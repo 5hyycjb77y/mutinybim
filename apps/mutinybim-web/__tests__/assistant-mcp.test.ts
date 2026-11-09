@@ -148,7 +148,7 @@ test("discovery: /mcp asks for sign-in and names its metadata, which names this 
     token_endpoint: `${base}/oauth/token`,
     registration_endpoint: `${base}/oauth/register`,
     code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: ["none", "client_secret_post", "client_secret_basic"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
   });
@@ -326,4 +326,86 @@ test("an assistant can name itself by a client metadata address instead of regis
   expect(inside.status).toBe(400);
   expect(await inside.text()).toContain("private address");
   expect(fetched).toEqual([clientId]);
+});
+
+/** A confidential client: registers for a secret, the person allows, then the code (with PKCE) and the secret for tokens. */
+async function signInConfidential(cookie: string, method: "client_secret_post" | "client_secret_basic"): Promise<void> {
+  const registration = await fetch(`${base}/oauth/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "Secret Assistant", redirect_uris: [REDIRECT], token_endpoint_auth_method: method, grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }) });
+  expect(registration.status).toBe(201);
+  const registered = (await registration.json()) as { client_id: string; client_secret?: string; token_endpoint_auth_method: string; client_secret_expires_at?: number };
+  expect(registered.token_endpoint_auth_method).toBe(method);
+  expect(registered.client_secret_expires_at).toBe(0);
+  const secret = registered.client_secret ?? "";
+  expect(secret.length).toBeGreaterThan(30);
+  const { verifier, challenge } = pkce();
+  const params = new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "s-2", scope: "models offline_access" });
+  const consent = await fetch(`${base}/oauth/authorize?${params}`, { headers: { cookie } });
+  expect(consent.status).toBe(200);
+  const allow = async () => new URL((await post("/oauth/authorize", { request: params.toString(), decision: "allow" }, cookie)).headers.get("location") ?? "").searchParams.get("code") ?? "";
+  const basic = (id: string, s: string) => `Basic ${Buffer.from(`${encodeURIComponent(id)}:${encodeURIComponent(s)}`).toString("base64")}`;
+  const token = (form: Record<string, string>, secretUsed: string | null) => {
+    const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+    const body: Record<string, string> = { ...form };
+    if (secretUsed !== null && method === "client_secret_basic") headers.authorization = basic(registered.client_id, secretUsed);
+    else body.client_id = registered.client_id;
+    if (secretUsed !== null && method === "client_secret_post") body.client_secret = secretUsed;
+    return fetch(`${base}/oauth/token`, { method: "POST", headers, body: new URLSearchParams(body).toString() });
+  };
+  const missing = await token({ grant_type: "authorization_code", code: await allow(), redirect_uri: REDIRECT, code_verifier: verifier }, null);
+  expect(missing.status).toBe(401);
+  expect(((await missing.json()) as { error: string }).error).toBe("invalid_client");
+  const wrong = await token({ grant_type: "authorization_code", code: await allow(), redirect_uri: REDIRECT, code_verifier: verifier }, "mbs_not-the-secret");
+  expect(wrong.status).toBe(401);
+  const noPkce = await token({ grant_type: "authorization_code", code: await allow(), redirect_uri: REDIRECT, code_verifier: pkce().verifier }, secret);
+  expect(noPkce.status).toBe(400);
+  const ok = await token({ grant_type: "authorization_code", code: await allow(), redirect_uri: REDIRECT, code_verifier: verifier }, secret);
+  expect(ok.status).toBe(200);
+  const tokens = (await ok.json()) as { access_token: string; refresh_token: string };
+  const refreshed = await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token }, secret);
+  expect(refreshed.status).toBe(200);
+  const fresh = (await refreshed.json()) as { access_token: string };
+  const client = await connect(fresh.access_token);
+  expect((await client.listTools()).tools.length).toBeGreaterThan(0);
+  await client.close();
+}
+
+test("a confidential assistant (client_secret_post) gets a secret at registration and must send it, with PKCE, for tokens", async () => {
+  await signInConfidential(await signUp("pat@example.com", "Pat Example"), "client_secret_post");
+}, 30_000);
+
+test("a confidential assistant (client_secret_basic) proves its secret with HTTP Basic", async () => {
+  await signInConfidential(await signUp("lee@example.com", "Lee Example"), "client_secret_basic");
+}, 30_000);
+
+test("a metadata document that prefers private_key_jwt but supports none signs in as a public client; one without none is refused", async () => {
+  await app?.close();
+  const both = "https://assistant.example/oauth/client-both.json";
+  const keyOnly = "https://assistant.example/oauth/client-key-only.json";
+  const probe = createApp(config(0), { editor: false });
+  await new Promise<void>((resolve) => probe.server.listen(0, "127.0.0.1", resolve));
+  const address = probe.server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  await probe.close();
+  app = createApp(config(address.port), {
+    editor: false,
+    resolveHost: async () => ["203.0.113.7"],
+    fetchImpl: async (url) => {
+      const methods = url === both ? ["none", "private_key_jwt"] : ["private_key_jwt"];
+      return new Response(JSON.stringify({ client_id: url, client_name: "Key Assistant", redirect_uris: [REDIRECT], token_endpoint_auth_method: "private_key_jwt", token_endpoint_auth_methods_supported: methods, jwks_uri: "https://assistant.example/oauth/jwks.json" }), { status: 200 });
+    },
+  });
+  await app.listen();
+  base = `http://127.0.0.1:${address.port}`;
+  const cookie = await signUp("kim@example.com", "Kim Example");
+  const { verifier, challenge } = pkce();
+  const params = new URLSearchParams({ response_type: "code", client_id: both, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", scope: "models", resource: `${base}/mcp` });
+  const consent = await fetch(`${base}/oauth/authorize?${params}`, { headers: { cookie } });
+  expect(consent.status).toBe(200);
+  expect(await consent.text()).toContain("Key Assistant");
+  const allowed = await post("/oauth/authorize", { request: params.toString(), decision: "allow" }, cookie);
+  const code = new URL(allowed.headers.get("location") ?? "").searchParams.get("code") ?? "";
+  const ok = await fetch(`${base}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: both, code_verifier: verifier }).toString() });
+  expect(ok.status).toBe(200);
+  const refused = await fetch(`${base}/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: keyOnly, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256" })}`, { headers: { cookie } });
+  expect(refused.status).toBe(400);
 });

@@ -653,7 +653,7 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
         }
         const form = new URLSearchParams(raw);
         if (pathname === "/oauth/token") {
-          const answer = exchangeToken(form, auth);
+          const answer = exchangeToken(form, auth, req.headers.authorization);
           sendJson(res, answer.status, answer.body, answer.status === 401 ? { "www-authenticate": 'Basic realm="mutinybim"' } : {});
           return true;
         }

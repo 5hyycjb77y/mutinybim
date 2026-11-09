@@ -8,8 +8,10 @@
  *   /packs/<family>/mcp, and authorization server metadata (RFC 8414).
  * - Client registration: dynamic registration (RFC 7591) and client ID
  *   metadata documents (an https client_id the app fetches, carefully).
- *   Public clients only; no client secrets are issued.
- * - Sign-in: authorization code with PKCE (S256 only), the `resource`
+ *   Registered clients may be public (`none`) or confidential
+ *   (`client_secret_post` / `client_secret_basic`, secret kept as a digest);
+ *   a metadata document client must be able to use `none`.
+ * - Sign-in: authorization code with PKCE (S256 only, for every client), the `resource`
  *   parameter (RFC 8707) checked against this app's tool addresses, and
  *   `iss` in every redirect (RFC 9207).
  * - Tokens: opaque, stored as digests; access for an hour, refresh for 30
@@ -18,14 +20,17 @@
  * The tokens let an assistant reach the tool server only. They never sign
  * anyone in to the pages, and the pages' cookies never reach the tool server.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import type { AssistantClientRow, Db, UserRow } from "./db";
+import type { AssistantClientRow, AssistantTokenAuthMethod, Db, UserRow } from "./db";
 import { digest, randomToken } from "./secrets";
 
 /** The one scope: use your models through an assistant (what you can do is still your access to each model). */
 export const MCP_SCOPE = "models";
+/** Scopes an assistant may ask for that grant nothing extra here; they are dropped, not refused. */
+const IGNORED_SCOPES = new Set(["offline_access", "openid", "profile", "email"]);
+const TOKEN_AUTH_METHODS: readonly AssistantTokenAuthMethod[] = ["none", "client_secret_post", "client_secret_basic"];
 const CODE_MINUTES = 5;
 const ACCESS_MINUTES = 60;
 const REFRESH_DAYS = 30;
@@ -91,8 +96,8 @@ export function authorizationServerMetadata(origin: string): Record<string, unkn
     response_types_supported: ["code"],
     response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code", "refresh_token"],
-    token_endpoint_auth_methods_supported: ["none"],
-    revocation_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: TOKEN_AUTH_METHODS,
+    revocation_endpoint_auth_methods_supported: TOKEN_AUTH_METHODS,
     code_challenge_methods_supported: ["S256"],
     client_id_metadata_document_supported: true,
     authorization_response_iss_parameter_supported: true,
@@ -138,7 +143,15 @@ function cleanName(value: unknown, fallback: string): string {
   return name || fallback;
 }
 
-/** Dynamic client registration (RFC 7591): public clients, redirect addresses checked, no secret. */
+function isTokenAuthMethod(value: unknown): value is AssistantTokenAuthMethod {
+  return typeof value === "string" && (TOKEN_AUTH_METHODS as readonly string[]).includes(value);
+}
+
+/**
+ * Dynamic client registration (RFC 7591), redirect addresses checked. A
+ * public client (`none`) gets no secret; a confidential one gets a secret
+ * shown once here and kept only as its digest. PKCE is required either way.
+ */
 export function registerClient(db: Db, body: unknown): OAuthAnswer {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return oauthError(400, "invalid_client_metadata", "Send the client's metadata as a JSON object.");
   const meta = body as Record<string, unknown>;
@@ -149,7 +162,7 @@ export function registerClient(db: Db, body: unknown): OAuthAnswer {
     if (problem) return oauthError(400, "invalid_redirect_uri", `The redirect address ${uri.slice(0, 200)} ${problem}.`);
   }
   const method = meta.token_endpoint_auth_method ?? "none";
-  if (method !== "none") return oauthError(400, "invalid_client_metadata", "Only public clients register here: use token_endpoint_auth_method \"none\" with PKCE.");
+  if (!isTokenAuthMethod(method)) return oauthError(400, "invalid_client_metadata", `token_endpoint_auth_method must be one of ${TOKEN_AUTH_METHODS.join(", ")}.`);
   const grants = stringList(meta.grant_types) ?? ["authorization_code", "refresh_token"];
   if (grants.some((g) => g !== "authorization_code" && g !== "refresh_token")) return oauthError(400, "invalid_client_metadata", "Only authorization_code and refresh_token grants are offered.");
   const responseTypes = stringList(meta.response_types) ?? ["code"];
@@ -160,18 +173,20 @@ export function registerClient(db: Db, body: unknown): OAuthAnswer {
   }
   const clientId = `mbc_${randomUUID()}`;
   const clientName = cleanName(meta.client_name, "An assistant");
-  db.saveAssistantClient({ clientId, clientName, redirectUris: uris, kind: "registered" });
-  console.log("[mutinybim-web] an assistant registered", { clientId, clientName });
+  const secret = method === "none" ? null : randomToken("mbs_");
+  db.saveAssistantClient({ clientId, clientName, redirectUris: uris, kind: "registered", tokenAuthMethod: method, secretHash: secret ? digest(secret) : null });
+  console.log("[mutinybim-web] an assistant registered", { clientId, clientName, tokenAuthMethod: method });
   return {
     status: 201,
     body: {
       client_id: clientId,
       client_id_issued_at: Math.floor(Date.now() / 1000),
+      ...(secret ? { client_secret: secret, client_secret_expires_at: 0 } : {}),
       client_name: clientName,
       redirect_uris: uris,
       grant_types: grants,
       response_types: ["code"],
-      token_endpoint_auth_method: "none",
+      token_endpoint_auth_method: method,
       scope: MCP_SCOPE,
     },
   };
@@ -185,6 +200,18 @@ function isPrivateAddress(address: string): boolean {
   const lower = address.toLowerCase();
   if (lower.startsWith("::ffff:")) return isPrivateAddress(lower.slice(7));
   return lower === "::" || lower === "::1" || lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80") || lower.startsWith("ff");
+}
+
+/**
+ * Whether a metadata document client can sign in as a public client. The
+ * singular `token_endpoint_auth_method` may be a preference (SEP-3149): a
+ * document that names another method but lists `none` in
+ * `token_endpoint_auth_methods_supported` uses `none` here, with PKCE.
+ */
+export function metadataClientCanUseNone(meta: Record<string, unknown>): boolean {
+  const preferred = meta.token_endpoint_auth_method;
+  if (preferred === undefined || preferred === "none") return true;
+  return stringList(meta.token_endpoint_auth_methods_supported)?.includes("none") ?? false;
 }
 
 const defaultResolve: ResolveHost = async (hostname) => (await lookup(hostname, { all: true })).map((a) => a.address);
@@ -228,7 +255,10 @@ async function metadataClient(clientId: string, options: AssistantAuthOptions): 
   if (meta.client_id !== clientId) return "The assistant's metadata names a different client_id.";
   const uris = stringList(meta.redirect_uris);
   if (!uris || uris.length === 0 || uris.some((u) => redirectUriProblem(u) !== null)) return "The assistant's metadata has no usable redirect_uris.";
-  if (meta.token_endpoint_auth_method !== undefined && meta.token_endpoint_auth_method !== "none") return "Only public clients (no client secret) can sign in here.";
+  if (!metadataClientCanUseNone(meta)) {
+    console.warn("[mutinybim-web] an assistant's metadata offers no public sign-in", { clientId, method: meta.token_endpoint_auth_method, methods: meta.token_endpoint_auth_methods_supported });
+    return "This assistant can only sign in with a key this server doesn't check (it doesn't offer the public, no-secret sign-in).";
+  }
   const clientName = cleanName(meta.client_name, url.hostname);
   options.db.saveAssistantClient({ clientId, clientName, redirectUris: uris, kind: "metadata" });
   const saved = options.db.assistantClient(clientId);
@@ -297,7 +327,7 @@ export async function checkAuthorize(params: URLSearchParams, options: Assistant
   const resource = canonicalResource(options.origin, options.families, params.get("resource"));
   if (!resource) return back("invalid_target", "The resource is not this MutinyBIM tool server.");
   const requested = (params.get("scope") ?? MCP_SCOPE).split(/\s+/).filter(Boolean);
-  if (requested.some((s) => s !== MCP_SCOPE && s !== "offline_access")) return back("invalid_scope", `The only scope is "${MCP_SCOPE}".`);
+  if (requested.some((s) => s !== MCP_SCOPE && !IGNORED_SCOPES.has(s))) return back("invalid_scope", `The only scope is "${MCP_SCOPE}".`);
   return { ok: true, request: { client: found, redirectUri, state, codeChallenge, resource, scope: MCP_SCOPE } };
 }
 
@@ -325,11 +355,60 @@ function tokenBody(tokens: { access: string; refresh: string }, scope: string): 
   return { access_token: tokens.access, token_type: "Bearer", expires_in: ACCESS_MINUTES * 60, refresh_token: tokens.refresh, scope };
 }
 
-/** The token endpoint: a code (with its PKCE verifier) or a refresh token, for new tokens. */
-export function exchangeToken(form: URLSearchParams, options: AssistantAuthOptions): OAuthAnswer {
-  const grantType = form.get("grant_type");
-  const clientId = form.get("client_id") ?? "";
+function sameSecret(secret: string, storedHash: string): boolean {
+  const a = Buffer.from(digest(secret), "hex");
+  const b = Buffer.from(storedHash, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** RFC 6749 §2.3.1: HTTP Basic with the form-encoded client_id and secret. */
+function basicCredentials(authorization: string | undefined): { id: string; secret: string } | null | "bad" {
+  const match = /^Basic\s+([A-Za-z0-9+/=]+)\s*$/i.exec(authorization ?? "");
+  if (!match?.[1]) return authorization && /^Basic\b/i.test(authorization) ? "bad" : null;
+  const decoded = Buffer.from(match[1], "base64").toString("utf8");
+  const colon = decoded.indexOf(":");
+  if (colon < 0) return "bad";
+  try {
+    const decode = (s: string) => decodeURIComponent(s.replace(/\+/g, " "));
+    return { id: decode(decoded.slice(0, colon)), secret: decode(decoded.slice(colon + 1)) };
+  } catch {
+    return "bad";
+  }
+}
+
+/**
+ * Who is calling the token endpoint. A public client names itself with
+ * client_id; a confidential client must also prove its secret, in the body
+ * (`client_secret_post`) or in HTTP Basic (`client_secret_basic`), never both.
+ */
+function authenticateClient(form: URLSearchParams, authorization: string | undefined, options: AssistantAuthOptions): { clientId: string } | OAuthAnswer {
+  const basic = basicCredentials(authorization);
+  if (basic === "bad") return oauthError(401, "invalid_client", "The Basic credentials couldn't be read.");
+  const formId = form.get("client_id");
+  const formSecret = form.get("client_secret");
+  if (basic && formSecret) return oauthError(400, "invalid_request", "Send the client secret one way only: Basic or client_secret, not both.");
+  if (basic && formId && formId !== basic.id) return oauthError(401, "invalid_client", "The client_id doesn't match the Basic credentials.");
+  const clientId = basic?.id ?? formId ?? "";
   if (!clientId) return oauthError(401, "invalid_client", "Send client_id (public clients authenticate with PKCE, not a secret).");
+  const secret = basic?.secret ?? formSecret ?? "";
+  const client = options.db.assistantClient(clientId);
+  if (client && client.token_auth_method !== "none") {
+    if (!secret || !client.secret_hash || !sameSecret(secret, client.secret_hash)) {
+      console.warn("[mutinybim-web] an assistant's client secret was missing or wrong", { clientId, via: basic ? "basic" : formSecret ? "post" : "none" });
+      return oauthError(401, "invalid_client", "The client secret is missing or wrong.");
+    }
+    return { clientId };
+  }
+  if (secret) return oauthError(401, "invalid_client", "This client registered without a secret; sign in with PKCE only.");
+  return { clientId };
+}
+
+/** The token endpoint: a code (with its PKCE verifier) or a refresh token, for new tokens. */
+export function exchangeToken(form: URLSearchParams, options: AssistantAuthOptions, authorization?: string): OAuthAnswer {
+  const grantType = form.get("grant_type");
+  const caller = authenticateClient(form, authorization, options);
+  if ("status" in caller) return caller;
+  const { clientId } = caller;
   if (grantType === "authorization_code") {
     const code = form.get("code") ?? "";
     const found = code ? options.db.takeAssistantCode(digest(code)) : null;

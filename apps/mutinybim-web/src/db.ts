@@ -92,8 +92,14 @@ export interface AssistantClientRow {
   readonly client_name: string;
   readonly redirect_uris: readonly string[];
   readonly kind: "registered" | "metadata";
+  /** How the client proves itself at the token endpoint: "none" is a public client (PKCE only). */
+  readonly token_auth_method: AssistantTokenAuthMethod;
+  /** SHA-256 digest of a confidential client's secret; null for public clients. */
+  readonly secret_hash: string | null;
   readonly created_at: string;
 }
+
+export type AssistantTokenAuthMethod = "none" | "client_secret_post" | "client_secret_basic";
 
 export interface AssistantCodeRow {
   readonly client_id: string;
@@ -405,6 +411,8 @@ function shareRole(value: unknown): ShareRole {
 const UPGRADES: readonly string[] = [
   "ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'password'",
   "ALTER TABLE users ADD COLUMN color_scheme TEXT NOT NULL DEFAULT 'system' CHECK (color_scheme IN ('light', 'dark', 'system'))",
+  "ALTER TABLE assistant_clients ADD COLUMN token_auth_method TEXT NOT NULL DEFAULT 'none' CHECK (token_auth_method IN ('none', 'client_secret_post', 'client_secret_basic'))",
+  "ALTER TABLE assistant_clients ADD COLUMN secret_hash TEXT",
 ];
 
 export function openDb(file: string) {
@@ -538,15 +546,33 @@ export function openDb(file: string) {
     },
     forgetOAuthClient: (provider: string, redirectUri: string): void => void db.prepare("DELETE FROM oauth_clients WHERE provider = ? AND redirect_uri = ?").run(provider, redirectUri),
 
-    saveAssistantClient(input: { clientId: string; clientName: string; redirectUris: readonly string[]; kind: "registered" | "metadata" }): void {
-      db.prepare("INSERT OR REPLACE INTO assistant_clients (client_id, client_name, redirect_uris, kind, created_at) VALUES (?, ?, ?, ?, ?)").run(input.clientId, input.clientName, JSON.stringify(input.redirectUris), input.kind, now());
+    saveAssistantClient(input: { clientId: string; clientName: string; redirectUris: readonly string[]; kind: "registered" | "metadata"; tokenAuthMethod?: AssistantTokenAuthMethod; secretHash?: string | null }): void {
+      db.prepare("INSERT OR REPLACE INTO assistant_clients (client_id, client_name, redirect_uris, kind, token_auth_method, secret_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        input.clientId,
+        input.clientName,
+        JSON.stringify(input.redirectUris),
+        input.kind,
+        input.tokenAuthMethod ?? "none",
+        input.secretHash ?? null,
+        now(),
+      );
     },
     assistantClient(clientId: string): AssistantClientRow | null {
       const row = db.prepare("SELECT * FROM assistant_clients WHERE client_id = ?").get(clientId);
       if (!isRecord(row)) return null;
       const uris: unknown = JSON.parse(str(row, "redirect_uris"));
       const kind = row.kind === "metadata" ? "metadata" : "registered";
-      return { client_id: str(row, "client_id"), client_name: str(row, "client_name"), redirect_uris: Array.isArray(uris) ? uris.filter((u): u is string => typeof u === "string") : [], kind, created_at: str(row, "created_at") };
+      const tokenAuthMethod: AssistantTokenAuthMethod = row.token_auth_method === "client_secret_post" || row.token_auth_method === "client_secret_basic" ? row.token_auth_method : "none";
+      const secretHash = typeof row.secret_hash === "string" && row.secret_hash ? row.secret_hash : null;
+      return {
+        client_id: str(row, "client_id"),
+        client_name: str(row, "client_name"),
+        redirect_uris: Array.isArray(uris) ? uris.filter((u): u is string => typeof u === "string") : [],
+        kind,
+        token_auth_method: tokenAuthMethod,
+        secret_hash: secretHash,
+        created_at: str(row, "created_at"),
+      };
     },
     countAssistantClients(): number {
       const row = db.prepare("SELECT count(*) AS n FROM assistant_clients").get();
