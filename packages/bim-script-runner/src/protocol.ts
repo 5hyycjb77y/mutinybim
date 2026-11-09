@@ -57,9 +57,16 @@ export function clampLimits(requested: Partial<ScriptRunnerLimits> | undefined):
  * writes, no child processes, no worker threads, no addons, no WASI. Node 22's
  * permission model does not cover sockets; the network is denied by the
  * sandbox's deny-all policy.
+ *
+ * The young generation is pinned too: V8's heap limit is old space plus three
+ * semi-spaces, and the default semi-space grew in Node 24 (1024 MB of old
+ * space reports 1120–1216 MB there, 1072 MB on Node 22), which the
+ * supervisor's 64 MB allowance refuses.
  */
+export const CHILD_SEMI_SPACE_MB = 16;
+
 export function childNodeArgs(limits: ScriptRunnerLimits, childFile: string): string[] {
-  return [`--max-old-space-size=${limits.memoryMb}`, "--permission", `--allow-fs-read=${childFile}`, "--disable-warning=ExperimentalWarning", childFile];
+  return [`--max-old-space-size=${limits.memoryMb}`, `--max-semi-space-size=${CHILD_SEMI_SPACE_MB}`, "--permission", `--allow-fs-read=${childFile}`, "--disable-warning=ExperimentalWarning", childFile];
 }
 
 /** The child's environment: nothing at all (no NODE_OPTIONS, no PATH, no credential). */
