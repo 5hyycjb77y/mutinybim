@@ -1,0 +1,25 @@
+{
+  "name": "@permitzip/bim-grid",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-grid"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "description": "MutinyBIM virtualized data grid: row and column windowing, keyboard, ranges, TSV clipboard, editors per kind, expandable child rows, frozen columns, ARIA grid, cell states. Generic: knows nothing about schedules or any host app.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./grid.css": "./src/grid.css"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

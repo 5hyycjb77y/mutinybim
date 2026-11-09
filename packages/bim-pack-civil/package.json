@@ -1,0 +1,23 @@
+{
+  "name": "@permitzip/bim-pack-civil",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack-civil"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM civil proof pack: storm catchments, inlets, manholes, outfalls and alignments, rational-method runoff carried down a gravity network. Built only through the add-on contract; imports no kernel source.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-pack": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

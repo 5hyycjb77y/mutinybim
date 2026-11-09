@@ -1,0 +1,33 @@
+{
+  "name": "@permitzip/bim-script",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-script"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM scripting kit: defineScript with typed parameters in bim-units, a recorder over the kernel's intent commands, deterministic ids and seeded random, the reads slice, part-type output, 500-step batch_edits chunking, the kit's checks, the ScriptRunner contract with its conformance suite, and the mutinybim-script run | check | pack CLI. Scripts produce ordinary edits and ordinary part types; they never run in a model server. Must not import any host app's code.",
+  "bin": {
+    "mutinybim-script": "./bin/mutinybim-script.mjs"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-lint": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

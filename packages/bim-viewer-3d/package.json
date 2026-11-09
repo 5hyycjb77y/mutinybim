@@ -1,0 +1,38 @@
+{
+  "name": "@permitzip/bim-viewer-3d",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-viewer-3d"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM 3D model view: That Open Fragments for linked IFC references, kernel-generated three.js geometry for authored MEP, plan cut, section box, picking. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ifc-import": "./src/ifc-import.ts",
+    "./light": "./src/light.ts",
+    "./pan-buttons": "./src/pan-buttons.ts",
+    "./wheel-zoom": "./src/wheel-zoom.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "dependencies": {
+    "@thatopen/fragments": "3.4.8",
+    "camera-controls": "3.1.2",
+    "three": "0.185.1",
+    "web-ifc": "0.0.78"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.3"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-sync": "*"
+  }
+}

@@ -1,0 +1,2 @@
+export { SURFACE_FACE_POINT, SURFACE_FACE_ROLES, KERNEL_SURFACE_FACE_ROWS, elementLevel, surfaceFaceKinds, surfaceFaceRow, surfaceFaceRowProblems, type FacePair, type SurfaceFaceRole, type SurfaceFaceRow } from "./faces";
+export { surfacesAt, type LinkedSurfaceElement, type LinkedSurfaceSource, type SurfaceAt, type SurfaceOrigin, type SurfaceRole, type SurfacesAtResult, type SurfacesTarget } from "./surfaces-at";

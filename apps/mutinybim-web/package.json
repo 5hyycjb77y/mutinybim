@@ -1,0 +1,12 @@
+{
+  "name": "@permitzip/mutinybim-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "The hosted MutinyBIM web app: accounts, saved models, the editor, the model server, bring-your-own AI and outside-assistant connections. One Node process; see README.md.",
+  "scripts": {
+    "start": "node --import tsx src/server.ts",
+    "build-editor": "node --import tsx src/build-editor.ts"
+  }
+}

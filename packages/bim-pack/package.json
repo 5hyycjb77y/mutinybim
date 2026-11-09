@@ -1,0 +1,31 @@
+{
+  "name": "@permitzip/bim-pack",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM add-on (pack) authoring surface: the one import a pack uses. Re-exports the versioned pack contract, every layer's extension points and the types their items need, plus the pack conformance suite. Internal contract (PACK-CONTRACT.md), not yet a public promise. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-lint": "*",
+    "@permitzip/bim-plugin": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

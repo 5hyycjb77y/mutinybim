@@ -1,0 +1,26 @@
+{
+  "name": "@permitzip/bim-calc",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-calc"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM calculation plugins: one deterministic, versioned, unit-typed interface for every trade, with versioned code and design-criteria packs (NEC 2020 / 2023 first). Every result names the clause or method it rests on. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

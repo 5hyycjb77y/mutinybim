@@ -1,0 +1,48 @@
+{
+  "name": "@permitzip/bim-mcp-packs",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-mcp-packs"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM's add-on tool packs for the tool server (@permitzip/bim-mcp): every tool family beyond the core (parts, routing and fittings, trades, views and sheets, drafting, schedules, coordination), each over the same caller runtime and typed host capabilities. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./capabilities": "./src/capabilities.ts",
+    "./support/*": "./src/support/*.ts",
+    "./*": "./src/*.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE"
+  ],
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-editor": "*",
+    "@permitzip/bim-first-party": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-lint": "*",
+    "@permitzip/bim-mcp": "*",
+    "@permitzip/bim-pack-electrical": "*",
+    "@permitzip/bim-pack-mechanical": "*",
+    "@permitzip/bim-pack-plumbing": "*",
+    "@permitzip/bim-sheets": "*",
+    "@permitzip/bim-sync": "*",
+    "@permitzip/bim-units": "*",
+    "@resvg/resvg-js": "^2.6.2",
+    "pdfjs-dist": "5.4.296",
+    "zod": "^4.0.0"
+  }
+}

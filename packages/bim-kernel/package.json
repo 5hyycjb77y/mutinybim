@@ -1,0 +1,52 @@
+{
+  "name": "@permitzip/bim-kernel",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-kernel"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM connected-network engine: domain model, intent commands, propagation solver, validation, airflow, commit policy and sheet scene graph. Runs identically in the browser, on the sequencer and in workers. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types.ts",
+    "./geometry": "./src/geometry.ts",
+    "./registry": "./src/registry/index.ts",
+    "./spaces": "./src/spaces/index.ts",
+    "./services": "./src/services/index.ts",
+    "./categories": "./src/categories/index.ts",
+    "./surfaces": "./src/surfaces/index.ts",
+    "./connections": "./src/connections/index.ts",
+    "./questions": "./src/questions/index.ts",
+    "./blocks": "./src/blocks/index.ts",
+    "./commands": "./src/commands.ts",
+    "./packs": "./src/packs/index.ts",
+    "./placement": "./src/placement/index.ts",
+    "./elements": "./src/elements/index.ts",
+    "./formats": "./src/formats.ts",
+    "./findings": "./src/findings/api.ts",
+    "./lineages": "./src/lineages/index.ts",
+    "./lifecycle": "./src/lifecycle/index.ts",
+    "./basis": "./src/basis/index.ts",
+    "./calc-sheets": "./src/calc-sheets/index.ts",
+    "./policy": "./src/policy/index.ts",
+    "./intake": "./src/propose/intake.ts",
+    "./rated-routes": "./src/routing/rated-routes.ts",
+    "./typicals": "./src/organization/typicals-extras.ts",
+    "./schedules": "./src/schedules/engine/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0",
+    "@permitzip/bim-geometry": "*",
+    "@permitzip/bim-units": "*",
+    "@permitzip/bim-formula": "*"
+  }
+}

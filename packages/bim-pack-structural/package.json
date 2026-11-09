@@ -1,0 +1,23 @@
+{
+  "name": "@permitzip/bim-pack-structural",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack-structural"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM Structural pack (namespace struct): steel beams, columns and pad footings placed along lines and at points, a small wide-flange catalogue, roof and floor live load by use, tributary areas as derived zones and the gravity load path to the footings. Proof that a discipline is a pack: built only through the add-on contract, with no kernel edits.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-pack": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

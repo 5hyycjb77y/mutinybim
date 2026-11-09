@@ -1,0 +1,25 @@
+{
+  "name": "@permitzip/bim-viewer",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-viewer"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM browser editor: plan editing with live presence and a live sheet at a coherent display revision. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-sync": "*"
+  }
+}

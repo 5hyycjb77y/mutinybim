@@ -1,0 +1,43 @@
+{
+  "name": "@permitzip/bim-devserver",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-devserver"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM feasibility dev server and scripted agents (in-process sequencer). Not a production service.",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "agents": "tsx scripts/agents.ts",
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-editor": "*",
+    "@permitzip/bim-first-party": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-pack-mechanical": "*",
+    "@permitzip/bim-sync": "*",
+    "@permitzip/bim-sheets": "*",
+    "@permitzip/bim-ui": "*",
+    "@permitzip/bim-viewer": "*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@thatopen/fragments": "^3.4.8",
+    "esbuild": "*",
+    "manifold-3d": "3.5.4",
+    "pdfjs-dist": "5.4.296",
+    "postcss": "^8.5.18",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^2.0.0",
+    "tailwindcss": "^4.2.1",
+    "tw-animate-css": "^1.4.0",
+    "web-ifc": "^0.0.78",
+    "ws": "^8.0.0"
+  }
+}

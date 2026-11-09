@@ -1,0 +1,28 @@
+{
+  "name": "@permitzip/bim-sync",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-sync"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM sync layer: backend-neutral SyncAdapter, commit store contract (lease fencing, idempotency, atomic decide), sequencer, wire protocol, client with heartbeat catch-up. Must not import any host product's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./note-locks": "./src/note-locks.ts",
+    "./branch-limits": "./src/branches/limits.ts",
+    "./lineages": "./src/lineages/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "zod": "^4.0.0"
+  }
+}

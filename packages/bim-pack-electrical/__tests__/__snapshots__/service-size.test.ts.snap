@@ -1,0 +1,8 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`early service sizing from an equipment list a 40-item kitchen list produces a service size with the calc trail (220.56 by count, 25% of the largest motor, 230.42 / 230.79) 1`] = `
+{
+  "requiredA": 680,
+  "service": "800 A, 120/208 V 3-phase 4-wire",
+}
+`;

@@ -1,0 +1,113 @@
+{
+  "comment": "e12: round 11 output (6eccc2969) the move must reproduce byte for byte. Regenerate only on round 11's tree: E12_WRITE_GOLDENS=1.",
+  "goldens": {
+    "catalog.elements": {
+      "sha256": "2de7778e95e5b810e53b7098942c1c57194a941499bc492a778c98f75232f642",
+      "length": 2906
+    },
+    "catalog.log": {
+      "sha256": "7d94bdc8f3023c5eb1b7499f28e25e64c076b63b0df4cf76e3b4214a6f63a1bb",
+      "length": 11045
+    },
+    "catalog.ids": {
+      "sha256": "65b1e3e6ca4fb021491fed9ea5b1144b58ee678707581b50fb1fda8c22870b1d",
+      "length": 96
+    },
+    "catalog.reads": {
+      "sha256": "ee73fd1cfb25f67614a812c12495f86391956569a7b23511e85ada17177694eb",
+      "length": 1704
+    },
+    "one_line.vertical": {
+      "sha256": "c69f3bfc8c742a40f574d84194d43996719c9b8594aa276ece2c7439a2f42624",
+      "length": 16271
+    },
+    "one_line.horizontal": {
+      "sha256": "a44d3a349e46291b7176c952602c6b4f0afc18d662c614aaaf72e3ec3376f86b",
+      "length": 16428
+    },
+    "one_line.reference.v-one-line.evaluated": {
+      "sha256": "8065e93cb5a9a781c7ef102c18d00174087247bdcd512be2dd3d9e1d2a8a76c9",
+      "length": 11243
+    },
+    "one_line.reference.v-one-line.scene": {
+      "sha256": "52f1e3ff64f8d7695401c2e73a361a594d33c8ecbc774dd94626cdb28af8da08",
+      "length": 24346
+    },
+    "one_line.reference.v-one-line-h.evaluated": {
+      "sha256": "0143251516cf2a051a577fa69f86623c4f4618bf64d25b26ceff276f3ce9b39a",
+      "length": 11783
+    },
+    "one_line.reference.v-one-line-h.scene": {
+      "sha256": "1da25ae1128eacc22f5ec7829e47529de0ee7b6c936807b6263488947a139e4b",
+      "length": 26061
+    },
+    "circuits.reference.v-default": {
+      "sha256": "f8ae1e436b0fee1ef5e5278eec31047efee8a3c5490a79ba011993d99ee8f093",
+      "length": 122740
+    },
+    "circuits.reference.v-arcs": {
+      "sha256": "f8ae1e436b0fee1ef5e5278eec31047efee8a3c5490a79ba011993d99ee8f093",
+      "length": 122740
+    },
+    "circuits.reference.v-orth": {
+      "sha256": "280b7180bc3b1efb54e9b86bb9837c946a4e03e82606b55b10e6b218b2087e8b",
+      "length": 39997
+    },
+    "circuits.reference.v-numbers": {
+      "sha256": "f00264560427f80f90a85e17a83fc995f6a7ed19bc912090785b93a7fa1d2248",
+      "length": 49189
+    },
+    "circuits.reference.v-off": {
+      "sha256": "e04c56650cf10c956354a56a7c3ab7e9e9ef3a26e5666c83f6dd786f5024c3df",
+      "length": 35102
+    },
+    "plans.fullbim_xs.views": {
+      "sha256": "f5073b9d0b4dab844f1b530eb0b41316fadc05fa949424944e66456a1e4d6920",
+      "length": 169
+    },
+    "plans.fullbim_xs.L01-Z1-view-a-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.fullbim_xs.L01-Z1-view-a-rcp": {
+      "sha256": "9bc6dc7fb2b6a1da5ee10400928fc40221e0405d8f8dc7b0a881b31dd66d2cca",
+      "length": 915824
+    },
+    "plans.fullbim_xs.L01-Z1-view-a-sect": {
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "length": 2
+    },
+    "plans.fullbim_xs.L01-Z1-view-e-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.fullbim_xs.L01-Z1-view-fp-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.fullbim_xs.L01-Z1-view-m-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.fullbim_xs.L01-Z1-view-p-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.fullbim_xs.L01-Z1-view-s-plan": {
+      "sha256": "576aab50fe37faadfbc31f090ac612fc86baf142ee5afb7c2240b5d473e9f0f0",
+      "length": 899336
+    },
+    "plans.synthetic.v-s": {
+      "sha256": "37412ef59b564b7088ba8aca5e40ead423a6ade80cc82e390fa2070a3e774cc9",
+      "length": 136197
+    },
+    "sections.connection_types": {
+      "sha256": "ead96f0d73425ca4cde285fabeabb590da0222a9fcdaf81dc2d519288583e92e",
+      "length": 866
+    },
+    "sections.loads": {
+      "sha256": "a03b66a1925fe8093453ec3ff42e4f49145fc99d3dcca85fd521efaec5b9f60b",
+      "length": 2210
+    }
+  }
+}

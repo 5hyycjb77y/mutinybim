@@ -1,0 +1,21 @@
+title = "MutinyBIM"
+
+[extend]
+useDefault = true
+
+# Known false positives, each one exact. Anything else gitleaks finds fails CI.
+[allowlist]
+description = "Calc value keys, synthetic test sentinels and a public WebAuthn test vector"
+regexes = [
+  # Calc result field names such as allowable_psi_per_100ft (a unit, not a key).
+  '''^[a-z]+(_[a-z0-9]+)*_per_100ft$''',
+  # Synthetic schedule cell keys in the library conformance test.
+  '''^P\d{4}\.Demand$''',
+  # The script-runner conformance test plants this value to prove it never leaks.
+  '''^x11-secret-7f3a$''',
+  '''^sb_publishable_test$''',
+]
+paths = [
+  # A WebAuthn assertion recorded from a throwaway test authenticator (public test data).
+  '''packages/bim-kernel/__tests__/s9-webauthn-vector\.ts''',
+]

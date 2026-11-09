@@ -1,0 +1,34 @@
+/*
+ * The hosted app's stylesheet: Tailwind v4 over the same primitives and
+ * `--mutiny-*` theme the editor uses (packages/bim-ui). Colors, fonts and
+ * radius come only from the theme variables (themeStyleSheet in bim-ui);
+ * nothing here picks a color of its own.
+ */
+@import "tailwindcss";
+
+@source "../src";
+@source "../client/settings.ts";
+@source "../../../packages/bim-ui/src";
+
+@layer base {
+  body {
+    background: var(--mutiny-surface);
+    color: var(--mutiny-text);
+    font-family: var(--mutiny-font-body);
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--mutiny-font-heading);
+    font-weight: var(--mutiny-heading-weight);
+  }
+  a:not([data-slot]) {
+    color: var(--mutiny-selection);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  code,
+  pre {
+    font-family: var(--mutiny-font-mono);
+  }
+}

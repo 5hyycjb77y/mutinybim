@@ -1,0 +1,5 @@
+{
+  "//": "What tsx reads when it runs the app (TSX_TSCONFIG_PATH): the automatic JSX runtime for the app and the packages it renders on the server.",
+  "compilerOptions": { "jsx": "react-jsx" },
+  "include": ["src/**/*", "../../packages/**/*"]
+}

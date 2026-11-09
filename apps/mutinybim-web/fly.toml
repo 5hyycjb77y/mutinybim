@@ -1,0 +1,61 @@
+# The hosted MutinyBIM app at https://app.mutinybim.com, on Fly.io. Deploy from the repository root:
+#   fly deploy . --config apps/mutinybim-web/fly.toml --dockerfile apps/mutinybim-web/Dockerfile --ha=false
+#
+# One machine and one volume: the account database and model files live on /data, and one process serves
+# them (README "Deploying"). --ha=false keeps it one machine; a second would start with an empty volume.
+# No Fly secrets: sessions, agent keys and assistant tokens are random values stored as digests, and the
+# sign-in providers are public clients. Nothing below is secret.
+app = "mutinybim-web"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MUTINYBIM_WEB_ORIGIN = "https://app.mutinybim.com"
+  MUTINYBIM_WEB_HOST = "0.0.0.0"
+  MUTINYBIM_WEB_PORT = "3100"
+  MUTINYBIM_WEB_DATA = "/data"
+  MUTINYBIM_WEB_SIGNUP = "open"
+  # Pinned rather than left to the default: the start-up log must say "the script box is sealed".
+  MUTINYBIM_WEB_SCRIPTS = "sealed"
+  MUTINYBIM_WEB_SCRIPT_RUNS = "2"
+  # Sign-in providers (MUTINYBIM_WEB_PROVIDERS) are set on the Fly app, not here: they name the
+  # operator's own identity provider, which differs per deployment.
+
+[[mounts]]
+  source = "mutinybim_web_data"
+  destination = "/data"
+  initial_size = "10gb"
+  snapshot_retention = 14
+
+[http_service]
+  internal_port = 3100
+  force_https = true
+  # Models are held in memory and assistants wait on approvals: the machine stays up.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 500
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[deploy]
+  strategy = "immediate"
+
+# The app (3 GB of JavaScript memory) plus about 1.2 GB per script running at once (two).
+[[vm]]
+  size = "shared-cpu-4x"
+  memory = "8gb"

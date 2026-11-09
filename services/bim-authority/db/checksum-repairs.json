@@ -1,0 +1,13 @@
+{
+  "about": "Applied migrations whose recorded checksum was repaired in every model database after a comment-only edit (README, \"Repairing a recorded checksum\"). scripts/check-migration-immutability.mjs allows exactly these edits; the migrator itself has no exceptions.",
+  "repairs": [
+    {
+      "file": "20261101050500_bim_import_runs.sql",
+      "from": "802b22e1224b4542c050d7e194b960674a3491d805292f19936a1112d4fb3446",
+      "to": "c2cfc4dd741e8e5c928ad65d62e525d864f7f9978f0192d3100c2966e85b9562",
+      "databases": ["us-east-1", "ap-southeast-1"],
+      "date": "2026-11-09",
+      "reason": "A comment was reworded in place after the file was applied; the SQL is unchanged."
+    }
+  ]
+}

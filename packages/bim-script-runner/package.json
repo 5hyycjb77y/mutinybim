@@ -1,0 +1,42 @@
+{
+  "name": "@permitzip/bim-script-runner",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-script-runner"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM script runner: one script per fresh Node process with the kit's caps (1 GB, 30 s, 2 MB), an empty environment and Node's permission model. Bundles to two files a sealed host bakes into its image; LocalScriptRunner runs them on one person's own computer. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts",
+    "./supervisor": "./src/supervisor.ts",
+    "./child": "./src/child.ts",
+    "./addons": "./src/addons.ts",
+    "./build": "./src/build.ts",
+    "./result": "./src/result.ts",
+    "./local": "./src/local.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE"
+  ],
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json",
+    "build": "node --import tsx src/build.ts dist"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-first-party": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-pack-civil": "*",
+    "@permitzip/bim-script": "*",
+    "esbuild": "*",
+    "zod": "^4.0.0"
+  }
+}

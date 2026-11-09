@@ -1,0 +1,143 @@
+name: Perf gate
+
+# The standing performance gate: the 250k synthetic building and the part,
+# calc, electrical, plumbing, sheets, lint, schedule and grid suites
+# (npm run perf:bim:ci), then the perf suites that build a full-size model
+# (npm run perf:suites). Budgets: docs/perf/mutinybim-budgets.json. They are
+# measured and only ever tightened; never raise one to get green.
+#
+# Where it runs and what blocks:
+# - The repository variable PERF_RUNNER names a calibrated runner (a stable
+#   machine, the same class every run). When it is set, pushes to main and
+#   pull requests from branches of this repository run there with absolute
+#   budgets: every timing at ci.budgetFactor x its budget blocks.
+# - Otherwise, and always for pull requests from forks, the job runs on
+#   ubuntu-latest with MUTINYBIM_PERF_BUDGETS=relative: invariants, sizes,
+#   counts and same-run ratios block; timings are measured and reported.
+#   Fork pull requests never reach PERF_RUNNER, whoever pays for it.
+#
+# Required on pull requests: the job always reports a result. When a pull
+# request touches none of the paths in "Decide scope" it passes without
+# measuring (the in-job skip), so a branch rule can require "Perf gate".
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: "22"
+  REPORT: bash .github/scripts/report.sh
+  INSTALL: "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi"
+
+jobs:
+  perf-gate:
+    name: Perf gate
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PERF_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    env:
+      CI_JOB_KEY: perf-gate
+      CI_JOB_NAME: Perf gate
+      MUTINYBIM_PERF_BUDGETS: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PERF_RUNNER && 'absolute' || 'relative' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Decide scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Measuring: $EVENT runs the whole gate."
+            exit 0
+          fi
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          scope='^(packages/bim-kernel/|packages/bim-sync/|packages/bim-viewer[^/]*/|packages/bim-editor/|services/bim-authority/|scripts/perf/mutinybim/|docs/perf/mutinybim-budgets\.json$|tools/perf/|\.github/workflows/perf-gate\.yml$|\.github/scripts/report\.sh$)'
+          hits="$(printf '%s\n' "$changed" | grep -E "$scope" || true)"
+          if [ -n "$hits" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Measuring: this pull request changes $(printf '%s\n' "$hits" | wc -l | tr -d ' ') gated file(s), e.g. $(printf '%s\n' "$hits" | head -1)."
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Not measured: no file under the kernel, sync, viewers, editor, model server or the gate itself changed." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Say how this run is judged
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          {
+            echo "### Perf gate"
+            echo
+            echo "- Runner: \`${{ runner.name }}\` (${{ runner.os }}, $(nproc) cores, $(free -g | awk '/^Mem:/{print $2}') GB)"
+            if [ "$MUTINYBIM_PERF_BUDGETS" = "absolute" ]; then
+              echo "- Budgets: **absolute**, on the calibrated runner set in PERF_RUNNER."
+            else
+              echo "- Budgets: **relative**. Invariants, sizes, counts and same-run ratios block; timings are reported. Absolute budgets run where the repository variable PERF_RUNNER names a calibrated runner."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install
+        if: steps.scope.outputs.run == 'true'
+        run: $REPORT --kind lines --name "Install" -- bash -c "$INSTALL"
+
+      - name: Perf gate (250k synthetic and the suites it runs)
+        if: steps.scope.outputs.run == 'true'
+        run: $REPORT --kind lines --name "Perf gate" -- npm run perf:bim:ci -- --out=.perf-results/mutinybim/ci
+
+      - name: Perf suites (full-size models, one per process)
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-artifacts"
+          $REPORT --kind jest --name "Perf suites" --json "$RUNNER_TEMP/ci-artifacts/perf-suites.json" -- \
+            npm run perf:suites -- --json="$RUNNER_TEMP/ci-artifacts/perf-suites.json"
+
+      - name: Add the gate's report to the run summary
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          if [ -f .perf-results/mutinybim/ci/report.md ]; then
+            cat .perf-results/mutinybim/ci/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The perf gate wrote no report: it stopped before measuring (see the Perf gate step)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the perf results
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-gate-results
+          path: .perf-results/mutinybim/ci/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore

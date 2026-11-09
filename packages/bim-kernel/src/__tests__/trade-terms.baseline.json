@@ -1,0 +1,1096 @@
+{
+  "comment": "Trade-specific words per kernel source file (trade-terms.test.ts). Shrink-only: lower these when a trade moves into a pack; never raise one.",
+  "terms": [
+    "electrical",
+    "plumbing",
+    "mechanical",
+    "sanitary",
+    "grease",
+    "vent",
+    "sewer",
+    "drainage",
+    "interceptor",
+    "breaker",
+    "panelboard",
+    "panel",
+    "circuit",
+    "feeder",
+    "receptacle",
+    "conductor",
+    "conduit",
+    "ampacity",
+    "voltage",
+    "kva",
+    "amps",
+    "nec",
+    "ipc",
+    "ifgc",
+    "imc",
+    "hvac",
+    "duct",
+    "cfm",
+    "diffuser",
+    "airflow",
+    "ventilation",
+    "wsfu",
+    "dfu",
+    "fixture",
+    "gas",
+    "mbh",
+    "sprinkler"
+  ],
+  "files": {
+    "packages/bim-kernel/src/annotation/annotations.ts": {
+      "duct": 11,
+      "fixture": 7,
+      "gas": 13,
+      "cfm": 8,
+      "airflow": 2,
+      "circuit": 1,
+      "panel": 1,
+      "plumbing": 2,
+      "mechanical": 2,
+      "electrical": 2
+    },
+    "packages/bim-kernel/src/annotation/auto-tag.ts": {
+      "gas": 5,
+      "duct": 13,
+      "fixture": 5,
+      "plumbing": 1,
+      "mechanical": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/annotation/detail-snaps.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/annotation/detailing.ts": {
+      "duct": 11,
+      "electrical": 2,
+      "conductor": 1,
+      "mechanical": 3
+    },
+    "packages/bim-kernel/src/annotation/figures.ts": {
+      "plumbing": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/annotation/tag-types.ts": {
+      "circuit": 1,
+      "gas": 2,
+      "mechanical": 1,
+      "plumbing": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/balance/air-params.ts": {
+      "mechanical": 1,
+      "cfm": 8
+    },
+    "packages/bim-kernel/src/balance/core.ts": {
+      "electrical": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/balance/pressure-target.ts": {
+      "mechanical": 1
+    },
+    "packages/bim-kernel/src/balance/quantity.ts": {
+      "panel": 1,
+      "airflow": 1
+    },
+    "packages/bim-kernel/src/blocks/commands.ts": {
+      "ventilation": 1
+    },
+    "packages/bim-kernel/src/blocks/fields.ts": {
+      "kva": 1,
+      "panel": 3
+    },
+    "packages/bim-kernel/src/blocks/render.ts": {
+      "panel": 1,
+      "circuit": 2,
+      "feeder": 1,
+      "electrical": 2,
+      "kva": 2,
+      "voltage": 1
+    },
+    "packages/bim-kernel/src/blocks/table-spec.ts": {
+      "ventilation": 7,
+      "mechanical": 1,
+      "gas": 16,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/blocks/types.ts": {
+      "kva": 1,
+      "amps": 1,
+      "voltage": 1,
+      "ventilation": 1
+    },
+    "packages/bim-kernel/src/catalog/commands.ts": {
+      "plumbing": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/catalog/load-classes.ts": {
+      "electrical": 3,
+      "receptacle": 1,
+      "hvac": 1
+    },
+    "packages/bim-kernel/src/catalog/types.ts": {
+      "electrical": 3,
+      "plumbing": 1,
+      "gas": 1,
+      "mechanical": 1,
+      "receptacle": 1
+    },
+    "packages/bim-kernel/src/categories/element.ts": {
+      "duct": 10,
+      "grease": 2
+    },
+    "packages/bim-kernel/src/categories/registry.ts": {
+      "duct": 13,
+      "electrical": 19,
+      "fixture": 10,
+      "panel": 1,
+      "mechanical": 5,
+      "plumbing": 4,
+      "circuit": 1,
+      "sprinkler": 1
+    },
+    "packages/bim-kernel/src/categories/symbol-registry.ts": {
+      "conductor": 2,
+      "electrical": 3
+    },
+    "packages/bim-kernel/src/categories/types.ts": {
+      "duct": 1,
+      "electrical": 1,
+      "receptacle": 2,
+      "diffuser": 1,
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/command-core.ts": {
+      "airflow": 11
+    },
+    "packages/bim-kernel/src/commands.ts": {
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/commands/architecture.ts": {
+      "fixture": 3,
+      "receptacle": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/commands/views.ts": {
+      "cfm": 1,
+      "mbh": 1,
+      "electrical": 3,
+      "sprinkler": 1,
+      "fixture": 1,
+      "grease": 1,
+      "duct": 1,
+      "panel": 1,
+      "feeder": 1
+    },
+    "packages/bim-kernel/src/connections/adapter.ts": {
+      "electrical": 7,
+      "feeder": 2,
+      "breaker": 1
+    },
+    "packages/bim-kernel/src/connections/aggregate.ts": {
+      "fixture": 1,
+      "nec": 1,
+      "panel": 1,
+      "electrical": 1,
+      "breaker": 1
+    },
+    "packages/bim-kernel/src/connections/batch.ts": {
+      "circuit": 2,
+      "feeder": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/connections/commands.ts": {
+      "conductor": 11,
+      "electrical": 35,
+      "feeder": 16,
+      "circuit": 14,
+      "voltage": 2,
+      "panel": 2,
+      "breaker": 1
+    },
+    "packages/bim-kernel/src/connections/delete.ts": {
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/connections/index.ts": {
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/connections/model.ts": {
+      "sanitary": 1,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/connections/network.ts": {
+      "electrical": 1,
+      "panel": 1,
+      "circuit": 1,
+      "plumbing": 1,
+      "fixture": 1,
+      "cfm": 1,
+      "mbh": 1
+    },
+    "packages/bim-kernel/src/connections/trades.ts": {
+      "circuit": 1,
+      "mechanical": 7,
+      "mbh": 4,
+      "electrical": 9,
+      "plumbing": 9,
+      "gas": 6,
+      "drainage": 2,
+      "airflow": 1,
+      "cfm": 1,
+      "duct": 1
+    },
+    "packages/bim-kernel/src/connections/types.ts": {
+      "panel": 6,
+      "electrical": 27,
+      "circuit": 2,
+      "feeder": 8,
+      "breaker": 1,
+      "plumbing": 4,
+      "mechanical": 2,
+      "conductor": 9,
+      "amps": 1,
+      "voltage": 2,
+      "conduit": 1
+    },
+    "packages/bim-kernel/src/connections/validate.ts": {
+      "panel": 1,
+      "voltage": 1,
+      "circuit": 3,
+      "feeder": 3
+    },
+    "packages/bim-kernel/src/derived.ts": {
+      "airflow": 6
+    },
+    "packages/bim-kernel/src/diagrams/definition.ts": {
+      "electrical": 5,
+      "plumbing": 10,
+      "feeder": 2,
+      "dfu": 1,
+      "gas": 1,
+      "mbh": 1,
+      "conductor": 1,
+      "voltage": 3,
+      "kva": 4
+    },
+    "packages/bim-kernel/src/diagrams/evaluate.ts": {
+      "breaker": 2,
+      "feeder": 2,
+      "conductor": 3
+    },
+    "packages/bim-kernel/src/diagrams/graph.ts": {
+      "feeder": 2,
+      "circuit": 1,
+      "conductor": 1,
+      "dfu": 1,
+      "breaker": 5
+    },
+    "packages/bim-kernel/src/diagrams/riser-layout.ts": {
+      "electrical": 1,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/documents.ts": {
+      "duct": 5,
+      "electrical": 2,
+      "fixture": 2,
+      "panel": 1,
+      "feeder": 1
+    },
+    "packages/bim-kernel/src/drawing/insulation.ts": {
+      "duct": 6
+    },
+    "packages/bim-kernel/src/drawing/projection.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/drawing/runs.ts": {
+      "duct": 18,
+      "conduit": 1,
+      "vent": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/drawing/sheet.ts": {
+      "cfm": 4,
+      "mechanical": 1
+    },
+    "packages/bim-kernel/src/drawing/solids.ts": {
+      "duct": 10,
+      "conduit": 2
+    },
+    "packages/bim-kernel/src/drawing/views.ts": {
+      "duct": 9,
+      "circuit": 2
+    },
+    "packages/bim-kernel/src/fields/params.ts": {
+      "panel": 1
+    },
+    "packages/bim-kernel/src/fields/piping.ts": {
+      "fixture": 1,
+      "mbh": 1,
+      "dfu": 1,
+      "sanitary": 1
+    },
+    "packages/bim-kernel/src/fields/providers/level-room.ts": {
+      "plumbing": 2
+    },
+    "packages/bim-kernel/src/fields/providers/loads.ts": {
+      "gas": 17,
+      "electrical": 1,
+      "drainage": 1,
+      "panel": 2,
+      "interceptor": 2,
+      "grease": 1,
+      "plumbing": 1,
+      "fixture": 4,
+      "mbh": 4,
+      "wsfu": 2
+    },
+    "packages/bim-kernel/src/fields/providers/placement.ts": {
+      "mechanical": 1,
+      "duct": 1,
+      "plumbing": 1,
+      "fixture": 2,
+      "electrical": 2,
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/fields/providers/serves.ts": {
+      "electrical": 7,
+      "gas": 8,
+      "fixture": 5,
+      "panel": 2,
+      "circuit": 7,
+      "feeder": 5,
+      "duct": 1
+    },
+    "packages/bim-kernel/src/fields/providers/spatial.ts": {
+      "sprinkler": 1,
+      "panel": 5
+    },
+    "packages/bim-kernel/src/fields/resolver.ts": {
+      "fixture": 1,
+      "gas": 1,
+      "nec": 1,
+      "panel": 1,
+      "circuit": 1,
+      "feeder": 1
+    },
+    "packages/bim-kernel/src/fields/template.ts": {
+      "feeder": 5,
+      "breaker": 1,
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/geometry.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/ids.ts": {
+      "grease": 1,
+      "sprinkler": 2
+    },
+    "packages/bim-kernel/src/index.ts": {
+      "plumbing": 2
+    },
+    "packages/bim-kernel/src/layout/one-line.ts": {
+      "feeder": 1,
+      "conductor": 1
+    },
+    "packages/bim-kernel/src/library/builtin.ts": {
+      "voltage": 30,
+      "electrical": 4,
+      "cfm": 30,
+      "diffuser": 2,
+      "airflow": 17,
+      "duct": 15,
+      "gas": 1,
+      "mechanical": 3,
+      "circuit": 15,
+      "ampacity": 1,
+      "ventilation": 2,
+      "receptacle": 2,
+      "panel": 5,
+      "panelboard": 3,
+      "feeder": 1,
+      "fixture": 9,
+      "plumbing": 2,
+      "drainage": 2,
+      "sanitary": 2
+    },
+    "packages/bim-kernel/src/library/revit-convert.ts": {
+      "duct": 21,
+      "mechanical": 7,
+      "plumbing": 5,
+      "fixture": 14,
+      "electrical": 34,
+      "sprinkler": 2,
+      "conduit": 2,
+      "circuit": 2,
+      "panel": 1,
+      "cfm": 2,
+      "kva": 1,
+      "mbh": 1,
+      "hvac": 2,
+      "sanitary": 2,
+      "vent": 2,
+      "gas": 4,
+      "voltage": 1
+    },
+    "packages/bim-kernel/src/load-points/commands.ts": {
+      "panel": 4,
+      "circuit": 1,
+      "duct": 3,
+      "gas": 1,
+      "grease": 2,
+      "interceptor": 3,
+      "fixture": 13,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/load-points/findings.ts": {
+      "panel": 1,
+      "plumbing": 1,
+      "fixture": 3
+    },
+    "packages/bim-kernel/src/load-points/model.ts": {
+      "drainage": 1,
+      "fixture": 5,
+      "sanitary": 3,
+      "gas": 3,
+      "airflow": 1,
+      "duct": 1,
+      "vent": 1,
+      "dfu": 2,
+      "wsfu": 2,
+      "mbh": 1,
+      "cfm": 1,
+      "grease": 1,
+      "electrical": 2
+    },
+    "packages/bim-kernel/src/load-points/synthetic.ts": {
+      "plumbing": 4,
+      "fixture": 1,
+      "wsfu": 3
+    },
+    "packages/bim-kernel/src/load-points/system-fit.ts": {
+      "wsfu": 13,
+      "gas": 11,
+      "fixture": 4,
+      "sanitary": 9,
+      "grease": 2,
+      "vent": 4,
+      "dfu": 4,
+      "mbh": 4,
+      "cfm": 1,
+      "drainage": 1
+    },
+    "packages/bim-kernel/src/load-points/types.ts": {
+      "duct": 1,
+      "fixture": 7,
+      "plumbing": 1,
+      "dfu": 1
+    },
+    "packages/bim-kernel/src/load-points/walk-loads.ts": {
+      "fixture": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/mounting-plane.ts": {
+      "duct": 2
+    },
+    "packages/bim-kernel/src/network.ts": {
+      "airflow": 8
+    },
+    "packages/bim-kernel/src/organization/commands.ts": {
+      "feeder": 1,
+      "duct": 1
+    },
+    "packages/bim-kernel/src/organization/model.ts": {
+      "feeder": 2,
+      "panel": 2,
+      "duct": 5,
+      "fixture": 1,
+      "cfm": 5
+    },
+    "packages/bim-kernel/src/organization/typicals-totals.ts": {
+      "plumbing": 1,
+      "electrical": 2,
+      "fixture": 2,
+      "mbh": 1,
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/organization/typicals.ts": {
+      "electrical": 1,
+      "panel": 3,
+      "feeder": 3
+    },
+    "packages/bim-kernel/src/packs/first-party/manifests.ts": {
+      "electrical": 11,
+      "plumbing": 13,
+      "mechanical": 9,
+      "gas": 12,
+      "panel": 2,
+      "circuit": 2,
+      "feeder": 3,
+      "drainage": 1,
+      "vent": 1,
+      "fixture": 1,
+      "ventilation": 2,
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/packs/index.ts": {
+      "electrical": 1,
+      "mechanical": 1,
+      "plumbing": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/packs/points.ts": {
+      "panel": 1,
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/part-commands.ts": {
+      "duct": 4,
+      "circuit": 6
+    },
+    "packages/bim-kernel/src/part-model/clearance.ts": {
+      "nec": 5,
+      "panel": 4,
+      "conduit": 1,
+      "duct": 2,
+      "electrical": 1,
+      "voltage": 2
+    },
+    "packages/bim-kernel/src/part-model/commands.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/part-model/examples.ts": {
+      "panel": 18,
+      "duct": 23,
+      "mechanical": 1,
+      "airflow": 8,
+      "cfm": 1,
+      "voltage": 5,
+      "electrical": 1,
+      "plumbing": 1,
+      "fixture": 1,
+      "sanitary": 1
+    },
+    "packages/bim-kernel/src/part-model/formula.ts": {
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/part-model/intake-hood.ts": {
+      "duct": 3
+    },
+    "packages/bim-kernel/src/part-model/preview.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/part-mount.ts": {
+      "diffuser": 1
+    },
+    "packages/bim-kernel/src/partition.ts": {
+      "mechanical": 1,
+      "plumbing": 1,
+      "electrical": 1,
+      "duct": 1
+    },
+    "packages/bim-kernel/src/parts.ts": {
+      "duct": 10,
+      "mechanical": 6,
+      "plumbing": 7,
+      "fixture": 11,
+      "electrical": 21,
+      "grease": 2,
+      "sprinkler": 2,
+      "sanitary": 1,
+      "cfm": 1,
+      "voltage": 7,
+      "receptacle": 1,
+      "hvac": 1,
+      "nec": 2
+    },
+    "packages/bim-kernel/src/placement/geometric.ts": {
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/placement/planned-index.ts": {
+      "electrical": 2,
+      "mechanical": 2,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/placement/types.ts": {
+      "panel": 1,
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/propose/commands.ts": {
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/propose/perimeter.ts": {
+      "nec": 1
+    },
+    "packages/bim-kernel/src/propose/rooms.ts": {
+      "fixture": 17
+    },
+    "packages/bim-kernel/src/propose/trace.ts": {
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/propose/types.ts": {
+      "circuit": 1,
+      "fixture": 5
+    },
+    "packages/bim-kernel/src/quantities/index.ts": {
+      "drainage": 4,
+      "fixture": 10,
+      "gas": 4,
+      "airflow": 2,
+      "wsfu": 20,
+      "dfu": 6,
+      "mbh": 6,
+      "cfm": 4,
+      "electrical": 1,
+      "vent": 1
+    },
+    "packages/bim-kernel/src/quantities/input.ts": {
+      "mbh": 2
+    },
+    "packages/bim-kernel/src/questions/commands.ts": {
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/questions/types.ts": {
+      "sanitary": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/reference-display.ts": {
+      "panel": 2,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/reference.ts": {
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/registry/builtin.ts": {
+      "panel": 1,
+      "mechanical": 11,
+      "duct": 14,
+      "plumbing": 10,
+      "fixture": 16,
+      "sanitary": 2,
+      "electrical": 19,
+      "conduit": 3,
+      "circuit": 6,
+      "feeder": 1,
+      "ventilation": 1
+    },
+    "packages/bim-kernel/src/registry/element-kinds.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/registry/types.ts": {
+      "sprinkler": 2,
+      "gas": 1,
+      "wsfu": 2,
+      "mechanical": 1,
+      "plumbing": 1,
+      "electrical": 3,
+      "fixture": 1,
+      "voltage": 2
+    },
+    "packages/bim-kernel/src/requirements/allocation.ts": {
+      "electrical": 1,
+      "receptacle": 1,
+      "hvac": 1,
+      "plumbing": 1,
+      "gas": 2,
+      "wsfu": 1,
+      "fixture": 2,
+      "panel": 3
+    },
+    "packages/bim-kernel/src/requirements/anchor.ts": {
+      "gas": 1
+    },
+    "packages/bim-kernel/src/requirements/engine.ts": {
+      "plumbing": 3,
+      "fixture": 1,
+      "drainage": 2,
+      "gas": 2,
+      "electrical": 1,
+      "mechanical": 1
+    },
+    "packages/bim-kernel/src/requirements/facets.ts": {
+      "wsfu": 4,
+      "electrical": 3,
+      "gas": 2,
+      "plumbing": 3,
+      "drainage": 2,
+      "mechanical": 3
+    },
+    "packages/bim-kernel/src/requirements/load-index.ts": {
+      "panel": 1
+    },
+    "packages/bim-kernel/src/requirements/model-engine.ts": {
+      "panel": 2,
+      "interceptor": 1
+    },
+    "packages/bim-kernel/src/requirements/policy.ts": {
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/requirements/run-end-candidates.ts": {
+      "fixture": 2,
+      "drainage": 1,
+      "sanitary": 1,
+      "gas": 2
+    },
+    "packages/bim-kernel/src/requirements/status.ts": {
+      "duct": 1,
+      "fixture": 2
+    },
+    "packages/bim-kernel/src/requirements/types.ts": {
+      "fixture": 3,
+      "wsfu": 1,
+      "dfu": 1,
+      "mbh": 1,
+      "cfm": 3,
+      "gas": 5,
+      "drainage": 2,
+      "airflow": 1,
+      "imc": 1,
+      "panel": 1,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/routing/commands.ts": {
+      "duct": 31,
+      "electrical": 1,
+      "conduit": 5,
+      "drainage": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/routing/connect-commands.ts": {
+      "duct": 10,
+      "drainage": 1
+    },
+    "packages/bim-kernel/src/routing/derive.ts": {
+      "panel": 4,
+      "mechanical": 1,
+      "electrical": 1,
+      "fixture": 4,
+      "interceptor": 1
+    },
+    "packages/bim-kernel/src/routing/fitting-commands.ts": {
+      "duct": 46,
+      "drainage": 3,
+      "gas": 2,
+      "conduit": 1,
+      "vent": 2,
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/routing/fittings/coefficients.ts": {
+      "duct": 2
+    },
+    "packages/bim-kernel/src/routing/fittings/geometry.ts": {
+      "duct": 13,
+      "conduit": 1
+    },
+    "packages/bim-kernel/src/routing/fittings/library.ts": {
+      "hvac": 1,
+      "duct": 3,
+      "conduit": 1,
+      "mbh": 1,
+      "drainage": 2
+    },
+    "packages/bim-kernel/src/routing/flex.ts": {
+      "duct": 15,
+      "airflow": 1,
+      "conduit": 1,
+      "mechanical": 1
+    },
+    "packages/bim-kernel/src/routing/follow-core.ts": {
+      "drainage": 1
+    },
+    "packages/bim-kernel/src/routing/geometry.ts": {
+      "conduit": 6
+    },
+    "packages/bim-kernel/src/routing/levels-across.ts": {
+      "diffuser": 1
+    },
+    "packages/bim-kernel/src/routing/orientation.ts": {
+      "duct": 13
+    },
+    "packages/bim-kernel/src/routing/pipe/commands.ts": {
+      "fixture": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/routing/pipe/design.ts": {
+      "ipc": 2,
+      "plumbing": 2,
+      "gas": 23,
+      "drainage": 5,
+      "fixture": 11,
+      "wsfu": 2,
+      "dfu": 7,
+      "mbh": 2,
+      "vent": 1
+    },
+    "packages/bim-kernel/src/routing/pipe/families.ts": {
+      "gas": 1,
+      "vent": 1
+    },
+    "packages/bim-kernel/src/routing/pipe/geometry.ts": {
+      "duct": 1,
+      "conduit": 1,
+      "gas": 2
+    },
+    "packages/bim-kernel/src/routing/pipe/size-commands.ts": {
+      "plumbing": 1,
+      "gas": 1
+    },
+    "packages/bim-kernel/src/routing/pipe/sizing-core.ts": {
+      "gas": 1
+    },
+    "packages/bim-kernel/src/routing/pipe/specs.ts": {
+      "drainage": 2,
+      "vent": 1,
+      "gas": 2
+    },
+    "packages/bim-kernel/src/routing/propagate.ts": {
+      "duct": 2
+    },
+    "packages/bim-kernel/src/routing/route-angles.ts": {
+      "duct": 8,
+      "conduit": 1
+    },
+    "packages/bim-kernel/src/routing/route-height.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/routing/rules.ts": {
+      "cfm": 1,
+      "dfu": 1,
+      "mbh": 1,
+      "duct": 9,
+      "conduit": 15,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/routing/run-insulation.ts": {
+      "duct": 17,
+      "plumbing": 1,
+      "mechanical": 1
+    },
+    "packages/bim-kernel/src/routing/run-label.ts": {
+      "duct": 1
+    },
+    "packages/bim-kernel/src/routing/stretch-commands.ts": {
+      "duct": 6,
+      "conduit": 1
+    },
+    "packages/bim-kernel/src/routing/system-graphics.ts": {
+      "vent": 1,
+      "gas": 1,
+      "sanitary": 1,
+      "grease": 2,
+      "duct": 1
+    },
+    "packages/bim-kernel/src/routing/types.ts": {
+      "duct": 14,
+      "conduit": 10,
+      "imc": 1,
+      "drainage": 2,
+      "gas": 1,
+      "airflow": 1,
+      "cfm": 1,
+      "fixture": 1
+    },
+    "packages/bim-kernel/src/routing/validate.ts": {
+      "duct": 5,
+      "diffuser": 2
+    },
+    "packages/bim-kernel/src/schedules/definition.ts": {
+      "mechanical": 1,
+      "duct": 5,
+      "plumbing": 1,
+      "fixture": 2,
+      "electrical": 2,
+      "airflow": 1,
+      "cfm": 2,
+      "gas": 1,
+      "mbh": 1,
+      "panel": 2,
+      "feeder": 2
+    },
+    "packages/bim-kernel/src/schedules/engine/edit.ts": {
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/schedules/engine/fields.ts": {
+      "duct": 6,
+      "panel": 2,
+      "electrical": 3,
+      "circuit": 1,
+      "feeder": 1,
+      "cfm": 4
+    },
+    "packages/bim-kernel/src/schedules/engine/session.ts": {
+      "electrical": 1,
+      "fixture": 1,
+      "mbh": 1,
+      "mechanical": 1,
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/schedules/engine/types.ts": {
+      "gas": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/schedules/engine/v1.ts": {
+      "duct": 4,
+      "panel": 3,
+      "cfm": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/schedules/forms/layout.ts": {
+      "panel": 2,
+      "circuit": 1
+    },
+    "packages/bim-kernel/src/schedules/forms/support.ts": {
+      "circuit": 1,
+      "nec": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/schedules/forms/types.ts": {
+      "panel": 5,
+      "feeder": 3,
+      "circuit": 2,
+      "amps": 2,
+      "nec": 1
+    },
+    "packages/bim-kernel/src/schedules/paper.ts": {
+      "panel": 1
+    },
+    "packages/bim-kernel/src/schedules/records.ts": {
+      "duct": 10,
+      "cfm": 20,
+      "electrical": 1,
+      "voltage": 2,
+      "circuit": 4,
+      "panel": 3,
+      "breaker": 2,
+      "conductor": 2,
+      "kva": 2,
+      "airflow": 10
+    },
+    "packages/bim-kernel/src/schedules/schedule.ts": {
+      "duct": 5,
+      "panel": 3,
+      "circuit": 3,
+      "voltage": 1,
+      "feeder": 1,
+      "mechanical": 1,
+      "cfm": 2,
+      "electrical": 3
+    },
+    "packages/bim-kernel/src/selection-scopes.ts": {
+      "duct": 2,
+      "panel": 1,
+      "cfm": 1
+    },
+    "packages/bim-kernel/src/services/builtin.ts": {
+      "sanitary": 2,
+      "vent": 2,
+      "gas": 3,
+      "grease": 2,
+      "duct": 1,
+      "electrical": 1,
+      "drainage": 1,
+      "cfm": 1,
+      "dfu": 1,
+      "mbh": 1
+    },
+    "packages/bim-kernel/src/services/registry.ts": {
+      "duct": 8,
+      "electrical": 4,
+      "sprinkler": 3,
+      "sanitary": 3,
+      "grease": 4,
+      "drainage": 1,
+      "fixture": 1,
+      "vent": 1,
+      "dfu": 2,
+      "conduit": 2,
+      "mechanical": 5,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/services/types.ts": {
+      "gas": 4,
+      "sprinkler": 1,
+      "duct": 2,
+      "electrical": 3,
+      "plumbing": 1,
+      "mechanical": 1,
+      "grease": 4,
+      "dfu": 2,
+      "wsfu": 1,
+      "cfm": 1,
+      "mbh": 1,
+      "interceptor": 1,
+      "sanitary": 1
+    },
+    "packages/bim-kernel/src/services/write-gate.ts": {
+      "grease": 2,
+      "plumbing": 3,
+      "sanitary": 2,
+      "duct": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/spaces/derived-zones.ts": {
+      "nec": 3,
+      "panel": 3,
+      "sprinkler": 1,
+      "electrical": 1
+    },
+    "packages/bim-kernel/src/spaces/outdoor-air-reader.ts": {
+      "ventilation": 32,
+      "mechanical": 3,
+      "imc": 7,
+      "airflow": 4,
+      "cfm": 4
+    },
+    "packages/bim-kernel/src/spaces/space-commands.ts": {
+      "panel": 2,
+      "electrical": 1,
+      "nec": 1,
+      "plumbing": 1
+    },
+    "packages/bim-kernel/src/spaces/space-use.ts": {
+      "cfm": 1,
+      "imc": 1
+    },
+    "packages/bim-kernel/src/spaces/types.ts": {
+      "ventilation": 1,
+      "electrical": 1,
+      "sprinkler": 1,
+      "drainage": 1,
+      "nec": 1,
+      "panel": 2
+    },
+    "packages/bim-kernel/src/spaces/zone-bounds.ts": {
+      "ventilation": 1,
+      "electrical": 1,
+      "sprinkler": 1,
+      "drainage": 1
+    },
+    "packages/bim-kernel/src/spaces/zone-servers.ts": {
+      "ventilation": 2,
+      "duct": 2,
+      "airflow": 3,
+      "electrical": 7,
+      "hvac": 3,
+      "drainage": 2,
+      "plumbing": 2,
+      "mbh": 1,
+      "gas": 1,
+      "cfm": 3
+    },
+    "packages/bim-kernel/src/types.ts": {
+      "mechanical": 2,
+      "plumbing": 1,
+      "electrical": 1,
+      "duct": 4,
+      "sprinkler": 1,
+      "panel": 1
+    },
+    "packages/bim-kernel/src/view-categories.ts": {
+      "electrical": 2,
+      "fixture": 1,
+      "panel": 1,
+      "duct": 1
+    }
+  }
+}

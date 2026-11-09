@@ -1,0 +1,26 @@
+{
+  "name": "@permitzip/bim-lint",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-lint"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM coordination lint: a derived read over a model revision that says what an edit clashes with (ours and linked models), where equipment sits (outside the building, floating, buried), what is near it, and document checks. Pure TypeScript, no I/O; runs in the browser, on Vercel and on the model server. Never edits. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-kernel": "*",
+    "zod": "^4.0.0"
+  }
+}

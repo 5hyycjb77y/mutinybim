@@ -1,0 +1,17 @@
+{
+  "comment": "Runtime import cycles and layer debts allowed today (import-layers.test.ts). Shrink-only: delete an entry when it no longer occurs; never add one. Groups are strongly connected sets of runtime imports (type-only imports excluded). Before round 5a: 6 groups (52 + 5 + 4 + 3 + 2 + 2 files).",
+  "runtimeCycleGroups": [],
+  "layerViolations": {
+    "primitives-import-no-kernel": [],
+    "schema-imports-no-domain": [
+    ],
+    "spine-imports-no-commands": [],
+    "spine-imports-no-derived": [],
+    "kernel-imports-no-upper-packages": [],
+    "public-entry-only": [
+      "packages/bim-lint/src/rules/packs/questions.ts -> packages/bim-kernel/src/questions/index.ts",
+      "packages/bim-sheets/src/blocks.ts -> packages/bim-kernel/src/blocks/fields.ts",
+      "packages/bim-sheets/src/blocks.ts -> packages/bim-kernel/src/blocks/render.ts"
+    ]
+  }
+}

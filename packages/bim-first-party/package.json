@@ -1,0 +1,28 @@
+{
+  "name": "@permitzip/bim-first-party",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-first-party"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "The MutinyBIM add-ons PermitZIP ships (Electrical, Plumbing and gas, Mechanical, Fire protection, Architecture), installed in every host (browser, model server, MCP routes, agent worker, tests) independent of the per-deployment add-on list. One import, one call: installFirstPartyAddOns().",
+  "exports": {
+    ".": "./src/index.ts",
+    "./seed": "./src/seed/index.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-pack-electrical": "*",
+    "@permitzip/bim-pack-plumbing": "*",
+    "@permitzip/bim-pack-mechanical": "*",
+    "@permitzip/bim-pack-architecture": "*"
+  }
+}

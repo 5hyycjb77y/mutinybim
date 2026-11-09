@@ -1,0 +1,32 @@
+{
+  "name": "@permitzip/bim-plugin",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-plugin"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM as an Agent Plugins 1.0 package: the agent tool pack catalogue (the one place pack membership lives), one Agent Skill per pack and one MCP server per pack. Host-neutral; must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "plugin.json",
+    "mcp.json",
+    "skills",
+    "src",
+    "LICENSE"
+  ],
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json",
+    "build:files": "tsx scripts/write-files.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*"
+  }
+}

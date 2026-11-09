@@ -1,0 +1,28 @@
+{
+  "name": "@permitzip/bim-pack-electrical",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack-electrical"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM Electrical add-on (namespace electrical, first-party): panels, circuits, feeders and their loads, load-flow on the network core, the one-line diagram graph, panel schedule forms, electrical symbols, dedicated equipment space, NEC calcs and checks, and the agent tools it declares. Built only through the add-on contract; the kernel imports nothing from it. Stored names are frozen.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./src/host.ts",
+    "./ui": "./src/ui.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-pack": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0",
+    "@permitzip/bim-lint": "*"
+  }
+}

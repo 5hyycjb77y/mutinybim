@@ -1,0 +1,348 @@
+/* MutinyBIM schedule surfaces. Plain CSS over --mutiny-* so they draw the same with or without Tailwind. */
+.mutiny-sched {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  color: var(--mutiny-text, #182126);
+  font: 13px/1.4 var(--mutiny-font-body, system-ui, sans-serif);
+}
+.mutiny-sched-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mutiny-sched-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--mutiny-font-heading, inherit);
+}
+.mutiny-sched-toolbar-actions {
+  display: flex;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.mutiny-sched-status {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--mutiny-muted, #626c73);
+}
+.mutiny-sched-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--mutiny-muted, #626c73);
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  border-radius: var(--mutiny-radius, 6px);
+}
+.mutiny-sched-muted {
+  color: var(--mutiny-muted, #626c73);
+}
+.mutiny-sched-impacts {
+  margin: 8px 0 0;
+  padding-inline-start: 18px;
+}
+.mutiny-sched-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(0 0 0 / 0.3);
+}
+.mutiny-sched-dialog {
+  position: fixed;
+  z-index: 51;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 16px;
+  border-radius: var(--mutiny-radius, 6px);
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  background: var(--mutiny-panel, #f2f3f4);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.2);
+}
+.mutiny-sched-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.mutiny-sched-dialog-body {
+  margin: 8px 0 16px;
+}
+.mutiny-sched-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.mutiny-sched-sheet {
+  position: fixed;
+  z-index: 51;
+  top: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--mutiny-panel, #f2f3f4);
+  border-inline-start: 1px solid var(--mutiny-border, #dde1e4);
+  box-shadow: 0 0 40px rgb(0 0 0 / 0.2);
+}
+.mutiny-sched-sheet.is-right {
+  right: 0;
+}
+.mutiny-sched-sheet.is-left {
+  left: 0;
+}
+.mutiny-sched-sheet-header {
+  position: relative;
+  padding: 16px 48px 8px 16px;
+  border-bottom: 1px solid var(--mutiny-border, #dde1e4);
+}
+.mutiny-sched-sheet-header /* In a confirm dialog the focused button is the default action: always show it, whatever moved focus there. */
+.mutiny-sched-dialog .mutiny-sched-button:focus {
+  outline: 2px solid var(--mutiny-focus-ring, #d7e620);
+  outline-offset: 2px;
+}
+.mutiny-sched-icon-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.mutiny-sched-sheet-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.mutiny-sched-sheet-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid var(--mutiny-border, #dde1e4);
+}
+.mutiny-sched-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.mutiny-sched-section > legend,
+.mutiny-sched-section-title {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 4px;
+}
+.mutiny-sched-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mutiny-sched-field label,
+.mutiny-sched-label {
+  font-weight: 500;
+}
+.mutiny-sched-input,
+.mutiny-sched-select,
+.mutiny-sched-textarea {
+  font: inherit;
+  color: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  border-radius: var(--mutiny-radius, 6px);
+  background: var(--mutiny-field, #fff);
+}
+.mutiny-sched-textarea {
+  font-family: var(--mutiny-font-mono, ui-monospace, monospace);
+  min-height: 56px;
+  resize: vertical;
+}
+.mutiny-sched-input[aria-invalid="true"],
+.mutiny-sched-textarea[aria-invalid="true"] {
+  border-color: var(--mutiny-danger, #b42318);
+}
+.mutiny-sched-error {
+  color: var(--mutiny-danger, #b42318);
+  margin: 0;
+}
+.mutiny-sched-error-span {
+  font-family: var(--mutiny-font-mono, ui-monospace, monospace);
+  white-space: pre;
+  margin: 0;
+}
+.mutiny-sched-error-span mark {
+  background: var(--mutiny-danger-subtle, #fde4e1);
+  color: var(--mutiny-danger, #b42318);
+  text-decoration: underline wavy;
+}
+.mutiny-sched-help {
+  color: var(--mutiny-muted, #626c73);
+  margin: 0;
+  font-size: 12px;
+}
+.mutiny-sched-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mutiny-sched-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--mutiny-radius, 6px);
+}
+.mutiny-sched-list-item {
+  flex-wrap: wrap;
+}
+.mutiny-sched-list-note {
+  order: 10;
+  flex-basis: 100%;
+}
+.mutiny-sched-list-item:hover {
+  background: var(--mutiny-subtle, #eef0f1);
+}
+.mutiny-sched-list-item > .mutiny-sched-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mutiny-sched-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mutiny-sched-discipline {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mutiny-muted, #626c73);
+  margin-top: 6px;
+}
+.mutiny-sched-button {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  border-radius: var(--mutiny-radius, 6px);
+  background: var(--mutiny-field, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.mutiny-sched-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mutiny-sched-button.is-primary {
+  background: var(--mutiny-accent, #d7e620);
+  color: var(--mutiny-accent-foreground, #182126);
+  border-color: transparent;
+}
+.mutiny-sched-button.is-danger {
+  background: var(--mutiny-danger, #b42318);
+  color: var(--mutiny-danger-foreground, #fff);
+  border-color: transparent;
+}
+.mutiny-sched-button.is-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.mutiny-sched-button:focus-visible,
+.mutiny-sched-icon-button:focus-visible,
+.mutiny-sched-input:focus-visible,
+.mutiny-sched-select:focus-visible,
+.mutiny-sched-textarea:focus-visible {
+  outline: 2px solid var(--mutiny-focus-ring, #d7e620);
+  outline-offset: 1px;
+}
+/* In a confirm dialog the focused button is the default action: always show it, whatever moved focus there. */
+.mutiny-sched-dialog .mutiny-sched-button:focus {
+  outline: 2px solid var(--mutiny-focus-ring, #d7e620);
+  outline-offset: 2px;
+}
+.mutiny-sched-icon-button {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+}
+.mutiny-sched-menu {
+  z-index: 60;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  border-radius: var(--mutiny-radius, 6px);
+  background: var(--mutiny-panel, #f2f3f4);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);
+}
+.mutiny-sched-menu-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  border-radius: var(--mutiny-radius, 6px);
+  cursor: pointer;
+  outline: none;
+}
+.mutiny-sched-menu-item[data-highlighted] {
+  background: var(--mutiny-subtle, #e6e9eb);
+}
+.mutiny-sched-menu-item[data-disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.mutiny-sched-menu-reason {
+  font-size: 11px;
+}
+.mutiny-sched-badge {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--mutiny-border, #dde1e4);
+  color: var(--mutiny-muted, #626c73);
+}
+.mutiny-sched-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mutiny-sched-columns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mutiny-sched-columns-row,
+.mutiny-sched-columns-add,
+.mutiny-sched-columns-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.mutiny-sched-columns-row .mutiny-sched-input {
+  flex: 1 1 8rem;
+  min-width: 6rem;
+}
+.mutiny-sched-columns-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

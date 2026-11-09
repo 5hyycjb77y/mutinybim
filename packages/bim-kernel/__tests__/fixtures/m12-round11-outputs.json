@@ -1,0 +1,92 @@
+{
+  "r1-demo": {
+    "anchors": "96e77dcdd5e251f83152",
+    "sheet": "2512f30af8f61f2ceb6d",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "c5d5872dc4099287da8f",
+    "tagStyles": "1aca058127cc5222c6e3",
+    "scopes": "58e2c37a3e58afb76e48"
+  },
+  "r2-demo-edited": {
+    "anchors": "0cfc5b31b8293e14de43",
+    "sheet": "2d5a4779be783081a7e4",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "9c6cb9342692f34a03d0",
+    "tagStyles": "1aca058127cc5222c6e3",
+    "scopes": "58e2c37a3e58afb76e48"
+  },
+  "r3-heavy": {
+    "anchors": "d15478e9b99aa6525572",
+    "sheet": "d0069f32a6c37a78da01",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "a9f41ab898d77ae1b018",
+    "tagStyles": "00d7d1988c28a179b163",
+    "scopes": "1108ce3a4427f1188cec"
+  },
+  "r5-fullbim-xs": {
+    "anchors": "8f1c4754e71e8c951491",
+    "sheet": "fc003a29e0854410bd82",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "a6b7d46e91269d4198ce",
+    "tagStyles": "984a47b4f513cd60a5ab",
+    "scopes": "1305dc6257616d6529db"
+  },
+  "r8-shared-tree": {
+    "anchors": "96e77dcdd5e251f83152",
+    "sheet": "55456a06d70794d57fcf",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "c5d5872dc4099287da8f",
+    "tagStyles": "1aca058127cc5222c6e3",
+    "scopes": "58e2c37a3e58afb76e48"
+  },
+  "demo": {
+    "anchors": "96e77dcdd5e251f83152",
+    "sheet": "2512f30af8f61f2ceb6d",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "c5d5872dc4099287da8f",
+    "tagStyles": "1aca058127cc5222c6e3",
+    "scopes": "58e2c37a3e58afb76e48"
+  },
+  "heavy": {
+    "anchors": "33c3e5a2d8e7158aaaee",
+    "sheet": "a6eeb300206bc53bb3ec",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "09c9e81300fbd4f17b47",
+    "tagStyles": "caca63c2f1d1f0b9826f",
+    "scopes": "440c00dc23dbe0176569"
+  },
+  "fullbim-xs": {
+    "anchors": "be384e43e8c7e94ca3f4",
+    "sheet": "26b879746f5e3cc064b8",
+    "viewScenes": "4e202b6e1ffdd9263a1a",
+    "autoTags": "b7cca7574a101afcbc3e",
+    "picks": "f4e36ccfd2b62f9c0e7e",
+    "solids": "a493197154826ac2baec",
+    "tagStyles": "a8a2aac3216b300f102c",
+    "scopes": "90d6e0a48c0f329fa373"
+  },
+  "floor": {
+    "anchors": "b08bad752d81a2f712a6",
+    "sheet": "2b6d04904b6f6da57160",
+    "viewScenes": "4f53cda18c2baa0c0354",
+    "autoTags": "4f53cda18c2baa0c0354",
+    "picks": "4f53cda18c2baa0c0354",
+    "solids": "0047f8fb7af4b994146a",
+    "tagStyles": "a88fc6c5751438037275",
+    "scopes": "8f7e9839c3e454a83de4"
+  }
+}

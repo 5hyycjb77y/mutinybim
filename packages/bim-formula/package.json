@@ -1,0 +1,24 @@
+{
+  "name": "@permitzip/bim-formula",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-formula"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "description": "MutinyBIM formula language: field-based, unit-typed expressions for schedule columns, tags and library calculations. Pure and deterministic, compiled once and evaluated over whole columns. Must not import host app code or the kernel.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-units": "*"
+  }
+}

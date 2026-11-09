@@ -1,0 +1,28 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`NEC 210.52 receptacle proposer: unit 001 is deterministic: the same rooms give the same proposal (golden) 1`] = `
+[
+  "u001-living#wall-1 wall (2842, 172) 0°",
+  "u001-living#wall-2 wall (4794, 1121) 90°",
+  "u001-living#wall-3 wall (4794, 3904) 90°",
+  "u001-living#wall-4 wall (2629, 4184) 180°",
+  "u001-living#wall-5 wall (172, 3629) 270°",
+  "u001-living#wall-6 wall (172, 1108) 270°",
+  "u001-kitchen#wall-1 wall (8362, 2026) 90°",
+  "u001-kitchen#wall-2 wall (8033, 4184) 180°",
+  "u001-kitchen#wall-3 wall (5506, 4184) 180°",
+  "u001-kitchen#wall-4 wall (4961, 1677) 270°",
+  "u001-kitchen#countertop-1 countertop (8362, 305) 90°",
+  "u001-kitchen#countertop-2 countertop (4961, 304) 270°",
+  "u001-kitchen#countertop-3 countertop (5884, 172) 0°",
+  "u001-kitchen#island-1 island (6249, 1829) 0°",
+  "u001-kitchen#island-2 island (7164, 1829) 0°",
+  "u001-hall#hallway-1 hallway (7138, 4351) 0°",
+  "u001-bed#wall-1 wall (3575, 6725) 90°",
+  "u001-bed#wall-2 wall (2318, 8362) 180°",
+  "u001-bed#wall-3 wall (172, 7614) 270°",
+  "u001-bed#wall-4 wall (1022, 5570) 0°",
+  "u001-bath#bathroom-1 bathroom (4879, 8362) 180°",
+  "u001-laundry#laundry-1 laundry (7165, 8362) 180°",
+]
+`;

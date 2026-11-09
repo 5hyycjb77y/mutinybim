@@ -1,0 +1,797 @@
+/*
+ * Design tokens for the editor demo: the shadcn/ui color, radius, shadow and
+ * font variables the vendored primitives read (`hsl(var(--primary))` and the
+ * shade scales), with light and dark values. Inside the editor root the
+ * Mutiny theme overrides most of them (demo/theme.ts). A snapshot of the
+ * host app's token sheet; refresh it from there when the primitives gain a token.
+ */
+@custom-variant dark (&:is(.dark *));
+
+/* ──────────────────────────────────────────────────────────────
+   Font families — non-inlined so ThemeProvider can override the
+   CSS custom properties (--font-sans, --font-heading) at runtime.
+   ────────────────────────────────────────────────────────────── */
+@theme {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  /* Serif headings over a sans body. Overridden at
+     runtime by the active preset's `fontHeading` and the user's font picks. */
+  --font-heading: var(--font-source-serif), Georgia, serif;
+  /* Tailwind's own stacks, restated non-inline so a preset's code / serif
+     font (ThemeProvider) can override them at runtime. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Shadows and letter-spacing — themeable, shadcn/tweakcn style.
+   Utilities read the variables; :root below holds Tailwind's
+   default values, so nothing changes unless a preset sets them.
+   ────────────────────────────────────────────────────────────── */
+@theme inline {
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Design tokens — inlined so Tailwind knows about them as
+   utilities but we don't emit duplicate custom properties.
+   The actual values live in :root / .dark below.
+   ────────────────────────────────────────────────────────────── */
+@theme inline {
+  --breakpoint-xs: 475px;
+
+  /* shadcn semantic colors */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring-3: hsl(var(--ring-3));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  /* Blueprint slate. Evidence and provenance only: source links, document
+     references, selected relationships. Not a second button colour. */
+  --color-evidence: hsl(var(--evidence));
+  --color-evidence-foreground: hsl(var(--evidence-foreground));
+  /* Avatar palette slots 1-8 (initials on a color). */
+  --color-avatar-1: hsl(var(--avatar-1));
+  --color-avatar-1-foreground: hsl(var(--avatar-1-foreground));
+  --color-avatar-2: hsl(var(--avatar-2));
+  --color-avatar-2-foreground: hsl(var(--avatar-2-foreground));
+  --color-avatar-3: hsl(var(--avatar-3));
+  --color-avatar-3-foreground: hsl(var(--avatar-3-foreground));
+  --color-avatar-4: hsl(var(--avatar-4));
+  --color-avatar-4-foreground: hsl(var(--avatar-4-foreground));
+  --color-avatar-5: hsl(var(--avatar-5));
+  --color-avatar-5-foreground: hsl(var(--avatar-5-foreground));
+  --color-avatar-6: hsl(var(--avatar-6));
+  --color-avatar-6-foreground: hsl(var(--avatar-6-foreground));
+  --color-avatar-7: hsl(var(--avatar-7));
+  --color-avatar-7-foreground: hsl(var(--avatar-7-foreground));
+  --color-avatar-8: hsl(var(--avatar-8));
+  --color-avatar-8-foreground: hsl(var(--avatar-8-foreground));
+
+  /* Primary shade scale */
+  --color-primary-50: hsl(var(--primary-50));
+  --color-primary-100: hsl(var(--primary-100));
+  --color-primary-200: hsl(var(--primary-200));
+  --color-primary-300: hsl(var(--primary-300));
+  --color-primary-400: hsl(var(--primary-400));
+  --color-primary-500: hsl(var(--primary-500));
+  --color-primary-600: hsl(var(--primary-600));
+  --color-primary-700: hsl(var(--primary-700));
+  --color-primary-800: hsl(var(--primary-800));
+  --color-primary-900: hsl(var(--primary-900));
+  --color-primary-950: hsl(var(--primary-950));
+
+  /* Accent shade scale (brand accent, distinct from shadcn semantic accent) */
+  --color-accent-50: hsl(var(--accent-50));
+  --color-accent-100: hsl(var(--accent-100));
+  --color-accent-200: hsl(var(--accent-200));
+  --color-accent-300: hsl(var(--accent-300));
+  --color-accent-400: hsl(var(--accent-400));
+  --color-accent-500: hsl(var(--accent-500));
+  --color-accent-600: hsl(var(--accent-600));
+  --color-accent-700: hsl(var(--accent-700));
+  --color-accent-800: hsl(var(--accent-800));
+  --color-accent-900: hsl(var(--accent-900));
+
+  /* Status colors — HSL variable indirection so :root / .dark can override.
+     Values are defined as HSL component triples in :root (light) and .dark
+     (dark, using an inversion mapping so -50 becomes a deep tint and -700
+     becomes a light accent). This is what makes `bg-success-50 text-success-700
+     border-success-200` automatically adapt to dark mode. Never inline the
+     dark values into component classNames. */
+  --color-success-50: hsl(var(--success-50));
+  --color-success-100: hsl(var(--success-100));
+  --color-success-200: hsl(var(--success-200));
+  --color-success-300: hsl(var(--success-300));
+  --color-success-400: hsl(var(--success-400));
+  --color-success-500: hsl(var(--success-500));
+  --color-success-600: hsl(var(--success-600));
+  --color-success-700: hsl(var(--success-700));
+  --color-success-800: hsl(var(--success-800));
+  --color-success-900: hsl(var(--success-900));
+  --color-success-950: hsl(var(--success-950));
+
+  --color-warning-50: hsl(var(--warning-50));
+  --color-warning-100: hsl(var(--warning-100));
+  --color-warning-200: hsl(var(--warning-200));
+  --color-warning-300: hsl(var(--warning-300));
+  --color-warning-400: hsl(var(--warning-400));
+  --color-warning-500: hsl(var(--warning-500));
+  --color-warning-600: hsl(var(--warning-600));
+  --color-warning-700: hsl(var(--warning-700));
+  --color-warning-800: hsl(var(--warning-800));
+  --color-warning-900: hsl(var(--warning-900));
+  --color-warning-950: hsl(var(--warning-950));
+
+  --color-danger-50: hsl(var(--danger-50));
+  --color-danger-100: hsl(var(--danger-100));
+  --color-danger-200: hsl(var(--danger-200));
+  --color-danger-300: hsl(var(--danger-300));
+  --color-danger-400: hsl(var(--danger-400));
+  --color-danger-500: hsl(var(--danger-500));
+  --color-danger-600: hsl(var(--danger-600));
+  --color-danger-700: hsl(var(--danger-700));
+  --color-danger-800: hsl(var(--danger-800));
+  --color-danger-900: hsl(var(--danger-900));
+  --color-danger-950: hsl(var(--danger-950));
+
+  --color-info-50: hsl(var(--info-50));
+  --color-info-100: hsl(var(--info-100));
+  --color-info-200: hsl(var(--info-200));
+  --color-info-300: hsl(var(--info-300));
+  --color-info-400: hsl(var(--info-400));
+  --color-info-500: hsl(var(--info-500));
+  --color-info-600: hsl(var(--info-600));
+  --color-info-700: hsl(var(--info-700));
+  --color-info-800: hsl(var(--info-800));
+  --color-info-900: hsl(var(--info-900));
+  --color-info-950: hsl(var(--info-950));
+
+  /* Custom animations */
+  --animate-fade-in: fadeIn 0.3s ease-in-out;
+  --animate-slide-up: slideUp 0.3s ease-out;
+  --animate-slide-down: slideDown 0.3s ease-out;
+  --animate-scale-in: scaleIn 0.2s ease-out;
+  --animate-modal-in: modalIn 0.2s ease-out;
+  --animate-modal-out: modalOut 0.15s ease-in;
+  --animate-backdrop-in: backdropIn 0.2s ease-out;
+  --animate-backdrop-out: backdropOut 0.15s ease-in;
+  --animate-shimmer-slide: shimmer-slide 2s linear infinite;
+  --animate-evidence-pulse: evidence-pulse 1.5s ease-out;
+
+  /* Radius scale — multiplicative like ui.shadcn.com/create */
+  --radius-xs: calc(var(--radius) * 0.5);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: calc(var(--radius) * 0.875);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes slideUp {
+    0% {
+      transform: translateY(10px);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes slideDown {
+    0% {
+      transform: translateY(-10px);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes scaleIn {
+    0% {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes modalIn {
+    0% {
+      opacity: 0;
+      transform: scale(0.95) translateY(10px);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes modalOut {
+    0% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.95) translateY(10px);
+    }
+  }
+  @keyframes backdropIn {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes backdropOut {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes evidence-pulse {
+    /* Phase E.1 — when a scope-item source badge is clicked, the matching
+       chain-of-custody row pulses to draw the operator's eye. The ring
+       starts saturated, fades through a softer blur, and lands at neutral
+       so the row doesn't keep visual noise after the highlight. */
+    0% {
+      box-shadow:
+        0 0 0 0 hsl(var(--primary) / 0.6),
+        0 0 0 4px hsl(var(--primary) / 0.4);
+    }
+    50% {
+      box-shadow:
+        0 0 0 6px hsl(var(--primary) / 0.0),
+        0 0 0 4px hsl(var(--primary) / 0.2);
+    }
+    100% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+    }
+  }
+  @keyframes shimmer-slide {
+    0% {
+      background-position: 100% center;
+    }
+    100% {
+      background-position: 0% center;
+    }
+  }
+  --font-sans: var(--font-sans);
+
+  /* Sidebar + ring tokens — wrapped in hsl() like the rest of the
+     semantic system. Values (HSL triples) live in :root / .dark and
+     compose off the core tokens so theme presets flow through
+     automatically (ThemeProvider sets --background, --primary, etc.
+     and --sidebar / --ring inherit via var() composition). */
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-backdrop: hsl(var(--backdrop));
+  --color-surface-elevated: hsl(var(--surface-elevated));
+  --color-backdrop-accent: hsl(var(--backdrop-accent));
+  --shadow-elevated:
+    0 1px 2px hsl(var(--elevation-shadow) / 0.12),
+    0 10px 30px -12px hsl(var(--elevation-shadow) / 0.38);
+  --color-ring: hsl(var(--ring));
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   v4 border compat: default border color changed to currentColor.
+   Keep gray-200 default during semantic-token migration.
+   ────────────────────────────────────────────────────────────── */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+  }
+}
+
+/* ── Branded scrollbar — outside @layer so ::-webkit-scrollbar works in Chrome ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Custom utilities
+   ────────────────────────────────────────────────────────────── */
+@utility text-balance {
+  text-wrap: balance;
+}
+
+@utility glass {
+  @apply bg-background/70 backdrop-blur-xl border border-border/50;
+}
+
+@utility glass-card {
+  @apply glass shadow-xl rounded-2xl;
+}
+
+@utility animate-slide-up-bulk {
+  animation: slide-up 0.2s ease-out;
+}
+
+@utility animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+@utility btn-ripple {
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+    transform: translate(-50%, -50%);
+    transition:
+      width 0.6s,
+      height 0.6s;
+  }
+
+  &:active::after {
+    width: 300px;
+    height: 300px;
+    transition: 0s;
+  }
+}
+
+@utility theme-switching {
+  animation: theme-flash 0.3s ease-in-out;
+}
+
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-default {
+  -ms-overflow-style: auto;
+  scrollbar-width: auto;
+  &::-webkit-scrollbar {
+    display: block;
+  }
+}
+
+@utility scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.45);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   CSS variables — light & dark mode
+   ────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    /* Tailwind v4 defaults. Presets may override (presetExtraCssVars). */
+    --shadow-2xs: 0 1px rgb(0 0 0 / 0.05);
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+    --tracking-normal: 0em;
+    --background: 40 24% 98%;
+    --foreground: 20 14% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 20 14% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14% 12%;
+    --primary: 18 72% 38%;
+    --primary-foreground: 40 30% 98%;
+    --secondary: 36 20% 94%;
+    --secondary-foreground: 20 14% 20%;
+    --muted: 36 18% 95%;
+    --muted-foreground: 25 8% 42%;
+    --accent: 36 26% 92%;
+    --accent-foreground: 20 14% 20%;
+    --destructive: 0 70% 44%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 30 12% 88%;
+    --input: 30 12% 88%;
+    --ring-3: 18 72% 38%;
+
+    /* Focus ring — brand primary so `ring-ring` and focus outlines
+       read as brand terracotta instead of a neutral gray. */
+    --ring: var(--primary-500);
+
+    /* Sidebar tokens — composed from core semantic tokens so they
+       always match the active theme preset without ThemeProvider
+       having to set them explicitly. */
+    --sidebar: var(--background);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--accent);
+    --sidebar-accent-foreground: var(--accent-foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--primary-500);
+
+    /* Elevation (agent-first frame and its one card). ThemeProvider writes
+       derived values per preset; these keep first paint sensible. */
+    --backdrop: 36 14% 94%;
+    --backdrop-accent: 36 18% 86%;
+    --surface-elevated: var(--card);
+    --elevation-shadow: 20 14% 18%;
+
+    --radius: 0.625rem;
+    --chart-1: 18 72% 45%;
+    --chart-2: 200 48% 40%;
+    --chart-3: 152 32% 36%;
+    --chart-4: 42 74% 45%;
+    --chart-5: 280 28% 48%;
+    /* Pre-hydration fallback, light. Matches the default preset. */
+    --evidence: 193 22% 35%;
+    --evidence-foreground: 40 24% 98%;
+    /* Person and agent avatar palette (initials backgrounds). Each pair is >= 4.5:1, checked by lib/__tests__/avatar-palette-contrast.test.ts. Theme presets may override. */
+    --avatar-1: 14 55% 34%;
+    --avatar-1-foreground: 0 0% 100%;
+    --avatar-2: 32 60% 32%;
+    --avatar-2-foreground: 0 0% 100%;
+    --avatar-3: 145 45% 28%;
+    --avatar-3-foreground: 0 0% 100%;
+    --avatar-4: 180 55% 26%;
+    --avatar-4-foreground: 0 0% 100%;
+    --avatar-5: 210 55% 34%;
+    --avatar-5-foreground: 0 0% 100%;
+    --avatar-6: 240 45% 42%;
+    --avatar-6-foreground: 0 0% 100%;
+    --avatar-7: 280 40% 40%;
+    --avatar-7-foreground: 0 0% 100%;
+    --avatar-8: 335 50% 38%;
+    --avatar-8-foreground: 0 0% 100%;
+
+    /* Primary shade scale (default preset: terracotta) */
+    --primary-50: 24 100% 97%;
+    --primary-100: 22 95% 93%;
+    --primary-200: 21 90% 86%;
+    --primary-300: 20 85% 76%;
+    --primary-400: 19 78% 62%;
+    --primary-500: 18 72% 50%;
+    --primary-600: 18 72% 44%;
+    --primary-700: 17 74% 38%;
+    --primary-800: 16 72% 31%;
+    --primary-900: 15 68% 26%;
+    --primary-950: 14 70% 17%;
+
+    /* Accent shade scale (default preset: warm sand) */
+    --accent-50: 40 44% 97%;
+    --accent-100: 38 38% 94%;
+    --accent-200: 36 32% 88%;
+    --accent-300: 35 28% 80%;
+    --accent-400: 34 24% 70%;
+    --accent-500: 33 22% 60%;
+    --accent-600: 32 20% 50%;
+    --accent-700: 30 20% 40%;
+    --accent-800: 28 18% 31%;
+    --accent-900: 26 16% 24%;
+
+    /* ── Status shade scales — light mode (HSL from Tailwind's default palettes) ── */
+    /* success = green */
+    --success-50: 138 76% 97%;
+    --success-100: 141 84% 93%;
+    --success-200: 141 79% 85%;
+    --success-300: 142 77% 73%;
+    --success-400: 142 69% 58%;
+    --success-500: 142 71% 45%;
+    --success-600: 142 76% 36%;
+    --success-700: 142 72% 29%;
+    --success-800: 143 64% 24%;
+    --success-900: 144 61% 20%;
+    --success-950: 145 80% 10%;
+
+    /* warning = amber */
+    --warning-50: 48 100% 96%;
+    --warning-100: 48 96% 89%;
+    --warning-200: 48 97% 77%;
+    --warning-300: 46 97% 65%;
+    --warning-400: 43 96% 56%;
+    --warning-500: 38 92% 50%;
+    --warning-600: 32 95% 44%;
+    --warning-700: 26 90% 37%;
+    --warning-800: 23 83% 31%;
+    --warning-900: 22 78% 26%;
+    --warning-950: 21 92% 14%;
+
+    /* danger = red */
+    --danger-50: 0 86% 97%;
+    --danger-100: 0 93% 94%;
+    --danger-200: 0 96% 89%;
+    --danger-300: 0 94% 82%;
+    --danger-400: 0 91% 71%;
+    --danger-500: 0 84% 60%;
+    --danger-600: 0 72% 51%;
+    --danger-700: 0 74% 42%;
+    --danger-800: 0 70% 35%;
+    --danger-900: 0 63% 31%;
+    --danger-950: 0 75% 15%;
+
+    /* info = blue */
+    --info-50: 214 100% 97%;
+    --info-100: 214 95% 93%;
+    --info-200: 213 97% 87%;
+    --info-300: 212 96% 78%;
+    --info-400: 213 94% 68%;
+    --info-500: 217 91% 60%;
+    --info-600: 221 83% 53%;
+    --info-700: 224 76% 48%;
+    --info-800: 226 71% 40%;
+    --info-900: 226 64% 33%;
+    --info-950: 229 84% 13%;
+  }
+
+  .dark {
+    --background: 24 10% 8%;
+    --foreground: 40 14% 92%;
+    /* Lift cards off the page the way ui.shadcn.com/create does in dark
+       mode (~6 lightness points). 11% was too close to 8% and made org
+       cards, sheets, and tables read as one flat smear. */
+    --card: 24 12% 15%;
+    --card-foreground: 40 14% 92%;
+    --popover: 24 12% 16%;
+    --popover-foreground: 40 14% 92%;
+    --primary: 18 76% 52%;
+    --primary-foreground: 24 20% 10%;
+    --secondary: 24 8% 17%;
+    --secondary-foreground: 40 14% 90%;
+    --muted: 24 8% 16%;
+    /* AAA tune: 72% lightness holds ~7.5:1 on the dark bg. Hue warmed from
+       the old 215 blue-gray to sit in the terracotta palette; lightness is
+       the contrast-carrying term and is unchanged. */
+    --muted-foreground: 35 10% 72%;
+    --accent: 24 8% 20%;
+    --accent-foreground: 40 14% 92%;
+    /* AAA tune: was 0 62.8% 30.6% (~2:1 text on dark); 70% lightness clears
+       7:1 for body text while preserving the red hue. */
+    --destructive: 0 72% 70%;
+    /* AAA tune: was 210 40% 98% (~2.6:1 on the new bright-red destructive).
+       0 20% 8% is a near-black with a faint red tint that clears 6.79:1
+       against --destructive while still reading as ink on a warning
+       surface. */
+    --destructive-foreground: 0 20% 8%;
+    /* AAA tune: was 217.2 32.6% 17.5% (~1.37:1). 58% lightness clears 6.08:1
+       on `--background` (well past the 4.5:1 non-text AAA target) and 4.45:1
+       on the darker `--muted` surface, so framed cards and inputs are
+       visible against both. --input aliases --border so inputs inherit the
+       fix. Hue warmed to sit with the terracotta palette; the 58% lightness
+       that carries the contrast is unchanged. */
+    --border: 24 12% 58%;
+    --input: 24 12% 58%;
+    --ring-3: 18 76% 52%;
+
+    /* Focus ring + sidebar tokens — see :root for rationale. The
+       same var() composition works in dark because the upstream
+       tokens (--primary, --background, etc.) are already dark-mode
+       values here. */
+    --ring: var(--primary-500);
+    --sidebar: var(--background);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--accent);
+    --sidebar-accent-foreground: var(--accent-foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--primary-500);
+
+    --backdrop: 24 10% 4.5%;
+    --backdrop-accent: 24 10% 13.5%;
+    --surface-elevated: 24 10% 10.5%;
+    --elevation-shadow: 24 10% 1%;
+
+    --chart-1: 18 76% 56%;
+    --chart-2: 200 56% 58%;
+    --chart-3: 152 38% 52%;
+    --chart-4: 42 78% 58%;
+    --chart-5: 280 36% 66%;
+    /* Pre-hydration fallback, dark. #45636B measures 2.8:1 here, so dark
+       gets its own lighter value rather than reusing the light one. */
+    --evidence: 193 22% 55%;
+    --evidence-foreground: 24 10% 8%;
+    /* Avatar palette, dark: lighter fills with dark initials, each pair >= 4.5:1. */
+    --avatar-1: 14 60% 72%;
+    --avatar-1-foreground: 220 20% 10%;
+    --avatar-2: 32 65% 68%;
+    --avatar-2-foreground: 220 20% 10%;
+    --avatar-3: 145 40% 62%;
+    --avatar-3-foreground: 220 20% 10%;
+    --avatar-4: 180 45% 60%;
+    --avatar-4-foreground: 220 20% 10%;
+    --avatar-5: 210 60% 72%;
+    --avatar-5-foreground: 220 20% 10%;
+    --avatar-6: 240 55% 76%;
+    --avatar-6-foreground: 220 20% 10%;
+    --avatar-7: 280 45% 74%;
+    --avatar-7-foreground: 220 20% 10%;
+    --avatar-8: 335 55% 74%;
+    --avatar-8-foreground: 220 20% 10%;
+
+    /* ── Primary shade scale — dark mode (default preset inversion).
+       Without these, SSR in dark mode renders `bg-primary-50` as near-white
+       terracotta and flashes to the correct dark tint only after hydration.
+       Runtime `applyThemePreset()` overrides these when the user picks
+       another preset; this block is the safe default. ────────────── */
+    --primary-50: 14 70% 17%;
+    --primary-100: 15 68% 26%;
+    --primary-200: 16 72% 31%;
+    --primary-300: 17 74% 38%;
+    --primary-400: 18 72% 44%;
+    --primary-500: 18 72% 50%;
+    --primary-600: 19 78% 62%;
+    --primary-700: 20 85% 76%;
+    --primary-800: 21 90% 86%;
+    --primary-900: 22 95% 93%;
+    --primary-950: 24 100% 97%;
+
+    /* ── Accent shade scale — dark mode (default preset sand inversion) ── */
+    --accent-50: 26 16% 24%;
+    --accent-100: 28 18% 31%;
+    --accent-200: 30 20% 40%;
+    --accent-300: 32 20% 50%;
+    --accent-400: 33 22% 60%;
+    --accent-500: 34 24% 70%;
+    --accent-600: 35 28% 80%;
+    --accent-700: 36 32% 88%;
+    --accent-800: 38 38% 94%;
+    --accent-900: 40 44% 97%;
+
+    /* ── Status shade scales — dark mode.
+       Inversion mapping so the SAME className is dark-mode correct:
+         50  ←→ 950   (light tint / deep tint — used for backgrounds)
+         100 ←→ 900
+         200 ←→ 800   (borders)
+         300 ←→ 700   (text on light / text on dark)
+         400 ←→ 600
+         500 stays    (the canonical saturated mid-tone, used for solid fills)
+       Result: `bg-info-50 text-info-700 border-info-200` renders a deep
+       tinted card with light-blue text and medium-dark-blue border in dark
+       mode, matching the "subtle status chip" intent of the light-mode
+       rendering.
+       ─────────────────────────────────────────────────────────────── */
+    --success-50: 145 80% 10%;
+    --success-100: 144 61% 20%;
+    --success-200: 143 64% 24%;
+    --success-300: 142 72% 29%;
+    --success-400: 142 76% 36%;
+    --success-500: 142 71% 45%;
+    --success-600: 142 69% 58%;
+    --success-700: 142 77% 73%;
+    --success-800: 141 79% 85%;
+    --success-900: 141 84% 93%;
+    --success-950: 138 76% 97%;
+
+    --warning-50: 21 92% 14%;
+    --warning-100: 22 78% 26%;
+    --warning-200: 23 83% 31%;
+    --warning-300: 26 90% 37%;
+    --warning-400: 32 95% 44%;
+    --warning-500: 38 92% 50%;
+    --warning-600: 43 96% 56%;
+    --warning-700: 46 97% 65%;
+    --warning-800: 48 97% 77%;
+    --warning-900: 48 96% 89%;
+    --warning-950: 48 100% 96%;
+
+    --danger-50: 0 75% 15%;
+    --danger-100: 0 63% 31%;
+    --danger-200: 0 70% 35%;
+    --danger-300: 0 74% 42%;
+    --danger-400: 0 72% 51%;
+    --danger-500: 0 84% 60%;
+    --danger-600: 0 91% 71%;
+    --danger-700: 0 94% 82%;
+    --danger-800: 0 96% 89%;
+    --danger-900: 0 93% 94%;
+    --danger-950: 0 86% 97%;
+
+    --info-50: 229 84% 13%;
+    --info-100: 226 64% 33%;
+    --info-200: 226 71% 40%;
+    --info-300: 224 76% 48%;
+    --info-400: 221 83% 53%;
+    --info-500: 217 91% 60%;
+    --info-600: 213 94% 68%;
+    --info-700: 212 96% 78%;
+    --info-800: 213 97% 87%;
+    --info-900: 214 95% 93%;
+    --info-950: 214 100% 97%;
+  }
+}

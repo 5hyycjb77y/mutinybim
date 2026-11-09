@@ -1,0 +1,53 @@
+name: Proof packs
+
+# The proof rule: a commit that changes a proof pack's code (Civil, a Preview
+# add-on built only on the published add-on surface) changes nothing under
+# packages/bim-kernel. A kernel change the pack needed lands as its own commit
+# first: in its own pull request, or as an earlier commit of this one merged
+# with a rebase (a squash folds the two together). Checked over every commit
+# of the pull request.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proof-packs-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  proof-packs:
+    name: Proof-pack commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CI_JOB_KEY: proof-packs
+      CI_JOB_NAME: Proof-pack commits
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Self-test the check
+        run: bash .github/scripts/report.sh --kind lines --name "Proof-pack commits self-test" -- bash scripts/bim/check-proof-pack-commits.sh --self-test
+      - name: Check each commit of this pull request
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/report.sh --kind lines --name "Proof-pack commits" -- bash scripts/bim/check-proof-pack-commits.sh "$BASE_SHA" "$HEAD_SHA"
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore

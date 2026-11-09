@@ -1,0 +1,135 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mutinybim",
+  "version": "1.0.0",
+  "description": "MutinyBIM agent tools as packs: connect the core plus only the packs a job needs (drafting, ducts and pipes, electrical, plumbing, views and sheets, coordination, groups and phases, parts, calculations, schedules). Each pack is one MCP server and one Agent Skill of the same name.",
+  "author": {
+    "name": "PermitZIP",
+    "url": "https://permitzip.com"
+  },
+  "homepage": "https://github.com/permitzip/mutinybim/tree/main/packages/bim-plugin",
+  "repository": "https://github.com/permitzip/mutinybim",
+  "license": "Apache-2.0",
+  "keywords": [
+    "bim",
+    "aec",
+    "mep",
+    "mutinybim",
+    "building-model",
+    "mcp"
+  ],
+  "extensions": {
+    "com.permitzip.mutinybim": {
+      "packs": [
+        {
+          "id": "core",
+          "label": "MutinyBIM core",
+          "purpose": "Write, check, preview and land scripts that read and change the model, save a part script's parts, and four reads to look before writing",
+          "skill": "mutinybim",
+          "server": "mutinybim",
+          "token_cap": 3500,
+          "tools": 9
+        },
+        {
+          "id": "model",
+          "label": "Model reads and everyday edits",
+          "purpose": "Schedule rows, levels, views and sheets, linked models, surfaces; previews and the everyday part edits; pictures, printing and issuing sheets; coordination lint",
+          "skill": "mutinybim-model",
+          "server": "mutinybim-model",
+          "token_cap": 9600,
+          "tools": 27
+        },
+        {
+          "id": "drafting",
+          "label": "Drafting and annotation",
+          "purpose": "Dimensions, tags, notes with leaders, detail linework and detail components",
+          "skill": "mutinybim-drafting",
+          "server": "mutinybim-drafting",
+          "token_cap": 8200,
+          "tools": 17
+        },
+        {
+          "id": "ducts_pipes",
+          "label": "Duct and pipe runs",
+          "purpose": "Route, connect, resize, slope, insulate and fit duct and pipe runs",
+          "skill": "mutinybim-ducts-pipes",
+          "server": "mutinybim-ducts-pipes",
+          "token_cap": 10800,
+          "tools": 20
+        },
+        {
+          "id": "electrical",
+          "label": "Electrical circuits and diagrams",
+          "purpose": "Panels, circuits, feeders, receptacle proposals, one-line and riser diagrams",
+          "skill": "mutinybim-electrical",
+          "server": "mutinybim-electrical",
+          "token_cap": 9300,
+          "tools": 18
+        },
+        {
+          "id": "plumbing",
+          "label": "Plumbing loads and design",
+          "purpose": "Fixture load points, connection types, pipe types and each pipe system's sizing",
+          "skill": "mutinybim-plumbing",
+          "server": "mutinybim-plumbing",
+          "token_cap": 6300,
+          "tools": 5
+        },
+        {
+          "id": "views_sheets",
+          "label": "Views and sheets",
+          "purpose": "Views, crops, 3D views, sheets, viewports, sheet notes and layout",
+          "skill": "mutinybim-views-sheets",
+          "server": "mutinybim-views-sheets",
+          "token_cap": 10600,
+          "tools": 18
+        },
+        {
+          "id": "coordination",
+          "label": "Coordination and linked models",
+          "purpose": "Linked models, levels from them, coordinates, accepted findings and rooms",
+          "skill": "mutinybim-coordination",
+          "server": "mutinybim-coordination",
+          "token_cap": 6000,
+          "tools": 16
+        },
+        {
+          "id": "groups_phases",
+          "label": "Groups, phases and typed elements",
+          "purpose": "Groups, locks, phases, phase filters and typed element values",
+          "skill": "mutinybim-groups-phases",
+          "server": "mutinybim-groups-phases",
+          "token_cap": 5200,
+          "tools": 15
+        },
+        {
+          "id": "parts",
+          "label": "Part definitions",
+          "purpose": "Draft, check and save parts, the firm's part library, clearances and hosts",
+          "skill": "mutinybim-parts",
+          "server": "mutinybim-parts",
+          "token_cap": 4500,
+          "tools": 11
+        },
+        {
+          "id": "calcs",
+          "label": "Calculations",
+          "purpose": "Code calculations, duct size advice, duct pressure and pipe hydraulics reports, pipe sizing and service size",
+          "skill": "mutinybim-calcs",
+          "server": "mutinybim-calcs",
+          "token_cap": 3700,
+          "tools": 8
+        },
+        {
+          "id": "schedules",
+          "label": "Schedules",
+          "purpose": "Define schedules, edit their cells and manage the schedule library",
+          "skill": "mutinybim-schedules",
+          "server": "mutinybim-schedules",
+          "token_cap": 1900,
+          "tools": 4
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@permitzip/bim-editor-host",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-editor-host"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM editor host contract: the types a host (the open-source standalone app, or any app that embeds the editor) implements so the Building Model editor runs inside it. Types only. Must not import host code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@permitzip/bim-pack-architecture",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack-architecture"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM Architecture add-on (namespace architecture, first-party): grids, walls, doors, windows, openings, floors, ceilings, roofs, columns and stairs with their types and parameters, joins, host voids, room bounding, rating rows and the IFC4 mapping. Built only through the add-on contract; the kernel imports nothing from it.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-pack": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  }
+}

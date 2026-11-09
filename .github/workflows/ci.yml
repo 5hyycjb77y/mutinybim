@@ -1,0 +1,299 @@
+name: CI
+
+# No secrets, no write tokens, no paid runners, no AI calls. Pull requests from
+# forks run with the same read-only token as everyone else.
+#
+# Every check runs through .github/scripts/ci-report.cjs. When a check fails it
+# puts the failing lines on the run summary page (file:line and message) and as
+# annotations on the pull request's Files changed view, and the job uploads its
+# full log as the artifact ci-logs-<job> as soon as that job finishes. The last
+# job, "CI summary", names the first failure across the whole run.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      perf_1m:
+        description: Also run the perf grid at a million elements (bim-perf-1m, about an hour)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: "22"
+  # Default Postgres password for a throwaway service container. Not a secret.
+  POSTGRES_PASSWORD: postgres
+  REPORT: node .github/scripts/ci-report.cjs run
+  INSTALL: "if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi"
+
+jobs:
+  lint:
+    name: Lint and boundary checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI_JOB_KEY: lint
+      CI_JOB_NAME: Lint and boundary checks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: $REPORT --kind lines --name "Install" -- bash -c "$INSTALL"
+      - name: ESLint (open-source boundary, layer rules) and package license check
+        run: $REPORT --kind eslint --name "ESLint and package license check" -- npm run lint
+      - name: Install the model server's own dependencies (their licenses are checked too)
+        working-directory: services/bim-authority
+        run: node "$GITHUB_WORKSPACE/.github/scripts/ci-report.cjs" run --kind lines --name "Install the model server" -- bash -c "$INSTALL"
+      # Runtime: Apache-2.0, MIT, BSD-2/3, ISC, 0BSD, CC0, Unlicense, Zlib, MPL-2.0 (unmodified).
+      # GPL, AGPL, LGPL, SSPL, BUSL and unknown licenses fail. Reviewed exceptions are listed in the script.
+      - name: Dependency license check
+        run: $REPORT --kind lines --name "Dependency license check" -- npm run licenses
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_JOB_KEY: typecheck
+      CI_JOB_NAME: Typecheck
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: $REPORT --kind lines --name "Install" -- bash -c "$INSTALL"
+      - name: Typecheck the packages
+        run: $REPORT --kind tsc --name "Typecheck the packages" -- npm run typecheck
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore
+
+  test:
+    name: Unit tests (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      CI_JOB_KEY: test-${{ matrix.shard }}
+      CI_JOB_NAME: Unit tests (${{ matrix.shard }}/2)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: $REPORT --kind lines --name "Install" -- bash -c "$INSTALL"
+      - name: Install the model server's own dependencies (its tests run in this suite)
+        working-directory: services/bim-authority
+        run: node "$GITHUB_WORKSPACE/.github/scripts/ci-report.cjs" run --kind lines --name "Install the model server" -- bash -c "$INSTALL"
+      - name: Jest (includes the kernel trade-word ratchet, import-layer and cycle baselines)
+        # Shared runners vary several-fold in speed: tests keep their machine-relative checks and
+        # skip absolute millisecond budgets, which the calibrated perf runs enforce.
+        env:
+          MUTINYBIM_PERF_BUDGETS: relative
+        run: |
+          $REPORT --kind jest --name "Jest" --json "$RUNNER_TEMP/ci-artifacts/jest-results.json" -- \
+            npx jest --shard=${{ matrix.shard }}/2 --maxWorkers=2 \
+              --json --testLocationInResults --outputFile="$RUNNER_TEMP/ci-artifacts/jest-results.json"
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore
+
+  model-server:
+    name: Model server (typecheck, Docker build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_JOB_KEY: model-server
+      CI_JOB_NAME: Model server (typecheck, Docker build)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        working-directory: services/bim-authority
+        run: node "$GITHUB_WORKSPACE/.github/scripts/ci-report.cjs" run --kind lines --name "Install" -- bash -c "$INSTALL"
+      - name: Typecheck
+        working-directory: services/bim-authority
+        run: node "$GITHUB_WORKSPACE/.github/scripts/ci-report.cjs" run --kind tsc --name "Typecheck the model server" -- npx tsc -p tsconfig.json
+      - name: Docker build (not pushed)
+        run: $REPORT --kind lines --name "Docker build" -- docker build --progress=plain -f services/bim-authority/Dockerfile -t mutinybim-authority:ci .
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI_JOB_KEY: secret-scan
+      CI_JOB_NAME: Secret scan
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The gitleaks binary from its container image: no license key and no token needed.
+      # --redact keeps every secret out of the log, the report and the summary.
+      - name: gitleaks
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-artifacts/gitleaks" && chmod 777 "$RUNNER_TEMP/ci-artifacts/gitleaks"
+          $REPORT --kind gitleaks --name "gitleaks" --json "$RUNNER_TEMP/ci-artifacts/gitleaks/report.json" -- \
+            docker run --rm -v "$PWD:/repo" -v "$RUNNER_TEMP/ci-artifacts/gitleaks:/out" ghcr.io/gitleaks/gitleaks:v8.24.2 \
+              git /repo --no-banner --redact --exit-code 1 --report-format json --report-path /out/report.json
+      - name: Upload the full log
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ env.CI_JOB_KEY }}
+          path: ${{ runner.temp }}/ci-artifacts
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # MutinyBIM at a million elements, on request only: a manual run with
+  # perf_1m ticked. Pull requests and pushes never run it, and CI summary
+  # does not need it, so when it doesn't run it is skipped, not reported as
+  # a pass. Every step runs even when an earlier one failed, so a red run
+  # lists every red row; results upload either way.
+  #   gh workflow run ci.yml --ref <branch> -f perf_1m=true
+  # It needs ~32 GB: the repository variable PERF_RUNNER names a runner that
+  # size; without it the run goes to ubuntu-latest and may run out of memory.
+  # Steps: the 1M checkpoint (run.ts --tier=1M --checkpoint), the reopen after
+  # an add-on switch, the add-on switch first edit, a route leg check, the
+  # model server restart drill, the memory probe with two copies open, and
+  # the rest of the 1M grid (one-million-grid.ts: the standalone 1M rows).
+  # Budgets: docs/perf/mutinybim-budgets.json.
+  bim-perf-1m:
+    name: Perf 1M (on request)
+    if: github.event_name == 'workflow_dispatch' && inputs.perf_1m
+    runs-on: ${{ vars.PERF_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 150
+    env:
+      OUT: .perf-results/mutinybim/1m
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install
+        run: bash -c "$INSTALL" && mkdir -p "$OUT"
+
+      - name: 1M checkpoint (every perf row at 1M)
+        run: node --import tsx scripts/perf/mutinybim/run.ts --tier=1M --checkpoint --out=$OUT/checkpoint
+
+      - name: Reopen after an add-on switch, 1M
+        if: ${{ !cancelled() }}
+        run: node --expose-gc --max-old-space-size=12288 --import tsx scripts/perf/mutinybim/addon-switch-reopen.ts --tier=1M --enforce --out=$OUT/addon-switch-reopen
+
+      - name: Add-on switch first edit, 1M
+        if: ${{ !cancelled() }}
+        run: npx jest --maxWorkers=1 packages/bim-pack/__tests__/k9-perf.test.ts
+        env:
+          K9_PERF: "1"
+          K9_PERF_SCALE: 1M
+          NODE_OPTIONS: --max-old-space-size=12288
+
+      - name: Route leg check, 1M
+        if: ${{ !cancelled() }}
+        run: node --expose-gc --max-old-space-size=12288 --import tsx scripts/perf/mutinybim/m14-route-preview.ts 1M 400 | tee $OUT/route-preview-1m.txt
+
+      - name: Model server restart drill
+        if: ${{ !cancelled() }}
+        run: node --max-old-space-size=12288 --import tsx services/bim-authority/drills/restart-resume.ts --tier=1M --out=$OUT/restart-resume
+
+      - name: Memory probe, two copies open, 1M
+        if: ${{ !cancelled() }}
+        run: node --expose-gc --max-old-space-size=12288 --import tsx scripts/perf/mutinybim/memory-probe.ts --tier=1M --copies=2 --enforce | tee $OUT/memory-probe-two-copies-1m.json
+
+      - name: The rest of the 1M grid
+        if: ${{ !cancelled() }}
+        run: node --import tsx scripts/perf/mutinybim/one-million-grid.ts --out=$OUT/grid
+
+      - name: Upload 1M results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bim-perf-1m
+          path: .perf-results/mutinybim/1m/
+          if-no-files-found: warn
+
+  summary:
+    name: CI summary
+    needs: [lint, typecheck, test, model-server, secret-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      # Same-run artifacts download with the job's own runtime token; no extra permission.
+      - name: Collect the failure reports
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-logs-*
+          path: ${{ runner.temp }}/ci-reports
+      - name: Summarise
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node .github/scripts/ci-report.cjs summary --dir "$RUNNER_TEMP/ci-reports"

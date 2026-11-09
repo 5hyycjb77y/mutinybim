@@ -1,0 +1,26 @@
+{
+  "name": "@permitzip/bim-ifc",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-ifc"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM IFC 4.3 ADD2 export: kernel model to a neutral entity graph to STEP Part 21, reading the class, parameter, service and zone registries so anything a pack defines exports with no exporter change. Stable GlobalIds, pure TypeScript, deterministic. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-units": "*"
+  }
+}

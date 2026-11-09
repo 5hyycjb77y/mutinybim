@@ -1,0 +1,85 @@
+{
+  "familyName": "Example packaged RTU - 3 ton gas heat",
+  "typeName": "EXAMPLE-RTU-036",
+  "category": "mechanical_equipment",
+  "description": "Synthetic fixture shaped like a part drafted from a cut sheet: modeled body (cabinet on a hollow curb), geometry [], planDisplay both, one size row.",
+  "source": { "kind": "builtin", "libraryVersion": "test" },
+  "geometry": [],
+  "symbol": [{ "at": [0, 0], "kind": "text", "text": "RTU", "heightMm": 150 }],
+  "tagFields": ["mark"],
+  "typeParams": [
+    { "kind": "text", "name": "manufacturer", "label": "Manufacturer" },
+    { "kind": "text", "name": "model_number", "label": "Model" },
+    { "min": 1, "kind": "length", "name": "length", "unit": "mm", "label": "Length" },
+    { "min": 1, "kind": "length", "name": "width", "unit": "mm", "label": "Width" },
+    { "min": 1, "kind": "length", "name": "height", "unit": "mm", "label": "Cabinet height" },
+    { "min": 0, "kind": "length", "name": "curb_height", "unit": "mm", "label": "Curb height" },
+    { "min": 1, "kind": "length", "name": "curb_wall", "unit": "mm", "label": "Curb wall" },
+    { "min": 1, "kind": "length", "name": "supply_width", "unit": "mm", "label": "Supply opening width" },
+    { "min": 1, "kind": "length", "name": "supply_depth", "unit": "mm", "label": "Supply opening depth" },
+    { "min": 1, "kind": "length", "name": "return_width", "unit": "mm", "label": "Return opening width" },
+    { "min": 1, "kind": "length", "name": "return_depth", "unit": "mm", "label": "Return opening depth" },
+    { "min": 0, "kind": "number", "name": "cooling_tons", "unit": "tons", "label": "Nominal cooling" },
+    { "min": 0, "kind": "number", "name": "airflow", "unit": "cfm", "label": "Rated airflow" },
+    { "min": 0, "kind": "number", "name": "voltage", "unit": "v", "label": "Voltage" }
+  ],
+  "typeValues": {
+    "manufacturer": "Example", "model_number": "EXAMPLE-RTU-036", "length": 1890, "width": 1185, "height": 850, "curb_height": 355.6, "curb_wall": 50.8,
+    "supply_width": 609.6, "supply_depth": 355.6, "return_width": 609.6, "return_depth": 355.6, "cooling_tons": 3, "airflow": 1200, "voltage": 208
+  },
+  "instanceParams": [{ "kind": "text", "name": "serves", "label": "Serves" }],
+  "connectors": [
+    { "id": "supply", "flow": { "param": "airflow" }, "label": "Supply air", "shape": "rect", "width": { "param": "supply_width" }, "domain": "duct", "height": { "param": "supply_depth" }, "position": [{ "param": "length", "scale": -0.25 }, 0, 0], "direction": [0, 0, -1], "widthAxis": [0, 1, 0], "systemKind": "supply_air", "flowDirection": "out" },
+    { "id": "return", "flow": { "param": "airflow" }, "label": "Return air", "shape": "rect", "width": { "param": "return_width" }, "domain": "duct", "height": { "param": "return_depth" }, "position": [{ "param": "length", "scale": 0.25 }, 0, 0], "direction": [0, 0, -1], "widthAxis": [0, 1, 0], "systemKind": "return_air", "flowDirection": "in" },
+    { "id": "power", "label": "Power", "poles": 3, "shape": "none", "domain": "electrical", "voltage": { "param": "voltage" }, "position": [{ "param": "length", "scale": -0.5 }, { "param": "width", "scale": -0.25 }, { "formula": "curb_height + height / 2" }], "direction": [-1, 0, 0], "systemKind": "power", "flowDirection": "in" }
+  ],
+  "model": {
+    "id": "example_rtu_036",
+    "planDisplay": "both",
+    "types": [{ "name": "EXAMPLE-RTU-036", "values": { "length": 1890, "width": 1185, "height": 850, "curb_height": 355.6, "curb_wall": 50.8, "airflow": 1200, "cooling_tons": 3, "voltage": 208, "manufacturer": "Example", "model_number": "EXAMPLE-RTU-036", "supply_width": 609.6, "supply_depth": 355.6, "return_width": 609.6, "return_depth": 355.6 } }],
+    "referencePlanes": [
+      { "id": "front", "axis": "x", "name": "Front", "offset": { "param": "length", "scale": 0.5 } },
+      { "id": "back", "axis": "x", "name": "Back", "offset": { "param": "length", "scale": -0.5 } },
+      { "id": "left", "axis": "y", "name": "Left", "offset": { "param": "width", "scale": 0.5 } },
+      { "id": "right", "axis": "y", "name": "Right", "offset": { "param": "width", "scale": -0.5 } },
+      { "id": "curb_top", "axis": "z", "name": "Curb top", "offset": { "param": "curb_height" } },
+      { "id": "unit_top", "axis": "z", "name": "Unit top", "offset": { "formula": "curb_height + height" } },
+      { "id": "curb_front", "axis": "x", "name": "Curb inside front", "offset": { "formula": "length / 2 - curb_wall" } },
+      { "id": "curb_back", "axis": "x", "name": "Curb inside back", "offset": { "formula": "-length / 2 + curb_wall" } },
+      { "id": "curb_left", "axis": "y", "name": "Curb inside left", "offset": { "formula": "width / 2 - curb_wall" } },
+      { "id": "curb_right", "axis": "y", "name": "Curb inside right", "offset": { "formula": "-width / 2 + curb_wall" } }
+    ],
+    "sketches": [
+      {
+        "id": "footprint", "name": "Footprint", "plane": "base",
+        "points": [{ "u": -900, "v": -600, "id": "footprint_a" }, { "u": 900, "v": -600, "id": "footprint_b" }, { "u": 900, "v": 600, "id": "footprint_c" }, { "u": -900, "v": 600, "id": "footprint_d" }],
+        "entities": [{ "id": "footprint_rect", "kind": "rectangle", "corners": ["footprint_a", "footprint_b", "footprint_c", "footprint_d"] }],
+        "constraints": [
+          { "kind": "on_plane", "plane": "back", "point": "footprint_a" }, { "kind": "on_plane", "plane": "right", "point": "footprint_a" },
+          { "kind": "on_plane", "plane": "front", "point": "footprint_c" }, { "kind": "on_plane", "plane": "left", "point": "footprint_c" }
+        ]
+      },
+      {
+        "id": "curb", "name": "Curb", "plane": "base",
+        "points": [
+          { "u": -900, "v": -600, "id": "curb_a" }, { "u": 900, "v": -600, "id": "curb_b" }, { "u": 900, "v": 600, "id": "curb_c" }, { "u": -900, "v": 600, "id": "curb_d" },
+          { "u": -850, "v": -550, "id": "curb_in_a" }, { "u": 850, "v": -550, "id": "curb_in_b" }, { "u": 850, "v": 550, "id": "curb_in_c" }, { "u": -850, "v": 550, "id": "curb_in_d" }
+        ],
+        "entities": [
+          { "id": "curb_rect", "kind": "rectangle", "corners": ["curb_a", "curb_b", "curb_c", "curb_d"] },
+          { "id": "curb_in_rect", "kind": "rectangle", "corners": ["curb_in_a", "curb_in_b", "curb_in_c", "curb_in_d"] }
+        ],
+        "constraints": [
+          { "kind": "on_plane", "plane": "back", "point": "curb_a" }, { "kind": "on_plane", "plane": "right", "point": "curb_a" },
+          { "kind": "on_plane", "plane": "front", "point": "curb_c" }, { "kind": "on_plane", "plane": "left", "point": "curb_c" },
+          { "kind": "on_plane", "plane": "curb_back", "point": "curb_in_a" }, { "kind": "on_plane", "plane": "curb_right", "point": "curb_in_a" },
+          { "kind": "on_plane", "plane": "curb_front", "point": "curb_in_c" }, { "kind": "on_plane", "plane": "curb_left", "point": "curb_in_c" }
+        ]
+      }
+    ],
+    "features": [
+      { "id": "cabinet", "end": { "formula": "curb_height + height" }, "kind": "extrude", "name": "Cabinet", "start": { "param": "curb_height" }, "sketch": "footprint", "material": "Galvanized steel", "operation": "join" },
+      { "id": "curb_ring", "end": { "param": "curb_height" }, "kind": "extrude", "name": "Roof curb", "start": 0, "sketch": "curb", "operation": "join" }
+    ]
+  }
+}

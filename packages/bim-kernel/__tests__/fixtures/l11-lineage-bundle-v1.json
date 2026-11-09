@@ -1,0 +1,152 @@
+{
+  "format": "mutinybim.lineage_bundle",
+  "version": 1,
+  "base": {
+    "modelId": "model-fixture",
+    "lineageId": "design",
+    "revision": 0,
+    "stateDigest": "cdab8b15ede6946391eab9b0601db36fd4dc9665c638348a0dd2a8a9a45bbedb"
+  },
+  "lineage": {
+    "id": "shop",
+    "parent": {
+      "lineageId": "design",
+      "revision": 0
+    },
+    "role": "shop",
+    "returnPolicy": "accept_back",
+    "state": "open",
+    "name": "shop",
+    "createdBy": {
+      "provider": "unsigned",
+      "subject": "u-avery",
+      "kind": "person",
+      "displayName": "Avery"
+    },
+    "createdAt": "2026-11-02T01:00:00Z"
+  },
+  "ancestry": [
+    {
+      "id": "design",
+      "parent": null,
+      "role": "design_record",
+      "returnPolicy": "never",
+      "state": "open",
+      "name": "Design",
+      "createdBy": {
+        "provider": "unsigned",
+        "subject": "u-avery",
+        "kind": "person",
+        "displayName": "Avery"
+      },
+      "createdAt": "2026-11-02T00:00:00Z"
+    }
+  ],
+  "changesets": [
+    {
+      "revision": 1,
+      "baseRevision": 0,
+      "idempotencyKey": "shop-1",
+      "actor": {
+        "id": "u-avery",
+        "name": "Avery",
+        "kind": "human"
+      },
+      "command": {
+        "type": "set_tag_text",
+        "tagId": "l11",
+        "text": "l11"
+      },
+      "elements": [
+        {
+          "id": "L2",
+          "version": 2,
+          "authoredRev": {},
+          "kind": "level",
+          "name": "Level 2",
+          "elevationMm": 3050
+        }
+      ],
+      "readSet": {},
+      "authored": [],
+      "intents": [],
+      "rebased": false,
+      "committedAt": "2026-11-02T02:00:00Z",
+      "removedIds": [],
+      "before": {
+        "L2": {
+          "id": "L2",
+          "version": 1,
+          "authoredRev": {},
+          "kind": "level",
+          "name": "Level 2",
+          "elevationMm": 3000
+        }
+      }
+    },
+    {
+      "revision": 2,
+      "baseRevision": 1,
+      "idempotencyKey": "shop-2",
+      "actor": {
+        "id": "u-avery",
+        "name": "Avery",
+        "kind": "human"
+      },
+      "command": {
+        "type": "set_tag_text",
+        "tagId": "l11",
+        "text": "l11"
+      },
+      "elements": [
+        {
+          "id": "L6",
+          "version": 1,
+          "authoredRev": {},
+          "kind": "level",
+          "name": "Equipment deck",
+          "elevationMm": 4200
+        }
+      ],
+      "readSet": {},
+      "authored": [],
+      "intents": [],
+      "rebased": false,
+      "committedAt": "2026-11-02T02:00:00Z",
+      "removedIds": [],
+      "before": {
+        "L6": null
+      }
+    }
+  ],
+  "signoffs": [
+    {
+      "seq": 1,
+      "projectId": "project-fixture",
+      "baseModelId": "model-fixture",
+      "recordKind": "lineage_reviewed",
+      "subjectId": "shop",
+      "actorUserId": "u-avery",
+      "payload": {
+        "by": {
+          "provider": "unsigned",
+          "subject": "u-avery",
+          "kind": "person",
+          "displayName": "Avery"
+        },
+        "at": "2026-11-02T03:00:00Z",
+        "anchor": {
+          "lineage_id": "design",
+          "revision": 0
+        },
+        "delta_digest": "7ae6fea934882cfa3708ecc38729eb0e3fda6991c1327de99488d8838961dc14",
+        "lineage_id": "shop",
+        "to": "design",
+        "outcome": "approved_as_noted",
+        "reason": "Deck height to be confirmed on site"
+      },
+      "prevHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "recordHash": "e6cb6dac5e80a9ce288fafde000fe2dddf21d3352286c8c4840cd976270224d6"
+    }
+  ]
+}

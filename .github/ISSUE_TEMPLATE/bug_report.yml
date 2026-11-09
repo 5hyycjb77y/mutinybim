@@ -1,0 +1,92 @@
+name: Bug report
+description: Something in MutinyBIM does not work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not include real client, project or building data.
+        Use a synthetic model, or describe the shape of the problem.
+
+        **Security problem?** Do not file it here. Use the Security tab → Report a vulnerability.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and any message the software showed.
+      placeholder: "I routed a duct from the unit to Level 2 and the route was refused with: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps, commands or a script that shows the problem.
+      placeholder: |
+        1. npm run demo
+        2. Open http://localhost:3095
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Kernel (model, commands, routing)
+        - Add-on (a trade package)
+        - Scripting kit
+        - Sheets, PDF or IFC
+        - Viewer or UI
+        - Model server or sync
+        - Docs
+        - Performance
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: discipline
+    attributes:
+      label: Discipline (if any)
+      options:
+        - Not trade-specific
+        - Architecture
+        - Structural
+        - Civil or site
+        - Fire protection
+        - Mechanical
+        - Electrical
+        - Plumbing and gas
+        - Development or cost
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: Output of `git rev-parse --short HEAD`, or a release tag.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node version, and browser if it is a UI problem.
+      placeholder: "macOS 15, Node 22.11, Chrome 131"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: Paste relevant output. Remove any tokens or personal data first.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This report contains no client, project or personal data.
+          required: true

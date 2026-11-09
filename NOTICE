@@ -1,0 +1,79 @@
+MutinyBIM
+Copyright 2026 PermitZIP
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The MutinyBIM name, logo, wordmark, icon and illustration are trademarks and
+artwork of their owner. They are not licensed under the Apache License. See
+TRADEMARKS.md and packages/bim-ui/assets/LICENSE.md.
+
+-------------------------------------------------------------------------------
+Third-party material included in this repository
+-------------------------------------------------------------------------------
+
+Liberation Sans fonts
+  Files: packages/bim-sheets/fonts/LiberationSans-Regular.ttf,
+         LiberationSans-Bold.ttf, LiberationSans-Italic.ttf,
+         LiberationSans-BoldItalic.ttf
+  Digitized data copyright (c) 2010 Google Corporation, with Reserved Font
+  Arimo, Tinos and Cousine.
+  Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation.
+  Licensed under the SIL Open Font License, Version 1.1. The full license is in
+  packages/bim-sheets/fonts/LICENSE-LiberationSans.txt. The same files are
+  served from public/mutinybim/fonts/.
+
+Jost and Questrial fonts (the sample firm's title block fonts)
+  Files: public/mutinybim/firm/permitzip/fonts/Jost-Bold.ttf, Jost-Medium.ttf,
+         Questrial-Regular.ttf
+  Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type)
+  Copyright 2011 The Questrial Project Authors (https://github.com/googlefonts/questrial)
+  Licensed under the SIL Open Font License, Version 1.1. The full licenses are
+  beside the fonts.
+
+shadcn/ui components
+  Files: packages/bim-ui/src/ui/ (adapted and restyled)
+  Copyright (c) 2023 shadcn
+  Licensed under the MIT License. The full license is in
+  packages/bim-ui/src/ui/LICENSE-shadcn.md.
+
+IFC 4.3 schema facts
+  File: packages/bim-ifc/src/schema-ifc4x3.ts
+  Entity attribute names and enumeration members of the IFC 4.3 ADD2 schema
+  (ISO 16739-1), published by buildingSMART International. Generated as a data
+  table; no web-ifc source code is copied into this repository.
+
+-------------------------------------------------------------------------------
+Third-party dependencies with file-level copyleft
+-------------------------------------------------------------------------------
+
+web-ifc (used unmodified as an npm dependency by packages/bim-sheets and
+packages/bim-viewer-3d)
+  Licensed under the Mozilla Public License, Version 2.0.
+  Source: https://github.com/ThatOpen/engine_web-ifc
+  By That Open Company (formerly IFC.js) and contributors.
+  MPL-2.0 applies to web-ifc's own files, including its .wasm builds. MutinyBIM
+  installs them from npm and does not copy, patch or modify them; the
+  dependency license check fails if a patch or copy appears here.
+
+resvg-js (used unmodified as an npm dependency by packages/bim-mcp-packs to
+render sheet previews)
+  Licensed under the Mozilla Public License, Version 2.0.
+  Source: https://github.com/yisibl/resvg-js
+  Installed from npm with its platform binary; not copied or modified here.
+
+lightningcss (used unmodified, through Tailwind, to build the editor's styles)
+  Licensed under the Mozilla Public License, Version 2.0.
+  Source: https://github.com/parcel-bundler/lightningcss
+  Installed from npm with its platform binary; not copied or modified here.
+
+-------------------------------------------------------------------------------
+Other dependencies
+-------------------------------------------------------------------------------
+
+MutinyBIM also depends on npm packages under permissive licenses (MIT, ISC,
+Apache-2.0), including three, @thatopen/fragments, camera-controls,
+manifold-3d, pdf-lib, radix-ui, lucide-react, zod, ws, jose, postgres and
+esbuild. They are installed by npm and are not copied into this repository.
+Their licenses are in their packages. THIRD_PARTY_LICENSES.md lists every
+runtime and tooling dependency with its version, license and source, and
+names any reviewed exception.

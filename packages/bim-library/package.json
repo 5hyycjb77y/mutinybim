@@ -1,0 +1,41 @@
+{
+  "name": "@permitzip/bim-library",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-library"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM firm library: the mutinybim-library v1 bundle format (display profiles, object classes, shared fields, named calculations, relationships, schedule and tag templates), layering, pinning, validation, the LibraryProvider extension point with its conformance suite, and the file-backed provider standalone MutinyBIM runs on. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node-fs.ts",
+    "./bim-formula": "./src/bim-formula.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-formula": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-units": "*",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@permitzip/bim-formula": {
+      "optional": true
+    },
+    "@permitzip/bim-units": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@permitzip/bim-formula": "*",
+    "@permitzip/bim-units": "*"
+  }
+}

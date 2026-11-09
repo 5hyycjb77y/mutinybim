@@ -1,0 +1,17 @@
+export * from "./types";
+export * from "./space-geometry";
+export * from "./space-use";
+export * from "./space-index";
+export * from "./space-density";
+export * from "./space-fingerprint";
+export * from "./zone-servers";
+export * from "./zone-bounds";
+export * from "./derived-zones";
+export * from "./outdoor-air-reader";
+export * from "./detect";
+export { spaceCommandSchema, spaceIdForRoom, type SpaceDesignCommand } from "./space-commands";
+export { ceilingIdForSpace, makeCeilingFromHeightRefusal } from "./space-commands";
+export { boundingElementWords, noRoomWords, previewRoomFromWalls, type RoomFromWallsPreview } from "./boundaries/preview";
+export { previewSplit, roomWords, SUB_ROOM_LETTERS, type SplitPreview, type SplitPreviewChild, type SplitPreviewLoad } from "./split-preview";
+export { notClosedWords, sideWords, SPACE_NOT_CLOSED_SOURCE } from "./boundaries/open-findings";
+export { SPACES_SPLIT_NOT_YET, SPACES_BOUNDED_NOT_YET } from "./space-commands";

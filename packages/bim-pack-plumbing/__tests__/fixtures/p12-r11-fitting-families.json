@@ -1,0 +1,3589 @@
+{
+ "comment": "Round 11's pipe fitting families (git 6eccc2969 packages/bim-kernel/src/routing/pipe/families.ts), frozen by P12 before the move. Families in full; slot choices, fit refusals and labels as SHA-256 of their stable JSON (see p12-family-matrices.ts).",
+ "families": [
+  {
+   "id": "pipe.water.elbow_90",
+   "name": "90° elbow, short radius",
+   "smacnaType": "90° elbow (short radius)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "lOverD": {
+     "body": 30
+    }
+   },
+   "description": "Standard 90° elbow."
+  },
+  {
+   "id": "pipe.water.elbow_90_lr",
+   "name": "90° elbow, long radius",
+   "smacnaType": "90° elbow (long radius)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1.5,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "bend",
+    "rOverD": 1.5,
+    "lOverD": {
+     "body": 20
+    }
+   },
+   "description": "Long-radius 90°: lower loss, more take-out."
+  },
+  {
+   "id": "pipe.water.elbow_45",
+   "name": "45° elbow",
+   "smacnaType": "45° elbow",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "lOverD": {
+     "body": 16
+    }
+   },
+   "description": "Standard 45° elbow."
+  },
+  {
+   "id": "pipe.water.tee",
+   "name": "Tee",
+   "smacnaType": "Tee (straight or reducing)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "Straight tee; reducing when the branch is smaller than the run."
+  },
+  {
+   "id": "pipe.water.reducer",
+   "name": "Reducer",
+   "smacnaType": "Reducing coupling",
+   "domain": "pipe",
+   "fittingTypes": [
+    "transition"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "shapeChange": "same",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "transition",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "reducer"
+   },
+   "description": "Concentric reducing coupling between two sizes."
+  },
+  {
+   "id": "pipe.water.cap",
+   "name": "Cap",
+   "smacnaType": "Cap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "cap"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "cap",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "cap"
+   },
+   "description": "Closes an open end."
+  },
+  {
+   "id": "pipe.water.coupling",
+   "name": "Coupling",
+   "smacnaType": "Coupling",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "coupling",
+    "layingOverOd": 0.2,
+    "lOverD": {
+     "body": 0
+    }
+   },
+   "description": "Joins two lengths of the same size."
+  },
+  {
+   "id": "pipe.water.union",
+   "name": "Union",
+   "smacnaType": "Union",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "union",
+    "layingOverOd": 1.4,
+    "lOverD": {
+     "body": 2
+    }
+   },
+   "description": "Lets equipment be disconnected."
+  },
+  {
+   "id": "pipe.valve.ball",
+   "name": "Ball valve, full port",
+   "smacnaType": "Ball valve (full port)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "valve",
+    "layingOverOd": 2.6,
+    "lOverD": {
+     "body": 3
+    }
+   },
+   "description": "Quarter-turn shut-off."
+  },
+  {
+   "id": "pipe.valve.gate",
+   "name": "Gate valve",
+   "smacnaType": "Gate valve",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "valve",
+    "layingOverOd": 2.6,
+    "lOverD": {
+     "body": 8
+    }
+   },
+   "description": "Full-open isolation valve."
+  },
+  {
+   "id": "pipe.valve.check",
+   "name": "Swing check valve",
+   "smacnaType": "Check valve (swing)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "valve",
+    "layingOverOd": 3.4,
+    "lOverD": {
+     "body": 100
+    }
+   },
+   "description": "Stops reverse flow."
+  },
+  {
+   "id": "pipe.valve.prv",
+   "name": "Pressure-reducing valve (placeholder)",
+   "smacnaType": "Pressure-reducing valve",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "pex_crimp",
+      "pex_expansion",
+      "solvent_weld",
+      "fusion"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "steel",
+     "black_steel",
+     "galvanized"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "pex_crimp",
+     "pex_expansion",
+     "solvent_weld",
+     "fusion"
+    ],
+    "form": "inline",
+    "accessory": "prv",
+    "layingOverOd": 4,
+    "lOverD": {
+     "body": 0
+    }
+   },
+   "description": "Placeholder: its outlet set pressure isn't modelled. Enter its loss as an engineer's override from the valve's data."
+  },
+  {
+   "id": "dwv.quarter_bend",
+   "name": "1/4 bend",
+   "smacnaType": "Quarter bend (90°, short radius)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "direction": {
+     "hv": true,
+     "vh": {
+      "maxIn": 2
+     },
+     "hh": {
+      "maxIn": 2
+     }
+    }
+   },
+   "description": "Tight 90° bend. Turns horizontal flow down; vertical-to-horizontal and horizontal-to-horizontal only on small fixture drains."
+  },
+  {
+   "id": "dwv.quarter_bend_short_sweep",
+   "name": "1/4 bend, short sweep",
+   "smacnaType": "Short sweep (90°)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1.5,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 1.5,
+    "direction": {
+     "hv": true,
+     "vh": {
+      "minIn": 3
+     },
+     "hh": {
+      "maxIn": 2
+     }
+    }
+   },
+   "description": "90° sweep. Any size horizontal to vertical; vertical to horizontal from 3\" up."
+  },
+  {
+   "id": "dwv.quarter_bend_long_sweep",
+   "name": "1/4 bend, long sweep",
+   "smacnaType": "Long sweep (90°)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 3,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 3,
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": true
+    }
+   },
+   "description": "Long-radius 90° sweep: the turn for the base of a stack and for horizontal-to-horizontal changes."
+  },
+  {
+   "id": "dwv.closet_bend",
+   "name": "Closet bend",
+   "smacnaType": "Closet bend",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "sizesIn": {
+     "min": 3,
+     "max": 4
+    },
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": false
+    }
+   },
+   "description": "90° bend under a water closet flange, 3\" or 4\"."
+  },
+  {
+   "id": "dwv.eighth_bend",
+   "name": "1/8 bend",
+   "smacnaType": "Eighth bend (45°)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1.5,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 1.5,
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": true
+    }
+   },
+   "description": "45° bend; any change of direction."
+  },
+  {
+   "id": "dwv.sixteenth_bend",
+   "name": "1/16 bend",
+   "smacnaType": "Sixteenth bend (22½°)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "22.5",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1.5,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 1.5,
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": true
+    }
+   },
+   "description": "22½° bend; any change of direction."
+  },
+  {
+   "id": "dwv.sanitary_tee",
+   "name": "Sanitary tee",
+   "smacnaType": "Sanitary tee",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": true
+    },
+    "direction": {
+     "hv": true,
+     "vh": false,
+     "hh": false
+    }
+   },
+   "description": "Branch sweeps down into the run. Only where horizontal flow enters a vertical stack."
+  },
+  {
+   "id": "dwv.wye",
+   "name": "Wye (45°)",
+   "smacnaType": "Wye",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 45,
+     "sweep": false
+    },
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": true
+    }
+   },
+   "description": "Branch enters at 45° in the direction of flow."
+  },
+  {
+   "id": "dwv.combo_wye_eighth",
+   "name": "Combination wye & 1/8 bend",
+   "smacnaType": "Combination wye and eighth bend",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": true
+    },
+    "direction": {
+     "hv": true,
+     "vh": true,
+     "hh": true
+    }
+   },
+   "description": "A wye with a 1/8 bend on the branch: the branch leaves square, the flow joins at 45°. Any change of direction."
+  },
+  {
+   "id": "dwv.vent_tee",
+   "name": "Vent tee",
+   "smacnaType": "Vent tee",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "ventOnly": true
+   },
+   "description": "Square tee for dry vent piping; no sweep, so not for drainage."
+  },
+  {
+   "id": "dwv.reducer",
+   "name": "Reducer / increaser",
+   "smacnaType": "Reducer (increaser)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "transition"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "shapeChange": "same",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "reducer"
+   },
+   "description": "Changes size; drains only get larger downstream."
+  },
+  {
+   "id": "dwv.cap",
+   "name": "Test cap / plug",
+   "smacnaType": "Test cap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "cap"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "cap"
+   },
+   "description": "Closes an open end."
+  },
+  {
+   "id": "dwv.cleanout_tee",
+   "name": "Cleanout (tee + plug)",
+   "smacnaType": "Cleanout tee with plug",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "inline",
+    "accessory": "cleanout",
+    "layingOverOd": 2
+   },
+   "description": "Tee-pattern cleanout with a threaded plug."
+  },
+  {
+   "id": "dwv.cleanout_wye",
+   "name": "Cleanout (wye + plug)",
+   "smacnaType": "Cleanout wye with plug",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "inline",
+    "accessory": "cleanout",
+    "layingOverOd": 2.6,
+    "placement": "horizontal"
+   },
+   "description": "Wye-pattern cleanout for horizontal drains."
+  },
+  {
+   "id": "dwv.test_tee",
+   "name": "Test tee",
+   "smacnaType": "Test tee",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "inline",
+    "accessory": "test_tee",
+    "layingOverOd": 2,
+    "placement": "vertical"
+   },
+   "description": "Cleanout tee in a stack, used to plug the stack for a water test."
+  },
+  {
+   "id": "dwv.p_trap",
+   "name": "P-trap",
+   "smacnaType": "P-trap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "trap",
+    "accessory": "trap",
+    "layingOverOd": 3,
+    "placement": "horizontal"
+   },
+   "description": "Trap on a fixture's trap arm; keeps a water seal."
+  },
+  {
+   "id": "dwv.coupling",
+   "name": "Coupling",
+   "smacnaType": "Coupling (no-hub band or solvent coupling)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "solvent_weld",
+      "no_hub",
+      "hub_gasket",
+      "threaded"
+     ],
+     "default": "solvent_weld"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "drainage",
+     "vent"
+    ],
+    "materials": [
+     "pvc",
+     "abs",
+     "cast_iron",
+     "galvanized"
+    ],
+    "joints": [
+     "solvent_weld",
+     "no_hub",
+     "hub_gasket",
+     "threaded"
+    ],
+    "form": "inline",
+    "accessory": "coupling",
+    "layingOverOd": 0.7
+   },
+   "description": "Joins two lengths."
+  },
+  {
+   "id": "pipe.gas.elbow_90",
+   "name": "90° elbow, threaded",
+   "smacnaType": "90° elbow (threaded malleable iron)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 0.8,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel"
+    ],
+    "joints": [
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 0.8,
+    "lOverD": {
+     "body": 30
+    }
+   },
+   "description": "Threaded 90°."
+  },
+  {
+   "id": "pipe.gas.elbow_45",
+   "name": "45° elbow, threaded",
+   "smacnaType": "45° elbow (threaded malleable iron)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 0.8,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel"
+    ],
+    "joints": [
+     "threaded"
+    ],
+    "form": "bend",
+    "rOverD": 0.8,
+    "lOverD": {
+     "body": 16
+    }
+   },
+   "description": "Threaded 45°."
+  },
+  {
+   "id": "pipe.gas.tee",
+   "name": "Tee, threaded",
+   "smacnaType": "Tee (threaded malleable iron)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel"
+    ],
+    "joints": [
+     "threaded"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "Threaded tee, straight or reducing."
+  },
+  {
+   "id": "pipe.gas.reducer",
+   "name": "Reducing coupling / bushing",
+   "smacnaType": "Reducing coupling",
+   "domain": "pipe",
+   "fittingTypes": [
+    "transition"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "shapeChange": "same",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded",
+      "csst_mechanical"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "transition",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel",
+     "csst"
+    ],
+    "joints": [
+     "threaded",
+     "csst_mechanical"
+    ],
+    "form": "reducer"
+   },
+   "description": "Changes size."
+  },
+  {
+   "id": "pipe.gas.cap",
+   "name": "Cap, threaded",
+   "smacnaType": "Cap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "cap"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded",
+      "csst_mechanical"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "cap",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel",
+     "csst"
+    ],
+    "joints": [
+     "threaded",
+     "csst_mechanical"
+    ],
+    "form": "cap"
+   },
+   "description": "Closes an open end."
+  },
+  {
+   "id": "pipe.gas.union",
+   "name": "Union, ground joint",
+   "smacnaType": "Union",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel"
+    ],
+    "joints": [
+     "threaded"
+    ],
+    "form": "inline",
+    "accessory": "union",
+    "layingOverOd": 1.6,
+    "lOverD": {
+     "body": 2
+    }
+   },
+   "description": "Lets an appliance be disconnected."
+  },
+  {
+   "id": "pipe.gas.cock",
+   "name": "Gas cock / shut-off",
+   "smacnaType": "Gas cock (plug valve)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded",
+      "csst_mechanical"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel",
+     "csst"
+    ],
+    "joints": [
+     "threaded",
+     "csst_mechanical"
+    ],
+    "form": "inline",
+    "accessory": "gas_cock",
+    "layingOverOd": 2.4,
+    "lOverD": {
+     "body": 18
+    }
+   },
+   "description": "Appliance or zone shut-off."
+  },
+  {
+   "id": "pipe.gas.drip_leg",
+   "name": "Drip leg (tee + nipple + cap)",
+   "smacnaType": "Drip leg / sediment trap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "nipple_mm",
+     "label": "Drip leg nipple length",
+     "kind": "number",
+     "unit": "mm",
+     "default": 76.2,
+     "min": 50,
+     "max": 600
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel"
+    ],
+    "joints": [
+     "threaded"
+    ],
+    "form": "drip_leg",
+    "accessory": "drip_leg",
+    "layingOverOd": 2,
+    "lOverD": {
+     "body": 20
+    },
+    "placement": "vertical"
+   },
+   "description": "Tee on the drop to an appliance, with a capped nipple below it to catch sediment."
+  },
+  {
+   "id": "pipe.gas.regulator",
+   "name": "Gas pressure regulator",
+   "smacnaType": "Pressure regulator (service, line or appliance)",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "threaded",
+      "csst_mechanical"
+     ],
+     "default": "threaded"
+    },
+    {
+     "key": "role",
+     "label": "Regulator",
+     "kind": "choice",
+     "options": [
+      "line",
+      "service",
+      "appliance"
+     ],
+     "default": "line"
+    },
+    {
+     "key": "outlet_in_wc",
+     "label": "Outlet pressure (in. w.c.; 2 psi = 55.4)",
+     "kind": "number",
+     "unit": "in_wc",
+     "default": 7,
+     "min": 1,
+     "max": 300
+    },
+    {
+     "key": "zone_drop_in_wc",
+     "label": "Allowable drop downstream (in. w.c.; 1 psi = 27.7)",
+     "kind": "number",
+     "unit": "in_wc",
+     "default": 0.5,
+     "min": 0.05,
+     "max": 150
+    },
+    {
+     "key": "vent",
+     "label": "Vent",
+     "kind": "choice",
+     "options": [
+      "vent_limiter",
+      "vent_to_outdoors",
+      "none"
+     ],
+     "default": "vent_limiter"
+    },
+    {
+     "key": "capacity_mbh",
+     "label": "Rated capacity (MBH; 0: not given)",
+     "kind": "number",
+     "unit": "mbh",
+     "default": 0,
+     "min": 0,
+     "max": 100000
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "not_calculated",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "black_steel",
+     "steel",
+     "csst"
+    ],
+    "joints": [
+     "threaded",
+     "csst_mechanical"
+    ],
+    "form": "inline",
+    "accessory": "regulator",
+    "layingOverOd": 4
+   },
+   "description": "Steps the pressure down (2 psi to 11 in. w.c. at a cook line, or at one appliance); the pipe downstream is a new pressure zone sized at the outlet setting. Indoors it needs a vent limiter or a vent to outdoors."
+  },
+  {
+   "id": "pipe.gas.csst_bend_90",
+   "name": "CSST bend, 90°",
+   "smacnaType": "CSST field bend",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "csst_mechanical"
+     ],
+     "default": "csst_mechanical"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 3,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "csst"
+    ],
+    "joints": [
+     "csst_mechanical"
+    ],
+    "form": "bend",
+    "rOverD": 3,
+    "lOverD": {
+     "body": 20
+    }
+   },
+   "description": "CSST bends in the field; no fitting. Keep at least the manufacturer's minimum bend radius."
+  },
+  {
+   "id": "pipe.gas.csst_bend_45",
+   "name": "CSST bend, 45°",
+   "smacnaType": "CSST field bend",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "csst_mechanical"
+     ],
+     "default": "csst_mechanical"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 3,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "csst"
+    ],
+    "joints": [
+     "csst_mechanical"
+    ],
+    "form": "bend",
+    "rOverD": 3,
+    "lOverD": {
+     "body": 12
+    }
+   },
+   "description": "CSST field bend, 45°."
+  },
+  {
+   "id": "pipe.gas.csst_tee",
+   "name": "CSST tee",
+   "smacnaType": "CSST tee fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "csst_mechanical"
+     ],
+     "default": "csst_mechanical"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "csst"
+    ],
+    "joints": [
+     "csst_mechanical"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "CSST mechanical tee."
+  },
+  {
+   "id": "pipe.gas.csst_fitting",
+   "name": "CSST fitting",
+   "smacnaType": "CSST termination / coupling",
+   "domain": "pipe",
+   "fittingTypes": [
+    "accessory"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "csst_mechanical"
+     ],
+     "default": "csst_mechanical"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "csst"
+    ],
+    "joints": [
+     "csst_mechanical"
+    ],
+    "form": "inline",
+    "accessory": "coupling",
+    "layingOverOd": 1.6,
+    "lOverD": {
+     "body": 4
+    }
+   },
+   "description": "CSST mechanical fitting (coupling or termination)."
+  },
+  {
+   "id": "pipe.gas.pe_elbow_90",
+   "name": "PE elbow, 90°, fusion",
+   "smacnaType": "PE fusion elbow",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "fusion"
+     ],
+     "default": "fusion"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "pe"
+    ],
+    "joints": [
+     "fusion"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "lOverD": {
+     "body": 30
+    }
+   },
+   "description": "Polyethylene gas elbow, butt or socket fusion."
+  },
+  {
+   "id": "pipe.gas.pe_elbow_45",
+   "name": "PE elbow, 45°, fusion",
+   "smacnaType": "PE fusion elbow",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "fusion"
+     ],
+     "default": "fusion"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "pe"
+    ],
+    "joints": [
+     "fusion"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "lOverD": {
+     "body": 16
+    }
+   },
+   "description": "Polyethylene gas 45°, fusion."
+  },
+  {
+   "id": "pipe.gas.pe_tee",
+   "name": "PE tee, fusion",
+   "smacnaType": "PE fusion tee",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee",
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "fusion"
+     ],
+     "default": "fusion"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "pe"
+    ],
+    "joints": [
+     "fusion"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "Polyethylene gas tee, straight or reducing."
+  },
+  {
+   "id": "pipe.gas.pe_reducer",
+   "name": "PE reducer, fusion",
+   "smacnaType": "PE fusion reducer",
+   "domain": "pipe",
+   "fittingTypes": [
+    "transition"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "shapeChange": "same",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "fusion"
+     ],
+     "default": "fusion"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "transition",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "pe"
+    ],
+    "joints": [
+     "fusion"
+    ],
+    "form": "reducer"
+   },
+   "description": "Changes PE size."
+  },
+  {
+   "id": "pipe.gas.pe_cap",
+   "name": "PE cap, fusion",
+   "smacnaType": "PE end cap",
+   "domain": "pipe",
+   "fittingTypes": [
+    "cap"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "fusion"
+     ],
+     "default": "fusion"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "cap",
+   "pipe": {
+    "services": [
+     "gas"
+    ],
+    "materials": [
+     "pe"
+    ],
+    "joints": [
+     "fusion"
+    ],
+    "form": "cap"
+   },
+   "description": "Closes an open PE end."
+  },
+  {
+   "id": "pipe.elbow",
+   "name": "Elbow",
+   "smacnaType": "Generic pipe fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "elbow"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "angles": "45_90",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "no_hub",
+      "hub_gasket",
+      "solvent_weld",
+      "pex_crimp",
+      "pex_expansion",
+      "fusion",
+      "csst_mechanical"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "r_over_d",
+     "label": "Centreline radius / outside diameter",
+     "kind": "number",
+     "unit": "ratio",
+     "default": 1,
+     "min": 0.5,
+     "max": 6
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water",
+     "drainage",
+     "vent",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "pvc",
+     "abs",
+     "cast_iron",
+     "steel",
+     "black_steel",
+     "galvanized",
+     "csst",
+     "pe"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "no_hub",
+     "hub_gasket",
+     "solvent_weld",
+     "pex_crimp",
+     "pex_expansion",
+     "fusion",
+     "csst_mechanical"
+    ],
+    "form": "bend",
+    "rOverD": 1,
+    "lOverD": {
+     "body": 30
+    }
+   },
+   "description": "Generic pipe fitting from before the pipe library; swap it for a typed fitting."
+  },
+  {
+   "id": "pipe.transition",
+   "name": "Reducer",
+   "smacnaType": "Generic pipe fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "transition"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "shapeChange": "same",
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "no_hub",
+      "hub_gasket",
+      "solvent_weld",
+      "pex_crimp",
+      "pex_expansion",
+      "fusion",
+      "csst_mechanical"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "transition",
+   "pipe": {
+    "services": [
+     "water",
+     "drainage",
+     "vent",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "pvc",
+     "abs",
+     "cast_iron",
+     "steel",
+     "black_steel",
+     "galvanized",
+     "csst",
+     "pe"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "no_hub",
+     "hub_gasket",
+     "solvent_weld",
+     "pex_crimp",
+     "pex_expansion",
+     "fusion",
+     "csst_mechanical"
+    ],
+    "form": "reducer"
+   },
+   "description": "Generic pipe fitting from before the pipe library; swap it for a typed fitting."
+  },
+  {
+   "id": "pipe.tee",
+   "name": "Tee",
+   "smacnaType": "Generic pipe fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "tee"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "no_hub",
+      "hub_gasket",
+      "solvent_weld",
+      "pex_crimp",
+      "pex_expansion",
+      "fusion",
+      "csst_mechanical"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water",
+     "drainage",
+     "vent",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "pvc",
+     "abs",
+     "cast_iron",
+     "steel",
+     "black_steel",
+     "galvanized",
+     "csst",
+     "pe"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "no_hub",
+     "hub_gasket",
+     "solvent_weld",
+     "pex_crimp",
+     "pex_expansion",
+     "fusion",
+     "csst_mechanical"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": false
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "Generic pipe fitting from before the pipe library; swap it for a typed fitting."
+  },
+  {
+   "id": "pipe.wye",
+   "name": "Combination wye",
+   "smacnaType": "Generic pipe fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "wye"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "mainShapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "no_hub",
+      "hub_gasket",
+      "solvent_weld",
+      "pex_crimp",
+      "pex_expansion",
+      "fusion",
+      "csst_mechanical"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "pipe_k",
+   "pipe": {
+    "services": [
+     "water",
+     "drainage",
+     "vent",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "pvc",
+     "abs",
+     "cast_iron",
+     "steel",
+     "black_steel",
+     "galvanized",
+     "csst",
+     "pe"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "no_hub",
+     "hub_gasket",
+     "solvent_weld",
+     "pex_crimp",
+     "pex_expansion",
+     "fusion",
+     "csst_mechanical"
+    ],
+    "form": "tee",
+    "branch": {
+     "angleDeg": 90,
+     "sweep": true
+    },
+    "lOverD": {
+     "branch": 60,
+     "main": 20
+    }
+   },
+   "description": "Generic pipe fitting from before the pipe library; swap it for a typed fitting."
+  },
+  {
+   "id": "pipe.cap",
+   "name": "Cap",
+   "smacnaType": "Generic pipe fitting",
+   "domain": "pipe",
+   "fittingTypes": [
+    "cap"
+   ],
+   "shapes": [
+    "pipe"
+   ],
+   "params": [
+    {
+     "key": "joint",
+     "label": "Joint",
+     "kind": "choice",
+     "options": [
+      "sweat",
+      "press",
+      "threaded",
+      "no_hub",
+      "hub_gasket",
+      "solvent_weld",
+      "pex_crimp",
+      "pex_expansion",
+      "fusion",
+      "csst_mechanical"
+     ],
+     "default": "sweat"
+    },
+    {
+     "key": "takeout_mm",
+     "label": "Take-out (0: generic proportion)",
+     "kind": "number",
+     "unit": "mm",
+     "default": 0,
+     "min": 0,
+     "max": 1500
+    }
+   ],
+   "geometry": "pipe_fitting",
+   "loss": "cap",
+   "pipe": {
+    "services": [
+     "water",
+     "drainage",
+     "vent",
+     "gas"
+    ],
+    "materials": [
+     "copper",
+     "pex",
+     "cpvc",
+     "pp_r",
+     "pvc",
+     "abs",
+     "cast_iron",
+     "steel",
+     "black_steel",
+     "galvanized",
+     "csst",
+     "pe"
+    ],
+    "joints": [
+     "sweat",
+     "press",
+     "threaded",
+     "no_hub",
+     "hub_gasket",
+     "solvent_weld",
+     "pex_crimp",
+     "pex_expansion",
+     "fusion",
+     "csst_mechanical"
+    ],
+    "form": "cap"
+   },
+   "description": "Generic pipe fitting from before the pipe library; swap it for a typed fitting."
+  }
+ ],
+ "regulatorParams": [
+  {
+   "key": "role",
+   "label": "Regulator",
+   "kind": "choice",
+   "options": [
+    "line",
+    "service",
+    "appliance"
+   ],
+   "default": "line"
+  },
+  {
+   "key": "outlet_in_wc",
+   "label": "Outlet pressure (in. w.c.; 2 psi = 55.4)",
+   "kind": "number",
+   "unit": "in_wc",
+   "default": 7,
+   "min": 1,
+   "max": 300
+  },
+  {
+   "key": "zone_drop_in_wc",
+   "label": "Allowable drop downstream (in. w.c.; 1 psi = 27.7)",
+   "kind": "number",
+   "unit": "in_wc",
+   "default": 0.5,
+   "min": 0.05,
+   "max": 150
+  },
+  {
+   "key": "vent",
+   "label": "Vent",
+   "kind": "choice",
+   "options": [
+    "vent_limiter",
+    "vent_to_outdoors",
+    "none"
+   ],
+   "default": "vent_limiter"
+  },
+  {
+   "key": "capacity_mbh",
+   "label": "Rated capacity (MBH; 0: not given)",
+   "kind": "number",
+   "unit": "mbh",
+   "default": 0,
+   "min": 0,
+   "max": 100000
+  }
+ ],
+ "choicesSha": "f3145e3e3ab1b276c821c939883d18de38bc49374e03fb37c489cbaefabbc8d6",
+ "choicesCount": 4160,
+ "mismatchSha": "e7e376ac237665d381162a5c6e96c19f63c5f028eafa127fb02cadaaac0b0d8a",
+ "mismatchCount": 21216,
+ "labelsSha": "12eabc497b5ccfdb315565ac3f10be0b0107140c8aaae7c65a0c4fde1273b4da",
+ "labels": {
+  "pipe.water.tee|reducing": "Reducing tee",
+  "pipe.water.tee|equal": "Tee",
+  "dwv.sanitary_tee|reducing": "Sanitary tee",
+  "dwv.sanitary_tee|equal": "Sanitary tee",
+  "dwv.wye|reducing": "Wye (45°)",
+  "dwv.wye|equal": "Wye (45°)",
+  "dwv.combo_wye_eighth|reducing": "Combination wye & 1/8 bend",
+  "dwv.combo_wye_eighth|equal": "Combination wye & 1/8 bend",
+  "dwv.vent_tee|reducing": "Vent tee",
+  "dwv.vent_tee|equal": "Vent tee",
+  "pipe.gas.tee|reducing": "Reducing tee, threaded",
+  "pipe.gas.tee|equal": "Tee, threaded",
+  "pipe.gas.csst_tee|reducing": "CSST tee",
+  "pipe.gas.csst_tee|equal": "CSST tee",
+  "pipe.gas.pe_tee|reducing": "PE tee, fusion",
+  "pipe.gas.pe_tee|equal": "PE tee, fusion",
+  "pipe.tee|reducing": "Reducing tee",
+  "pipe.tee|equal": "Tee",
+  "pipe.wye|reducing": "Combination wye",
+  "pipe.wye|equal": "Combination wye"
+ }
+}

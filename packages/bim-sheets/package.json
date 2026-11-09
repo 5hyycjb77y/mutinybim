@@ -1,0 +1,32 @@
+{
+  "name": "@permitzip/bim-sheets",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-sheets"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM sheet output: vector PDF writer for the shared sheet scene graph, and IFC plan backgrounds cut on Node (./ifc-plan). Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ifc-plan": "./src/ifc-plan.ts",
+    "./pdf-core": "./src/pdf-core.ts",
+    "./qr": "./src/qr.ts",
+    "./reissue-check": "./src/reissue-check.ts",
+    "./ifc-cut-version": "./src/ifc-cut-version.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-calc": "*",
+    "@permitzip/bim-kernel": "*",
+    "pdf-lib": "^1.17.1",
+    "web-ifc": "0.0.78"
+  }
+}

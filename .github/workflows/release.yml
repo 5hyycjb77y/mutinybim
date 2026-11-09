@@ -1,0 +1,192 @@
+name: Release
+
+# Every merge to main whose CI passes is a release: the next version is tagged
+# v<version> on that commit with a GitHub Release, so hosts (their import
+# step) pick it up with no hand step. A maintainer may still push a
+# tag v<version> on main by hand, or run this workflow on a commit.
+#
+# The version: one patch above the newest v* tag, unless the manifests on the
+# commit were set higher by hand (`npm run release:version -- <version>` in a
+# pull request, for a minor or major release), in which case that version.
+# The manifests in git keep the version last set by hand; the tag is the
+# release's version.
+#
+# Publishing the @permitzip/bim-* packages and the model server to GitHub
+# Packages, and the model server image to ghcr.io/permitzip/mutinybim-authority,
+# runs only when the repository variable MUTINYBIM_PUBLISH is "true"
+# (Settings → Secrets and variables → Actions → Variables). The only
+# credential is this workflow's own token (packages: write, scoped to this
+# repository); there is no stored publish secret. Tarballs and the image carry
+# GitHub build attestations once the repository is public
+# (gh attestation verify <file> --repo permitzip/mutinybim).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit on main to release (default: the newest commit on main)"
+        required: false
+
+permissions:
+  contents: read
+
+# One release at a time, in order: the next run reads the tag the last one made.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Choose the version
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.pick.outputs.release }}
+      version: ${{ steps.pick.outputs.version }}
+      sha: ${{ steps.pick.outputs.sha }}
+      tagged: ${{ steps.pick.outputs.tagged }}
+      publish: ${{ steps.pick.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.sha }}
+          REF_NAME: ${{ github.ref_name }}
+          PUBLISH: ${{ vars.MUTINYBIM_PUBLISH }}
+        run: node tools/release/next-version.mjs
+      - name: Summary
+        env:
+          RELEASE: ${{ steps.pick.outputs.release }}
+          VERSION: ${{ steps.pick.outputs.version }}
+          SHA: ${{ steps.pick.outputs.sha }}
+          PUBLISH: ${{ steps.pick.outputs.publish }}
+        run: |
+          if [ "$RELEASE" = "true" ]; then
+            echo "### Release v$VERSION from \`${SHA:0:12}\`" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$PUBLISH" = "true" ]; then echo "Packages and the model server image publish." >> "$GITHUB_STEP_SUMMARY"; else echo "Tag and GitHub Release only: MUTINYBIM_PUBLISH is not \"true\", so nothing is published." >> "$GITHUB_STEP_SUMMARY"; fi
+          else
+            echo "### No release: \`${SHA:0:12}\` is already tagged." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  packages:
+    name: Publish packages
+    needs: version
+    if: ${{ needs.version.outputs.release == 'true' && needs.version.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://npm.pkg.github.com
+          scope: "@permitzip"
+      - name: Set the release version (not committed)
+        run: node tools/release/set-version.mjs "${{ needs.version.outputs.version }}"
+      - name: Pack what is not yet published
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/release/publish.mjs pack "${{ needs.version.outputs.version }}" dist/release
+      - name: Attest the tarballs
+        if: ${{ !github.event.repository.private && hashFiles('dist/release/*.tgz') != '' }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/release/*.tgz
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/release/publish.mjs push dist/release
+
+  image:
+    name: Model server image
+    needs: version
+    if: ${{ needs.version.outputs.release == 'true' && needs.version.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/bim-authority/Dockerfile
+          push: true
+          build-args: BIM_AUTHORITY_COMMIT=${{ needs.version.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/permitzip/mutinybim
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=v${{ needs.version.outputs.version }}
+          tags: |
+            ghcr.io/permitzip/mutinybim-authority:v${{ needs.version.outputs.version }}
+            ghcr.io/permitzip/mutinybim-authority:sha-${{ needs.version.outputs.sha }}
+      - name: Attest the image
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/permitzip/mutinybim-authority
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  tag:
+    name: Tag and GitHub Release
+    needs: [version, packages, image]
+    # After publishing when it runs; a skipped publish still tags. A failed publish tags nothing, so the next run retries this version.
+    if: ${{ always() && needs.version.outputs.release == 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0
+      - name: Tag the commit
+        if: ${{ needs.version.outputs.tagged != 'true' }}
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          git tag "v$VERSION" "$SHA"
+          git push origin "refs/tags/v$VERSION"
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then echo "v$VERSION already has a release"; exit 0; fi
+          gh release create "v$VERSION" --verify-tag --title "MutinyBIM $VERSION" --generate-notes

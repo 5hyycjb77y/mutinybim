@@ -1,0 +1,22 @@
+{
+  "name": "@permitzip/bim-units",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-units"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "description": "MutinyBIM typed units: dimensions, quantity kinds, a unit registry for every AEC trade, typed quantities, explicit conversion, display profiles and per-kind aggregation rules. No dependencies. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./kinds": "./src/kind-point.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  }
+}

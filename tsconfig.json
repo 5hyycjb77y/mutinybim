@@ -1,0 +1,4 @@
+{
+  "//": "What tsx reads for scripts run from the repository root (the perf runner and its suites, drills): the automatic JSX runtime, as the packages are written for. Type checking uses packages/tsconfig.bim.json.",
+  "compilerOptions": { "jsx": "react-jsx" }
+}

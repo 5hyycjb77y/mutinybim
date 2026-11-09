@@ -1,0 +1,49 @@
+{
+  "comment": "Lane E old-vs-new goldens: sha256 of each output computed by the pre-round-6 tree (7bfda9c7c, electrical in the kernel and bim-calc) with /tmp/c6e/gen-goldens.ts on 2026-10-30. Never regenerate from the new code.",
+  "goldens": {
+    "small.command": {
+      "sha256": "036c3f5de7c6867f72298f28cd738a571be43fe517f9a69dfc609d5f7e1cf1ea",
+      "length": 8428
+    },
+    "small.elements.sha256": {
+      "sha256": "cb75753dce17ce20716f3acd035a66a3b822cde8907c374f2011b6cc0f91017f",
+      "length": 64
+    },
+    "small.reports": {
+      "sha256": "f3e8f33c7e1a21c87b9af0c343a2622b9bc48d974b7e58da26debebde79ffd24",
+      "length": 5972
+    },
+    "planned.command": {
+      "sha256": "7e4ecf336469e0ec100fe3957beb8631f418721404e19e8f693291fe8e3a189b",
+      "length": 4414
+    },
+    "planned.elements.sha256": {
+      "sha256": "44ff3dcfc4383ac0e37145c5a86636d5ed60a73e86ffd3e778e4951a11de9822",
+      "length": 64
+    },
+    "planned.reports": {
+      "sha256": "91fbb7ccdfc109521fcddb3460b0f4dc32985c51b93dfe4af29f49e33a7af01e",
+      "length": 2654
+    },
+    "reference.nec2020.reports": {
+      "sha256": "91ba6efae931c3ea268fc3fb0f4145263cfe2ac83e8f3475820689a9df317df3",
+      "length": 26990
+    },
+    "reference.nec2020.schedules": {
+      "sha256": "4aeb0e36d18ddc7d9cd93845ccd008a28e8df49fd2ad0711b5f9541a6e42896e",
+      "length": 24466
+    },
+    "reference.nec2023.reports": {
+      "sha256": "3655ddd017c6989009103ba3dd7321a2be9a0d784c31eb3bac0c85600df1854e",
+      "length": 26990
+    },
+    "reference.nec2023.schedules": {
+      "sha256": "4aeb0e36d18ddc7d9cd93845ccd008a28e8df49fd2ad0711b5f9541a6e42896e",
+      "length": 24466
+    },
+    "reference.check": {
+      "sha256": "595118ac6d2bcb17bcef51064a66fde5de4a11e6ffd5fe46934b60813eda814f",
+      "length": 1022
+    }
+  }
+}

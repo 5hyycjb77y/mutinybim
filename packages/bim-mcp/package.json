@@ -1,0 +1,46 @@
+{
+  "name": "@permitzip/bim-mcp",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-mcp"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "The MutinyBIM tool server: one small core tool pack (script execution first, a few reads) on MCP over stdio or streamable HTTP, a host adapter for identity, permissions, approvals, the script runner and the model server, and an extension point for add-on packs. The open local host runs it for one person on their own computer. Must not import any host app's code.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./local": "./src/local/index.ts",
+    "./scripts/tier": "./src/scripts/tier.ts"
+  },
+  "bin": {
+    "mutinybim-mcp": "bin/mutinybim-mcp.mjs",
+    "mutinybim-example": "bin/mutinybim-example.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/mutinybim-mcp.mjs",
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@permitzip/bim-editor": "*",
+    "@permitzip/bim-first-party": "*",
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-library": "*",
+    "@permitzip/bim-plugin": "*",
+    "@permitzip/bim-script": "*",
+    "@permitzip/bim-script-runner": "*",
+    "@permitzip/bim-sync": "*",
+    "tsx": "*",
+    "zod": "^4.0.0"
+  }
+}

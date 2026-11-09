@@ -1,0 +1,74 @@
+name: Feature request
+description: Something MutinyBIM should do that it does not do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem from the chair of the person using the software: what they are
+        trying to get done, and what gets in the way. Please do not include real client or project data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Who needs this, and what are they trying to do?
+      placeholder: "As a plumbing engineer, I need to ... but today I have to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+      description: What the person would see and do. Sketches and screenshots of synthetic models are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: kernel
+    attributes:
+      label: The shared idea underneath
+      description: |
+        MutinyBIM builds shared concepts once in the kernel and expresses trades as add-ons.
+        Is there a general idea under this request that other trades would use too?
+        (Schedules, tags, loads, connections, systems, sizing, checks and units are shared ideas.)
+  - type: dropdown
+    id: discipline
+    attributes:
+      label: Discipline
+      multiple: true
+      options:
+        - Not trade-specific
+        - Architecture
+        - Structural
+        - Civil or site
+        - Fire protection
+        - Mechanical
+        - Electrical
+        - Plumbing and gas
+        - General contractor
+        - Owner, developer or cost
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Kernel
+        - Add-on
+        - Scripting kit
+        - Sheets, PDF or IFC
+        - Viewer or UI
+        - Model server or sync
+        - Agent tools
+        - Docs
+        - Not sure
+  - type: checkboxes
+    id: engineering
+    attributes:
+      label: Engineering content
+      options:
+        - label: This involves an engineering calculation, code rule or design default (it will need review by a licensed professional).
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Helping
+      options:
+        - label: I would like to work on this.

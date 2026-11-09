@@ -1,0 +1,24 @@
+{
+  "name": "@permitzip/bim-geometry",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-geometry"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "description": "MutinyBIM solid geometry: resolved solid programs (profiles, extrude, revolve, join/cut/intersect) evaluated to triangle meshes with manifold-3d, plus a content-keyed mesh cache. Pure data in, triangles out. Must not import host app or kernel code.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc -p ../tsconfig.bim.json"
+  },
+  "dependencies": {
+    "manifold-3d": "3.5.4"
+  }
+}

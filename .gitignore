@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+dist/
+.next/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.eslintcache
+/tmp/
+.perf-results/
+.fixtures-cache/
+mutinybim-examples/

@@ -1,0 +1,14 @@
+/* The editor demo's Tailwind v4 stylesheet (build.ts runs it through @tailwindcss/postcss). */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./vendor/shadcn-tailwind.css";
+@import "../../bim-grid/src/grid.css";
+@import "../../bim-schedules-ui/src/schedules.css";
+@import "./tokens.css";
+
+@source "../src";
+@source "./entry.tsx";
+@source "../../bim-ui/src";
+@source "../../bim-grid/src";
+@source "../../bim-schedules-ui/src";
+@source "../../bim-pack-*/src";

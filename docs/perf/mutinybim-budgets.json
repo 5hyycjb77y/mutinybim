@@ -1,0 +1,3311 @@
+{
+  "version": 1,
+  "note": "MutinyBIM standing performance gate. Budgets are set from measurements and only ever tightened; a budget is never raised to get green. Each row: p50 / p95 in its unit, its scope (in-process, browser, server) and cache state. How the gate reads them: scripts/perf/mutinybim/run.ts and docs/PERFORMANCE.md.",
+  "referenceHardware": {
+    "reference": "Current Apple-silicon developer laptop (M-series Pro/Max class, 16+ GB), plugged in, Chrome with hardware WebGL.",
+    "weaker": "Four-year-old integrated-GPU laptop. Approximated in the suite by 4x Chrome CPU throttling at 1366x768, devicePixelRatio 1; GPU is NOT throttled, so weak-laptop frame times are a lower bound until measured on real hardware."
+  },
+  "regression": {
+    "minRuns": 5,
+    "aggregation": "Each run is a separate process. A run reports p50 and p95 of its own samples (one sample for cold metrics). The run-level figures are combined by taking the median across runs (median-of-N). Cold metrics: p50 = median of the runs, p95 = nearest-rank p95 of the runs.",
+    "rule": "A metric regresses when BOTH (current - baseline) > absFloor AND current > baseline * (1 + rel). Checked separately for p50 (rel.p50) and p95 (rel.p95). Baselines are compared only when the hardware class matches; otherwise the regression check reports NO-BASELINE and only absolute budgets apply.",
+    "defaults": {
+      "ms": {
+        "rel": {
+          "p50": 0.25,
+          "p95": 0.5
+        },
+        "absFloor": 5
+      },
+      "frameMs": {
+        "rel": {
+          "p50": 0.15,
+          "p95": 0.3
+        },
+        "absFloor": 1.5
+      },
+      "MB": {
+        "rel": {
+          "p50": 0.1,
+          "p95": 0.15
+        },
+        "absFloor": 32
+      },
+      "count": {
+        "rel": {
+          "p50": 0,
+          "p95": 0
+        },
+        "absFloor": 0
+      },
+      "KB": {
+        "rel": {
+          "p50": 0.1,
+          "p95": 0.15
+        },
+        "absFloor": 4
+      },
+      "ns": {
+        "rel": {
+          "p50": 0.25,
+          "p95": 0.5
+        },
+        "absFloor": 200
+      },
+      "us": {
+        "rel": {
+          "p50": 0.25,
+          "p95": 0.5
+        },
+        "absFloor": 1
+      },
+      "ratio": {
+        "rel": {
+          "p50": 0.05,
+          "p95": 0.1
+        },
+        "absFloor": 0.02
+      }
+    },
+    "noisyRun": "A run starting with 1-minute load average above 75% of the core count, or under 4 GB free memory, is marked noisy in the report. Noisy runs still count against absolute budgets; a regression seen only in a noisy run must be re-run before it blocks."
+  },
+  "ci": {
+    "tier": "250k",
+    "runs": 3,
+    "budgetFactor": 2,
+    "why": "A shared CI runner is not the reference laptop. On a calibrated runner (PERF_RUNNER) the gate enforces the structural invariants exactly and absolute timing budgets at budgetFactor x. On a shared runner (MUTINYBIM_PERF_BUDGETS=relative) it enforces invariants, sizes and same-run ratios, and reports timings without blocking. Regression bands apply only against a baseline recorded on the same hardware class."
+  },
+  "metrics": {
+    "join.cold": {
+      "label": "Open one zone: first join on a freshly loaded, unwarmed head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1000,
+      "p95": 2000,
+      "status": "active"
+    },
+    "join.warm": {
+      "label": "Open one zone on a warm server",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "view.first.cold": {
+      "label": "First view of a zone, cold (join + 3D solids for the zone)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1200,
+      "p95": 2400,
+      "status": "active"
+    },
+    "view.first.warm": {
+      "label": "First view of a zone, warm",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 300,
+      "p95": 600,
+      "status": "active"
+    },
+    "area.switch": {
+      "label": "Move an open connection to another zone",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "edit.preview.slide_branch": {
+      "label": "Local edit preview: slide a duct branch (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.preview.resize_run": {
+      "label": "Local edit preview: resize a trunk run",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.cold": {
+      "label": "First durable commit on a freshly loaded, unwarmed head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "commit.durable.slide_branch": {
+      "label": "Durable commit (author sees 'saved'): slide a duct branch",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "commit.durable.resize_run": {
+      "label": "Durable commit: resize a trunk run",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.slide_branch": {
+      "label": "Remote visibility: another person in the same zone sees the slide",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.resize_run": {
+      "label": "Remote visibility: resize a trunk run",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "memory.server.heap": {
+      "label": "Authority heap with the whole model loaded and warm",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1400,
+      "p95": 1400,
+      "status": "active"
+    },
+    "memory.server.rss": {
+      "label": "Authority resident memory with the whole model loaded and warm",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1900,
+      "p95": 1900,
+      "status": "active"
+    },
+    "memory.client.zoneWire": {
+      "label": "Bytes sent to open one zone",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 4,
+      "p95": 4,
+      "status": "active"
+    },
+    "memory.client.zoneHeap": {
+      "label": "Client heap growth for one loaded zone",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 64,
+      "p95": 64,
+      "status": "active"
+    },
+    "remote.server.commit": {
+      "label": "Server-side durable commit on the hosted authority (Postgres)",
+      "unit": "ms",
+      "scope": "remote",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 250,
+      "status": "active"
+    },
+    "remote.e2e.join": {
+      "label": "Open one zone end to end over the network (sign-in excluded)",
+      "unit": "ms",
+      "scope": "remote",
+      "cache": "warm",
+      "p50": 1500,
+      "p95": 3000,
+      "status": "pending"
+    },
+    "remote.e2e.commit": {
+      "label": "Durable commit end to end over the network",
+      "unit": "ms",
+      "scope": "remote",
+      "cache": "warm",
+      "p50": 250,
+      "p95": 500,
+      "status": "pending"
+    },
+    "remote.e2e.visible": {
+      "label": "Remote visibility end to end, same region",
+      "unit": "ms",
+      "scope": "remote",
+      "cache": "warm",
+      "p50": 300,
+      "p95": 600,
+      "status": "pending"
+    },
+    "3d.synthetic.load": {
+      "label": "Draw one authored zone in the 3D view (reference laptop)",
+      "unit": "ms",
+      "scope": "browser",
+      "cache": "warm",
+      "p50": 300,
+      "p95": 600,
+      "status": "active"
+    },
+    "3d.edit.redraw": {
+      "label": "Redraw authored geometry after an edit (reference laptop)",
+      "unit": "ms",
+      "scope": "browser",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "3d.frame.weak": {
+      "label": "Frame time, same scene, weaker laptop (approximation)",
+      "unit": "frameMs",
+      "scope": "browser",
+      "cache": "warm",
+      "p50": 33.3,
+      "p95": 50,
+      "status": "active"
+    },
+    "sheet.regen": {
+      "label": "Sheet regeneration after a duct edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 500,
+      "status": "active"
+    },
+    "plan.regen.range": {
+      "label": "Plan regeneration with a top, bottom and depth set, after a duct edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 500,
+      "status": "active"
+    },
+    "linked.plan.cut.large": {
+      "label": "Cut a large linked architect's floor for a plan background, hidden lines removed",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 2000,
+      "p95": 4000,
+      "status": "active"
+    },
+    "linked.plan.hidden": {
+      "label": "Hidden-line step of that cut (a chair under a table removed)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "linked.plan.cut.xl": {
+      "label": "Cut a very large linked architect's floor (four times linked.plan.cut.large) for a plan background, hidden lines removed",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 5500,
+      "p95": 7000,
+      "status": "active"
+    },
+    "linked.plan.hidden.xl": {
+      "label": "Hidden-line step of the very large linked cut",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 250,
+      "p95": 350,
+      "status": "active"
+    },
+    "linked.plan.cut.cache.decode": {
+      "label": "Warm hit on the shared linked-cut cache for the very large cut (read the stored answer instead of cutting)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "stress.commit.25": {
+      "label": "Saved at the author, 25 people editing one 250k model at 2 edits/s each",
+      "unit": "ms",
+      "scope": "stress",
+      "cache": "warm",
+      "p50": 80,
+      "p95": 250,
+      "status": "active"
+    },
+    "stress.fanout.25": {
+      "label": "Seen by everyone else, 25 people editing one 250k model",
+      "unit": "ms",
+      "scope": "stress",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 100,
+      "status": "active"
+    },
+    "stress.commit.50": {
+      "label": "Saved at the author, 50 people editing one 250k model at 2 edits/s each",
+      "unit": "ms",
+      "scope": "stress",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 600,
+      "status": "active"
+    },
+    "stress.fanout.50": {
+      "label": "Seen by everyone else, 50 people editing one 250k model",
+      "unit": "ms",
+      "scope": "stress",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 300,
+      "status": "active"
+    },
+    "tag.style.edit.10k": {
+      "label": "Change a tag style used by 10,000 tags on one plan (the commit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 3,
+      "p95": 200,
+      "status": "active"
+    },
+    "tag.style.redraw.10k": {
+      "label": "Redraw that plan after the tag style change (every tag re-laid out)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 700,
+      "p95": 900,
+      "status": "active"
+    },
+    "pdf.render": {
+      "label": "Render the pilot sheet to PDF",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2000,
+      "p95": 4000,
+      "status": "active"
+    },
+    "set.pdf.render": {
+      "label": "Print a three-sheet set to one PDF (the pilot sheet, a schedule sheet, a notes sheet with the sheet index)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 3000,
+      "p95": 6000,
+      "status": "active"
+    },
+    "batch.documents.500": {
+      "label": "Plan a 500-step views/sheets batch (one approval) on the full model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "schedule.evaluate": {
+      "label": "Evaluate an air terminal schedule on the full model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "autotag.500": {
+      "label": "Auto-tag 500 elements in a plan (deterministic placement, collision checks)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "dimension.regen": {
+      "label": "Regenerate 200 associative dimensions after a model edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 120,
+      "status": "active"
+    },
+    "detail.redraw.2000": {
+      "label": "Redraw a detail view with 2,000 items",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "detail.redraw.detailing": {
+      "label": "Redraw a detail view with 1,000 detailing items (hatches, components, insulation, curves)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "detail.hatch.heavy": {
+      "label": "Redraw a hatch-heavy detail (50 large crosshatched and concrete regions)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 120,
+      "p95": 250,
+      "status": "active"
+    },
+    "detail.modify.500": {
+      "label": "Plan a modify operation on 500 drawn items (rotate with groups, one approval)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 50,
+      "status": "active"
+    },
+    "detail.lines.move_joined": {
+      "label": "Move one side of 500 rectangles in a 2,000-line detail; joined sides follow (one approval)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 80,
+      "status": "active"
+    },
+    "detail.lines.offset_chains": {
+      "label": "Offset 500 closed chains (2,000 joined lines) at once, corners re-met",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 60,
+      "p95": 150,
+      "status": "active"
+    },
+    "detail.lines.fillet_arc": {
+      "label": "Fillet Arc one corner in a 2,000-line detail",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 10,
+      "status": "active"
+    },
+    "detail.lines.split": {
+      "label": "Split one line in a 2,000-line detail",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 10,
+      "status": "active"
+    },
+    "detail.snap.move": {
+      "label": "Draft snap per pointer move in a 1,000-item detail",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 10,
+      "status": "active"
+    },
+    "layout.sheet": {
+      "label": "Deterministic sheet layout (where every viewport goes, scales fitted)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 25,
+      "status": "active"
+    },
+    "crop.drag.preview": {
+      "label": "Crop box drag: per pointer move (grip, window, frame size)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 8,
+      "status": "active"
+    },
+    "edit.preview.set_view_crop": {
+      "label": "Local edit preview: change a view's crop box (viewport follows)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "sheet.regen.crop": {
+      "label": "Sheet regeneration after a crop change",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 500,
+      "status": "active"
+    },
+    "sheet.regen.3d": {
+      "label": "Sheet regeneration with a 3D view after a duct edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 500,
+      "status": "active"
+    },
+    "section.generate": {
+      "label": "Section view generation after a duct edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 400,
+      "status": "active"
+    },
+    "edit.preview.place_part": {
+      "label": "Local edit preview: place a part on a level (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.ghost.place_part": {
+      "label": "Pointer-follow preview while you place (snap + ghost solids, nothing sent)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 8,
+      "status": "active"
+    },
+    "commit.durable.place_part": {
+      "label": "Durable commit (author sees 'saved'): place a part on a level",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.place_part": {
+      "label": "Remote visibility: another person in the same zone sees it (place a part on a level)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.move_elements": {
+      "label": "Local edit preview: move a placed part (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.ghost.move_elements": {
+      "label": "Pointer-follow preview while you move (snap + ghost solids, nothing sent)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 8,
+      "status": "active"
+    },
+    "commit.durable.move_elements": {
+      "label": "Durable commit (author sees 'saved'): move a placed part",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.move_elements": {
+      "label": "Remote visibility: another person in the same zone sees it (move a placed part)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.route_run": {
+      "label": "Local edit preview: route a duct run from a diffuser (drop, two elbows, three segments) (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.route_run": {
+      "label": "Durable commit (author sees 'saved'): route a duct run from a diffuser (drop, two elbows, three segments)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.route_run": {
+      "label": "Remote visibility: another person in the same zone sees it (route a duct run from a diffuser (drop, two elbows, three segments))",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.resize_routed": {
+      "label": "Local edit preview: resize a routed run (segments, elbows, transitions and branches follow) (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.resize_routed": {
+      "label": "Durable commit (author sees 'saved'): resize a routed run (segments, elbows, transitions and branches follow)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.resize_routed": {
+      "label": "Remote visibility: another person in the same zone sees it (resize a routed run (segments, elbows, transitions and branches follow))",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.move_connected": {
+      "label": "Local edit preview: move a part with a connected run (the run follows or stretches) (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.move_connected": {
+      "label": "Durable commit (author sees 'saved'): move a part with a connected run (the run follows or stretches)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.move_connected": {
+      "label": "Remote visibility: another person in the same zone sees it (move a part with a connected run (the run follows or stretches))",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.delete_connected": {
+      "label": "Local edit preview: delete a routed segment with cascade (links cut, open end capped) (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.delete_connected": {
+      "label": "Durable commit (author sees 'saved'): delete a routed segment with cascade (links cut, open end capped)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.delete_connected": {
+      "label": "Remote visibility: another person in the same zone sees it (delete a routed segment with cascade (links cut, open end capped))",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.swap_fitting": {
+      "label": "Local edit preview: change a routed elbow to another fitting type, same connections (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.swap_fitting": {
+      "label": "Durable commit (author sees 'saved'): change a routed elbow to another fitting type, same connections",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.swap_fitting": {
+      "label": "Remote visibility: another person in the same zone sees it (change a routed elbow to another fitting type, same connections)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.offset_run": {
+      "label": "Local edit preview: offset a routed run up 6 in. with two 45° elbows (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.offset_run": {
+      "label": "Durable commit (author sees 'saved'): offset a routed run up 6 in. with two 45° elbows",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.offset_run": {
+      "label": "Remote visibility: another person in the same zone sees it (offset a routed run up 6 in. with two 45° elbows)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.ghost.offset_run": {
+      "label": "Pointer-follow offset preview (offset with its elbows computed on the local view, nothing sent)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 8,
+      "status": "active"
+    },
+    "pressure.recalc.after_edit": {
+      "label": "Duct pressure report after an edit to its system (velocity, friction, fitting losses, critical path, fan ESP)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "pressure.report.cold": {
+      "label": "First pressure report of a system, asked for by system id only",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 250,
+      "p95": 500,
+      "status": "active"
+    },
+    "edit.preview.route_pipe": {
+      "label": "Local edit preview: route a sloped 2\" sanitary drain with one turn (input -> predicted model + solids)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.route_pipe": {
+      "label": "Durable commit (author sees 'saved'): route a sloped 2\" sanitary drain with one turn",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.route_pipe": {
+      "label": "Remote visibility: another person in the same zone sees it (route a sloped 2\" sanitary drain)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.swap_pipe_fitting": {
+      "label": "Local edit preview: change a drain's turn to another drainage fitting, checked against its direction change",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "commit.durable.swap_pipe_fitting": {
+      "label": "Durable commit (author sees 'saved'): change a drain's turn to another drainage fitting",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "remote.visible.swap_pipe_fitting": {
+      "label": "Remote visibility: another person in the same zone sees it (change a drain's turn)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "pipe.report.after_edit": {
+      "label": "Pipe hydraulics report after an edit to its system (fixture units, capacity at slope / pressure at fixtures / gas drop)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "pipe.report.cold": {
+      "label": "First pipe hydraulics report of a system, asked for by system id only",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 250,
+      "p95": 500,
+      "status": "active"
+    },
+    "gas.zones.report": {
+      "label": "Gas report with pressure zones, fresh engine: the zone walk, the pressure reset at each regulator, each zone checked against its own drop",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 15,
+      "p95": 30,
+      "status": "active"
+    },
+    "gas.size.proposal": {
+      "label": "Gas sizing proposal by pressure zone (plumbing.gas_system: Table 402.4(n) and the 402.4 equation per zone)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 25,
+      "p95": 50,
+      "status": "active"
+    },
+    "edit.ghost.route_run": {
+      "label": "Pointer-follow route preview while drawing (route with fittings computed on the local view, nothing sent)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4,
+      "p95": 8,
+      "status": "active"
+    },
+    "select.prehighlight.tab": {
+      "label": "Hover pre-highlight and Tab to select more: element, run, branch and system around the piece under the pointer, with the scope's totals",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 8,
+      "p95": 16,
+      "status": "active"
+    },
+    "select.box": {
+      "label": "Window / crossing box select over one zone's solids (screen boxes, inside or touching test, category filter)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "view.visibility.resolve": {
+      "label": "Group and phase display for every element of the whole model in one view (show / halftone / dashed / hide)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.preview.split_run": {
+      "label": "Local edit preview: split a routed run at a point",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.preview.resize_stretch": {
+      "label": "Local edit preview: reshape a stretch between two points (two splits, two rect-to-round transitions)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.preview.resize_batch": {
+      "label": "Local edit preview: one atomic resize of a box-selected set of routed segments (transitions where neighbours keep their size)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 33,
+      "p95": 66,
+      "status": "active"
+    },
+    "commit.durable.resize_batch": {
+      "label": "Durable commit: batch resize of a box selection",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "edit.ghost.drag_run": {
+      "label": "Pointer-follow drag of a routed piece (a straight piece or an elbow; what it meets follows), computed on the local view, nothing sent",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 8,
+      "p95": 16,
+      "status": "active"
+    },
+    "edit.ghost.drag_run_stop": {
+      "label": "Pointer-follow drag past an elbow's limit: refused, the stop solved, the stop previewed (nothing sent)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 8,
+      "p95": 16,
+      "status": "active"
+    },
+    "edit.preview.drag_run": {
+      "label": "Local edit preview: release a drag of a routed piece",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "edit.preview.move_group": {
+      "label": "Local edit preview: move a selected run (several routed pieces) whole",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "geometry.engine.init": {
+      "label": "Part editor: geometry engine start (manifold-3d import, WASM instantiate, setup), once per tab or process",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "part.sketch.solve.40x60": {
+      "label": "Part editor: solve a 40-point / 60-constraint sketch (runs on every pointer move while dragging a sketch)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 8,
+      "status": "active",
+      "tolerance": {
+        "rel": {
+          "p50": 0.25,
+          "p95": 0.5
+        },
+        "absFloor": 0.5
+      }
+    },
+    "part.regen.50": {
+      "label": "Part editor: regenerate a 50-feature part (body plus interleaved extruded joins and cuts) to a mesh",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 33,
+      "status": "active"
+    },
+    "part.mesh.build": {
+      "label": "Part solid: build one size's mesh from its definition (resolve the solid program, then the engine), the cache cold, per part type",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 20,
+      "p95": 50,
+      "status": "active"
+    },
+    "part.mesh.cache_hit": {
+      "label": "Part solid: a placed copy asking for its size's cached mesh (what every redraw of every copy pays)",
+      "unit": "us",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "active"
+    },
+    "part.clash.pieces.build": {
+      "label": "Part solid: its convex pieces for clash (medium detail, ~450 mm cells, at most 5 per axis), built once per type + size and cached beside the mesh",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 75,
+      "p95": 150,
+      "status": "active"
+    },
+    "lint.clash.part_mesh.after_edit": {
+      "label": "Clash after an edit to one modeled part: its cached convex pieces placed and measured against what is near it (two runs: one in its curb's hollow, one through its casing)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "part.mesh.instanced.draw": {
+      "label": "3D view: draw every placed modeled part as one instanced mesh per type + size + detail level, per frame",
+      "unit": "frameMs",
+      "scope": "browser",
+      "cache": "warm",
+      "p50": 8,
+      "p95": 16,
+      "status": "pending",
+      "appliesTo": "250k tier; 16 / 33 ms at the 1M tier"
+    },
+    "geometry.boolean.10k": {
+      "label": "Geometry: cut one 10,240-triangle solid with another (the boolean and its mesh; inputs already built)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 45,
+      "status": "active"
+    },
+    "calc.size_circuit": {
+      "label": "Calc plugins: size one feeder through the registry (validate, NEC edition, ampacity, voltage drop, EGC, conduit, citations, runKey)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 2,
+      "status": "active",
+      "tolerance": {
+        "rel": {
+          "p50": 0.25,
+          "p95": 0.5
+        },
+        "absFloor": 0.5
+      }
+    },
+    "calc.demand_load.5k": {
+      "label": "Calc plugins: NEC Article 220 demand at a service with 5,000 loads below it",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "calc.size_circuit.300": {
+      "label": "Calc plugins: size the feeders of a 300-panel building, one run each",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "active"
+    },
+    "electrical.aggregate.cold": {
+      "label": "Electrical load totals, cold: every panel, board and transformer of the tier's distribution reported (NEC demand, per phase, capacity chain, findings)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1000,
+      "p95": 2000,
+      "status": "active"
+    },
+    "electrical.report.after_edit": {
+      "label": "Electrical load totals after one load edit: the MDP's and the edited panel's reports",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 8,
+      "p95": 16,
+      "status": "active"
+    },
+    "electrical.report_all.after_edit": {
+      "label": "Electrical load totals after one load edit: every node's report",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "electrical.schedules.cold.300": {
+      "label": "Panel schedules, cold: 300 panel schedules evaluated and laid out as they print (slots, per-phase kVA, NEC demand by class, totals)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1200,
+      "p95": 2000,
+      "status": "active"
+    },
+    "electrical.schedules.after_edit.300": {
+      "label": "Panel schedules after one load edit: the same 300 schedules redrawn",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "active"
+    },
+    "electrical.circuit.edit": {
+      "label": "Put a receptacle back on its circuit (the edit a person makes in circuiting)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 4,
+      "status": "active"
+    },
+    "electrical.panel_view.after_edit": {
+      "label": "Panel view refresh after that circuit edit: the panel schedule, its load report and the panel list",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 40,
+      "status": "active"
+    },
+    "electrical.panel_list": {
+      "label": "List every panel, board and transformer for the panel picker",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 30,
+      "status": "active"
+    },
+    "diagram.one_line.evaluate.150": {
+      "label": "Live one-line over 155 pieces of equipment, derived from scratch",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 40,
+      "p95": 80,
+      "status": "active"
+    },
+    "diagram.one_line.after_edit.150": {
+      "label": "Live one-line after one panel's bus rating changes, derived again",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 40,
+      "p95": 80,
+      "status": "active"
+    },
+    "diagram.plumbing_riser.evaluate.200": {
+      "label": "Live sanitary riser over 200 fixtures, derived from scratch",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 30,
+      "p95": 60,
+      "status": "active"
+    },
+    "diagram.plumbing_riser.after_edit.200": {
+      "label": "Live sanitary riser after one branch is resized, derived again",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 30,
+      "p95": 60,
+      "status": "active"
+    },
+    "diagram.plumbing_isometric.evaluate.200": {
+      "label": "Plumbing isometric over the same 200-fixture piping, from scratch",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 25,
+      "p95": 50,
+      "status": "active"
+    },
+    "electrical.circuit.add_balanced": {
+      "label": "Put one receptacle on a 208 V panel with no slots given: the kernel picks the free slots that best balance the phases (300-panel distribution)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 33,
+      "status": "active"
+    },
+    "electrical.rebalance.plan": {
+      "label": "Rebalance plan of one 42-circuit panel (deterministic moves and swaps, preview)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "electrical.check.all": {
+      "label": "Electrical check list over the whole model, warm engine (every node's findings, loads on no circuit, missing connection types)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "active"
+    },
+    "plumbing.load_points.cold.5k": {
+      "label": "Plumbing totals from a fresh engine: a 5,000 load point system walked and its service read",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 100,
+      "p95": 200,
+      "status": "active"
+    },
+    "plumbing.load_points.advance.5k": {
+      "label": "What every pipe carries after one load point edit (5,000 points on a 250k model)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "plumbing.load_points.edit_commit.5k": {
+      "label": "Edit one load point (Properties or bim_edit_load_point): the commit on the full head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "electrical.plan.circuiting.1200": {
+      "label": "Print an electrical plan with its circuiting: 1,200 receptacles on 150 circuits (arcs, home runs, gaps at crossings)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "electrical.plan.circuiting.after_move": {
+      "label": "Redraw that plan after one receptacle moves (its circuit line and home run follow)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "electrical.plan.typical.24": {
+      "label": "Print a 24-unit typical with circuit numbers and home runs on every unit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "active"
+    },
+    "electrical.propose.receptacles.192": {
+      "label": "Propose receptacles for 192 rooms (24 copies of unit 001) by NEC 210.52",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "active"
+    },
+    "lint.index.cold": {
+      "label": "Coordination lint index, cold: a fresh engine indexes the tier's model plus a 100k-element linked model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1000,
+      "p95": 1500,
+      "status": "active"
+    },
+    "lint.advance.50": {
+      "label": "Coordination lint after an edit touching at most 50 elements: index update plus the before and after findings in the edit's scope",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "lint.block.build": {
+      "label": "Coordination lint block build after an edit: the diff, what's here, the caps, serialising",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1.5,
+      "p95": 3,
+      "status": "active"
+    },
+    "lint.memory.index": {
+      "label": "Heap held by one coordination lint engine (native + linked index)",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 45,
+      "p95": 60,
+      "status": "active"
+    },
+    "schedule.grid.cold.10k": {
+      "label": "Open a whole-building schedule of 10,000+ rows on a revision nothing has read, plus the first 200-row window",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 200,
+      "p95": 300,
+      "status": "active"
+    },
+    "schedule.patch.one_edit.10k": {
+      "label": "One cell edit on a 10,000+ row schedule: the open rows brought up to date",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 3,
+      "p95": 5,
+      "status": "active"
+    },
+    "schedule.patch.serves_expand.2k": {
+      "label": "A fixture edit updates its water heater's Serves aggregate and expanded sub-rows on a 2,000-row schedule",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "schedule.formula.column.10k": {
+      "label": "One compiled formula over a 10,000-row column",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 5,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "schedule.paste.500.preview": {
+      "label": "Paste 500 cells into a schedule column: the local preview",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "active"
+    },
+    "schedule.paste.500.commit": {
+      "label": "Paste 500 cells into a schedule column: the commit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 400,
+      "status": "active"
+    },
+    "schedule.authority.window.200": {
+      "label": "One 200-row window (a scroll) from an open schedule",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 25,
+      "status": "active"
+    },
+    "schedule.join.25": {
+      "label": "25 people open the same schedule at once: 25 first windows from one open session",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 25,
+      "status": "active"
+    },
+    "fields.base.read.tower": {
+      "label": "Base fields (mark, type, family, level, room, count) read for every element of the tower-14 synthetic",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 100,
+      "p95": 150,
+      "status": "active"
+    },
+    "serves.index.sample_market": {
+      "label": "What the water heater serves on the sample market, on a revision nothing has read",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 0.25,
+      "p95": 0.5,
+      "status": "active"
+    },
+    "units.format.100k": {
+      "label": "Format 100,000 schedule cells through the unit library",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "registry.recognize.tower14": {
+      "label": "Class recognition over the tower-14 synthetic, cold (one pass)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 10,
+      "p95": 20,
+      "status": "active"
+    },
+    "grid.scroll.10k.frame": {
+      "label": "Schedule grid: one scroll frame of a fast flick (7 rows) through 10,000 rows, 24 columns, 1 frozen",
+      "unit": "frameMs",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16.67,
+      "p95": 20,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "grid.scroll.10k.mean": {
+      "label": "Schedule grid: mean frame time of the 10,000-row flick (one value per run)",
+      "unit": "frameMs",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16.67,
+      "p95": 16.67,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "planned.index.cold": {
+      "label": "Not placed yet list, cold: every planned part found on a record never seen before",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 25,
+      "p95": 80,
+      "status": "active"
+    },
+    "planned.index.after_edit": {
+      "label": "Not placed yet list after one part is taken off the drawing",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 4,
+      "status": "active"
+    },
+    "spaces.make_from_rooms.2k": {
+      "label": "Make spaces from rooms: 2,016 spaces on the synthetic tower",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 600,
+      "p95": 1200,
+      "status": "active"
+    },
+    "spaces.density.2k.cold": {
+      "label": "Area (density) loads of 2,016 spaces, nothing cached",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 50,
+      "p95": 80,
+      "status": "active"
+    },
+    "spaces.density.2k.edit": {
+      "label": "Area loads after one space is redrawn",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 25,
+      "status": "active"
+    },
+    "spaces.locate.10k": {
+      "label": "Which space is this point in: 10,000 lookups",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 25,
+      "status": "active"
+    },
+    "spaces.detect_rooms.200": {
+      "label": "Propose room outlines from a 200-room floor's linework",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 150,
+      "p95": 300,
+      "status": "active"
+    },
+    "linked.background.open": {
+      "label": "Linked model background: open the architect's IFC once",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 300,
+      "p95": 600,
+      "status": "active"
+    },
+    "linked.background.switch.warm": {
+      "label": "Linked backgrounds of a sheet's plan viewports after warm-up",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 2,
+      "status": "active"
+    },
+    "requirements.engine.cold": {
+      "label": "Load lifecycle totals from a fresh engine: every load, estimate and device of the tier",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 300,
+      "p95": 500,
+      "status": "active"
+    },
+    "requirements.engine.after_device_edit": {
+      "label": "Load lifecycle totals after one device is edited",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 10,
+      "status": "active"
+    },
+    "requirements.engine.after_estimate_edit": {
+      "label": "Load lifecycle totals after one area estimate is edited",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 25,
+      "status": "active"
+    },
+    "kernel.parameters.resolve.10k": {
+      "label": "Part parameter resolution: 10,000 parts x 20 parameters (instance, then type value, then default)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "network.aggregate.one_edit.tower": {
+      "label": "One load point edit on the tower: the commit, then every network total re-aggregated to the service",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "schedules.equipment.open.2k": {
+      "label": "Equipment list opens on 2,000 planned items (first row set, every column read)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 150,
+      "p95": 300,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "struct.load_path.one_edit.grid_20x20": {
+      "label": "Structural load path re-totalled after one rooftop unit's weight changes, 20 x 20 bay roof",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "graphics.category_resolve.tower": {
+      "label": "Every tower-14 element resolved to its look in a plan view with no per-category overrides (every saved view today)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 15,
+      "p95": 25,
+      "status": "pending"
+    },
+    "graphics.category_resolve.tower.overrides": {
+      "label": "Same, with class and service overrides, a fresh registry (every element's class recognized once)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 100,
+      "p95": 150,
+      "status": "pending"
+    },
+    "zones.derived.resolve.500": {
+      "label": "Derived zones: the dedicated space above 500 panels, resolved with nothing cached",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 8,
+      "p95": 12,
+      "status": "pending"
+    },
+    "surfaces_at.250k": {
+      "label": "Floor, ceiling and roof at 1,000 points across a 250,000-element linked tower and 2,000 of our slabs",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 60,
+      "p95": 120,
+      "status": "pending"
+    },
+    "requirements.graph.one_edit.250k": {
+      "label": "Requirements re-derived after one edit (only rules whose declared reads it touched)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "requirements.graph.cold.250k": {
+      "label": "Every requirement derived from cold",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 650,
+      "p95": 680,
+      "status": "pending"
+    },
+    "requirements.graph.why": {
+      "label": "Why is this here? for one element",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 5,
+      "status": "pending"
+    },
+    "requirements.graph.depends_on.wall": {
+      "label": "What depends on this, for one wall",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 15,
+      "status": "pending"
+    },
+    "requirements.graph.impact_preview.merge_3_rooms": {
+      "label": "Impact preview of removing three walls (merging three rooms) on the scenario overlay",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "requirements.snapshot.bind.2k_rules": {
+      "label": "Bind a 2,000-rule requirements snapshot to a model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "pending"
+    },
+    "ceiling.height_at.250k": {
+      "label": "Ceiling seen from below at 1,000 points on a 250,000-element tower with 5,500 typed ceilings",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "qto.one_edit.250k": {
+      "label": "Quantities carried after one wall moves on a 250,370-element model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "qto.schedule.tower": {
+      "label": "Takeoff by cost code and stage on the tower (3,422 elements, 3,374 rows)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 80,
+      "p95": 130,
+      "status": "pending"
+    },
+    "cost.price_takeoff.250k": {
+      "label": "Price the takeoff in the reader's process with a test cost source (250,370 elements)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "propose.similar_query.250k": {
+      "label": "Rooms like this one, on a 250,000-element model (25,000 rooms)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "propose.apply_similar.40": {
+      "label": "Receptacles in a unit and its similar units, proposed and accepted as one edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 150,
+      "status": "pending"
+    },
+    "validate.incremental.250k": {
+      "label": "Validation after one edit on a model that already has open issues (head ledger warm)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 15,
+      "status": "active"
+    },
+    "propose.accept_click.250k": {
+      "label": "Click a previewed room to accept its ghosts, on a 250,000-element model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "kernel.packs.state_lookup": {
+      "label": "Resolving a model's add-on set from its own switches and pinned firm disciplines, per command",
+      "unit": "ns",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2000,
+      "p95": 2000,
+      "status": "pending"
+    },
+    "kernel.class_index.one_edit.250k": {
+      "label": "One part moved on a 250k model, then every recognizable class's elements read (what a schedule set reads after an edit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "derived.topology_edit.250k": {
+      "label": "One terminal removed on a 250k model: derived values (taps, airflow, runs, openings, annotations) after the edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "lint.level_edit.250k": {
+      "label": "A level raised on a 250k model: the coordination index advanced",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 200,
+      "status": "pending"
+    },
+    "kernel.packs.resolve": {
+      "label": "A model's pack set: the three first-party packs plus two stub packs built, then every extension point's items read",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1,
+      "p95": 2,
+      "status": "pending"
+    },
+    "kernel.packs.command_dispatch": {
+      "label": "Checking one kernel intent command when command types may be an add-on's (commandSchema.safeParse, move_tag)",
+      "unit": "ns",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 6220,
+      "p95": 12600,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "kernel.packs.command_dispatch.pack": {
+      "label": "Checking the first-party pack intent command (commandSchema.safeParse, place_service_layout)",
+      "unit": "ns",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 12600,
+      "p95": 12600,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "bim.pack_tools.dispatch": {
+      "label": "Listing a pinned model's add-on agent tools and dispatching one declared read through the host",
+      "unit": "us",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 16,
+      "p95": 30,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "bim.pack_tools.dispatch.direct_read": {
+      "label": "The old bim_read_panel handler's read, called directly (the host's before)",
+      "unit": "us",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "bim.pack_tools.dispatch.list": {
+      "label": "Listing a pinned model's add-on agent tools",
+      "unit": "us",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "bim.pack_tools.dispatch.pinned": {
+      "label": "Listing a pinned model's tools and dispatching a pinned add-on's read",
+      "unit": "us",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "schedules.v1.first_read.250k": {
+      "label": "A v1 Mechanical equipment schedule's first read of a new revision (250k)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 10,
+      "p95": 15,
+      "status": "pending"
+    },
+    "electrical.distribution.first_read.250k": {
+      "label": "The electrical engine's distribution list, first read of a new revision (250k)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 12,
+      "p95": 18,
+      "status": "pending"
+    },
+    "fields.level_members.first_read.250k": {
+      "label": "A level's members (the level_members relationship), first read of a new revision (250k)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 300,
+      "p95": 500,
+      "status": "pending"
+    },
+    "sync.apply.first_read.250k": {
+      "label": "A remote part move applied by a browser on a 250k model, then every recognizable class, the topology index and a level's members read",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "electrical.distribution_equipment.250k": {
+      "label": "Every panelboard, switchboard and transformer by name, first read of a new revision (250k)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "sheet.equipment_schedule.250k": {
+      "label": "The v1 sheet's equipment schedule rows, first read of a new revision (250k)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 60,
+      "p95": 100,
+      "status": "pending"
+    },
+    "organization.group_phase_command.250k": {
+      "label": "Delete a group that has members and delete a phase in use, both refused, on a committed 250k head right after an element edit",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "network.gravity.one_edit.tower": {
+      "label": "One branch end edited on a 40-storey gravity network: the walk from the touched node",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "elements.upgrade_on_edit.250k": {
+      "label": "The upgrade-on-edit hook's work for one edited wall on a 250k model of walls with no class or schema version",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 2,
+      "status": "pending"
+    },
+    "branch.fork.250k": {
+      "label": "Start a branch from a saved version 2,000 changesets back (a pin, never a copy), 250k elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 100,
+      "p95": 200,
+      "status": "pending"
+    },
+    "branch.fork.1M": {
+      "label": "Start a branch from a saved version 2,000 changesets back, 1M elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 2000,
+      "p95": 4000,
+      "status": "pending"
+    },
+    "branch.open": {
+      "label": "Open a branch cold on the model server, against opening its base",
+      "unit": "ratio",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 1.1,
+      "p95": 1.1,
+      "status": "pending"
+    },
+    "branch.commit": {
+      "label": "Commit on a branch session, against Main's commit",
+      "unit": "ratio",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 1,
+      "status": "pending"
+    },
+    "authority.memory.branch": {
+      "label": "Model server heap for one open branch beside its base",
+      "unit": "ratio",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.15,
+      "p95": 0.15,
+      "status": "pending"
+    },
+    "branch.state_at.2k_ids.250k": {
+      "label": "Read 2,000 elements as they were at a revision (state_at), 250k elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "branch.state_at.2k_ids.1M": {
+      "label": "Read 2,000 elements as they were at a revision (state_at), 1M elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "pending"
+    },
+    "branch.compare.schedule.2k": {
+      "label": "Show Main beside on a schedule (2,000 changed elements on the branch)",
+      "unit": "ms",
+      "scope": "browser",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "pending"
+    },
+    "merge.three_way": {
+      "label": "Three-way merge of a branch into Main, 2,000 changed elements (changed set only)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 500,
+      "p95": 1000,
+      "status": "pending"
+    },
+    "merge.partial_dependency": {
+      "label": "Which merge parts hang on which (hosts, connections, served-from), 2,000 changed",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 100,
+      "status": "pending"
+    },
+    "responsibility.cover.2k_changed": {
+      "label": "Which accepted responsibilities cover 2,000 changed elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "merge.apply.2k_changed": {
+      "label": "Land the approved parts of a 2,000-element merge on Main (one revision per part)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1000,
+      "p95": 2000,
+      "status": "pending"
+    },
+    "kinds.lift.stored": {
+      "label": "Read every stored airflow value through the add-on kind reader (old flat fields and the parameter form), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 40,
+      "p95": 80,
+      "status": "active"
+    },
+    "kinds.lift.stored.1M": {
+      "label": "Read every stored airflow value through the add-on kind reader, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 160,
+      "p95": 320,
+      "status": "active"
+    },
+    "connections.integrity.edit": {
+      "label": "Connector integrity on an edit: the changed ends only, through the spatial index, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "connections.integrity.edit.1M": {
+      "label": "Connector integrity on an edit, changed ends only, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "parts.import_report.one_type": {
+      "label": "Bad-connector report for one part type before it is saved",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 5,
+      "status": "active"
+    },
+    "validate.addon_switch.first_edit.1M": {
+      "label": "First edit after an add-on is switched on or off at 1M (re-runs only the checks that read what the add-on contributes)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "validate.first_edit_after_load.open_issues": {
+      "label": "First edit on a head loaded with an issue open: one whole-model check, not two",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "questions.register": {
+      "label": "Questions register on a new revision (500 questions), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "questions.register.1M": {
+      "label": "Questions register on a new revision (500 questions), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 80,
+      "p95": 160,
+      "status": "pending"
+    },
+    "question.thread.read": {
+      "label": "Read one question's thread (200 replies) on a new revision",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "submittal.chain_of.one_element": {
+      "label": "Design, submittal and field chain for one element (500 submittals, 100 substitutions)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 5,
+      "status": "pending"
+    },
+    "submittal.depends_on.one_type": {
+      "label": "What depends on one submitted type, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 15,
+      "p95": 30,
+      "status": "pending"
+    },
+    "submittal.depends_on.one_type.1M": {
+      "label": "What depends on one submitted type, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 60,
+      "status": "pending"
+    },
+    "validity.index.cold": {
+      "label": "First 'may no longer hold' read on a head (1,000 answers each relying on a room), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "validity.index.cold.1M": {
+      "label": "First 'may no longer hold' read on a head, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "validity.carry.relied": {
+      "label": "Edit to a relied-on room: re-check only the records relying on it (all registered carries), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "active"
+    },
+    "validity.carry.unrelated": {
+      "label": "Edit nothing relies on: the reliance index is shared, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.5,
+      "p95": 1,
+      "status": "active"
+    },
+    "validity.read.after_edit": {
+      "label": "Stale answers after an edit plus one answer's words, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 5,
+      "status": "active"
+    },
+    "signoff.signature.verify_one": {
+      "label": "Verify one passkey (WebAuthn ES256) signature on a sign-off entry",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 5,
+      "status": "active"
+    },
+    "signoff.chain.verify.10k": {
+      "label": "Verify a 10,000-entry sign-off chain, signatures included",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 400,
+      "status": "active"
+    },
+    "branch.switch.viewer_kept": {
+      "label": "Switch branch keeping the 3D view: time beyond branch.open, no rebuild of unchanged elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 200,
+      "status": "pending"
+    },
+    "ifc.import.apply.2k": {
+      "label": "Land one 2,000-record chunk of a linked IFC model on its proposal branch",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1000,
+      "p95": 2000,
+      "status": "pending"
+    },
+    "qto.delta.revision_pair.250k": {
+      "label": "Quantity change between two revisions from history reads, 250k elements (2,000 changed)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "pending"
+    },
+    "qto.delta.revision_pair.1M": {
+      "label": "Quantity change between two revisions from history reads, 1M elements (2,000 changed)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 400,
+      "status": "pending"
+    },
+    "cost.price_takeoff.1M": {
+      "label": "Price the takeoff in the reader's process with the reader's own price book (1M elements)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 400,
+      "status": "pending"
+    },
+    "requirements.graph.sensitivity.250k": {
+      "label": "What drives the most, after one edit (Checklist header), 250k elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "requirements.graph.sensitivity.1M": {
+      "label": "What drives the most, after one edit (Checklist header), 1M elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 40,
+      "p95": 80,
+      "status": "pending"
+    },
+    "validate.addon_switch.first_edit": {
+      "label": "First edit after an add-on is switched on or off (re-checks the model once under the new set)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "active"
+    },
+    "pipes.lift.stored": {
+      "label": "Every pipe fitting's joint read as its end type and every piece's product, on a fresh pack set (the open read inside authority.boot), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 40,
+      "p95": 80,
+      "status": "active"
+    },
+    "pipes.lift.stored.1M": {
+      "label": "Pipe joints and products lifted on open, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 160,
+      "p95": 320,
+      "status": "active"
+    },
+    "pipes.joint_issue.edit_50": {
+      "label": "Joint check for the 50 fittings an edit touches, read through the product rows",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.1,
+      "p95": 0.2,
+      "status": "active"
+    },
+    "pipes.sizing.edit_50": {
+      "label": "Pipe sizing for the 50 pieces an edit touches, read through the product rows",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.1,
+      "p95": 0.2,
+      "status": "active"
+    },
+    "kinds.connector_ends.resolve": {
+      "label": "Resolve the kind rows' connector ends for a set (cold) and read every element's downstream ends, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 5,
+      "p95": 10,
+      "status": "active"
+    },
+    "kinds.connector_ends.resolve.1M": {
+      "label": "Resolve connector ends and read every element's downstream ends, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 20,
+      "p95": 40,
+      "status": "active"
+    },
+    "kinds.anchor_of.row": {
+      "label": "anchorOf through the kind rows for every element, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 13,
+      "p95": 16,
+      "status": "active"
+    },
+    "kinds.anchor_of.row.1M": {
+      "label": "anchorOf through the kind rows for every element, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 45,
+      "p95": 55,
+      "status": "active"
+    },
+    "lineage.fork.1m": {
+      "label": "Fork a copy of a 1M model 2,000 changesets back",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 4.7,
+      "p95": 10,
+      "status": "pending"
+    },
+    "lineage.accept_back.2k": {
+      "label": "Accept 2,000 records of a copy back onto its parent, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 60,
+      "status": "pending"
+    },
+    "lineage.compare.diverged_10": {
+      "label": "Overlay read: compare two copies with 10% of records changed since their common ancestor, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 400,
+      "status": "pending"
+    },
+    "lineage.compare.1m.diverged_10": {
+      "label": "Overlay read with 10% changed, 1M (100k differences)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 800,
+      "p95": 1600,
+      "status": "pending"
+    },
+    "lineage.chain.depth_5.open": {
+      "label": "Open a copy five deep relative to one deep, 1M (ratio, %)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 15,
+      "status": "pending"
+    },
+    "findings.ledger.one_edit.250k": {
+      "label": "Problem list: refile after one edit, lint included, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4.9,
+      "status": "pending"
+    },
+    "gate.freeze": {
+      "label": "Freeze a stage (state digest, totals by basis) at a repeat revision, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1000,
+      "p95": 2000,
+      "status": "pending"
+    },
+    "gate.freeze.1M": {
+      "label": "Freeze a stage at a repeat revision, 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5000,
+      "p95": 8000,
+      "status": "pending"
+    },
+    "gate.compare.two_gates": {
+      "label": "Compare two frozen stages (estimate vs actual), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 2,
+      "status": "pending"
+    },
+    "requirements.applies_at.one_edit": {
+      "label": "One edit with a requirement tied to a parcel bound, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.6,
+      "p95": 40,
+      "status": "pending"
+    },
+    "basis.read_map.schedule": {
+      "label": "Confidence column over every row of a schedule, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 130,
+      "p95": 200,
+      "status": "pending"
+    },
+    "lineage.open.diverged_10": {
+      "label": "Open a copy from its checkpoint with 10% changed, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "lineage.open.diverged_50": {
+      "label": "Open a copy from its checkpoint with 50% changed, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 150,
+      "p95": 300,
+      "status": "pending"
+    },
+    "agent.preflight.one_edit.open_issues": {
+      "label": "Approve-card preflight on a model with 21,760 open issues, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 28.7,
+      "p95": 40,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "agent.preflight.one_edit.open_issues.20k": {
+      "label": "Approve-card preflight on a model with 2,000 open issues, about 23k elements",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "script.check.500_steps": {
+      "label": "Check a 500-step script output (preflight + checks on the touched area), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 300,
+      "p95": 400,
+      "status": "pending"
+    },
+    "script.snapshot.slice": {
+      "label": "Serialise a script's declared read slice (1.9 MB), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 200,
+      "p95": 300,
+      "status": "pending"
+    },
+    "script.check.500_steps.1M": {
+      "label": "Check a 500-step script output (preflight + checks on the touched area), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 300,
+      "p95": 400,
+      "status": "pending"
+    },
+    "route.preview.check_leg": {
+      "label": "Check one drawn route leg against rated walls, ceilings and room bounds while routing (pointer-follow, nothing sent), 250k and 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "route.check_span.leg": {
+      "label": "Route check of one span with the rated-element index (rated walls that don't bound rooms included), 250k and 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "heat_gain.space.after_edit": {
+      "label": "Kitchen heat of one room after an edit (parts-by-space index), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "diagram.selection.map": {
+      "label": "Map a diagram selection to model elements and back (one click either side), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "diagram.air_schematic.layout": {
+      "label": "Lay out one air system's schematic, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "plumbing.cleanout.propose": {
+      "label": "Propose cleanouts on one selected drain, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "pending"
+    },
+    "validate.addon_switch.first_edit_after_reopen": {
+      "label": "First edit after an add-on switch and a reopen from stored rows (kept checks re-used), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "pending"
+    },
+    "validate.addon_switch.first_edit_after_reopen.1M": {
+      "label": "First edit after an add-on switch and a reopen from stored rows (kept checks re-used), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 500,
+      "p95": 1000,
+      "status": "pending"
+    },
+    "memory.server.rss.two_copies.1M": {
+      "label": "Model server RSS with two copies of a 1M model open",
+      "unit": "MB",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1900,
+      "p95": 1900,
+      "status": "pending"
+    },
+    "library.install.verify.one_package": {
+      "label": "Verify one 50-type package offline (hashes, signature, licence, conformance)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 100,
+      "p95": 200,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "authority.boot.with_outside_packs.ratio": {
+      "label": "Model open with one outside data add-on pinned, relative to none, 250k (ratio ×100)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 105,
+      "p95": 105,
+      "status": "pending"
+    },
+    "zones.derived.cold": {
+      "label": "Derived zones for 2,000 parts, cold, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 13,
+      "p95": 25,
+      "status": "pending"
+    },
+    "zones.clearance_clash.one_edit": {
+      "label": "Clearance clash after one edit, 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 16,
+      "status": "pending"
+    },
+    "signoff.pin.context": {
+      "label": "Build and write the checking context a sign-off pins at sign time (20 relied rules)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 5,
+      "status": "active"
+    },
+    "validity.code_change.carry": {
+      "label": "Code of record changes (IBC 2021 -> 2024): re-check only the sign-offs relying on it (10,000 sign-offs, 40 changed rules, 60 carried forward)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 12,
+      "status": "active"
+    },
+    "set.issue.check": {
+      "label": "Reissue check before a set is issued: 100 sheets x 3 approvals",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 50,
+      "status": "active"
+    },
+    "sheet.fingerprint.issue": {
+      "label": "Stamp one sheet's Verify code and fingerprint its PDF at issue",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 6,
+      "p95": 8,
+      "status": "pending"
+    },
+    "verify.pdf.fingerprint": {
+      "label": "Fingerprint a 50 MB PDF in the browser (WebCrypto SHA-256)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1000,
+      "p95": 1000,
+      "status": "active"
+    },
+    "verify.by_hash": {
+      "label": "Verify by fingerprint at the server: one unique-index match plus the rate counter",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "questions.stale_after_agent_edit.cold": {
+      "label": "Answers an agent's edit made stale, on a fresh head (index built), 250k and 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 20,
+      "p95": 20,
+      "status": "active"
+    },
+    "questions.stale_after_agent_edit.warm": {
+      "label": "Answers an agent's edit made stale, same head, 250k and 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 20,
+      "status": "active"
+    },
+    "authority.open.kept_state.1M": {
+      "label": "Model server open (warm-up) of a 1M head with an issue open and its kept validation state",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 600,
+      "p95": 1000,
+      "status": "active"
+    },
+    "agent.mcp.bim_pack_connect": {
+      "label": "In-process wall time to connect the MutinyBIM core and every pack (initialize + tools/list each, in parallel)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 250,
+      "p95": 500,
+      "status": "active"
+    },
+    "sheet.key_plan.per_sheet.250k": {
+      "label": "Key plan drawn for one sheet on a 250k model (outline from the wall / slab / level kind index, never a scan of every element)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 5,
+      "status": "pending"
+    },
+    "sheet.document_index.after_commit.250k": {
+      "label": "The sheet index (sheets, views, viewports, drawn items) read after an edit committed the way the app commits it, on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 1,
+      "p95": 3,
+      "status": "pending"
+    },
+    "mechanical.size_system.250k": {
+      "label": "Size one air system of 250 runs (mechanical.size_system, nothing sent) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "mechanical.size_system.1M": {
+      "label": "Size one air system of 250 runs (mechanical.size_system, nothing sent) on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "viewer.live_plan.view_graphics.250k": {
+      "label": "Live plan symbol layer redrawn (circuits drawn as they are made) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 8,
+      "p95": 16,
+      "status": "pending"
+    },
+    "viewer.live_plan.view_graphics.1M": {
+      "label": "Live plan symbol layer redrawn (circuits drawn as they are made) on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 60,
+      "status": "pending"
+    },
+    "viewer.plan_near_miss.250k": {
+      "label": "One hover near miss in the live plan (a footprint within 8 px once every pick ray missed) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "viewer.plan_near_miss.1M": {
+      "label": "One hover near miss in the live plan on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2,
+      "p95": 4,
+      "status": "pending"
+    },
+    "viewer.plan_near_miss.sync_one_edit.250k": {
+      "label": "The near-miss footprint grid brought up to date after one element moved, at idle after a draw (never inside it), on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "viewer.plan_near_miss.sync_one_edit.1M": {
+      "label": "The near-miss footprint grid brought up to date after one element moved, at idle after a draw, on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 120,
+      "p95": 200,
+      "status": "pending"
+    },
+    "electrical.continue_circuit.plan.250k": {
+      "label": "Plan one device joining a circuit (Continue circuit) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 5,
+      "p95": 10,
+      "status": "pending"
+    },
+    "kernel.batch_edits.10.250k": {
+      "label": "One 10-step batch_edits committed on a 250k model, after a preview on the same head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "kernel.batch_edits.50.250k": {
+      "label": "One 50-step batch_edits committed on a 250k model, after a preview on the same head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 25,
+      "p95": 50,
+      "status": "pending"
+    },
+    "kernel.batch_edits.10.1M": {
+      "label": "One 10-step batch_edits committed on a 1M model, after a preview on the same head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 40,
+      "status": "pending"
+    },
+    "kernel.batch_edits.50.1M": {
+      "label": "One 50-step batch_edits committed on a 1M model, after a preview on the same head",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 50,
+      "p95": 100,
+      "status": "pending"
+    },
+    "schedule.edit_step.apply.250k": {
+      "label": "One edit_schedule (rename a column, then sort by it) committed through planCommit on a 250k model: one revision, one undo step, the schedule's paper re-sized",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 20,
+      "p95": 50,
+      "status": "active"
+    },
+    "schedule.rows.after_column_edit.250k": {
+      "label": "The grid's rows rebuilt after one column change (the new definition over the whole 250k model)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 30,
+      "p95": 60,
+      "status": "active"
+    },
+    "arch.wall.move_joined.250k": {
+      "label": "Move one joined wall on the 250k model: its corners and tees follow (one move_elements commit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 15,
+      "p95": 40,
+      "status": "active"
+    },
+    "arch.wall.move_joined.1M": {
+      "label": "Move one joined wall on the 1M model: its corners and tees follow (one move_elements commit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 80,
+      "status": "active"
+    },
+    "arch.wall.move_carry.250k": {
+      "label": "The share of that move spent carrying joined ends (move less the same move with Disjoin), 250k",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 3,
+      "p95": 6,
+      "status": "active"
+    },
+    "arch.wall.move_carry.1M": {
+      "label": "The share of that move spent carrying joined ends (move less the same move with Disjoin), 1M",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 3,
+      "p95": 6,
+      "status": "active"
+    },
+    "arch.wall.surface_follow.250k": {
+      "label": "Change one floor's thickness on the 250k model with every wall run to the structure above: the walls under it re-size in the same change (one set_element_thickness commit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 15,
+      "p95": 40,
+      "status": "pending"
+    },
+    "arch.wall.surface_follow.1M": {
+      "label": "Change one floor's thickness on the 1M model with every wall run to the structure above (one set_element_thickness commit)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 30,
+      "p95": 80,
+      "status": "pending"
+    },
+    "drawing.plan.other_levels.250k": {
+      "label": "A plan's other levels' work in its height range found (RTUs on ROOF LOW POINT drawn on ROOF) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 10,
+      "p95": 20,
+      "status": "pending"
+    },
+    "drawing.plan.other_levels.1M": {
+      "label": "A plan's other levels' work in its height range found on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 40,
+      "p95": 60,
+      "status": "pending"
+    },
+    "linked.plan.cut.mep.large": {
+      "label": "Linked MEP floor cut for a plan with every category drawn by the add-ons' rules (12,800 elements)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 800,
+      "p95": 1200,
+      "status": "pending"
+    },
+    "linked.reference.index.large": {
+      "label": "Index a linked building of 50,000 walls as reference geometry (snap, dimension and room-bound source), once per loaded set of linked models",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "cold",
+      "p50": 400,
+      "p95": 800,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "linked.reference.snap.large": {
+      "label": "One pointer move's linked snap read on that index (faces, centre lines, ends and corners within 300 mm)",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.05,
+      "p95": 0.2,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "viewer.opening.body.build.250k": {
+      "label": "Build one door or window body (frame, leaf, glass) on a 250k model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.2,
+      "p95": 0.5,
+      "status": "active",
+      "ciBudgetFactor": 1
+    },
+    "viewer.opening.body.build.1M": {
+      "label": "Build one door or window body (frame, leaf, glass) on a 1M model",
+      "unit": "ms",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 0.2,
+      "p95": 0.5,
+      "status": "pending",
+      "ciBudgetFactor": 1
+    },
+    "kernel.discipline.lookup": {
+      "label": "Name a stored discipline and check whether a filter covers it (disciplineLabel + disciplineCovers)",
+      "unit": "ns",
+      "scope": "in-process",
+      "cache": "warm",
+      "p50": 2000,
+      "p95": 2000,
+      "status": "active",
+      "ciBudgetFactor": 1
+    }
+  },
+  "knownBudgetFailures": {
+    "250k": [
+      "3d.edit.redraw"
+    ]
+  },
+  "knownBudgetFailuresNote": "Rows over budget at the last calibrated baseline. Reported, not blocking; delete a row the moment it passes (the gate fails until you do).",
+  "invariants": {
+    "x11.previewFullSyncs.50": {
+      "label": "Space index full re-reads during 18 Approve-card preflights on the 23k open-issues grid (each preflight stays on its neighbourhood)",
+      "max": 0
+    },
+    "x11.previewFullSyncs.544": {
+      "label": "Space index full re-reads during 18 Approve-card preflights on the 250k open-issues grid",
+      "max": 0
+    },
+    "findings.ledgerMismatches": {
+      "label": "Problem-list entries that differ between the incremental ledger and a fresh read after edits",
+      "max": 0
+    },
+    "electrical.recomputedAfterEdit": {
+      "label": "Distribution nodes whose loads are recomputed after one load edit (its panel, transformer, board and the MDP)",
+      "max": 4
+    },
+    "diagram.nondeterministic": {
+      "label": "Live diagram evaluations of the same model that drew different items (same model, same bytes)",
+      "max": 0
+    },
+    "electrical.incrementalMismatches": {
+      "label": "Electrical reports that differ between the incremental engine and a fresh one after the edits",
+      "max": 0
+    },
+    "electrical.rebalanceNondeterministic": {
+      "label": "Rebalance plans that differ between two runs on the same model",
+      "max": 0
+    },
+    "electrical.plan.nondeterministic": {
+      "label": "Prints of the same electrical plan whose circuit lines, gaps or tags differ (same model, same bytes)",
+      "max": 0
+    },
+    "electrical.propose.nondeterministic": {
+      "label": "Receptacle proposals that differ between two runs on the same rooms (same model, same bytes)",
+      "max": 0
+    },
+    "electrical.propose.uncovered": {
+      "label": "Rooms of the 24-unit proposal where some point of wall space or countertop is out of reach",
+      "max": 0
+    },
+    "electrical.schedules.problems": {
+      "label": "Panel schedules of the 300-panel building that could not show their panel",
+      "max": 0
+    },
+    "plumbing.incrementalMismatches": {
+      "label": "Pipe totals that differ between the incremental plumbing engine and a fresh one after load point edits",
+      "max": 0
+    },
+    "plumbing.flowMismatches": {
+      "label": "Pipes whose derived flow differs from what the plumbing engine says they carry",
+      "max": 0
+    },
+    "lint.advanceMismatches": {
+      "label": "Edits whose scoped lint findings after advance differ from a fresh engine's on the same revision",
+      "max": 0
+    },
+    "lint.blocksOver2KB": {
+      "label": "Lint blocks over the 2 KB cap",
+      "max": 0
+    },
+    "lint.editsOver50": {
+      "label": "Perf edits that touched more than the 50 elements lint.advance.50 is budgeted for",
+      "max": 0
+    },
+    "subscribedElements": {
+      "label": "Elements sent to a person who opened one zone (one zone at default density is 5,086)",
+      "max": 6000
+    },
+    "subscribedFraction": {
+      "label": "Subscribed elements / total for one zone at full-building scale",
+      "max": 0.01,
+      "minTier": "1M"
+    },
+    "editAffected.slide_branch": {
+      "label": "Elements in the slide_branch changeset",
+      "max": 64
+    },
+    "editAffected.resize_run": {
+      "label": "Elements in the resize_run changeset",
+      "max": 512
+    },
+    "editAffected.place_part": {
+      "label": "Elements in a place_part changeset (the part, plus its type the first time)",
+      "max": 2
+    },
+    "editAffected.move_elements": {
+      "label": "Elements in a move_elements changeset for one untagged part",
+      "max": 1
+    },
+    "editAffected.route_run": {
+      "label": "Elements in a route_run changeset (three segments, two elbows, the part, the system the first time)",
+      "max": 8
+    },
+    "editAffected.resize_routed": {
+      "label": "Elements in a resize of one routed run",
+      "max": 16
+    },
+    "editAffected.move_connected": {
+      "label": "Elements in a move of one part with one connected run",
+      "max": 8
+    },
+    "editAffected.delete_connected": {
+      "label": "Elements in a cascade delete of one routed segment (the elbow it left, its cap)",
+      "max": 4
+    },
+    "editAffected.swap_fitting": {
+      "label": "Elements in a swap_fitting changeset (the fitting only)",
+      "max": 1
+    },
+    "editAffected.route_pipe": {
+      "label": "Elements in a route_pipe changeset (two sloped segments, the turn, the system the first time)",
+      "max": 4
+    },
+    "editAffected.swap_pipe_fitting": {
+      "label": "Elements in a swap_pipe_fitting changeset (the fitting only)",
+      "max": 1
+    },
+    "editAffected.offset_run": {
+      "label": "Elements in an offset_run changeset (the segment, two elbows, the sloped piece, the moved remainder)",
+      "max": 6
+    },
+    "editAffected.split_run": {
+      "label": "Elements in a split_run changeset (the head, the new tail, what met the far end)",
+      "max": 4
+    },
+    "editAffected.resize_stretch": {
+      "label": "Elements in a resize_stretch between two points (head, stretch, tail, two transitions, the far neighbour)",
+      "max": 8
+    },
+    "outsideObserver.bytesPerEdit": {
+      "label": "Bytes delivered per edit to someone in another zone (a new part type or level, sent once to every area, is not counted)",
+      "max": 256
+    },
+    "outsideObserver.changesets": {
+      "label": "Changesets with zone content delivered to someone in another zone (model-wide definitions excepted)",
+      "max": 0
+    },
+    "previewScale": {
+      "label": "Warm edit preview p50 at 1M / at 250k (needs both tiers in the comparison baseline)",
+      "max": 2
+    },
+    "partSolveMismatches": {
+      "label": "Repeated solves of one sketch whose points, status or iterations differ from the first (the solver is deterministic)",
+      "max": 0
+    },
+    "partRegenMismatches": {
+      "label": "Repeated regenerations of one part whose mesh bytes differ from the first (the engine is deterministic)",
+      "max": 0
+    },
+    "booleanMismatches": {
+      "label": "Repeated cuts of the same two solids whose triangle count or volume differ from the first",
+      "max": 0
+    },
+    "calcMismatches": {
+      "label": "Repeated calc runs whose result bytes (values, citations, runKey) differ from the first (calcs are deterministic)",
+      "max": 0
+    },
+    "ui.edit.rerendered_panels": {
+      "label": "Building Model panels (canvas, inspector, rail, ribbon) that re-render when one element is edited with no side panel open",
+      "max": 2
+    },
+    "agent.tools.core_plus_two.tokens": {
+      "label": "Tool text (estimated tokens) for the MutinyBIM core plus any two packs; each pack also stays under its own cap in packages/bim-plugin/src/catalogue.ts",
+      "max": 34000
+    },
+    "e2e.building_model.shard_minutes": {
+      "label": "Building Model E2E wall time per shard in CI, minutes, retries 0",
+      "max": 45
+    },
+    "ui.first_chunk.kb": {
+      "label": "kB in the Building Model surface's static first-load import graph: own source files plus each npm package's entry file, type-only and dynamic imports excluded",
+      "max": 9586
+    }
+  }
+}

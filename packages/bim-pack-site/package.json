@@ -1,0 +1,22 @@
+{
+  "name": "@permitzip/bim-pack-site",
+  "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/permitzip/mutinybim.git",
+    "directory": "packages/bim-pack-site"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "type": "module",
+  "description": "MutinyBIM Site add-on: site constraints (setbacks, easements, flood zones, environmental findings, utility capacity) and parcels as intent records with no geometry, and the parcel requirement anchor, so site rules hold before a building is drawn. Built only through the add-on contract.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@permitzip/bim-kernel": "*",
+    "@permitzip/bim-pack": "*"
+  }
+}

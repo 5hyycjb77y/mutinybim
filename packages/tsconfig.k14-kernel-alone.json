@@ -1,0 +1,129 @@
+{
+  "extends": "./tsconfig.bim.json",
+  "compilerOptions": {
+    "paths": {
+      "@permitzip/bim-kernel": [
+        "./bim-kernel/src/index.ts"
+      ],
+      "@permitzip/bim-kernel/types": [
+        "./bim-kernel/src/types.ts"
+      ],
+      "@permitzip/bim-kernel/geometry": [
+        "./bim-kernel/src/geometry.ts"
+      ],
+      "@permitzip/bim-kernel/registry": [
+        "./bim-kernel/src/registry/index.ts"
+      ],
+      "@permitzip/bim-kernel/spaces": [
+        "./bim-kernel/src/spaces/index.ts"
+      ],
+      "@permitzip/bim-kernel/services": [
+        "./bim-kernel/src/services/index.ts"
+      ],
+      "@permitzip/bim-kernel/categories": [
+        "./bim-kernel/src/categories/index.ts"
+      ],
+      "@permitzip/bim-kernel/surfaces": [
+        "./bim-kernel/src/surfaces/index.ts"
+      ],
+      "@permitzip/bim-kernel/connections": [
+        "./bim-kernel/src/connections/index.ts"
+      ],
+      "@permitzip/bim-kernel/questions": [
+        "./bim-kernel/src/questions/index.ts"
+      ],
+      "@permitzip/bim-kernel/blocks": [
+        "./bim-kernel/src/blocks/index.ts"
+      ],
+      "@permitzip/bim-kernel/commands": [
+        "./bim-kernel/src/commands.ts"
+      ],
+      "@permitzip/bim-kernel/packs": [
+        "./bim-kernel/src/packs/index.ts"
+      ],
+      "@permitzip/bim-kernel/placement": [
+        "./bim-kernel/src/placement/index.ts"
+      ],
+      "@permitzip/bim-kernel/elements": [
+        "./bim-kernel/src/elements/index.ts"
+      ],
+      "@permitzip/bim-kernel/formats": [
+        "./bim-kernel/src/formats.ts"
+      ],
+      "@permitzip/bim-kernel/findings": [
+        "./bim-kernel/src/findings/api.ts"
+      ],
+      "@permitzip/bim-kernel/lineages": [
+        "./bim-kernel/src/lineages/index.ts"
+      ],
+      "@permitzip/bim-kernel/lifecycle": [
+        "./bim-kernel/src/lifecycle/index.ts"
+      ],
+      "@permitzip/bim-kernel/basis": [
+        "./bim-kernel/src/basis/index.ts"
+      ],
+      "@permitzip/bim-kernel/calc-sheets": [
+        "./bim-kernel/src/calc-sheets/index.ts"
+      ],
+      "@permitzip/bim-kernel/policy": [
+        "./bim-kernel/src/policy/index.ts"
+      ],
+      "@permitzip/bim-kernel/schedules": [
+        "./bim-kernel/src/schedules/engine/index.ts"
+      ],
+      "@permitzip/bim-kernel/intake": [
+        "./bim-kernel/src/propose/intake.ts"
+      ],
+      "@permitzip/bim-kernel/rated-routes": [
+        "./bim-kernel/src/routing/rated-routes.ts"
+      ],
+      "@permitzip/bim-kernel/typicals": [
+        "./bim-kernel/src/organization/typicals-extras.ts"
+      ],
+      "@permitzip/bim-units": [
+        "./bim-units/src/index.ts"
+      ],
+      "@permitzip/bim-units/kinds": [
+        "./bim-units/src/kind-point.ts"
+      ],
+      "@permitzip/bim-geometry": [
+        "./bim-geometry/src/index.ts"
+      ],
+      "@permitzip/bim-formula": [
+        "./bim-formula/src/index.ts"
+      ]
+    },
+    "types": [
+      "node"
+    ]
+  },
+  "include": [],
+  "files": [
+    "./bim-kernel/src/basis/index.ts",
+    "./bim-kernel/src/blocks/index.ts",
+    "./bim-kernel/src/calc-sheets/index.ts",
+    "./bim-kernel/src/categories/index.ts",
+    "./bim-kernel/src/commands.ts",
+    "./bim-kernel/src/connections/index.ts",
+    "./bim-kernel/src/elements/index.ts",
+    "./bim-kernel/src/findings/api.ts",
+    "./bim-kernel/src/formats.ts",
+    "./bim-kernel/src/geometry.ts",
+    "./bim-kernel/src/index.ts",
+    "./bim-kernel/src/lifecycle/index.ts",
+    "./bim-kernel/src/lineages/index.ts",
+    "./bim-kernel/src/organization/typicals-extras.ts",
+    "./bim-kernel/src/packs/index.ts",
+    "./bim-kernel/src/placement/index.ts",
+    "./bim-kernel/src/policy/index.ts",
+    "./bim-kernel/src/propose/intake.ts",
+    "./bim-kernel/src/questions/index.ts",
+    "./bim-kernel/src/registry/index.ts",
+    "./bim-kernel/src/routing/rated-routes.ts",
+    "./bim-kernel/src/schedules/engine/index.ts",
+    "./bim-kernel/src/services/index.ts",
+    "./bim-kernel/src/spaces/index.ts",
+    "./bim-kernel/src/surfaces/index.ts",
+    "./bim-kernel/src/types.ts"
+  ]
+}

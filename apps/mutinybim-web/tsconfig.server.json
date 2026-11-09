@@ -1,0 +1,4 @@
+{
+  "extends": "../../packages/tsconfig.bim.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "__tests__/**/*.ts", "client/ai.ts", "client/settings.ts"]
+}
