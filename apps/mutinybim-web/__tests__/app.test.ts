@@ -303,6 +303,21 @@ test("the theme choice is kept in the account and drawn on every page", async ()
   expect(app?.db.userByEmail("sam@example.com")?.color_scheme).toBe("light");
 });
 
+test("sign-up shows the terms and privacy agreement, and the pages answer", async () => {
+  await start();
+  const form = await (await fetch(`${base}/signup`)).text();
+  expect(form).toContain('name="agree"');
+  expect(form).toContain('href="/terms"');
+  expect(form).toContain('href="/privacy"');
+  for (const pathname of ["/terms", "/privacy"]) {
+    const response = await fetch(`${base}${pathname}`);
+    expect(response.status).toBe(200);
+    expect((await response.text()).toLowerCase()).toContain(pathname.slice(1));
+  }
+  const refused = await post("/signup", { name: "Sam", email: "sam@example.com", password: "correct-horse", agree: "0" });
+  expect(refused.status).toBe(400);
+});
+
 test("with no quote setting there is no quote button, page or wording anywhere", async () => {
   await start();
   const cookie = await signUp("sam@example.com");

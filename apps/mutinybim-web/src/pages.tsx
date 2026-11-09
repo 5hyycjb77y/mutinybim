@@ -161,6 +161,12 @@ export function signupPage(config: WebConfig, options: { email?: string; name?: 
           <TextField label="Your name" hint="People editing with you see it." name="name" autoComplete="name" required maxLength={80} defaultValue={options.name ?? ""} />
           <TextField label="Email" name="email" type="email" autoComplete="email" required defaultValue={options.email ?? ""} />
           <TextField label="Password" hint="At least 8 characters." name="password" type="password" autoComplete="new-password" required minLength={8} />
+          <label className="flex items-start gap-2 text-sm text-(--mutiny-muted)">
+            <input type="checkbox" name="agree" value="1" required className="mt-1" />
+            <span>
+              I agree to the <a href="/terms">Terms of use</a> and the <a href="/privacy">Privacy notice</a>.
+            </span>
+          </label>
           <Button type="submit" size="lg">
             Create account
           </Button>
@@ -172,6 +178,53 @@ export function signupPage(config: WebConfig, options: { email?: string; name?: 
     </Card>,
     { title: "Sign up", user: null, quote: null, flash: options.flash ?? null, narrow: true },
   );
+}
+
+/** A short legal page: a title and paragraphs, in the same narrow frame as the forms. */
+function legalPage(title: string, paragraphs: ReactNode[]): string {
+  return page(
+    <div className="flex flex-col gap-4 text-sm/relaxed">
+      <h1 className="text-2xl">{title}</h1>
+      {paragraphs.map((text, i) => (
+        <p key={i}>{text}</p>
+      ))}
+      <p className="text-(--mutiny-muted)">Last updated November 9, 2026.</p>
+    </div>,
+    { title, user: null, quote: null, narrow: true },
+  );
+}
+
+/**
+ * Terms of use. Short on purpose: the software is Apache-2.0, the hosted
+ * service is provided as-is, and the person keeps their models.
+ */
+export function termsPage(): string {
+  return legalPage("Terms of use", [
+    "These terms cover the hosted MutinyBIM app at app.mutinybim.com, run by PermitZIP. The MutinyBIM software itself is open source under the Apache License 2.0: you can read, use and change the code from the public repository, and that license governs the code.",
+    <>
+      <strong>The service is provided as is.</strong> It is free and comes with no warranty of any kind, including that it will be available, error-free or fit for a particular purpose. To the fullest extent the law allows, PermitZIP is not liable for any loss or damage from using the service, including lost models or lost time. Nothing here limits liability the law does not let us limit.
+    </>,
+    "You own the models you make. You give us permission only to store them and to show them to the people you share them with. Don't upload anything you don't have the right to, and don't use the service to break the law or to attack the service or other people.",
+    "You can stop using the service at any time, and you can ask us to delete your account and models. We may suspend or close an account that breaks these terms, and we may change or stop the service. If we change these terms, the date at the bottom changes and the new terms apply from then on.",
+  ]);
+}
+
+/**
+ * Privacy notice. What is stored, what never reaches the server (the AI key),
+ * and how to ask for deletion.
+ */
+export function privacyPage(): string {
+  return legalPage("Privacy notice", [
+    "This notice covers the hosted MutinyBIM app at app.mutinybim.com, run by PermitZIP.",
+    <>
+      <strong>What we store:</strong> your name, your email address, a one-way hash of your password (never the password itself), your models, and who you share them with. We also keep a short server log of requests, which includes your IP address, so we can run and protect the service.
+    </>,
+    <>
+      <strong>What we never see:</strong> your AI key. It stays in your browser and goes straight from there to your own AI provider. We don't receive it, store it or pay for your AI use.
+    </>,
+    "We use this information to run your account and your models, and for nothing else. We don't sell it and we don't use it for advertising. If you sign in with another provider, we receive only the name and email that provider shares.",
+    "You can ask us to export or delete your account and models, and to correct your name or email. Email the address on the PermitZIP website and we'll do it. Some records, such as server logs, are kept only as long as we need them to run and secure the service.",
+  ]);
 }
 
 /** No email is sent by this app, so recovery is a linked sign-in or a reset link from whoever runs the server. */

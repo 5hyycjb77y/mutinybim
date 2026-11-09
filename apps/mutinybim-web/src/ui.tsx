@@ -157,7 +157,7 @@ export function page(body: ReactNode, options: FrameOptions): string {
           {body}
         </main>
         <footer className="border-t border-(--mutiny-border) px-4 py-5 text-center text-xs text-(--mutiny-muted)">
-          MutinyBIM is open source (Apache-2.0). <a href="https://github.com/permitzip/mutinybim">Source code</a> · Bring your own AI: this app pays for none and sees none of your keys.
+          MutinyBIM is open source (Apache-2.0). <a href="https://github.com/permitzip/mutinybim">Source code</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · Bring your own AI: this app pays for none and sees none of your keys.
         </footer>
         {(options.scripts ?? []).map((src) => (
           <script key={src} type="module" src={src} />

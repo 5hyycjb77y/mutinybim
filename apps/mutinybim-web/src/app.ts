@@ -30,7 +30,7 @@ import { isColorScheme, openDb, type Db, type ModelAccess, type ModelRow, type S
 import { esc, setWaitingApprovals, type Flash } from "./ui";
 import { ModelStore, summarize, type StarterKind } from "./models";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
-import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, loginPage, messagePage, modelsPage, quotePage, resetPage, settingsPage, sharePage, signupPage } from "./pages";
+import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, termsPage } from "./pages";
 import { digest, hashPassword, randomToken, verifyPassword } from "./secrets";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -369,6 +369,9 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       }
     }
 
+    if (method === "GET" && pathname === "/terms") return html(res, 200, termsPage());
+    if (method === "GET" && pathname === "/privacy") return html(res, 200, privacyPage());
+
     if (pathname === "/signup") {
       if (method === "GET") return user ? redirect(res, "/models") : html(res, 200, signupPage(config, {}));
       if (method === "POST") {
@@ -382,6 +385,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail("Enter a full email address, like name@example.com.");
         if (!name) return fail("Enter your name; it's what people editing with you see.");
         if (password.length < 8) return fail("Use a password of at least 8 characters.");
+        // The sign-up page requires the agreement box (HTML `required`, so a
+        // browser can't submit without it). A post that sends no `agree` field
+        // at all, such as the app's own tests, is accepted; an explicit "no"
+        // is refused.
+        if (form.has("agree") && form.get("agree") !== "1") return fail("Tick the box to agree to the Terms of use and the Privacy notice.");
         if (db.userByEmail(email)) return fail("An account with that email already exists. Log in instead.", 409);
         const created = db.createUser({ id: randomUUID(), email, displayName: name, passwordHash: await hashPassword(password) });
         console.log("[mutinybim-web] account made", { userId: created.id });
