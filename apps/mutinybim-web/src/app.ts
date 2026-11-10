@@ -669,10 +669,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       const back = new URL(checked.request.redirectUri);
       const web = back.protocol === "https:" || back.protocol === "http:";
       if (!form) {
-        // The form posts here, then this app sends the browser on to the assistant. form-action covers every
-        // redirect after that too, and assistants bounce their own callback (www.cursor.com → cursor.com):
-        // allow any https address, plus the callback's own origin or app scheme.
-        const csp = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https: ${web ? back.origin : back.protocol}`;
+        // No form-action: the browser applies it to every redirect after the form posts, and an assistant's
+        // callback can redirect on to its own app scheme (Cursor: www.cursor.com → cursor.com → cursor://),
+        // which no source list can name in advance.
+        const csp = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'`;
         return html(res, 200, assistantConsentPage(config, user, { clientName: checked.request.client.client_name, backTo: web ? back.host : back.protocol.replace(/:$/, ""), request: params.toString(), models: db.modelsOf(user.id).length, shared: db.sharedWith(user.id).length }), { "content-security-policy": csp });
       }
       if (form.get("decision") !== "allow") {

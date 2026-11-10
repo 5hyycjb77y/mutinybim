@@ -77,8 +77,8 @@ async function signInAssistant(cookie: string, resource = `${base}/mcp`): Promis
   const consent = await fetch(`${base}/oauth/authorize?${params}`, { headers: { cookie } });
   expect(consent.status).toBe(200);
   expect(await consent.text()).toContain("Let “Test Assistant” use your models?");
-  // The browser checks every redirect after Allow, and assistants bounce their callback to another https host.
-  expect(consent.headers.get("content-security-policy")).toMatch(/form-action 'self' https: /);
+  // The browser checks form-action on every redirect after Allow, and an assistant's callback can go on to its app scheme.
+  expect(consent.headers.get("content-security-policy")).not.toContain("form-action");
   const allowed = await post("/oauth/authorize", { request: params.toString(), decision: "allow" }, cookie);
   expect(allowed.status).toBe(303);
   const back = new URL(allowed.headers.get("location") ?? "");
