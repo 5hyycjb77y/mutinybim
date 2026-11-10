@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { EditorDataHost } from '@permitzip/bim-editor-host'
-import { useOptionalEditorHost } from '@permitzip/bim-editor/host'
-import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
 import type { SheetBlockReport } from '../../contracts/bim/block-reports'
 
 export type BlockFreshnessState =
+  | { readonly status: 'unavailable' }
   | { readonly status: 'loading' }
   | { readonly status: 'error'; readonly message: string }
   | { readonly status: 'ready'; readonly revision: number; readonly blocks: readonly SheetBlockReport[] }
@@ -23,9 +22,10 @@ function errorOf(value: unknown): string | null {
 /**
  * Live blocks on sheets against their latest issue, read again whenever the
  * saved model's revision moves (an edit can change a load summary).
+ * A host without the optional blocks service cannot check issues; that is
+ * unavailable, not a failed request.
  */
 export function useBlockFreshnessFrom(port: EditorDataHost['blocks'], projectId: string, modelId: string, sheets: readonly string[], revision: number): BlockFreshnessState & { readonly retry: () => void } {
-  const capabilities = useOptionalEditorHost()?.capabilities ?? null
   const [state, setState] = useState<BlockFreshnessState>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
   const sheetKey = sheets.join(',')
@@ -54,6 +54,6 @@ export function useBlockFreshnessFrom(port: EditorDataHost['blocks'], projectId:
     setState({ status: 'loading' })
     setAttempt((n) => n + 1)
   }, [])
-  if (!port) return { status: 'error', message: unavailableWords('Checking live blocks against their issue', capabilities), retry }
+  if (!port) return { status: 'unavailable', retry }
   return { ...state, retry }
 }

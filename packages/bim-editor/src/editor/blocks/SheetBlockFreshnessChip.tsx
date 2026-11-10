@@ -22,6 +22,7 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(und
  * issued PDF never changes either way.
  */
 export function SheetBlockFreshnessChip({ freshness, blockId }: { freshness: BlockFreshnessState & { readonly retry: () => void }; blockId?: string }) {
+  if (freshness.status === 'unavailable') return null
   if (freshness.status === 'loading') {
     return (
       <Badge variant="outline" aria-live="polite" data-testid="block-freshness">
