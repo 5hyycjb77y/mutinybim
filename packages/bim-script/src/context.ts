@@ -4,7 +4,7 @@ import { FIRST_PARTY_PACK_IDS, PACK_READ_POINT, activePackSet, firstPartyPackNam
 import { scriptSourceIssues, type ScriptKind, type ScriptValue } from "@permitzip/bim-library";
 import type { ScriptDefinition } from "./define";
 import { deterministicId, seededRandom, type RunSeed } from "./determinism";
-import { chunkEdits, stepRefusal, type EditStep, type ScriptOutput } from "./output";
+import { MAX_SCRIPT_REPORT_BYTES, MAX_SCRIPT_REPORTS, chunkEdits, jsonBytes, stepRefusal, type EditStep, type ScriptOutput, type ScriptReport } from "./output";
 import { sliceAsModel, sliceReader, type ModelSlice, type SliceReader } from "./slice";
 import { bindWorking } from "./working";
 
@@ -54,6 +54,15 @@ export interface ScriptContext {
   editSteps(command: unknown): void;
   /** What the edits do, in words, for the approval card ("Receptacles every 12 ft, Level 2"). */
   label(text: string): void;
+  /**
+   * Shows a value the script read or worked out to the agent, beside the
+   * preview (`report` in bim_run_script's answer): levels and their ids, a
+   * room's area, a calc's answer. Plain data only (numbers, text, lists,
+   * objects); at most 50 reports and 16 KB a run. A script that only
+   * reports, and makes no edits, still runs: its preview has nothing to
+   * apply. If the run stops, what it reported so far is in the message.
+   */
+  report(label: string, value: unknown): void;
   /** The engineering calculations a script can run (code calcs, duct and pipe reports, service size). */
   calcs(): readonly ScriptCalcInfo[];
   /**
@@ -130,6 +139,9 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
   const types: { typeId: string; definition: PartTypeDefinition }[] = [];
   const typeIds = new Set<string>();
   let label = "";
+  const reports: ScriptReport[] = [];
+  let reportBytes = 2;
+  let reportsCut = false;
   const features = new Set(input.slice.features);
   const serverReads = (feature: string) => features.has(feature);
   const ctx: ScriptContext = {
@@ -139,6 +151,21 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
     random,
     label(text) {
       label = text.trim().slice(0, 160);
+    },
+    report(text, value) {
+      const words = typeof text === "string" ? text.trim().slice(0, 120) : "";
+      if (!words) throw new ScriptRunError('ctx.report takes a label first: ctx.report("Levels", ctx.model.levels()).');
+      const plain = plainData(words, value);
+      if (reportsCut) return;
+      const entry = { label: words, value: plain };
+      const bytes = jsonBytes(entry) + 1;
+      if (reports.length >= MAX_SCRIPT_REPORTS - 1 || reportBytes + bytes > MAX_SCRIPT_REPORT_BYTES - jsonBytes(REPORTS_CUT) - 1) {
+        reports.push(REPORTS_CUT);
+        reportsCut = true;
+        return;
+      }
+      reports.push(entry);
+      reportBytes += bytes;
     },
     calcs() {
       return withPackSet(input.packs, () => scriptCalcs.list()).map((c) => ({ id: c.id, title: c.title, domain: c.domain, summary: c.summary, readsModel: c.needsModel }));
@@ -183,7 +210,7 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
       // Parsed as a one-step batch: the kernel's own check that it is a single edit a batch may hold.
       const one = { type: "batch_edits", commands: [command] };
       const parsed = withPackSet(input.packs, () => commandSchema.safeParse(one));
-      if (!parsed.success) throw new ScriptRunError(`Step ${n} (${command.type}) isn't a valid edit: ${commandIssueMessage(parsed.error, one)}${missingTradesWords(input.slice)}`);
+      if (!parsed.success) throw new ScriptRunError(`Step ${n} (${command.type}) isn't a valid edit: ${commandIssueMessage(parsed.error, one)}${unitWords(command)}${missingTradesWords(input.slice)}`);
       const step = isEditBatchCommand(parsed.data) ? parsed.data.commands[0] : undefined;
       if (!step) throw new ScriptRunError(`Step ${n} (${command.type}) isn't a single edit.`);
       const result = withPackSet(input.packs, () => withUpgradePolicy(serverReads, () => executeCommand(working, step)));
@@ -201,14 +228,80 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
     },
   };
   bindWorking(ctx, { model: () => working, packs: input.packs });
-  await definition.runWith(ctx, input.values);
-  if (kind === "part") {
-    if (types.length === 0) throw new ScriptRunError("The part script defined no part types.");
-    return { kind: "part_types", types };
+  try {
+    await definition.runWith(ctx, input.values);
+  } catch (err) {
+    throw withReports(err, reports);
   }
-  if (steps.length === 0) throw new ScriptRunError("The script made no edits.");
+  const report = reports.length > 0 ? { report: reports } : {};
+  if (kind === "part") {
+    if (types.length === 0) throw withReports(new ScriptRunError("The part script defined no part types."), reports);
+    return { kind: "part_types", types, ...report };
+  }
+  if (steps.length === 0) {
+    if (reports.length === 0) throw new ScriptRunError("The script made no edits. To see values without editing, ctx.report them.");
+    return { kind: "edits", label: label || "Nothing changed: reports only", steps: 0, batches: [], ...report };
+  }
   const words = label || `${steps.length} edit${steps.length === 1 ? "" : "s"} by script`;
-  return { kind: "edits", label: words, steps: steps.length, batches: chunkEdits(words, steps) };
+  return { kind: "edits", label: words, steps: steps.length, batches: chunkEdits(words, steps), ...report };
+}
+
+/** The report that stands in for those past the run's limit. */
+const REPORTS_CUT: ScriptReport = { label: "more", value: `Reports past ${MAX_SCRIPT_REPORTS} or ${MAX_SCRIPT_REPORT_BYTES / 1024} KB were left out; report less, or a summary.` };
+
+/** A reported value as plain JSON data, or the script's error in words. */
+function plainData(label: string, value: unknown): unknown {
+  if (value === undefined) return null;
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(value);
+  } catch (err) {
+    throw new ScriptRunError(`ctx.report("${label}") takes plain data (numbers, text, lists, objects); this value can't be written out (${err instanceof Error ? err.message : String(err)}).`);
+  }
+  if (text === undefined) throw new ScriptRunError(`ctx.report("${label}") takes plain data (numbers, text, lists, objects), not a function or symbol.`);
+  return JSON.parse(text);
+}
+
+/** At most this much of a stopped run's message is its reports (the runner keeps 4000 characters). */
+const STOPPED_REPORT_CHARS = 1500;
+
+/** The error, with what the script reported before it stopped (an error from the script's own realm keeps its stack, so its line). */
+function withReports(err: unknown, reports: readonly ScriptReport[]): unknown {
+  if (reports.length === 0 || typeof err !== "object" || err === null) return err;
+  const message: unknown = Reflect.get(err, "message");
+  if (typeof message !== "string") return err;
+  const room = Math.min(STOPPED_REPORT_CHARS, 3500 - message.length);
+  if (room < 80) return err;
+  const all = reports.map((r) => `${r.label}: ${JSON.stringify(r.value)}`).join("; ");
+  Reflect.set(err, "message", `${message}. What it reported before stopping: ${all.length > room ? `${all.slice(0, room - 1)}…` : all}`);
+  return err;
+}
+
+/** Why an edit that didn't parse may hold a units.* value or NaN where the kernel wants plain millimetres ("" when it doesn't). */
+function unitWords(command: unknown): string {
+  const found = unitProblem(command, "", 0, { left: 20_000 });
+  return found ? `. ${found} Kernel commands take plain millimetres: units.in_(length, "mm") is the number, or use a kit helper (building.walls, building.ceiling, equipment.place) that takes units.* values.` : "";
+}
+
+function unitProblem(value: unknown, path: string, depth: number, budget: { left: number }): string | null {
+  if (budget.left-- <= 0 || depth > 12) return null;
+  if (typeof value === "number") return Number.isNaN(value) ? `${path || "A value"} is NaN: arithmetic on a units.* value (a measure, not a number) gives NaN.` : null;
+  if (typeof value !== "object" || value === null) return null;
+  if (Array.isArray(value)) {
+    for (const [i, v] of value.entries()) {
+      const found = unitProblem(v, `${path}[${i}]`, depth + 1, budget);
+      if (found) return found;
+    }
+    return null;
+  }
+  const keys = Object.keys(value);
+  const kind: unknown = Reflect.get(value, "kind");
+  if (keys.length === 2 && typeof kind === "string" && typeof Reflect.get(value, "value") === "number") return `${path || "A value"} is a ${kind} measure (units.*), not a number.`;
+  for (const k of keys) {
+    const found = unitProblem(Reflect.get(value, k), path ? `${path}.${k}` : k, depth + 1, budget);
+    if (found) return found;
+  }
+  return null;
 }
 
 /** The batches a plan may come as; each holds single edits (or, for batch_edits, more batches). */

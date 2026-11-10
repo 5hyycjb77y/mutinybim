@@ -82,17 +82,35 @@ single calls. Use a family's single tools for one or two edits.
 - `units.ft / in / mm / m / of`: every length is a measure.
 - `parts.part(name, { type, category })` → `box` / `cylinder` / `transition`
   → `connector(face, { id, label, domain, systemKind, shape, size…, endType })`
-  → `ctx.parts.define(typeId, builder.build())`. Duct connectors need an end
+  → `ctx.parts.define(typeId, builder.build())`, in a **part** script only. A
+  layout or route script uses part types by listing their ids in
+  `reads.partTypes` and placing them with `equipment.place`; it never calls
+  `ctx.parts.define`. Duct connectors need an end
   type (`mechanical.slip`, `mechanical.flanged`, `mechanical.formed_flange`);
   pipe ones too (`plumbing_gas.sweat`, `plumbing_gas.threaded`, …).
-- `building.walls`, `building.floor`, `building.door`, `building.window`,
-  `building.space`.
+- `building.level`, `building.walls`, `building.floor`, `building.door`,
+  `building.window`, `building.space`, `building.spaceInWalls`,
+  `building.ceiling` (outline and height as `units.*` values).
+- **Level arguments are level ids** (from `building.level` or
+  `ctx.model.levels()` with `reads.levels: true`). The kit's helpers also take
+  the name of exactly one level the script read; raw `ctx.edit` commands take
+  only the id.
+- **Read what a helper works from.** `building.spaceInWalls` traces walls: put
+  `"wall"` in `reads.kinds` unless the script draws them first.
+  `bim_check_output` warns when a call needs data the reads don't send.
+- **See a value with `ctx.report(label, value)`**, never by throwing an
+  error: it comes back as `report` in `bim_run_script`'s answer (50 reports,
+  16 KB). A script that only reports still runs.
+- `units.*` values are measures, not numbers. Give them to kit helpers; a raw
+  `ctx.edit` command takes plain millimetres (`units.in_(length, "mm")`).
 - `equipment.place(ctx, { level, type, at })` → `placed.connector("supply")`
   is a route end.
 - `routes.along` (with `slope: { rise, per }` for drains), `routes.branch`,
   `routes.drop`, `routes.connectInto`; sizes `routes.rect / round / oval / pipe`.
 - `documents.sheet`, `planView`, `ceilingView`, `duplicateView`, `place` (a
-  view on a sheet), `editSchedule`, `sheetSet`.
+  view on a sheet), `editSchedule`. There is no sheet set function: number
+  the sheets in print order; the person picks the sheets when printing or
+  issuing.
 - Anything else: `ctx.edit(command)` with any model command; its fields come
   from `bim_script_reference({ command })`. Circuits and loads are the
   add-ons' commands; search for them.

@@ -36,6 +36,9 @@ export default defineScript({
     const duct = routes.rect(units.mm(width), units.mm(height));
 
     // The unit's part type: a box with supply and return openings on its underside, sized like the ducts.
+    // A route or layout script saves a new type as an edit (save_part_types). It never calls
+    // ctx.parts.define (only a part script does); to use a type the model or library already has,
+    // list its id in reads.partTypes and place it with equipment.place.
     const rtu = parts.part("Rooftop unit", { type: "10 ton", category: "mechanical_equipment" });
     rtu.box({ length: units.in(120), width: units.in(60), height: units.in(48) });
     for (const [id, label, systemKind, x] of [["supply", "Supply", "supply_air", -30], ["return", "Return", "return_air", 30]] as const) {

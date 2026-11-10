@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DEFAULT_SETTINGS, canonicalJson, elementCount, elementValues, type ModelState } from "@permitzip/bim-kernel";
+import { DEFAULT_SETTINGS, canonicalJson, elementCount, elementValues, gatedRecordFeatures, type ModelState } from "@permitzip/bim-kernel";
 import { contentHashOf, makeItem, scriptItemSchema, scriptReadsSchema, type ScriptItem, type ScriptReads } from "@permitzip/bim-library";
 import {
   RUNNER_CONTRACT,
@@ -18,6 +18,7 @@ import {
   lintScript,
   parseScriptOutput,
   partTypeItemsFromRun,
+  readsWarnings,
   runFailureWords,
   searchReference,
   sliceAsModel,
@@ -126,6 +127,16 @@ async function resolveScript(lib: ScriptLibrary, arg: ScriptArg): Promise<{ read
   return { ok: true, script: { source: item.source, reads: item.manifest.reads, seed, saved: item } };
 }
 
+/**
+ * The features a script's slice carries: what the model server advertises out
+ * of the protocol's features and the kernel's gated record shapes (ceilings,
+ * quantities, …). The server advertises both (`serverProtocol`), so a slice
+ * built from the protocol list alone refuses shapes the server stores.
+ */
+export function sliceFeatures(policy: (feature: string) => boolean): string[] {
+  return [...new Set([...Object.values(PROTOCOL_FEATURES), ...gatedRecordFeatures()])].filter((f) => policy(f));
+}
+
 const EMPTY_SLICE: ModelSlice = { format: SLICE_FORMAT, version: 1, modelId: "none", revision: 0, reads: {}, selection: [], elements: {}, connections: [], settings: DEFAULT_SETTINGS, features: [] };
 
 interface RunOnModel {
@@ -155,7 +166,7 @@ async function runScriptFor(helpers: ScriptToolHelpers, extra: unknown, args: { 
   return helpers.withModel(extra, { project_id: args.project_id, model_id: args.model_id, level: args.level, zone: args.zone }, async (session) => {
     const head = session.model();
     const policy = session.upgradePolicy();
-    const features = Object.values(PROTOCOL_FEATURES).filter((f) => policy(f));
+    const features = sliceFeatures(policy);
     // Parts the script names from the host's library ride in the slice, so the sealed runner can place them (the open server holds none of its own).
     const patterns = script.reads.partTypes ?? [];
     const library = patterns.length > 0 ? libraryPartTypesFor(await (await helpers.library(extra)).partTypes(), patterns) : {};
@@ -291,6 +302,13 @@ const referenceIndex = () => ({
     how: "parts.part(name, { type, category }) → box / cylinder / transition bodies → connector(face, { id, label, domain, systemKind, shape, width?, height?, diameter? }) → ctx.parts.define(typeId, builder.build()).",
     example: KIT_ENTRIES.find((e) => e.name === "PartBuilder.connector")?.example,
   },
+  rules: {
+    levels: "Level arguments are level ids: building.level returns one, ctx.model.levels() lists them (reads.levels: true). The kit's helpers also take the name of exactly one level the script read; raw ctx.edit commands take only the id.",
+    part_types_in_layouts: 'A layout or route script uses part types by listing their ids in reads.partTypes ("acme.rtu.*" patterns work) and placing them with equipment.place. Only a part script (kind: "part") defines part types, with ctx.parts.define.',
+    reads: 'Read what a kit function works from: building.spaceInWalls traces walls, so read them (reads.kinds: ["wall"]) unless the script draws them first. bim_check_output warns when a call needs data the reads don\'t send.',
+    see_values: "ctx.report(label, value) shows what the script read or worked out in bim_run_script's report (50 reports, 16 KB a run); a script that only reports still runs. Don't throw an error to see a value.",
+    units: 'units.* values are measures, not numbers: give them to kit helpers (building.walls, building.ceiling, equipment.place). A raw ctx.edit command takes plain millimetres: units.in_(length, "mm").',
+  },
   limits: "one result ≤ 500 steps (one undo step); 1 GB memory, 30 s, 2 MB output; a run that hits a cap is not run again unchanged.",
   outside_clients: "Agents outside this server may run the open-source kit themselves and send its output to bim_apply_output ({ output, provenance }); the kernel re-checks every step and a person still approves.",
 });
@@ -389,12 +407,14 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           if (!reads.success) findings.push({ line: 0, rule: "shape", message: `reads isn't a script's reads: ${reads.error.issues.map((i) => `${i.path.join(".") || "reads"} ${i.message}`).join("; ")}.` });
           body.findings = findings.map((f) => ({ line: f.line, rule: f.rule, message: f.message }));
           ok = findings.length === 0;
+          const warnings = reads.success ? readsWarnings(args.script.source, reads.data) : [];
+          if (warnings.length > 0) body.warnings = warnings.map((w) => ({ line: w.line, rule: w.rule, message: w.message }));
         }
         if ((args.script || args.output) && args.model_id && args.project_id) {
           const modelArgs = { project_id: args.project_id, model_id: args.model_id, level: args.level, zone: args.zone };
           await helpers.withModel(extra, modelArgs, async (session) => {
             const policy = session.upgradePolicy();
-            const features = Object.values(PROTOCOL_FEATURES).filter((f) => policy(f));
+            const features = sliceFeatures(policy);
             const reads = args.script && "source" in args.script ? scriptReadsSchema.safeParse(args.script.reads) : null;
             if (reads?.success) body.reads = sliceSummary(sliceModel(session.model(), reads.data, args.selection ?? [], features));
             if (args.output) {
@@ -456,6 +476,10 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
         if (!resolved.script.saved && manifest && canonicalJson(manifest.reads) !== canonicalJson(resolved.script.reads)) {
           return json({ status: "has_issues", message: `The script declares reads ${canonicalJson(manifest.reads)} but was run with ${canonicalJson(resolved.script.reads)}. Run it with the reads it declares.`, nothing_changed: true });
         }
+        const report = got.output.report ? { report: got.output.report } : {};
+        if (got.output.kind === "edits" && got.output.steps === 0) {
+          return json({ status: "reported", kind: "edits", ...report, message: "The script made no edits, so there is nothing to apply. Its reports are in report.", nothing_changed: true, ms: run.result.ok ? run.result.ms : 0 });
+        }
         const tier = got.change.tier;
         const approval = tier.tier;
         if (got.output.kind === "edits") {
@@ -467,6 +491,7 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
             steps: got.output.steps,
             changes: { creates: got.change.summary.creates, edits: got.change.summary.edits, deletes: got.change.summary.deletes },
             checks: checkLines(got.check),
+            ...report,
             approval,
             ...(tier.tier === "ask_every_time" ? { approval_reasons: tier.reasons } : {}),
             ...(!one ? { message: `It makes ${got.output.steps} steps; one result lands as one undo step of at most 500. Split the work into smaller runs.` } : {}),
@@ -480,7 +505,7 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           });
         }
         const parts = partLines(got.output, got.check);
-        const body = { status: got.check.ok ? "previewed" : "has_issues", kind: "part_types", types: parts, checks: checkLines(got.check), approval, ms: run.result.ok ? run.result.ms : 0 };
+        const body = { status: got.check.ok ? "previewed" : "has_issues", kind: "part_types", types: parts, checks: checkLines(got.check), ...report, approval, ms: run.result.ok ? run.result.ms : 0 };
         if (!got.check.ok) return json(body);
         return json({
           ...body,
@@ -668,7 +693,7 @@ async function applyOutsideOutput(helpers: ScriptToolHelpers, extra: unknown, ar
     const head = session.model();
     if (head.revision !== args.base_revision) return { stale: `The model is at Rev ${head.revision}; the output was made at Rev ${args.base_revision}.` } as const;
     const policy = session.upgradePolicy();
-    const features = Object.values(PROTOCOL_FEATURES).filter((f) => policy(f));
+    const features = sliceFeatures(policy);
     const check = checkScriptOutput(head, output, { features });
     const change = editsChange(head, output, sliceModel(head, {}, [], features));
     return { check, change } as const;

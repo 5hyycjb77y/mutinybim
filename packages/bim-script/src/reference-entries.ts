@@ -143,8 +143,15 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["label", "approve card", "describe"],
   },
   {
+    name: "ctx.report",
+    summary: "Shows a value the script read or worked out to the agent: it comes back as `report` in bim_run_script's answer, beside the preview. Plain data only (numbers, text, lists, objects); at most 50 reports and 16 KB a run. A script that only reports and makes no edits still runs (nothing to apply), and a run that stops says what it reported so far. Use it instead of throwing an error to see a value.",
+    signature: "report(label: string, value: unknown): void",
+    example: layout(`    const levels = ctx.model.levels().map((l) => ({ id: l.id, name: l.name, elevationMm: l.elevationMm }));\n    ctx.report("Levels (use the id as a level argument)", levels);`),
+    topics: ["report", "see values", "debug", "print", "inspect", "what is in the model", "level ids", "return data"],
+  },
+  {
     name: "ctx.parts.define",
-    summary: "Part scripts: one part type (one size of the part) saved under its type id.",
+    summary: "Part scripts only (kind: \"part\"): one part type (one size of the part) saved under its type id. A layout or route script never defines part types: it lists the ids of the types it uses in reads.partTypes (\"acme.rtu.*\" patterns work) and places them with equipment.place.",
     signature: "parts: { define(typeId: string, definition: PartTypeDefinition): void }",
     example: part(`${BOX}\n    ctx.parts.define("acme.box.24", b.build());`),
     topics: ["part", "custom part", "family", "part type", "equipment type"],
@@ -469,17 +476,24 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "building.level",
-    summary: "A level at an elevation; returns its id.",
+    summary: "A level at an elevation; returns its id. Every level argument in the kit takes a level's id (this one, or one from ctx.model.levels()); the kit's helpers also take the name of exactly one level the script read (reads.levels: true), and refuse an unknown or shared name with the levels there are.",
     signature: "level(ctx: ScriptContext, spec: { name: string; elevation: Measure; id?: string }): string",
     example: layout(`    building.level(ctx, { name: "Level 3", elevation: units.ft(24) });`),
     topics: ["level", "levels", "storey", "floor level", "roof level"],
   },
   {
     name: "building.spaceInWalls",
-    summary: "A room found from the walls around a point: the kernel traces the enclosure and refuses an open room in words; returns the space's id.",
+    summary: "A room found from the walls around a point: the kernel traces the enclosure and refuses an open room in words; returns the space's id. It traces the walls in the script's model, so read them (reads.kinds: [\"wall\"]) unless the script draws them first; the kit stops with \"you didn't read walls\" otherwise.",
     signature: "spaceInWalls(ctx: ScriptContext, spec: { level: string; inside: PlanPoint; number?: string; name?: string; id?: string }): string",
     example: layout(`${WALLS}\n    building.spaceInWalls(ctx, { level: "L1", inside: { x: units.ft(15), y: units.ft(10) }, number: "101", name: "Office" });`),
     topics: ["rooms from walls", "find rooms", "room", "space", "trace rooms", "enclosure"],
+  },
+  {
+    name: "building.ceiling",
+    summary: "A ceiling on a level at a height above it, flat or sloped (slope: its direction and rise over run), optionally in a space and of a ceiling type; returns its id. Takes units.* values, so there are no millimetres to work out by hand.",
+    signature: "ceiling(ctx: ScriptContext, spec: { level: string; outline: readonly PlanPoint[]; height: Measure; space?: string; holes?: readonly (readonly PlanPoint[])[]; slope?: { directionDeg: number; pitch: number }; reference?: PlanPoint; typeId?: string; id?: string }): string",
+    example: layout(`${WALLS}\n    const office = building.spaceInWalls(ctx, { level: "L1", inside: { x: units.ft(15), y: units.ft(10) }, number: "101", name: "Office" });\n    const inside = [{ x: units.ft(1), y: units.ft(1) }, { x: units.ft(29), y: units.ft(1) }, { x: units.ft(29), y: units.ft(19) }, { x: units.ft(1), y: units.ft(19) }];\n    const ceiling = building.ceiling(ctx, { level: "L1", space: office, outline: inside, height: units.ft(9) });\n    ctx.report("Ceiling", ceiling);`),
+    topics: ["ceiling", "ceilings", "ceiling height", "sloped ceiling", "acoustic tile", "gypsum ceiling", "reflected ceiling"],
   },
   {
     name: "equipment.place",

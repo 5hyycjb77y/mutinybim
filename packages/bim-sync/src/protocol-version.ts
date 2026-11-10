@@ -1,7 +1,7 @@
 import { DISCIPLINES_REGISTRY_FEATURE, ORGANIZATION_SETUP_FEATURE, ELEMENT_TYPES_FEATURE, ELEMENTS_CORE_FEATURE, LINKS_DESIGN_FEATURE, PARTITION_DISCIPLINES_FEATURE, PARTS_LINE_HOST_FEATURE, PARTS_PACK_VALUES_FEATURE, PARTS_UNIT_CODES_FEATURE, SPACES_PARAMETER_RATES_FEATURE, PARTS_CONNECTOR_VALUES_FEATURE, SERVICES_REGISTRY_FEATURE, gatedRecordFeatures } from "@permitzip/bim-kernel";
 import { PACKS_PINS_FEATURE } from "@permitzip/bim-kernel/packs";
 import { QUESTION_ANSWERS_FEATURE, QUESTION_CUSTODY_FEATURE, QUESTION_FORWARD_PERSON_FEATURE, QUESTION_THREADS_FEATURE, SUBMITTAL_DIVERGENCE_FEATURE, SUBMITTAL_RECORDS_FEATURE, VALIDITY_RELIANCE_FEATURE } from "@permitzip/bim-kernel";
-import { ACTORS_PROVIDER_FEATURE, BRANCHES_IMPORT_FEATURE, CONNECTOR_END_TYPES_FEATURE, JOIN_PARTS_FEATURE, KINDS_ADDON_OWNED_FEATURE } from "@permitzip/bim-kernel";
+import { ACTORS_PROVIDER_FEATURE, BRANCHES_IMPORT_FEATURE, CEILINGS_FEATURE, CONNECTOR_END_TYPES_FEATURE, JOIN_PARTS_FEATURE, KINDS_ADDON_OWNED_FEATURE } from "@permitzip/bim-kernel";
 import { KINDS_ADDON_SHAPES_FEATURE, PIPES_ADDON_PRODUCTS_FEATURE, SIGNOFFS_CHECKING_CONTEXT_FEATURE, SIGNOFFS_DISPOSITIONS_FEATURE } from "@permitzip/bim-kernel";
 import { FINDINGS_LEDGER_FEATURE } from "@permitzip/bim-kernel/findings";
 import { GATES_RECORDS_FEATURE } from "@permitzip/bim-kernel/lifecycle";
@@ -88,6 +88,8 @@ export const PROTOCOL_FEATURES = {
   validityReliance: VALIDITY_RELIANCE_FEATURE,
   /** Round 9 A9: add-on-owned element kinds in their parameter form. Also a gated record step, so every peer of this release advertises it through `gatedRecordFeatures()`. */
   kindsAddonOwned: KINDS_ADDON_OWNED_FEATURE,
+  /** Round 7: `ceiling` records. A gated record step, so every peer of this release advertises it through `gatedRecordFeatures()`; named here so a host that lists the protocol's features (a script's slice) sees it. */
+  elementsCeilings: CEILINGS_FEATURE,
   /** Round 9 J9: part-type connectors carry an `endType` from the connector end-type point: the peer reads and stores it. */
   partsConnectorEndTypes: CONNECTOR_END_TYPES_FEATURE,
   /** Round 9 J9: `join_parts`, two parts' connectors (or a part and a load point) joined end to end: the peer reads and stores the links. */

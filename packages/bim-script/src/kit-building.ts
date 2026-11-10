@@ -1,6 +1,9 @@
-import { OPENING_SILL_KEY, asElementId, builtinPartType, planLevelSync, surfacesAt, type Command, type LevelSyncPlan, type SurfacesAtResult, type SyncStorey } from "@permitzip/bim-kernel";
+import { BOUNDING_ELEMENT_POINT, OPENING_SILL_KEY, asElementId, builtinPartType, planLevelSync, surfacesAt, type Command, type LevelSyncPlan, type SurfacesAtResult, type SyncStorey } from "@permitzip/bim-kernel";
+import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
+import { levelOf } from "./levels";
+import { ScriptReadError } from "./slice";
 import { onWorking, onWorkingIfAny } from "./working";
 
 /**
@@ -18,6 +21,7 @@ type CreateElement = Extract<Command, { type: "create_element" }>;
 type PlacePart = Extract<Command, { type: "place_part" }>;
 type CreateLevel = Extract<Command, { type: "create_level" }>;
 type SpaceInWalls = Extract<Command, { type: "place_space_in_walls" }>;
+type CreateCeiling = Extract<Command, { type: "create_ceiling" }>;
 type ElementSize = NonNullable<CreateElements["size"]>;
 type Values = NonNullable<CreateElements["values"]>;
 
@@ -95,12 +99,12 @@ export interface ChainSpec {
 const SURFACE_TO = { "structure above": "structure", ceiling: "ceiling", roof: "roof" } as const;
 
 /** A chain's top and base as the kernel's command fields. */
-function boundsOf(spec: ChainSpec): Pick<CreateElements, "topLevelId" | "topOffsetMm" | "topSurface" | "baseSurface" | "baseOffsetMm"> {
+function boundsOf(ctx: ScriptContext, spec: ChainSpec): Pick<CreateElements, "topLevelId" | "topOffsetMm" | "topSurface" | "baseSurface" | "baseOffsetMm"> {
   const out: { topLevelId?: string; topOffsetMm?: number; topSurface?: NonNullable<CreateElements["topSurface"]>; baseSurface?: NonNullable<CreateElements["baseSurface"]>; baseOffsetMm?: number } = {};
   const top = spec.top ?? (spec.topLevel ? { level: spec.topLevel, ...(spec.topOffset ? { offset: spec.topOffset } : {}) } : undefined);
   if (typeof top === "string") out.topSurface = { to: SURFACE_TO[top] };
   else if (top && "level" in top) {
-    out.topLevelId = top.level;
+    out.topLevelId = levelOf(ctx, top.level, "The top level");
     if (top.offset) out.topOffsetMm = mm(top.offset, "Top offset");
   } else if (top) out.topSurface = { to: SURFACE_TO[top.to], ...(top.offset ? { offsetMm: mm(top.offset, "Top offset") } : {}) };
   const base = spec.base;
@@ -118,13 +122,13 @@ function chain(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {
   const command: CreateElements = {
     type: "create_elements",
     idPrefix: spec.id ?? ctx.id(kind),
-    levelId: spec.level,
+    levelId: levelOf(ctx, spec.level),
     kind,
     points: spec.points.map((p, i) => planMm(p, `Point ${i + 1}`)),
     ...(spec.closed ? { closed: true } : {}),
     ...(spec.typeId ? { typeId: spec.typeId } : {}),
     ...(size ? { size } : {}),
-    ...boundsOf(spec),
+    ...boundsOf(ctx, spec),
     ...(spec.values ? { values: spec.values } : {}),
     ...(spec.label ? { label: spec.label } : {}),
   };
@@ -217,6 +221,48 @@ function storeysOf(ctx: ScriptContext, spec: LevelSyncSpec): SyncStorey[] {
   return spec.storeys.map((s) => ({ storeyId: s.storeyId, name: s.name, elevationMm: mm(s.elevation, `Storey ${s.name} elevation`), levelId: s.levelId ?? ctx.id("level") }));
 }
 
+/** A ceiling: its outline on plan and its height above the level. */
+export interface CeilingSpec {
+  /** The level it is on: its id, or the name of exactly one level the script read. */
+  readonly level: string;
+  /** Corners in order (either direction). */
+  readonly outline: readonly PlanPoint[];
+  /** Height above the level (where it is measured on a sloped one: `reference`, else the first corner). */
+  readonly height: Measure;
+  /** The space it is in (its id); absent: in none (a canopy, an open area). */
+  readonly space?: string;
+  /** Openings cut out of it, each an outline. */
+  readonly holes?: readonly (readonly PlanPoint[])[];
+  /** A sloped ceiling: the direction it rises toward (degrees counter-clockwise from east) and its rise over run (0.25 is 3 in 12). */
+  readonly slope?: { readonly directionDeg: number; readonly pitch: number };
+  /** Where `height` is measured on a sloped ceiling. */
+  readonly reference?: PlanPoint;
+  /** A ceiling type the model has (what it is made of: an acoustic tile, gypsum board). */
+  readonly typeId?: string;
+  readonly id?: string;
+}
+
+/** The kinds that bound rooms in the add-ons in force (walls, separation lines, an add-on's partitions) the script neither read nor drew, when nothing that bounds rooms is in its model; else null. */
+function unreadBounding(ctx: ScriptContext): readonly { readonly kind: string; readonly label: string }[] | null {
+  return (
+    onWorkingIfAny(ctx, (model) => {
+      const rows = activePackSet().items(BOUNDING_ELEMENT_POINT);
+      const kinds = new Set(rows.map((r) => r.kind));
+      for (const id in model.elements) if (kinds.has(model.elements[id]?.kind ?? "")) return null;
+      const unread = rows.filter((r) => {
+        try {
+          ctx.model.ofKind(r.kind);
+          return false;
+        } catch (err) {
+          if (err instanceof ScriptReadError) return true;
+          throw err;
+        }
+      });
+      return unread.length > 0 ? unread.map((r) => ({ kind: r.kind, label: r.label })) : null;
+    }) ?? null
+  );
+}
+
 export interface RoomSpec {
   readonly level: string;
   readonly number: string;
@@ -230,7 +276,7 @@ export const building = {
   /** A room (number, name, outline) on a level, as the architect's room: what receptacle spacing, room schedules and room templates read. Returns its id. */
   room(ctx: ScriptContext, spec: RoomSpec): string {
     const roomId = spec.id ?? ctx.id("room");
-    ctx.edit({ type: "add_architecture", levelId: spec.level, walls: [], openings: [], casework: [], rooms: [{ roomId, number: spec.number, name: spec.name, outline: spec.outline.map((p, i) => planMm(p, `Room corner ${i + 1}`)) }] });
+    ctx.edit({ type: "add_architecture", levelId: levelOf(ctx, spec.level), walls: [], openings: [], casework: [], rooms: [{ roomId, number: spec.number, name: spec.name, outline: spec.outline.map((p, i) => planMm(p, `Room corner ${i + 1}`)) }] });
     return roomId;
   },
   /**
@@ -240,7 +286,7 @@ export const building = {
    */
   surfacesAt(ctx: ScriptContext, target: SurfacesTargetSpec): Extract<SurfacesAtResult, { ok: true }> {
     const result = onWorking(ctx, "building.surfacesAt", (model) =>
-      surfacesAt(model, "element" in target ? { elementId: asElementId(target.element) } : { point: planMm(target.at, "Point"), ...(target.level ? { levelId: asElementId(target.level) } : {}), ...(target.elevation ? { elevationMm: mm(target.elevation, "Elevation") } : {}) }),
+      surfacesAt(model, "element" in target ? { elementId: asElementId(target.element) } : { point: planMm(target.at, "Point"), ...(target.level ? { levelId: asElementId(levelOf(ctx, target.level)) } : {}), ...(target.elevation ? { elevationMm: mm(target.elevation, "Elevation") } : {}) }),
     );
     if (!result.ok) throw new ScriptRunError(result.reason);
     return result;
@@ -263,10 +309,17 @@ export const building = {
   },
   /** A room found from the walls around a point; the kernel refuses an open room in words. Returns the space's id. */
   spaceInWalls(ctx: ScriptContext, spec: SpaceInWallsSpec): string {
+    const unread = unreadBounding(ctx);
+    if (unread) {
+      const [first] = unread;
+      throw new ScriptRunError(
+        `building.spaceInWalls traces what bounds the room around the point, but you didn't read ${unread.map((r) => `${r.label.toLowerCase()}s`).join(" or ")}, so this run has none. Add "${first?.kind ?? "wall"}" to reads.kinds${unread.length > 1 ? ` (and ${unread.slice(1).map((r) => `"${r.kind}"`).join(", ")} if those bound it)` : ""}, or draw the walls in the script first.`,
+      );
+    }
     const command: SpaceInWalls = {
       type: "place_space_in_walls",
       spaceId: spec.id ?? ctx.id("space"),
-      levelId: spec.level,
+      levelId: levelOf(ctx, spec.level),
       seed: planMm(spec.inside, "Point inside the room"),
       ...(spec.number ? { number: spec.number } : {}),
       ...(spec.name ? { name: spec.name } : {}),
@@ -289,7 +342,7 @@ export const building = {
     const command: CreateElement = {
       type: "create_element",
       elementId: spec.id ?? ctx.id("slab"),
-      levelId: spec.level,
+      levelId: levelOf(ctx, spec.level),
       kind: "slab",
       placement: { kind: "area", outline: spec.points.map((p, i) => planMm(p, `Outline point ${i + 1}`)) },
       ...(spec.typeId ? { typeId: spec.typeId } : {}),
@@ -319,13 +372,30 @@ export const building = {
       spaceId,
       number: spec.number,
       name: spec.name,
-      levelId: spec.level,
+      levelId: levelOf(ctx, spec.level),
       ...(spec.outline ? { outline: spec.outline.map((p, i) => planMm(p, `Outline point ${i + 1}`)) } : {}),
       ...(spec.ceilingHeight ? { ceilingHeightMm: mm(spec.ceilingHeight, "Ceiling height") } : {}),
       ...(spec.occupants !== undefined ? { occupants: spec.occupants } : {}),
     };
     ctx.edit({ type: "create_space", spaces: [space] });
     return spaceId;
+  },
+  /** A ceiling at a height above its level, flat or sloped; returns its id. Its type (what it is made of) is a ceiling type the model has. */
+  ceiling(ctx: ScriptContext, spec: CeilingSpec): string {
+    const ceilingId = spec.id ?? ctx.id("ceiling");
+    const ceiling: CreateCeiling["ceilings"][number] = {
+      ceilingId,
+      levelId: levelOf(ctx, spec.level),
+      outline: spec.outline.map((p, i) => planMm(p, `Ceiling corner ${i + 1}`)),
+      heightMm: mm(spec.height, "Ceiling height"),
+      ...(spec.space ? { spaceId: spec.space } : {}),
+      ...(spec.holes ? { holes: spec.holes.map((h, i) => h.map((p, j) => planMm(p, `Hole ${i + 1} corner ${j + 1}`))) } : {}),
+      ...(spec.slope ? { slope: spec.slope } : {}),
+      ...(spec.reference ? { reference: planMm(spec.reference, "Height reference") } : {}),
+      ...(spec.typeId ? { typeId: spec.typeId } : {}),
+    };
+    ctx.edit({ type: "create_ceiling", ceilings: [ceiling] });
+    return ceilingId;
   },
 };
 
@@ -369,7 +439,7 @@ export const equipment = {
       partId: spec.id ?? ctx.id("part"),
       typeId: spec.type,
       ...(libraryDefinition ? { partType: libraryDefinition } : {}),
-      levelId: spec.level,
+      levelId: levelOf(ctx, spec.level),
       position: planMm(spec.at, "Position"),
       ...(spec.height ? { offsetMm: mm(spec.height, "Height") } : {}),
       ...(spec.rotationDeg !== undefined ? { rotationDeg: spec.rotationDeg } : {}),

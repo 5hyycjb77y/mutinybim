@@ -1,6 +1,7 @@
 import { fittingFamilies, type Command, type FittingFamily, type PipeMaterial, type RunDomain, type RunSize } from "@permitzip/bim-kernel";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import type { ScriptContext } from "./context";
+import { levelOf } from "./levels";
 import { onWorking } from "./working";
 
 /**
@@ -80,7 +81,7 @@ function command(ctx: ScriptContext, spec: RouteSpec, overrides: Partial<RouteRu
   return {
     type: "route_run",
     idPrefix: spec.id ?? ctx.id("run"),
-    levelId: spec.level,
+    levelId: levelOf(ctx, spec.level),
     domain: spec.domain,
     size: spec.size,
     system: spec.system,
@@ -108,7 +109,7 @@ function send(ctx: ScriptContext, cmd: RouteRun): RouteHandle {
 }
 
 function levelHeightMm(ctx: ScriptContext, levelId: string): number {
-  const level = ctx.model.get(levelId);
+  const level = ctx.model.get(levelOf(ctx, levelId));
   const h = level.kind === "level" ? Reflect.get(level, "elevationMm") : undefined;
   if (typeof h !== "number") throw new Error(`${levelId} isn't a level, so a route can't drop to it.`);
   return h;

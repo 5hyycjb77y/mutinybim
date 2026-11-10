@@ -7,7 +7,7 @@ approval (`bim_run_script` → check → `bim_apply_output`).
 
 | Example | What it builds |
 | --- | --- |
-| [`small-office.ts`](small-office.ts) | Two floors of a 40 x 30 ft office. Exterior and interior walls, doors and windows, and rooms found from the walls around them (open office, conference room, office). A plan of each floor on its own sheet. |
+| [`small-office.ts`](small-office.ts) | Two floors of a 40 x 30 ft office. Exterior and interior walls, doors and windows, and rooms found from the walls around them (open office, conference room, office), each with a 9 ft ceiling. A plan of each floor on its own sheet, and a report of the level and room ids it made. |
 | [`rooftop-unit.ts`](rooftop-unit.ts) | A 10 ton rooftop unit. The script sizes the supply and return ducts from the airflow, builds the unit's part type with openings that size, places it on the roof and routes its ducts down into two rooms. Then it tags the ducts on a plan and puts an equipment schedule on a sheet. |
 | [`plumbing-riser.ts`](plumbing-riser.ts) | Toilet rooms on two floors. The script counts their fixture units and sizes the branches, the stack and the building drain with the plumbing code's tables. It draws them sloped 1/4 in per ft, connects every fixture, works out the water demand, and tags the drain with its size, slope and fixture units. |
 | [`electrical-room.ts`](electrical-room.ts) | A one-bedroom unit. Walls, rooms and a panel. Receptacles placed by the code's wall spacing (NEC 210.52), each room on its own circuit, and the panel schedule on a sheet with the code's demand factors. |

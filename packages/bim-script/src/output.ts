@@ -17,9 +17,22 @@ export type EditBatch = EditBatchCommand & { readonly label: string };
 /** One step of a batch. */
 export type EditStep = EditBatchCommand["commands"][number];
 
+/** One value a script reported with `ctx.report`: what the agent sees beside the preview. */
+export interface ScriptReport {
+  readonly label: string;
+  readonly value: unknown;
+}
+
+/** At most this many reports per run. */
+export const MAX_SCRIPT_REPORTS = 50;
+/** At most this much report JSON per run (labels and values together). */
+export const MAX_SCRIPT_REPORT_BYTES = 16 * 1024;
+
 export type ScriptOutput =
-  | { readonly kind: "edits"; readonly label: string; readonly steps: number; readonly batches: readonly EditBatch[] }
-  | { readonly kind: "part_types"; readonly types: readonly { readonly typeId: string; readonly definition: PartTypeDefinition }[] };
+  | { readonly kind: "edits"; readonly label: string; readonly steps: number; readonly batches: readonly EditBatch[]; readonly report?: readonly ScriptReport[] }
+  | { readonly kind: "part_types"; readonly types: readonly { readonly typeId: string; readonly definition: PartTypeDefinition }[]; readonly report?: readonly ScriptReport[] };
+
+const reportSchema = z.array(z.object({ label: z.string().min(1).max(120), value: z.unknown() })).max(MAX_SCRIPT_REPORTS).optional();
 
 /** The envelope as JSON (what a runner returns); batches and definitions are re-parsed by `parseScriptOutput`. */
 export const scriptOutputSchema = z.discriminatedUnion("kind", [
@@ -28,10 +41,12 @@ export const scriptOutputSchema = z.discriminatedUnion("kind", [
     label: z.string().trim().min(1).max(160),
     steps: z.number().int().min(0),
     batches: z.array(z.object({ type: z.literal("batch_edits"), label: z.string().trim().min(1).max(160), commands: z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_EDIT_BATCH_STEPS) })).max(200),
+    report: reportSchema,
   }),
   z.object({
     kind: z.literal("part_types"),
     types: z.array(z.object({ typeId: z.string().min(1).max(200), definition: z.unknown() })).min(1).max(200),
+    report: reportSchema,
   }),
 ]);
 
@@ -75,6 +90,7 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
   const env = scriptOutputSchema.safeParse(raw);
   if (!env.success) throw new ScriptOutputError(`The script's output isn't in the kit's shape: ${env.error.issues.map((i) => `${i.path.join(".") || "(top)"} ${i.message}`).join("; ")}.`);
   const out = env.data;
+  const report = out.report ? { report: checkedReport(out.report) } : {};
   if (out.kind === "part_types") {
     return {
       kind: "part_types",
@@ -83,6 +99,7 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
         if (!def.success) throw new ScriptOutputError(`Part type ${t.typeId} isn't a part-type definition: ${def.error.issues.map((i) => `${i.path.join(".") || "(top)"} ${i.message}`).join("; ")}.`);
         return { typeId: t.typeId, definition: def.data };
       }),
+      ...report,
     };
   }
   let steps = 0;
@@ -98,5 +115,17 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
     return { type: "batch_edits", label: b.label, commands: parsed.data.commands };
   });
   if (steps !== out.steps) throw new ScriptOutputError(`The output says ${out.steps} steps but its batches hold ${steps}.`);
-  return { kind: "edits", label: out.label, steps, batches };
+  return { kind: "edits", label: out.label, steps, batches, ...report };
+}
+
+/** A runner's reports, held to the same size the kit keeps them to. */
+function checkedReport(report: readonly { readonly label: string; readonly value?: unknown }[]): ScriptReport[] {
+  const out = report.map((r) => ({ label: r.label, value: r.value ?? null }));
+  if (jsonBytes(out) > MAX_SCRIPT_REPORT_BYTES) throw new ScriptOutputError(`The script's reports are over ${MAX_SCRIPT_REPORT_BYTES / 1024} KB.`);
+  return out;
+}
+
+/** The UTF-8 size of a value's JSON. */
+export function jsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value) ?? "").length;
 }

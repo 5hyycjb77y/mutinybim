@@ -20,7 +20,8 @@ too: it has `bim_list_views_and_sheets`, the views/sheets preview and apply
 (`bim_preview_views_sheets_edit`, `bim_apply_views_sheets_edit`), the
 pictures (`bim_render_view_image`, `bim_render_sheet_image`), printing and
 `bim_issue_set`. A sheet and a plan view per level, with their viewports, is
-one script (`documents.sheet`, `planView`, `place`, `sheetSet`); the tools
+one script (`documents.sheet`, `planView`, `place`; there is no sheet set
+function, so number the sheets in print order); the tools
 here are for single changes and for laying out and checking what a script
 made.
 
