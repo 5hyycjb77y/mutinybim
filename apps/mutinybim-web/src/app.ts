@@ -30,7 +30,8 @@ import { isColorScheme, openDb, type Db, type ModelAccess, type ModelRow, type S
 import { esc, setWaitingApprovals, type Flash } from "./ui";
 import { ModelStore, summarize, type StarterKind } from "./models";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
-import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, termsPage } from "./pages";
+import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
+import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
 import { digest, hashPassword, randomToken, verifyPassword } from "./secrets";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +53,8 @@ export interface AppOptions {
   readonly approvalWaitMs?: number;
   /** Where assistants' scripts run (tests pass a runner on this computer); default from the config. */
   readonly scripts?: HostedScripts;
+  /** The key linked-host passes are kept under (tests); default MUTINYBIM_WEB_LINK_KEY. null: linked hosts off. */
+  readonly linkKeys?: LinkKeys | null;
 }
 
 /** The scripts setting as a runner: the sealed box (default), off, or this computer's own runner (loopback servers only). */
@@ -190,6 +193,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
   const approvals = new ApprovalBook(db);
   setWaitingApprovals((userId) => approvals.waitingCount(userId));
+  const linkedHosts = createLinkedHosts({ config, db, keys: options.linkKeys !== undefined ? options.linkKeys : readLinkKeys(), ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
   const assistantAuth: AssistantAuthOptions = { origin: config.origin, families: TOOL_FAMILIES, db, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}), ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}) };
 
   const editor: EditorDemo | null =
@@ -276,6 +280,38 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
 
   const callbackUri = (provider: OAuthProviderConfig) => `${config.origin}/auth/${provider.id}/callback`;
 
+  const linkedProviderOf = (id: string): LinkedProvider => {
+    const provider = linkedHosts.provider(id);
+    if (!provider) throw new Refusal(404, "Projects from that sign-in aren't set up on this server.");
+    return provider;
+  };
+
+  /** Right after a sign-in with a linked host, once: offer to show its models too (or go straight on). */
+  const afterSignIn = (userId: string, provider: OAuthProviderConfig, returnTo: string): string => {
+    const host = linkedHosts.provider(provider.id);
+    if (!host || db.linkedGrant(userId, host.id) || db.linkedOfferAnswered(userId, host.id)) return returnTo;
+    return `/auth/${host.id}/models/offer?return_to=${encodeURIComponent(returnTo)}`;
+  };
+
+  /** The linked hosts' sections on My models: for each host this person signs in with (or already linked). */
+  async function linkedModelsView(user: UserRow, fresh: boolean): Promise<LinkedModelsView> {
+    const mine = db.identitiesOf(user.id);
+    const sections = await Promise.all(linkedHosts.providers.filter((p) => mine.includes(p.id) || db.linkedGrant(user.id, p.id)).map((p) => linkedHosts.view(user, p, { fresh })));
+    const keyMissing = linkedHosts.keyMissing ? config.providers.filter((p) => p.models && mine.includes(p.id)) : [];
+    return { sections, keyMissing };
+  }
+
+  function linkedSwitches(user: UserRow): { readonly provider: LinkedProvider; readonly state: LinkedSwitch }[] {
+    return linkedHosts.providers.map((provider) => {
+      const grant = db.linkedGrant(user.id, provider.id);
+      return { provider, state: !grant ? "off" : grant.state === "reconnect" ? "reconnect" : "on" };
+    });
+  }
+
+  async function modelsView(user: UserRow, flash: Flash | null, status = 200, fresh = false): Promise<{ status: number; body: string }> {
+    return { status, body: modelsPage(config, user, db.modelsOf(user.id), db.sharedWith(user.id), flash ?? undefined, await linkedModelsView(user, fresh)) };
+  }
+
   async function handleAuthCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: OAuthProviderConfig): Promise<void> {
     const error = url.searchParams.get("error");
     if (error) {
@@ -285,7 +321,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const code = url.searchParams.get("code");
     const stateParam = url.searchParams.get("state");
     const state = stateParam ? db.takeOAuthState(stateParam) : null;
-    if (!code || !state || state.provider !== provider.id) {
+    if (!code || !state || state.provider !== provider.id || state.return_to.startsWith(LINK_STATE_PREFIX)) {
       return html(res, 400, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "That sign-in link expired or was already used. Start again." } }));
     }
     const person = await finishSignIn({ provider, redirectUri: callbackUri(provider), code, codeVerifier: state.code_verifier, db, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
@@ -298,11 +334,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       if (known && known.id !== current.id) return html(res, 409, settingsPage(config, current, db.identitiesOf(current.id), { flash: { kind: "error", text: `That ${provider.label.replace(/^Log in with /i, "")} account is already linked to another MutinyBIM account.` } }));
       db.linkIdentity(provider.id, person.subject, current.id);
       console.log("[mutinybim-web] linked a sign-in", { provider: provider.id, userId: current.id });
-      return redirect(res, `${returnTo}${returnTo.includes("?") ? "&" : "?"}linked=${provider.id}`);
+      return redirect(res, afterSignIn(current.id, provider, `${returnTo}${returnTo.includes("?") ? "&" : "?"}linked=${provider.id}`));
     }
     if (known) {
       console.log("[mutinybim-web] signed in", { provider: provider.id, userId: known.id });
-      return redirect(res, returnTo, { "set-cookie": startSession(known.id, provider.id) });
+      return redirect(res, afterSignIn(known.id, provider, returnTo), { "set-cookie": startSession(known.id, provider.id) });
     }
     if (!person.email) return html(res, 400, loginPage(config, { returnTo, flash: { kind: "error", text: `${provider.label} didn't share an email address, which a MutinyBIM account needs. Sign up with email instead.` } }));
     const sameEmail = db.userByEmail(person.email);
@@ -313,7 +349,30 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const user = db.createUser({ id: randomUUID(), email: person.email, displayName: person.name ?? person.email.split("@")[0] ?? "You", passwordHash: null });
     db.linkIdentity(provider.id, person.subject, user.id);
     console.log("[mutinybim-web] account made through a sign-in provider", { provider: provider.id, userId: user.id });
-    return redirect(res, returnTo, { "set-cookie": startSession(user.id, provider.id) });
+    return redirect(res, afterSignIn(user.id, provider, returnTo), { "set-cookie": startSession(user.id, provider.id) });
+  }
+
+  /** Back from the linked host: keep its pass, then show its models. */
+  async function handleLinkedCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: LinkedProvider): Promise<void> {
+    const current = sessionUser(req);
+    if (!current) return redirect(res, "/login?return_to=%2Fmodels");
+    const host = provider.label.replace(/^Log in with /i, "");
+    const error = url.searchParams.get("error");
+    if (error) {
+      const words = error === "access_denied" ? `You didn't allow it on ${host}. Nothing changed; you can turn it on later under Settings.` : `${host} stopped (${error}${url.searchParams.get("error_description") ? `: ${url.searchParams.get("error_description")}` : ""}). Try again.`;
+      const view = await modelsView(current, { kind: "error", text: words }, 400);
+      return html(res, view.status, view.body);
+    }
+    const code = url.searchParams.get("code");
+    const stateParam = url.searchParams.get("state");
+    const state = stateParam ? db.takeOAuthState(stateParam) : null;
+    if (!code || !state || state.provider !== provider.id || !state.return_to.startsWith(LINK_STATE_PREFIX)) {
+      const view = await modelsView(current, { kind: "error", text: "That link expired or was already used. Start again." }, 400);
+      return html(res, view.status, view.body);
+    }
+    await linkedHosts.finish(provider, current, code, state.code_verifier);
+    const returnTo = safeReturn(state.return_to.slice(LINK_STATE_PREFIX.length));
+    return redirect(res, `${returnTo}${returnTo.includes("?") ? "&" : "?"}linked_models=${provider.id}`);
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -418,6 +477,29 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         return html(res, 502, loginPage(config, { returnTo, flash: { kind: "error", text: err.words } }));
       }
     }
+    const linkedRoute = pathname.match(/^\/auth\/([a-z0-9-]+)\/models\/(start|callback|offer)$/);
+    if (linkedRoute?.[1] && linkedRoute[2]) {
+      const provider = linkedProviderOf(linkedRoute[1]);
+      if (!user) return redirect(res, `/login?return_to=${encodeURIComponent(linkedRoute[2] === "callback" ? "/models" : pathname + url.search)}`);
+      const returnTo = safeReturn(url.searchParams.get("return_to"));
+      try {
+        if (method === "GET" && linkedRoute[2] === "offer") return html(res, 200, linkedOfferPage(config, user, provider, returnTo));
+        if (method === "POST" && linkedRoute[2] === "offer") {
+          db.answerLinkedOffer(user.id, provider.id);
+          return redirect(res, safeReturn((await readForm(req)).get("return_to")));
+        }
+        if (method === "GET" && linkedRoute[2] === "start") {
+          db.answerLinkedOffer(user.id, provider.id);
+          return redirect(res, await linkedHosts.start(provider, returnTo));
+        }
+        if (method === "GET" && linkedRoute[2] === "callback") return await handleLinkedCallback(req, res, url, provider);
+      } catch (err) {
+        if (!(err instanceof SignInError)) throw err;
+        console.error("[mutinybim-web] linking a host's models failed", { provider: provider.id, err: err.message });
+        const view = await modelsView(user, { kind: "error", text: err.words }, 502);
+        return html(res, view.status, view.body);
+      }
+    }
     const authCallback = pathname.match(/^\/auth\/([a-z0-9-]+)\/callback$/);
     if (method === "GET" && authCallback?.[1]) {
       const provider = providerOf(authCallback[1]);
@@ -449,14 +531,23 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
             : url.searchParams.get("reset") === "1"
               ? { kind: "ok" as const, text: "Your new password is saved. You were signed out everywhere else." }
               : null;
-        return html(res, 200, modelsPage(config, user, db.modelsOf(user.id), db.sharedWith(user.id), flash));
+        const linkedId = url.searchParams.get("linked_models");
+        const linkedProvider = linkedId ? linkedHosts.provider(linkedId) : null;
+        const view = await modelsView(user, flash ?? (linkedProvider ? { kind: "ok", text: `Done. Your ${linkedProvider.models.label} are below.` } : null), 200, url.searchParams.get("fresh") === "1" || Boolean(linkedProvider));
+        return html(res, view.status, view.body);
       }
       if (method === "POST") {
         const form = await readForm(req);
         const name = (form.get("name") ?? "").trim().slice(0, 120);
         const start: StarterKind = form.get("start") === "sample" ? "sample" : "blank";
-        if (!name) return html(res, 400, modelsPage(config, user, db.modelsOf(user.id), db.sharedWith(user.id), { kind: "error", text: "Give the model a name." }));
-        if (db.countModelsOf(user.id) >= config.modelLimit) return html(res, 409, modelsPage(config, user, db.modelsOf(user.id), db.sharedWith(user.id), { kind: "error", text: `A free account keeps up to ${config.modelLimit} models. Delete one to make another.` }));
+        if (!name) {
+          const view = await modelsView(user, { kind: "error", text: "Give the model a name." }, 400);
+          return html(res, view.status, view.body);
+        }
+        if (db.countModelsOf(user.id) >= config.modelLimit) {
+          const view = await modelsView(user, { kind: "error", text: `A free account keeps up to ${config.modelLimit} models. Delete one to make another.` }, 409);
+          return html(res, view.status, view.body);
+        }
         const id = newModelId();
         await models.create(id, start);
         db.createModel({ id, ownerId: user.id, name });
@@ -469,7 +560,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       const model = ownModel(user, modelAction[1]);
       if (modelAction[2] === "rename") {
         const name = ((await readForm(req)).get("name") ?? "").trim().slice(0, 120);
-        if (!name) return html(res, 400, modelsPage(config, user, db.modelsOf(user.id), db.sharedWith(user.id), { kind: "error", text: "A model needs a name." }));
+        if (!name) {
+          const view = await modelsView(user, { kind: "error", text: "A model needs a name." }, 400);
+          return html(res, view.status, view.body);
+        }
         db.renameModel(model.id, name);
         return redirect(res, "/models");
       }
@@ -513,7 +607,15 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (user && pathname === "/settings" && method === "GET") {
       const linked = url.searchParams.get("linked");
       const provider = linked ? config.providers.find((p) => p.id === linked) : undefined;
-      return html(res, 200, settingsPage(config, user, db.identitiesOf(user.id), { passwordFree: recentProviderSignIn(req), flash: provider ? { kind: "ok", text: `Linked. You can now log in with ${provider.label.replace(/^Log in with /i, "")}.` } : null }));
+      const linkedProvider = url.searchParams.get("linked_models") ? linkedHosts.provider(url.searchParams.get("linked_models") ?? "") : null;
+      const flash: Flash | null = provider ? { kind: "ok", text: `Linked. You can now log in with ${provider.label.replace(/^Log in with /i, "")}.` } : linkedProvider ? { kind: "ok", text: `On. Your ${linkedProvider.models.label} show on My models.` } : null;
+      return html(res, 200, settingsPage(config, user, db.identitiesOf(user.id), { passwordFree: recentProviderSignIn(req), flash, linkedModels: linkedSwitches(user) }));
+    }
+    const linkedOff = pathname.match(/^\/settings\/linked\/([a-z0-9-]+)\/off$/);
+    if (user && method === "POST" && linkedOff?.[1]) {
+      const provider = linkedProviderOf(linkedOff[1]);
+      await linkedHosts.unlink(user, provider);
+      return html(res, 200, settingsPage(config, user, db.identitiesOf(user.id), { flash: { kind: "ok", text: `Off. ${provider.models.label} no longer show here, and your assistants can't reach them through this app.` }, linkedModels: linkedSwitches(user) }));
     }
     if (user && pathname === "/settings/profile" && method === "POST") {
       const name = ((await readForm(req)).get("name") ?? "").trim().slice(0, 80);
@@ -770,10 +872,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   };
 
   const hostedScripts = options.scripts ?? scriptsFor(config);
-  const assistantTools = createAssistantTools({ auth: assistantAuth, db, dataDir: config.dataDir, approvals, attach, scripts: hostedScripts, ...(options.approvalWaitMs !== undefined ? { approvalWaitMs: options.approvalWaitMs } : {}) });
+  const assistantTools = createAssistantTools({ auth: assistantAuth, db, dataDir: config.dataDir, approvals, attach, scripts: hostedScripts, linked: linkedHosts, ...(options.approvalWaitMs !== undefined ? { approvalWaitMs: options.approvalWaitMs } : {}) });
 
   function connectView(user: UserRow, newKey: string | null, flash?: Flash): string {
-    return connectPage(config, user, { models: db.modelsOf(user.id), keys: db.agentKeysOf(user.id), assistants: db.assistantGrantsOf(user.id), newKey }, flash);
+    const linkedLabels = linkedHosts.providers.filter((p) => db.linkedGrant(user.id, p.id)?.state === "ok").map((p) => p.models.label);
+    return connectPage(config, user, { models: db.modelsOf(user.id), keys: db.agentKeysOf(user.id), assistants: db.assistantGrantsOf(user.id), newKey, linkedLabels }, flash);
   }
 
   function serveSocket(socket: WebSocket, person: UserRow, modelFromUrl: string | null, viaAgentKey: boolean): void {

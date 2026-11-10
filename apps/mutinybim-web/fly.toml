@@ -3,8 +3,10 @@
 #
 # One machine and one volume: the account database and model files live on /data, and one process serves
 # them (README "Deploying"). --ha=false keeps it one machine; a second would start with an empty volume.
-# No Fly secrets: sessions, agent keys and assistant tokens are random values stored as digests, and the
-# sign-in providers are public clients. Nothing below is secret.
+# Sessions, agent keys and assistant tokens are random values stored as digests, and the sign-in
+# providers are public clients. Nothing below is secret. Fly secrets on the app: MUTINYBIM_WEB_PROVIDERS
+# (configuration), and MUTINYBIM_WEB_LINK_KEY (+ _PREVIOUS while a new one rolls in), the key linked-host
+# passes are kept under; it is written by the operator's secret rotation, never by hand.
 app = "mutinybim-web"
 primary_region = "iad"
 kill_signal = "SIGTERM"

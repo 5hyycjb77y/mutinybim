@@ -8,7 +8,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { Badge, Button, buttonVariants, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, cn, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Field, FieldHint, Input, Label, NativeSelect, Separator } from "@permitzip/bim-ui";
 import type { OAuthProviderConfig, QuoteConfig, WebConfig } from "./config";
 import type { PendingApproval } from "./assistant-approvals";
-import type { AgentKeyRow, AssistantGrantRow, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
+import type { AgentKeyRow, AssistantGrantRow, LinkedModelRow, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
+import type { LinkedProvider, LinkedView } from "./linked-hosts";
 import type { ModelSummary } from "./models";
 import { formatWhen, page, waitingApprovalsOf, type Flash, type FrameUser } from "./ui";
 
@@ -349,7 +350,79 @@ function OwnModel({ m }: { m: ModelRow }) {
   );
 }
 
-export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash): string {
+/** The models a person may open on their linked hosts, and the state of each host (models page). */
+export interface LinkedModelsView {
+  readonly sections: readonly LinkedView[];
+  /** A provider is a linked host but the server has no link key (shown to people who use that provider). */
+  readonly keyMissing: readonly OAuthProviderConfig[];
+}
+
+function LinkedRow({ row, host }: { row: LinkedModelRow; host: string }) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 rounded-(--mutiny-radius) border border-(--mutiny-border) bg-(--mutiny-field) px-3 py-2.5">
+      <span className="min-w-0 flex-1 truncate font-semibold">{row.label}</span>
+      <Badge variant={row.can_edit ? "default" : "secondary"}>{row.can_edit ? "Can edit" : "View only"}</Badge>
+      {row.open_url ? (
+        <Button asChild size="sm">
+          <a href={row.open_url} target="_blank" rel="noopener noreferrer">
+            Open in {host}
+          </a>
+        </Button>
+      ) : (
+        <span className="text-xs text-(--mutiny-muted)">Open it from {host}.</span>
+      )}
+    </li>
+  );
+}
+
+function LinkedSection({ view }: { view: LinkedView }) {
+  const { provider, state, rows } = view;
+  const host = providerName(provider);
+  const label = provider.models.label;
+  const start = `/auth/${provider.id}/models/start?return_to=%2Fmodels`;
+  return (
+    <Card data-testid={`linked-${provider.id}`}>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+        <CardDescription>Access and sharing are managed in {host}.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {state === "not_linked" ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="flex-1 text-sm">See your {label} here, beside your own models.</p>
+            <Button asChild>
+              <a href={start}>Show my {label}</a>
+            </Button>
+          </div>
+        ) : state === "reconnect" ? (
+          <div className="flex flex-wrap items-center gap-3" role="status">
+            <p className="flex-1 text-sm">{host} needs you to reconnect. Nothing changed in your own models.</p>
+            <Button asChild>
+              <a href={start}>Reconnect</a>
+            </Button>
+          </div>
+        ) : state === "down" ? (
+          <div className="flex flex-wrap items-center gap-3" role="status">
+            <p className="flex-1 text-sm">{host} can't be reached right now. Your own models are fine.</p>
+            <Button asChild variant="outline">
+              <a href="/models?fresh=1">Try again</a>
+            </Button>
+          </div>
+        ) : rows.length === 0 ? (
+          <ModelEmpty title={`No ${label} to open`}>{host} lists only projects with a building model that you can open there.</ModelEmpty>
+        ) : (
+          <ul className="flex flex-col gap-2" data-testid="linked-models">
+            {rows.map((row) => (
+              <LinkedRow key={row.alias_id} row={row} host={host} />
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash, linked: LinkedModelsView = { sections: [], keyMissing: [] }): string {
   const atLimit = models.length >= config.modelLimit;
   return page(
     <>
@@ -401,6 +474,14 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
           </CardContent>
         </Card>
       ) : null}
+      {linked.sections.map((view) => (
+        <LinkedSection key={view.provider.id} view={view} />
+      ))}
+      {linked.keyMissing.map((p) => (
+        <Card key={p.id}>
+          <CardDescription>Projects from {providerName(p)} can't be shown on this server yet: its operator hasn't set the key it keeps those connections under. Your own models are fine.</CardDescription>
+        </Card>
+      ))}
       {atLimit ? (
         <Card>
           <CardDescription>You have {models.length} models, the most one free account can keep. Delete one to make another.</CardDescription>
@@ -508,7 +589,44 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
   );
 }
 
-export function settingsPage(config: WebConfig, user: UserRow, linked: readonly string[], options: { flash?: Flash; passwordFree?: boolean } = {}): string {
+/** Each linked host's switch on the settings page: on, needs reconnecting, or off. */
+export type LinkedSwitch = "on" | "reconnect" | "off";
+
+function LinkedModelsSwitch({ provider, state }: { provider: LinkedProvider; state: LinkedSwitch }) {
+  const label = provider.models.label;
+  const start = `/auth/${provider.id}/models/start?return_to=%2Fsettings`;
+  return (
+    <div className="flex flex-wrap items-center gap-2 pl-4 text-sm">
+      <span>Show {label}:</span>
+      {state === "on" ? (
+        <>
+          <Badge>On</Badge>
+          <ConfirmForm action={`/settings/linked/${provider.id}/off`} question={`Stop showing ${label} here? This app and your connected assistants stop seeing them at once. Nothing changes in ${providerName(provider)} or in your own models.`}>
+            <Button type="submit" size="sm" variant="ghost" className="text-(--mutiny-danger)">
+              Turn off
+            </Button>
+          </ConfirmForm>
+        </>
+      ) : state === "reconnect" ? (
+        <>
+          <Badge variant="destructive">Needs reconnecting</Badge>
+          <Button asChild size="sm" variant="outline">
+            <a href={start}>Reconnect</a>
+          </Button>
+        </>
+      ) : (
+        <>
+          <Badge variant="secondary">Off</Badge>
+          <Button asChild size="sm" variant="outline">
+            <a href={start}>Show them</a>
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function settingsPage(config: WebConfig, user: UserRow, linked: readonly string[], options: { flash?: Flash; passwordFree?: boolean; linkedModels?: readonly { readonly provider: LinkedProvider; readonly state: LinkedSwitch }[] } = {}): string {
   return page(
     <>
       <PageTitle>Settings</PageTitle>
@@ -532,21 +650,27 @@ export function settingsPage(config: WebConfig, user: UserRow, linked: readonly 
             <div className="flex flex-col gap-2">
               <h3 className="text-sm">Ways to log in</h3>
               <ul className="flex flex-col gap-2">
-                {config.providers.map((p) => (
-                  <li key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <strong>{providerName(p)}</strong>
-                    {linked.includes(p.id) ? (
-                      <Badge>Linked</Badge>
-                    ) : (
-                      <>
-                        <Badge variant="secondary">Not linked</Badge>
-                        <Button asChild size="sm" variant="outline">
-                          <a href={`/auth/${p.id}/start?link=1&return_to=%2Fsettings`}>Link it</a>
-                        </Button>
-                      </>
-                    )}
-                  </li>
-                ))}
+                {config.providers.map((p) => {
+                  const switchFor = linked.includes(p.id) ? options.linkedModels?.find((m) => m.provider.id === p.id) : undefined;
+                  return (
+                    <li key={p.id} className="flex flex-col gap-1.5">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <strong>{providerName(p)}</strong>
+                        {linked.includes(p.id) ? (
+                          <Badge>Linked</Badge>
+                        ) : (
+                          <>
+                            <Badge variant="secondary">Not linked</Badge>
+                            <Button asChild size="sm" variant="outline">
+                              <a href={`/auth/${p.id}/start?link=1&return_to=%2Fsettings`}>Link it</a>
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                      {switchFor ? <LinkedModelsSwitch provider={switchFor.provider} state={switchFor.state} /> : null}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </>
@@ -618,7 +742,7 @@ export function settingsPage(config: WebConfig, user: UserRow, linked: readonly 
         </CardDescription>
       </Card>
     </>,
-    { title: "Settings", user: frameUser(user), quote: config.quote, current: "settings", flash: options.flash ?? null, scripts: ["/static/settings.js"] },
+    { title: "Settings", user: frameUser(user), quote: config.quote, current: "settings", flash: options.flash ?? null, scripts: ["/static/settings.js", "/static/confirm.js"] },
   );
 }
 
@@ -631,6 +755,8 @@ export interface ConnectView {
   readonly keys: readonly AgentKeyRow[];
   readonly assistants: readonly AssistantGrantRow[];
   readonly newKey: string | null;
+  /** Labels of the linked hosts' models this person has turned on (assistants see those too). */
+  readonly linkedLabels?: readonly string[];
 }
 
 export function connectPage(config: WebConfig, user: UserRow, view: ConnectView, flash?: Flash): string {
@@ -682,6 +808,7 @@ export function connectPage(config: WebConfig, user: UserRow, view: ConnectView,
         <CardDescription>
           When your assistant can't ask you itself, its changes wait on <a href="/approvals">Approvals</a> until you press Approve. Its scripts run here in a sealed box with no network; a script only previews until you approve what it does.
         </CardDescription>
+        {view.linkedLabels && view.linkedLabels.length > 0 ? <CardDescription>Assistants you connect here also see your {view.linkedLabels.join(" and ")}.</CardDescription> : null}
       </Card>
       <Card>
         <CardHeader>
@@ -961,6 +1088,39 @@ export function quotePage(config: WebConfig, quote: QuoteConfig, user: UserRow, 
       </Card>
     </>,
     { title: quote.label, user: frameUser(user), quote: config.quote, current: "quote" },
+  );
+}
+
+/** Right after a sign-in with a linked host: one question, asked once. */
+export function linkedOfferPage(config: WebConfig, user: UserRow, provider: LinkedProvider, returnTo: string): string {
+  const host = providerName(provider);
+  const label = provider.models.label;
+  return page(
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-2xl">Show your {label} too?</CardTitle>
+        <CardDescription>
+          {host} can list the projects you can open there, here under your own models, and your connected assistants can work on them too. {host} asks you to allow it next.
+        </CardDescription>
+      </CardHeader>
+      <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
+        <li>It opens building models only: nothing else in your {host} account.</li>
+        <li>What you can see and change stays up to your role in {host}, checked every time.</li>
+        <li>Nothing is copied here. Turn it off any time under Settings, or in {host}.</li>
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <Button asChild size="lg">
+          <a href={`/auth/${provider.id}/models/start?return_to=${encodeURIComponent(returnTo)}`}>Show them</a>
+        </Button>
+        <form method="post" action={`/auth/${provider.id}/models/offer`}>
+          <input type="hidden" name="return_to" value={returnTo} />
+          <Button type="submit" size="lg" variant="outline">
+            Not now
+          </Button>
+        </form>
+      </div>
+    </Card>,
+    { title: `Show your ${label}`, user: frameUser(user), quote: config.quote, narrow: true },
   );
 }
 

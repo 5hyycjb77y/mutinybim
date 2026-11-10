@@ -98,7 +98,19 @@ export interface BimToolServerOptions extends CoreToolOptions {
   readonly version?: string;
   /** Added after the server's own instructions (how this host approves, where scripts run). */
   readonly instructions?: string;
+  /**
+   * Wraps every tool's handler (core, packs and `bim_enable_pack`) as it is
+   * registered: a host that answers some calls itself (a model it reaches
+   * elsewhere) does so here, and calls `next` for the rest. The tool's name,
+   * schema and listing are unchanged.
+   */
+  readonly aroundTool?: ToolCallWrapper;
 }
+
+/** A tool handler as registered: the parsed arguments (absent for a tool with none) and the request's extra. */
+export type ToolHandler = (...args: never[]) => unknown;
+/** Wraps one tool's handler; return `next` to leave the tool as it is. */
+export type ToolCallWrapper = (name: string, next: ToolHandler) => ToolHandler;
 
 export const BIM_TOOL_SERVER_VERSION = "0.1.0";
 
@@ -120,6 +132,24 @@ export function packProblems(packs: readonly BimToolPack[]): string[] {
     }
   }
   return problems;
+}
+
+/** A server whose `registerTool` passes each tool's handler (its last argument) through `wrap` first. */
+function wrappingTools(server: McpServer, wrap: ToolCallWrapper): McpServer {
+  return new Proxy(server, {
+    get(target, prop, receiver) {
+      if (prop === "registerTool") {
+        return (name: string, ...rest: unknown[]) => {
+          const register = target.registerTool.bind(target) as (name: string, ...args: unknown[]) => RegisteredTool;
+          const last = rest[rest.length - 1];
+          if (typeof last === "function") rest[rest.length - 1] = wrap(name, last as ToolHandler);
+          return register(name, ...rest);
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 /** A server whose `registerTool` also keeps each tool's handle (to turn it on or off later). */
@@ -216,11 +246,12 @@ export function createBimToolServer(options: BimToolServerOptions): McpServer {
     { name: options.name ?? "mutinybim", version: options.version ?? BIM_TOOL_SERVER_VERSION },
     { instructions: `${CORE_INSTRUCTIONS}${packLine}${options.instructions ? ` ${options.instructions}` : ""}` },
   );
-  registerBimCoreTools(server, options.host, options);
+  const target = options.aroundTool ? wrappingTools(server, options.aroundTool) : server;
+  registerBimCoreTools(target, options.host, options);
   const tools = new Map<string, FamilyTool>();
   for (const pack of packs) {
     const handles = new Map<string, RegisteredTool>();
-    pack.register(recordingTools(server, handles), options.host);
+    pack.register(recordingTools(target, handles), options.host);
     for (const [name, handle] of handles) tools.set(name, { handle, family: toolFamily(name) ?? pack.id });
   }
   if (options.families === "all") return server;
@@ -232,6 +263,6 @@ export function createBimToolServer(options: BimToolServerOptions): McpServer {
     on.add(id);
   }
   for (const tool of tools.values()) if (!on.has(tool.family)) tool.handle.disable();
-  if (tools.size > 0) registerPackControlTool(server, tools, here);
+  if (tools.size > 0) registerPackControlTool(target, tools, here);
   return server;
 }

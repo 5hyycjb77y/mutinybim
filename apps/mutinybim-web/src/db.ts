@@ -7,8 +7,10 @@
  *
  * Secrets never land here in the clear: passwords are scrypt hashes, session
  * tokens, reset links, agent keys and the sign-in codes and tokens outside
- * assistants get are stored as SHA-256 digests, and AI provider keys are not
- * stored on the server at all (they stay in the person's browser).
+ * assistants get are stored as SHA-256 digests, the passes a linked host
+ * issues are AES-256-GCM ciphertext under MUTINYBIM_WEB_LINK_KEY
+ * (linked-hosts.ts), and AI provider keys are not stored on the server at all
+ * (they stay in the person's browser).
  */
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -76,6 +78,33 @@ export interface OAuthClientRow {
   readonly client_id: string;
   readonly redirect_uri: string;
   readonly registered_at: string;
+}
+
+/** A person's pass for one linked host (ciphertext only; "reconnect" once the host refused it). */
+export interface LinkedGrantRow {
+  readonly user_id: string;
+  readonly provider: string;
+  readonly client_id: string;
+  readonly access_cipher: string;
+  readonly refresh_cipher: string;
+  readonly access_expires_at: string;
+  readonly refresh_expires_at: string;
+  readonly state: "ok" | "reconnect";
+  readonly last_error: string | null;
+  readonly created_at: string;
+}
+
+/** A model on a linked host, as this person last saw it, under a local id (alias) the tools take. */
+export interface LinkedModelRow {
+  readonly alias_id: string;
+  readonly user_id: string;
+  readonly provider: string;
+  readonly remote_model_id: string;
+  readonly remote_project_id: string;
+  readonly label: string;
+  readonly can_edit: boolean;
+  readonly open_url: string | null;
+  readonly seen_at: string;
 }
 
 export interface OAuthStateRow {
@@ -288,6 +317,38 @@ CREATE TABLE IF NOT EXISTS oauth_states (
   return_to TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS linked_grants (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  access_cipher TEXT NOT NULL,
+  refresh_cipher TEXT NOT NULL,
+  access_expires_at TEXT NOT NULL,
+  refresh_expires_at TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('ok', 'reconnect')),
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, provider)
+);
+CREATE TABLE IF NOT EXISTS linked_models (
+  alias_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  remote_model_id TEXT NOT NULL,
+  remote_project_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  can_edit INTEGER NOT NULL,
+  open_url TEXT,
+  seen_at TEXT NOT NULL,
+  UNIQUE (user_id, provider, remote_model_id)
+);
+CREATE TABLE IF NOT EXISTS linked_offers (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  answered_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, provider)
+);
 `;
 
 export type Db = ReturnType<typeof openDb>;
@@ -402,6 +463,37 @@ function toAssistantSession(row: unknown): AssistantSessionRow | null {
   };
 }
 
+function toLinkedGrant(row: unknown): LinkedGrantRow | null {
+  if (!isRecord(row)) return null;
+  return {
+    user_id: str(row, "user_id"),
+    provider: str(row, "provider"),
+    client_id: str(row, "client_id"),
+    access_cipher: str(row, "access_cipher"),
+    refresh_cipher: str(row, "refresh_cipher"),
+    access_expires_at: str(row, "access_expires_at"),
+    refresh_expires_at: str(row, "refresh_expires_at"),
+    state: row.state === "reconnect" ? "reconnect" : "ok",
+    last_error: strOrNull(row, "last_error"),
+    created_at: str(row, "created_at"),
+  };
+}
+
+function toLinkedModel(row: unknown): LinkedModelRow | null {
+  if (!isRecord(row)) return null;
+  return {
+    alias_id: str(row, "alias_id"),
+    user_id: str(row, "user_id"),
+    provider: str(row, "provider"),
+    remote_model_id: str(row, "remote_model_id"),
+    remote_project_id: str(row, "remote_project_id"),
+    label: str(row, "label"),
+    can_edit: num(row, "can_edit") === 1,
+    open_url: strOrNull(row, "open_url"),
+    seen_at: str(row, "seen_at"),
+  };
+}
+
 function shareRole(value: unknown): ShareRole {
   if (value === "view" || value === "edit") return value;
   throw new Error(`[mutinybim-web db] share role ${String(value)} is not view or edit`);
@@ -447,6 +539,11 @@ export function openDb(file: string) {
     },
     linkIdentity(provider: string, subject: string, userId: string): void {
       db.prepare("INSERT OR IGNORE INTO identities (provider, subject, user_id, created_at) VALUES (?, ?, ?, ?)").run(provider, subject, userId, now());
+    },
+    /** The subject a person's linked sign-in has at a provider, or null. */
+    identitySubject(userId: string, provider: string): string | null {
+      const row = db.prepare("SELECT subject FROM identities WHERE user_id = ? AND provider = ?").get(userId, provider);
+      return isRecord(row) && typeof row.subject === "string" ? row.subject : null;
     },
     identitiesOf(userId: string): readonly string[] {
       return db.prepare("SELECT provider FROM identities WHERE user_id = ? ORDER BY provider").all(userId).flatMap((r) => (isRecord(r) && typeof r.provider === "string" ? [r.provider] : []));
@@ -666,6 +763,54 @@ export function openDb(file: string) {
     /** Keeps a person's `keep` most recent sessions. */
     trimAssistantSessions: (userId: string, keep: number): void =>
       void db.prepare("DELETE FROM assistant_sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM assistant_sessions WHERE user_id = ? ORDER BY last_seen_at DESC LIMIT ?)").run(userId, userId, keep),
+
+    linkedGrant: (userId: string, provider: string): LinkedGrantRow | null => toLinkedGrant(db.prepare("SELECT * FROM linked_grants WHERE user_id = ? AND provider = ?").get(userId, provider)),
+    saveLinkedGrant(input: { userId: string; provider: string; clientId: string; accessCipher: string; refreshCipher: string; accessExpiresAt: Date; refreshExpiresAt: Date }): void {
+      const at = now();
+      db.prepare(
+        "INSERT INTO linked_grants (user_id, provider, client_id, access_cipher, refresh_cipher, access_expires_at, refresh_expires_at, state, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', NULL, ?, ?) " +
+          "ON CONFLICT (user_id, provider) DO UPDATE SET client_id = excluded.client_id, access_cipher = excluded.access_cipher, refresh_cipher = excluded.refresh_cipher, access_expires_at = excluded.access_expires_at, refresh_expires_at = excluded.refresh_expires_at, state = 'ok', last_error = NULL, updated_at = excluded.updated_at",
+      ).run(input.userId, input.provider, input.clientId, input.accessCipher, input.refreshCipher, input.accessExpiresAt.toISOString(), input.refreshExpiresAt.toISOString(), at, at);
+    },
+    /** The host refused the pass: keep the row (so the page says "reconnect"), drop the ciphertext. */
+    markLinkedReconnect(userId: string, provider: string, error: string): void {
+      db.prepare("UPDATE linked_grants SET state = 'reconnect', access_cipher = '', refresh_cipher = '', last_error = ?, updated_at = ? WHERE user_id = ? AND provider = ?").run(error.slice(0, 300), now(), userId, provider);
+      db.prepare("DELETE FROM linked_models WHERE user_id = ? AND provider = ?").run(userId, provider);
+    },
+    deleteLinkedGrant(userId: string, provider: string): void {
+      db.prepare("DELETE FROM linked_grants WHERE user_id = ? AND provider = ?").run(userId, provider);
+      db.prepare("DELETE FROM linked_models WHERE user_id = ? AND provider = ?").run(userId, provider);
+    },
+    linkedModelsOf: (userId: string, provider: string): readonly LinkedModelRow[] =>
+      db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND provider = ? ORDER BY label").all(userId, provider).flatMap((r) => toLinkedModel(r) ?? []),
+    linkedModelByAlias: (userId: string, aliasId: string): LinkedModelRow | null => toLinkedModel(db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND alias_id = ?").get(userId, aliasId)),
+    /** The host's list as it is now: known models keep their alias, new ones get one, the rest go. */
+    replaceLinkedModels(userId: string, provider: string, rows: readonly { remoteModelId: string; remoteProjectId: string; label: string; canEdit: boolean; openUrl: string | null }[], newAlias: () => string): readonly LinkedModelRow[] {
+      const at = now();
+      db.exec("BEGIN");
+      try {
+        const keep = new Set<string>();
+        for (const r of rows) {
+          keep.add(r.remoteModelId);
+          db.prepare(
+            "INSERT INTO linked_models (alias_id, user_id, provider, remote_model_id, remote_project_id, label, can_edit, open_url, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+              "ON CONFLICT (user_id, provider, remote_model_id) DO UPDATE SET remote_project_id = excluded.remote_project_id, label = excluded.label, can_edit = excluded.can_edit, open_url = excluded.open_url, seen_at = excluded.seen_at",
+          ).run(newAlias(), userId, provider, r.remoteModelId, r.remoteProjectId, r.label, r.canEdit ? 1 : 0, r.openUrl, at);
+        }
+        for (const existing of db.prepare("SELECT alias_id, remote_model_id FROM linked_models WHERE user_id = ? AND provider = ?").all(userId, provider)) {
+          if (isRecord(existing) && typeof existing.remote_model_id === "string" && !keep.has(existing.remote_model_id)) db.prepare("DELETE FROM linked_models WHERE alias_id = ?").run(str(existing, "alias_id"));
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND provider = ? ORDER BY label").all(userId, provider).flatMap((r) => toLinkedModel(r) ?? []);
+    },
+    linkedOfferAnswered(userId: string, provider: string): boolean {
+      return isRecord(db.prepare("SELECT 1 AS one FROM linked_offers WHERE user_id = ? AND provider = ?").get(userId, provider));
+    },
+    answerLinkedOffer: (userId: string, provider: string): void => void db.prepare("INSERT OR REPLACE INTO linked_offers (user_id, provider, answered_at) VALUES (?, ?, ?)").run(userId, provider, now()),
 
     saveOAuthState(input: { state: string; provider: string; codeVerifier: string; returnTo: string }): void {
       db.prepare("DELETE FROM oauth_states WHERE created_at < ?").run(new Date(Date.now() - 15 * 60_000).toISOString());

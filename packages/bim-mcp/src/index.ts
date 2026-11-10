@@ -28,5 +28,5 @@ export { editsChange, outputHash, partTypesChange, type ScriptChangeReport } fro
 export { classMembers, registerBimNetworkReadTools, registerBimSummaryReadTools } from "./reads/tools";
 export { chainOf, notPlacedYet, questionsList, withDesignFacts } from "./reads/design-reads";
 export { agentImpactOfRemoving, agentWhy, type AgentAnswer } from "./reads/graph";
-export { BIM_TOOL_SERVER_VERSION, CORE_READ_TOOLS, CORE_TOOLS, CORE_TOOL_BUDGET, PACK_CONTROL_TOOL, TOOL_FAMILIES, coreToolsOutsideCatalogue, createBimToolServer, familySlug, packProblems, registerBimCoreTools, toolFamily, type BimToolPack, type BimToolServerOptions, type CoreToolOptions } from "./server";
+export { BIM_TOOL_SERVER_VERSION, CORE_READ_TOOLS, CORE_TOOLS, CORE_TOOL_BUDGET, PACK_CONTROL_TOOL, TOOL_FAMILIES, coreToolsOutsideCatalogue, createBimToolServer, familySlug, packProblems, registerBimCoreTools, toolFamily, type BimToolPack, type BimToolServerOptions, type CoreToolOptions, type ToolCallWrapper, type ToolHandler } from "./server";
 export { editAs, editIdempotencyKey, readAs, runEdit, withAreaSession, withSession, type BeforeEditAnswer, type BimCaller, type Extra, type ResolveBimCaller } from "./caller";

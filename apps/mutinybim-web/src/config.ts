@@ -21,7 +21,9 @@
  *
  * Provider and quote settings are addresses and labels only. No secret is
  * read here: providers are public clients (authorization code with PKCE,
- * registering themselves dynamically when no client id is given).
+ * registering themselves dynamically when no client id is given). A provider
+ * may also be a linked host (its `models`, docs/LINKED-HOSTS.md); the key the
+ * app keeps those passes under is read by linked-hosts.ts, not here.
  */
 import path from "node:path";
 
@@ -38,6 +40,24 @@ export interface OAuthProviderConfig {
   readonly scope?: string;
   /** The name shown on the provider's consent screen when the app registers itself. */
   readonly clientName?: string;
+  /** The provider is also a linked host: it lists models people can open there and serves the open tools for them. */
+  readonly models?: LinkedModelsConfig;
+}
+
+/** A linked host (docs/LINKED-HOSTS.md): addresses and a scope, nothing secret. */
+export interface LinkedModelsConfig {
+  /** The heading people see over these models, e.g. "Example projects". */
+  readonly label: string;
+  /** The narrow scope that opens models there (asked for on its own, after sign-in). */
+  readonly scope: string;
+  /** GET with the pass: the models this person may open there. */
+  readonly list: string;
+  /** The host's MCP tool server for those models (the open core). */
+  readonly mcp: string;
+  /** Where the pass is issued and refreshed (default: the issuer's token endpoint). */
+  readonly token?: string;
+  /** Where the pass is handed back when the person turns this off (RFC 7009). */
+  readonly revoke?: string;
 }
 
 export interface QuoteConfig {
@@ -99,6 +119,32 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 }
 
+function linkedAddress(id: string, what: string, value: unknown): string {
+  const raw = text(value);
+  if (!raw) throw new Error(`[mutinybim-web] provider ${id}: models.${what} is required`);
+  const parsed = new URL(raw);
+  if (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost" && !parsed.hostname.endsWith(".localhost")) {
+    throw new Error(`[mutinybim-web] provider ${id}: models.${what} must be https (or this computer)`);
+  }
+  return parsed.toString();
+}
+
+function parseLinkedModels(id: string, value: unknown): LinkedModelsConfig | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) throw new Error(`[mutinybim-web] provider ${id}: models must be an object`);
+  const label = text(value.label);
+  const scope = text(value.scope);
+  if (!label || !scope) throw new Error(`[mutinybim-web] provider ${id}: models needs a label and a scope`);
+  return {
+    label,
+    scope,
+    list: linkedAddress(id, "list", value.list),
+    mcp: linkedAddress(id, "mcp", value.mcp),
+    ...(value.token !== undefined ? { token: linkedAddress(id, "token", value.token) } : {}),
+    ...(value.revoke !== undefined ? { revoke: linkedAddress(id, "revoke", value.revoke) } : {}),
+  };
+}
+
 export function parseProviders(raw: string | undefined): readonly OAuthProviderConfig[] {
   const parsed = parseJson("MUTINYBIM_WEB_PROVIDERS", raw);
   if (parsed === null) return [];
@@ -117,7 +163,8 @@ export function parseProviders(raw: string | undefined): readonly OAuthProviderC
     const clientId = text(entry.clientId);
     const scope = text(entry.scope);
     const clientName = text(entry.clientName);
-    return { id, label, issuer: issuerUrl.toString().replace(/\/$/, ""), ...(clientId ? { clientId } : {}), ...(scope ? { scope } : {}), ...(clientName ? { clientName } : {}) };
+    const models = parseLinkedModels(id, entry.models);
+    return { id, label, issuer: issuerUrl.toString().replace(/\/$/, ""), ...(clientId ? { clientId } : {}), ...(scope ? { scope } : {}), ...(clientName ? { clientName } : {}), ...(models ? { models } : {}) };
   });
 }
 
