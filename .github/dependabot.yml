@@ -1,12 +1,12 @@
 version: 2
-# open-pull-requests-limit 0 pauses version updates (security updates still open).
-# Raise the limits again once the launch has settled.
+# Cap open version-update pull requests so the tracker stays readable.
+# Security updates are on separately and are not counted here.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 5
     groups:
       dev-tooling:
         patterns: ["@types/*", "@typescript-eslint/*", "eslint", "jest", "jest-*", "typescript", "tsx", "esbuild"]
@@ -14,14 +14,14 @@ updates:
     directory: /services/bim-authority
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 5
   - package-ecosystem: docker
     directory: /services/bim-authority
     schedule:
       interval: weekly
-    open-pull-requests-limit: 0
+    open-pull-requests-limit: 5

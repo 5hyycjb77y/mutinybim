@@ -122,8 +122,9 @@ npm run proof-packs -- origin/main HEAD   # the proof-pack commit rule over a ra
 
 ## Repository map
 
-Package names keep the `@permitzip/bim-*` prefix for now. They are not
-published to npm yet; use them from this workspace.
+Package names use the `@permitzip/bim-*` prefix. Tagged releases publish
+them to GitHub Packages (see [docs/RELEASING.md](docs/RELEASING.md)). To
+change the code, work in this workspace.
 
 **Foundations**
 
@@ -251,8 +252,12 @@ approves it.
 ## Contributing
 
 We welcome contributions from engineers, architects, contractors, developers
-and software people. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+and software people. You do not need to be added to the repository. Fork it,
+open an issue, or send a pull request. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
+- A starting task: [good first issue](https://github.com/permitzip/mutinybim/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+- Questions, ideas and show-and-tell go in [Discussions](https://github.com/permitzip/mutinybim/discussions). Bug reports and feature requests use the issue forms.
 - Every commit needs a DCO sign-off (`git commit -s`). No other paperwork.
 - Build on the shared kernel, never beside it. Trade logic goes in add-ons.
 - Engineering calculations get the `needs licensed review` label and a review
