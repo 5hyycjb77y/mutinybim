@@ -29,7 +29,7 @@ import { listLevels, listPartTypes, type AgentSession } from "@permitzip/bim-syn
 import { editIdempotencyKey } from "../runtime";
 import { ADVERTISED_PART_DEFINITION, registerBimPartEditorTools } from "./part-editor";
 import { BIM_PART_EDIT_TOOL_NAMES, type BimPartEditToolName } from "../support/tool-names";
-import type { FirmPartsSource } from "./capabilities";
+import type { FirmPartEntry, FirmPartsSource } from "./capabilities";
 import type { NecEdition } from "@permitzip/bim-calc";
 import { checkDraft, plannedEquipmentBatch, proposedLoads, readDraft } from "@permitzip/bim-editor/editor/equipment-list/plan-equipment";
 import { elementValuesIn, partValuesIn, quantityInput } from "./vocabulary";
@@ -161,6 +161,24 @@ function typeDefinition(model: ModelState, typeId: string, firm?: ReadonlyMap<st
 /** Every size of a firm-library part by type id (what bim_place_part with from_firm_library resolves). */
 export function firmTypeMap(definition: PartTypeDefinition): Map<string, PartTypeDefinition> {
   return new Map(definitionTypes(definition).map((t) => [t.typeId, t.definition]));
+}
+
+function entryTypeMap(entry: FirmPartEntry): Map<string, PartTypeDefinition> {
+  return entry.typeId ? new Map([[entry.typeId, entry.definition]]) : firmTypeMap(entry.definition);
+}
+
+/**
+ * The firm-library sizes bim_place_part may resolve `typeId` against: the
+ * part whose model id is the type id's first segment (a drawn part, one type
+ * per row of its types table), else the part saved under the whole type id
+ * (a part type a script made, e.g. `acme.furn.desk.60x30`).
+ */
+export async function firmSizesFor(store: FirmPartsSource, typeId: string): Promise<Map<string, PartTypeDefinition>> {
+  const byModel = await store.get(typeId.split(".")[0] ?? "");
+  const sizes = byModel ? entryTypeMap(byModel) : new Map<string, PartTypeDefinition>();
+  if (sizes.has(typeId) || !typeId.includes(".")) return sizes;
+  const exact = await store.get(typeId);
+  return exact ? new Map([...sizes, ...entryTypeMap(exact)]) : sizes;
 }
 
 /** Ids for new elements come from the call's key, so a retried call places the same part, not a second one. */
@@ -679,8 +697,7 @@ export function registerBimPartTools(server: McpServer, helpers: PartToolHelpers
       let firm: ReadonlyMap<string, PartTypeDefinition> | undefined;
       if (input.tool === "bim_place_part" && wanted.from_firm_library === true && typeof wanted.type_id === "string") {
         try {
-          const part = await (await helpers.firmParts(extra)).get(wanted.type_id.split(".")[0] ?? "");
-          firm = part ? firmTypeMap(part.definition) : new Map();
+          firm = await firmSizesFor(await helpers.firmParts(extra), wanted.type_id);
         } catch (err) {
           console.error("[bim_preview_part_edit] firm library read failed", err);
           return { content: [{ type: "text" as const, text: `The firm library couldn't be read: ${err instanceof Error ? err.message : String(err)}.` }], isError: true };
@@ -713,9 +730,7 @@ export function registerBimPartTools(server: McpServer, helpers: PartToolHelpers
       let firm: ReadonlyMap<string, PartTypeDefinition> | undefined;
       if (tool === "bim_place_part" && own.data.from_firm_library === true && typeof own.data.type_id === "string") {
         try {
-          const store = await helpers.firmParts(extra);
-          const part = await store.get(own.data.type_id.split(".")[0] ?? "");
-          firm = part ? firmTypeMap(part.definition) : new Map();
+          firm = await firmSizesFor(await helpers.firmParts(extra), own.data.type_id);
         } catch (err) {
           console.error("[bim_place_part] firm library read failed", err);
           return { content: [{ type: "text" as const, text: `The firm library couldn't be read: ${err instanceof Error ? err.message : String(err)}. Nothing was placed.` }], isError: true };
