@@ -32,7 +32,7 @@ branches and its versions.
 
 Some screens read things a hosted app keeps: saved preferences, a firm's
 equipment and part libraries, design limits and route defaults, stored
-drawings and images, linked Revit models, project questions, code studies,
+drawings and images, linked models (IFC or Revit), project questions, code studies,
 file storage and a built-in AI agent. The local server has none of these, so
 those requests answer `501` and the editor says, in words, what's missing. The
 rest of the editor keeps working.

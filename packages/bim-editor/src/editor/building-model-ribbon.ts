@@ -181,6 +181,10 @@ export interface BuildingModelRibbonContext {
   readonly setPrintBlackOnly?: (on: boolean) => void
   readonly canLink: boolean
   readonly openLink: () => void
+  /** What Link a model brings in here, naming only the sources the host serves; absent: Autodesk Docs or an IFC file. */
+  readonly linkDescription?: string
+  /** Why nothing can be linked where the editor runs (the host serves no link source), in words; null or absent when something can. */
+  readonly linkUnavailableReason?: string | null
   /** Round 10 T10: Manage › Connect an agent (the core and each pack's connection). */
   readonly openConnectAgent?: () => void
   readonly addLevel: () => void
@@ -693,7 +697,7 @@ export function buildingModelRibbon(ctx: BuildingModelRibbonContext): RibbonTab[
               ],
               testId: 'ribbon-part-types',
             },
-            { id: 'link', label: 'Link a model', icon: Link2, description: "Bring in the architect's model from Autodesk Docs or an IFC file", keywords: ['ifc', 'linked models', 'reference'], disabledReason: ctx.canLink ? null : "Linking needs edit access to this project's model; ask a project lead.", run: ctx.openLink },
+            { id: 'link', label: 'Link a model', icon: Link2, description: ctx.linkDescription ?? "Bring in the architect's model from Autodesk Docs or an IFC file", keywords: ['ifc', 'linked models', 'reference'], disabledReason: ctx.linkUnavailableReason ?? (ctx.canLink ? null : "Linking needs edit access to this project's model; ask a project lead."), run: ctx.openLink },
             ...(ctx.openConnectAgent ? [{ id: 'connect-agent', label: 'Connect an agent', icon: Plug, description: 'Connect Claude, Cursor, ChatGPT or another agent: the core and each pack as its own connection, with a copy button', keywords: ['agent', 'mcp', 'claude', 'cursor', 'chatgpt', 'connect', 'pack', 'api'], disabledReason: null, run: ctx.openConnectAgent, testId: 'ribbon-connect-agent' }] : []),
           ],
         },

@@ -23,6 +23,56 @@ function portOf(port: LinkedPort): NonNullable<LinkedPort> {
   return port
 }
 
+/** The places a model can be linked from that this host serves. A source it doesn't serve is not offered. */
+export interface LinkSources {
+  /** An IFC file from the person's computer. */
+  readonly ifcUpload: boolean
+  /** The project's connected Revit model, with the models linked in it. */
+  readonly revitExport: boolean
+  /** Files picked from the project's Autodesk Docs. */
+  readonly autodeskDocs: boolean
+}
+
+/** What the host's port can link from: a source counts only when every method it needs is there. */
+export function linkSourcesOf(port: LinkedPort): LinkSources {
+  return {
+    ifcUpload: Boolean(port?.startUpload && port.putFile && port.convert),
+    revitExport: Boolean(port?.autodeskExport && port.updateFromRevit),
+    autodeskDocs: Boolean(port?.browseDocs && port.addDocs && port.refreshDocs && port.lineUp),
+  }
+}
+
+/** Whether Link (the dialog) has anything to offer: an upload or the Revit model. Autodesk Docs has its own picker. */
+export function canLinkFrom(sources: LinkSources): boolean {
+  return sources.ifcUpload || sources.revitExport
+}
+
+/** What Link a model does here, in words, naming only the sources this host serves. */
+export function linkDescription(sources: LinkSources): string {
+  const autodesk = sources.revitExport || sources.autodeskDocs
+  if (autodesk && sources.ifcUpload) return "Bring in the architect's model from Autodesk Docs or an IFC file"
+  if (autodesk) return "Bring in the architect's model from Autodesk Docs"
+  if (sources.ifcUpload) return "Bring in the architect's model from an IFC file"
+  return 'Linking a model is not available here'
+}
+
+/** What the Link button opens, in words. */
+export function linkButtonHint(sources: LinkSources): string {
+  if (sources.revitExport && sources.ifcUpload) return 'Bring in the models linked in our Revit file, or upload an IFC file'
+  if (sources.revitExport) return 'Bring in the models linked in our Revit file'
+  return 'Upload an IFC file'
+}
+
+/** Why nothing can be linked where the editor runs, in words; null when something can. */
+export function linkUnavailableReason(sources: LinkSources, hostName: string): string | null {
+  if (canLinkFrom(sources) || sources.autodeskDocs) return null
+  return `Linked models aren't available here: ${hostName} doesn't keep linked model files. You can model without one.`
+}
+
+const UPLOAD_SERVICE = 'Uploading an IFC file'
+const REVIT_SERVICE = "Bringing in the project's Revit model"
+const DOCS_SERVICE = 'Adding models from Autodesk Docs'
+
 async function readJson<T>(res: EditorDataAnswer, guard: (v: unknown) => v is T, what: string): Promise<T> {
   const body: unknown = await res.json().catch((err: unknown) => {
     console.error(`[linked-api] ${what}: response was not JSON`, err)
@@ -52,19 +102,27 @@ export async function fetchLinkedModelsFrom(port: LinkedPort, projectId: string,
 }
 
 export async function startUploadFrom(port: LinkedPort, projectId: string, request: StartUploadRequest): Promise<StartUploadResponse> {
-  return readJson(await portOf(port).startUpload({ projectId, request }), isStartUploadResponse, 'Starting the upload')
+  const p = portOf(port)
+  if (!p.startUpload) throw new EditorServiceUnavailableError(UPLOAD_SERVICE)
+  return readJson(await p.startUpload({ projectId, request }), isStartUploadResponse, 'Starting the upload')
 }
 
 export async function completeUploadFrom(port: LinkedPort, projectId: string, versionId: string): Promise<void> {
-  await readJson(await portOf(port).convert({ projectId, versionId }), isOk, 'Queuing the conversion')
+  const p = portOf(port)
+  if (!p.convert) throw new EditorServiceUnavailableError(UPLOAD_SERVICE)
+  await readJson(await p.convert({ projectId, versionId }), isOk, 'Queuing the conversion')
 }
 
 export async function retryVersionFrom(port: LinkedPort, projectId: string, versionId: string): Promise<void> {
-  await readJson(await portOf(port).convert({ projectId, versionId }), isOk, 'Trying the conversion again')
+  const p = portOf(port)
+  if (!p.convert) throw new EditorServiceUnavailableError(UPLOAD_SERVICE)
+  await readJson(await p.convert({ projectId, versionId }), isOk, 'Trying the conversion again')
 }
 
 export async function startAutodeskExportFrom(port: LinkedPort, projectId: string): Promise<void> {
-  await readJson(await portOf(port).autodeskExport({ projectId }), isOk, 'Starting the export from Revit')
+  const p = portOf(port)
+  if (!p.autodeskExport) throw new EditorServiceUnavailableError(REVIT_SERVICE)
+  await readJson(await p.autodeskExport({ projectId }), isOk, 'Starting the export from Revit')
 }
 
 function isDocsBrowseResponse(v: unknown): v is DocsBrowseResponse {
@@ -86,11 +144,15 @@ export async function browseDocsFrom(
   request: { readonly folderId: string | null; readonly query?: string },
   signal?: AbortSignal,
 ): Promise<DocsBrowseResponse> {
-  return readJson(await portOf(port).browseDocs({ projectId, request }, { signal }), isDocsBrowseResponse, 'Opening Autodesk Docs')
+  const p = portOf(port)
+  if (!p.browseDocs) throw new EditorServiceUnavailableError(DOCS_SERVICE)
+  return readJson(await p.browseDocs({ projectId, request }, { signal }), isDocsBrowseResponse, 'Opening Autodesk Docs')
 }
 
 export async function addDocsItemsFrom(port: LinkedPort, projectId: string, items: readonly DocsAddItem[]): Promise<DocsAddResult[]> {
-  const body = await readJson(await portOf(port).addDocs({ projectId, items }), isDocsAddResponse, 'Adding the models')
+  const p = portOf(port)
+  if (!p.addDocs) throw new EditorServiceUnavailableError(DOCS_SERVICE)
+  const body = await readJson(await p.addDocs({ projectId, items }), isDocsAddResponse, 'Adding the models')
   return body.results
 }
 
@@ -100,8 +162,10 @@ export async function refreshDocsReferenceFrom(
   referenceId: string,
   mode: 'check' | 'relink',
 ): Promise<{ outcome: 'up_to_date' | 'queued' | 'already_running'; versionNumber: number | null }> {
+  const p = portOf(port)
+  if (!p.refreshDocs) throw new EditorServiceUnavailableError(DOCS_SERVICE)
   return readJson(
-    await portOf(port).refreshDocs({ projectId, referenceId, mode }),
+    await p.refreshDocs({ projectId, referenceId, mode }),
     isDocsRefreshResponse,
     mode === 'check' ? 'Checking Autodesk Docs' : 'Re-linking from Autodesk Docs',
   )
@@ -119,17 +183,23 @@ function isUpdateOutcome(v: unknown): v is LinkedUpdateOutcome {
 
 /** Whether each linked model is behind Autodesk Docs (asks Autodesk, so it loads after the list). */
 export async function fetchLinkedFreshnessFrom(port: LinkedPort, projectId: string, signal?: AbortSignal): Promise<LinkedFreshnessView[]> {
-  const body = await readJson(await portOf(port).freshness({ projectId }, { signal }), isFreshnessResponse, 'Checking Autodesk Docs for new versions')
+  const p = portOf(port)
+  if (!p.freshness) throw new EditorServiceUnavailableError('Checking Autodesk Docs for new versions')
+  const body = await readJson(await p.freshness({ projectId }, { signal }), isFreshnessResponse, 'Checking Autodesk Docs for new versions')
   return body.models
 }
 
 /** Update a linked model from Revit; `force` exports it again even when Docs has nothing newer. */
 export async function updateFromRevitFrom(port: LinkedPort, projectId: string, referenceId: string, force: boolean): Promise<LinkedUpdateOutcome> {
-  return readJson(await portOf(port).updateFromRevit({ projectId, referenceId, force }), isUpdateOutcome, 'Updating from Revit')
+  const p = portOf(port)
+  if (!p.updateFromRevit) throw new EditorServiceUnavailableError(REVIT_SERVICE)
+  return readJson(await p.updateFromRevit({ projectId, referenceId, force }), isUpdateOutcome, 'Updating from Revit')
 }
 
 export async function lineUpDocsReferenceFrom(port: LinkedPort, projectId: string, referenceId: string): Promise<void> {
-  await readJson(await portOf(port).lineUp({ projectId, referenceId }), isOk, 'Lining it up with the project model')
+  const p = portOf(port)
+  if (!p.lineUp) throw new EditorServiceUnavailableError(DOCS_SERVICE)
+  await readJson(await p.lineUp({ projectId, referenceId }), isOk, 'Lining it up with the project model')
 }
 
 export async function updateLinkedReferenceFrom(
@@ -156,7 +226,9 @@ export interface UploadHandle {
  * this upload, and never overwrites a file), reporting progress (0–1).
  */
 export async function putFileFrom(port: LinkedPort, sourcePath: string, file: File, onProgress: (fraction: number) => void): Promise<UploadHandle> {
-  const handle = await portOf(port).putFile({ sourcePath, file }, onProgress)
+  const p = portOf(port)
+  if (!p.putFile) throw new EditorServiceUnavailableError(UPLOAD_SERVICE)
+  const handle = await p.putFile({ sourcePath, file }, onProgress)
   // The host rejects a cancelled upload with an AbortError; callers tell it apart by `UploadCancelled`.
   const done = handle.done.catch((err: unknown) => {
     throw typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError' ? new UploadCancelled() : err

@@ -168,28 +168,37 @@ export interface EditorUploadHandle {
   cancel(): void
 }
 
-/** Linked reference models: the list, uploads and their conversion, Autodesk Docs and Revit, placement, unlinking. */
+/**
+ * Linked reference models: the list, placement and unlinking, plus one group
+ * of methods per place a model can be linked from. A host leaves out the
+ * groups it cannot serve, and the editor offers only the sources whose whole
+ * group is there:
+ *
+ * - an uploaded IFC file: `startUpload`, `putFile`, `convert`
+ * - the project's connected Revit model and its links: `autodeskExport`, `updateFromRevit`
+ * - files picked from Autodesk Docs: `browseDocs`, `addDocs`, `refreshDocs`, `lineUp`
+ */
 export interface EditorLinkedModelsPort {
   /** Body: `{ canEdit, references, revitModel, autodeskExport }`. */
   list(input: { readonly projectId: string }, options: EditorRequestOptions): Promise<EditorDataAnswer>
   /** Body: `{ referenceId, versionId, sourcePath }`. */
-  startUpload(input: { readonly projectId: string; readonly request: unknown }): Promise<EditorDataAnswer>
+  startUpload?(input: { readonly projectId: string; readonly request: unknown }): Promise<EditorDataAnswer>
   /** Upload the file to `sourcePath` (from `startUpload`), reporting progress 0–1. Rejects in words a person can act on (signed out). */
-  putFile(input: { readonly sourcePath: string; readonly file: Blob }, onProgress: (fraction: number) => void): Promise<EditorUploadHandle>
+  putFile?(input: { readonly sourcePath: string; readonly file: Blob }, onProgress: (fraction: number) => void): Promise<EditorUploadHandle>
   /** Queue (or retry) the conversion of an uploaded version. Body: `{ ok: true }`. */
-  convert(input: { readonly projectId: string; readonly versionId: string }): Promise<EditorDataAnswer>
-  autodeskExport(input: { readonly projectId: string }): Promise<EditorDataAnswer>
+  convert?(input: { readonly projectId: string; readonly versionId: string }): Promise<EditorDataAnswer>
+  autodeskExport?(input: { readonly projectId: string }): Promise<EditorDataAnswer>
   /** Body: `{ folders, files }`. */
-  browseDocs(input: { readonly projectId: string; readonly request: { readonly folderId: string | null; readonly query?: string } }, options: EditorRequestOptions): Promise<EditorDataAnswer>
+  browseDocs?(input: { readonly projectId: string; readonly request: { readonly folderId: string | null; readonly query?: string } }, options: EditorRequestOptions): Promise<EditorDataAnswer>
   /** Body: `{ results }`. */
-  addDocs(input: { readonly projectId: string; readonly items: readonly unknown[] }): Promise<EditorDataAnswer>
+  addDocs?(input: { readonly projectId: string; readonly items: readonly unknown[] }): Promise<EditorDataAnswer>
   /** Body: `{ outcome, versionNumber }`. */
-  refreshDocs(input: { readonly projectId: string; readonly referenceId: string; readonly mode: "check" | "relink" }): Promise<EditorDataAnswer>
-  /** Body: `{ models: [{ referenceId, state, ... }] }`. */
-  freshness(input: { readonly projectId: string }, options: EditorRequestOptions): Promise<EditorDataAnswer>
+  refreshDocs?(input: { readonly projectId: string; readonly referenceId: string; readonly mode: "check" | "relink" }): Promise<EditorDataAnswer>
+  /** Whether each linked model is behind its source in Autodesk. Body: `{ models: [{ referenceId, state, ... }] }`. Absent: nothing is checked. */
+  freshness?(input: { readonly projectId: string }, options: EditorRequestOptions): Promise<EditorDataAnswer>
   /** Body: `{ outcome, kind }`. */
-  updateFromRevit(input: { readonly projectId: string; readonly referenceId: string; readonly force: boolean }): Promise<EditorDataAnswer>
-  lineUp(input: { readonly projectId: string; readonly referenceId: string }): Promise<EditorDataAnswer>
+  updateFromRevit?(input: { readonly projectId: string; readonly referenceId: string; readonly force: boolean }): Promise<EditorDataAnswer>
+  lineUp?(input: { readonly projectId: string; readonly referenceId: string }): Promise<EditorDataAnswer>
   update(input: { readonly projectId: string; readonly referenceId: string; readonly patch: unknown }): Promise<EditorDataAnswer>
   unlink(input: { readonly projectId: string; readonly referenceId: string }): Promise<EditorDataAnswer>
 }

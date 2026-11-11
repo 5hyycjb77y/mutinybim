@@ -58,9 +58,13 @@ import {
 } from '../contracts/building-model/linked-contract'
 import {
   addDocsItemsFrom,
+  canLinkFrom,
   fetchLinkedFreshnessFrom,
   fetchLinkedModelsFrom,
   lineUpDocsReferenceFrom,
+  linkButtonHint,
+  linkSourcesOf,
+  linkUnavailableReason,
   refreshDocsReferenceFrom,
   retryVersionFrom,
   startAutodeskExportFrom,
@@ -105,7 +109,12 @@ function viewSignature(data: LinkedModelsResponse): string {
 }
 
 export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onViewChange, onCanEditChange, fixtureReferences, displayControl, disciplineSet, headerless = false }: Props) {
-  const linked = useEditorHost().data.linkedModels
+  const host = useEditorHost()
+  const linked = host.data.linkedModels
+  // What this host can link from; a source it doesn't serve gets no button, tab or check.
+  const sources = useMemo(() => linkSourcesOf(linked), [linked])
+  const unavailable = linked ? null : linkUnavailableReason(sources, host.capabilities.hostName)
+  const checksFreshness = Boolean(linked?.freshness)
   const disciplines = disciplineSet?.() ?? undefined
   const [data, setData] = useState<LinkedModelsResponse | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -127,6 +136,8 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
   const [freshTick, setFreshTick] = useState(0)
 
   useEffect(() => {
+    // No linked-models service here: nothing to load, and the panel says so in words instead of failing.
+    if (!linked) return
     const controller = new AbortController()
     fetchLinkedModelsFrom(linked, projectId, controller.signal)
       .then((next) => {
@@ -169,7 +180,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
   // Asking Autodesk takes a moment, so it loads after the list, and again whenever an update finishes.
   const hasReferences = (data?.references.length ?? 0) > 0
   useEffect(() => {
-    if (!hasReferences || busy) return
+    if (!hasReferences || busy || !checksFreshness) return
     const controller = new AbortController()
     fetchLinkedFreshnessFrom(linked, projectId, controller.signal)
       .then((models) => {
@@ -182,7 +193,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
         setFreshnessError(err instanceof Error ? err.message : "Couldn't check Autodesk Docs for new versions.")
       })
     return () => controller.abort()
-  }, [linked, projectId, hasReferences, busy, freshTick])
+  }, [linked, projectId, hasReferences, busy, freshTick, checksFreshness])
 
   const canEdit = data?.canEdit ?? false
   const exportRunning = data?.autodeskExport ? isInProgress(data.autodeskExport.status) : false
@@ -190,7 +201,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
   const projectModelReadyAt = projectModel?.versions.find((v) => v.id === projectModel.currentVersionId)?.readyAt ?? null
   const hostName = data?.revitModel?.name ?? "our Revit model"
   // The project's Revit model is connected but has never been exported here.
-  const hostNeverExported = data !== null && data.revitModel !== null && projectModel === null && data.autodeskExport === null
+  const hostNeverExported = sources.revitExport && data !== null && data.revitModel !== null && projectModel === null && data.autodeskExport === null
   const startHostExport = useCallback(async () => {
     try {
       await startAutodeskExportFrom(linked, projectId)
@@ -255,6 +266,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
       <div className={headerless ? 'flex items-center justify-end gap-2' : 'flex items-center justify-between gap-2'}>
         {!headerless && <span className="text-sm font-medium">Linked models</span>}
         <div className="flex flex-wrap items-center justify-end gap-1">
+        {sources.autodeskDocs && (
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
@@ -266,6 +278,8 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
           </TooltipTrigger>
           <TooltipContent>{docsReason ?? "Pick the architect's (or anyone's) Revit or IFC files in this project's Autodesk Docs"}</TooltipContent>
         </Tooltip>
+        )}
+        {canLinkFrom(sources) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
@@ -275,10 +289,17 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
               </Button>
             </span>
           </TooltipTrigger>
-          <TooltipContent>{editReason ?? 'Bring in the models linked in our Revit file, or upload an IFC file'}</TooltipContent>
+          <TooltipContent>{editReason ?? linkButtonHint(sources)}</TooltipContent>
         </Tooltip>
+        )}
         </div>
       </div>
+
+      {unavailable && (
+        <p className="text-xs text-muted-foreground" data-testid="linked-models-unavailable">
+          {unavailable}
+        </p>
+      )}
 
       {loadError && (
         <Alert variant="destructive">
@@ -393,7 +414,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
       ))}
 
       <ItemGroup className="gap-1">
-        {data === null && !loadError && (
+        {linked && data === null && !loadError && (
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner className="size-3" />
             Loading…
@@ -665,7 +686,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
                       </DropdownMenuItem>
                     ) : (
                       <DropdownMenuItem
-                        disabled={!canEdit}
+                        disabled={!canEdit || !sources.ifcUpload}
                         onSelect={() => {
                           setReplacing({ id: ref.id, label: ref.label })
                           onLinkOpenChange(true)
@@ -700,7 +721,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
         onQueued={refresh}
         disciplineSet={disciplines}
         onOpenDocsPicker={
-          docsReason === null
+          sources.autodeskDocs && docsReason === null
             ? () => {
                 onLinkOpenChange(false)
                 setDocsOpen(true)
@@ -709,15 +730,17 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
         }
       />
 
-      <DocsPickerDialog
-        key={docsOpen ? 'docs-open' : 'docs-closed'}
-        projectId={projectId}
-        open={docsOpen}
-        onOpenChange={setDocsOpen}
-        revitModelName={data?.revitModel?.name ?? null}
-        onQueued={refresh}
-        disciplineSet={disciplines}
-      />
+      {sources.autodeskDocs && (
+        <DocsPickerDialog
+          key={docsOpen ? 'docs-open' : 'docs-closed'}
+          projectId={projectId}
+          open={docsOpen}
+          onOpenChange={setDocsOpen}
+          revitModelName={data?.revitModel?.name ?? null}
+          onQueued={refresh}
+          disciplineSet={disciplines}
+        />
+      )}
 
       <AlertDialog open={unlinking !== null} onOpenChange={(open) => !open && setUnlinking(null)}>
         <AlertDialogContent>

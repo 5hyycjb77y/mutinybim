@@ -262,7 +262,7 @@ Operator commands run as the app's user:
 - Sharing is by account email on the same server; there are no emailed
   invitations or links for people without an account.
 - The editor screens that need hosted storage (firm part libraries, stored
-  drawings, linked Revit models, code studies, file storage) say in words that
+  drawings, linked models (IFC or Revit), code studies, file storage) say in words that
   they are not available here; the rest of the editor works.
 - Sign-up has no email confirmation (the app sends no email).
 - A tool call that was waiting for the person when the server restarted
