@@ -221,7 +221,14 @@ async function assistant(cookie: string, elicit: (() => "accept" | "decline") | 
   const code = new URL(allowed.headers.get("location") ?? "").searchParams.get("code") ?? "";
   const tokens = (await (await fetch(`${base}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: ASSISTANT_REDIRECT, client_id: registered.client_id, code_verifier: verifier, resource }).toString() })).json()) as { access_token: string };
   const client = new Client({ name: "test-assistant", version: "1.0.0" }, elicit ? { capabilities: { elicitation: {} } } : {});
-  if (elicit) client.setRequestHandler(ElicitRequestSchema, async () => (elicit() === "accept" ? { action: "accept", content: { approve: true } } : { action: "decline" }));
+  if (elicit) {
+    client.setRequestHandler(ElicitRequestSchema, async () => {
+      if (elicit() === "accept") return { action: "accept", content: { approve: true } };
+      // A person reading the box: a no at once would count as the box never being shown, and go to the approvals page.
+      await new Promise((r) => setTimeout(r, 1_700));
+      return { action: "decline" };
+    });
+  }
   await client.connect(new StreamableHTTPClientTransport(new URL("/mcp", base), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } }));
   return client;
 }
@@ -339,7 +346,7 @@ test("an assistant works on linked models through the host, in this app's ids; v
   const family = await client.callTool({ name: "bim_create_level", arguments: { project_id: HOSTED_PROJECT_ID, model_id: editable, name: "Level 3", elevation_ft: 24 } });
   expect(textOf(family)).toContain("doesn't reach Example models from here");
   await client.close();
-});
+}, 30_000);
 
 test("a change approved on the approvals page after the call returned lands on the host once", async () => {
   await start();
