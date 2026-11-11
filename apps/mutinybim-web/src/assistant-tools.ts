@@ -123,6 +123,8 @@ const SESSION_KEEP_MS = 30 * 24 * 60 * 60_000;
 const SESSION_TOUCH_MS = 60_000;
 const MEMORY_SYNC_URL = "memory://mutinybim-web/sync";
 /** This app has no projects; tool families that ask for a project id take this one. */
+/** An approval box answered "no" sooner than this was never shown to the person. */
+const INSTANT_DECLINE_MS = 1_500;
 export const HOSTED_PROJECT_ID = "00000000-0000-4000-8000-000000000001";
 /** Given as a read's model_id, it answers with the signed-in person's models instead of reading one. */
 export const LIST_MODELS_WORD = "list";
@@ -365,9 +367,12 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
     const canForm = Boolean(elicitation) && (Boolean(elicitation?.form) || !elicitation?.url);
     if (canForm) {
       try {
+        const askedAt = Date.now();
         const said = await approvalIoFromRequest(extraValue).confirm(`MutinyBIM: ${clientName} wants to make this change in “${spec.modelName}”: ${spec.summary}.\nApprove?`);
         if (said === "approved") return { answer: "approved" };
-        if (said === "declined") return { answer: "declined" };
+        // A "no" faster than anyone can read came from the assistant, not the person (some never show the box): ask on the approvals page.
+        if (said === "declined" && Date.now() - askedAt >= INSTANT_DECLINE_MS) return { answer: "declined" };
+        if (said === "declined") console.warn("[mutinybim-web] the assistant's approval box said no at once; asking on the approvals page", { userId: person.id, clientName });
       } catch (err) {
         console.error("[mutinybim-web] the assistant's approval box failed; asking on the approvals page", { userId: person.id, err });
       }

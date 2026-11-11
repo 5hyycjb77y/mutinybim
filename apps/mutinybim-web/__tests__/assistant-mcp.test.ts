@@ -104,11 +104,11 @@ async function signInAssistant(cookie: string, resource = `${base}/mcp`): Promis
   return { clientId: registered.client_id, access: tokens.access_token, refresh: tokens.refresh_token };
 }
 
-async function connect(access: string, pathname = "/mcp", elicit?: (message: string) => "accept" | "decline"): Promise<Client> {
+async function connect(access: string, pathname = "/mcp", elicit?: (message: string) => "accept" | "decline" | Promise<"accept" | "decline">): Promise<Client> {
   const client = new Client({ name: "test-assistant", version: "1.0.0" }, elicit ? { capabilities: { elicitation: {} } } : {});
   if (elicit) {
     client.setRequestHandler(ElicitRequestSchema, async (request) => {
-      const said = elicit(String(request.params.message));
+      const said = await elicit(String(request.params.message));
       return said === "accept" ? { action: "accept", content: { approve: true } } : { action: "decline" };
     });
   }
@@ -244,11 +244,21 @@ test("every change asks first: the assistant's own box, or the approvals page; a
   expect(await levels()).toBe(2);
   await withBox.close();
 
-  const declining = await connect(access, `/packs/${EDIT_FAMILY}/mcp`, () => "decline");
+  // A person who reads the box and says no: declined, nothing changes.
+  const declining = await connect(access, `/packs/${EDIT_FAMILY}/mcp`, () => new Promise((r) => setTimeout(() => r("decline"), 1_700)));
   const refused = await declining.callTool({ name: "bim_create_level", arguments: { project_id: HOSTED_PROJECT_ID, model_id: modelId, name: "Level 3", elevation_ft: 24 } });
   expect(textOf(refused)).toContain("declined");
   expect(await levels()).toBe(2);
   await declining.close();
+
+  // An assistant that says no at once never showed the box: the change waits on the approvals page instead.
+  const hasty = await connect(access, `/packs/${EDIT_FAMILY}/mcp`, () => "decline");
+  const hastyCall = textOf(await hasty.callTool({ name: "bim_create_level", arguments: { project_id: HOSTED_PROJECT_ID, model_id: modelId, name: "Hasty", elevation_ft: 50 } }));
+  expect(hastyCall).toContain("awaiting_approval");
+  const hastyId = hastyCall.match(/\/approvals\/([0-9a-f-]{36})/)?.[1];
+  expect((await post(`/approvals/${hastyId}`, { decision: "decline" }, cookie)).status).toBe(200);
+  expect(await levels()).toBe(2);
+  await hasty.close();
 
   // No approval box: the change waits on the approvals page; approving it there lands it.
   const plain = await connect(access, `/packs/${EDIT_FAMILY}/mcp`);
