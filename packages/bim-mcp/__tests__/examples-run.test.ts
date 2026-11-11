@@ -10,6 +10,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { danglingReferences, entityCounts, exportIfc, readStep, type StepToken } from "@permitzip/bim-ifc";
 import type { BimElement, ModelState } from "@permitzip/bim-kernel";
 import { KIT_EXAMPLES, KIT_EXAMPLE_SOURCES } from "@permitzip/bim-script";
 import { runExample, type ExampleRun } from "../src/examples";
@@ -42,6 +43,33 @@ describe("examples: every showcase script runs through the core tools", () => {
     expect(ofKind(m, "sheet").map((s) => field<string>(s, "number")).sort()).toEqual(["A-101", "A-102"]);
     expect(ofKind(m, "viewport")).toHaveLength(2);
     expect(label).toMatch(/^Small office/);
+  }, 120_000);
+
+  it("small-office: IFC 4.3 preserves the storeys, typed walls and room identities", async () => {
+    const { model } = await run("small-office");
+    const { text } = exportIfc({
+      model,
+      project: { id: "small-office", name: "Small office", number: "001" },
+      timeStamp: "2026-01-01T00:00:00Z",
+    });
+    const file = readStep(text);
+    const entities = [...file.entities.values()];
+    const stringValue = (arg: StepToken | undefined) => arg?.kind === "string" ? arg.value : undefined;
+
+    expect(file.schemas).toEqual(["IFC4X3_ADD2"]);
+    expect(danglingReferences(file)).toEqual([]);
+    expect(entityCounts(file)).toMatchObject({ IFCBUILDINGSTOREY: 2, IFCWALL: 12, IFCSPACE: 6 });
+
+    const storeys = entities.filter((entity) => entity.type === "IFCBUILDINGSTOREY");
+    expect(storeys.map((storey) => stringValue(storey.args[2])).sort()).toEqual(["Level 1", "Level 2"]);
+
+    const rooms = entities.filter((entity) => entity.type === "IFCSPACE");
+    // IfcSpace uses Name for the room number and LongName for its display name.
+    const identities = rooms.map((room) => [stringValue(room.args[2]), stringValue(room.args[7])]);
+    expect(identities).toEqual(expect.arrayContaining([
+      ["101", "Open office"], ["102", "Conference"], ["103", "Office"],
+      ["201", "Open office"], ["202", "Conference"], ["203", "Office"],
+    ]));
   }, 120_000);
 
   it("rooftop-unit: the unit on the roof, ducts sized from airflow down into the rooms, tagged, and scheduled", async () => {
