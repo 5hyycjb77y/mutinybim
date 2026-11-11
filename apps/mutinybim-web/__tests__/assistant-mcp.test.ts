@@ -296,6 +296,13 @@ test("a model shared view-only: the assistant reads it but can't change it, and 
   const notShared = await client.callTool({ name: "bim_model_summary", arguments: { model_id: strangerModel } });
   expect(notShared.isError).toBe(true);
   expect(textOf(notShared)).toContain("isn't in your account or shared with you");
+  // An assistant that was never shown the sign-in instructions can still find the person's models.
+  const tools = await client.listTools();
+  expect(JSON.stringify(tools.tools.find((t) => t.name === "bim_model_summary")?.inputSchema)).toContain('Pass \\"list\\"');
+  const listed = await client.callTool({ name: "bim_model_summary", arguments: { model_id: "list" } });
+  expect(listed.isError).toBeFalsy();
+  expect(textOf(listed)).toContain(`Sample Warehouse (model_id ${modelId}, view only, shared by Sam Example)`);
+  expect(textOf(listed)).not.toContain(strangerModel);
   await client.close();
 }, 30_000);
 

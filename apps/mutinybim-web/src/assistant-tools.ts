@@ -37,7 +37,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ElicitResultSchema, isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { canonicalJson, parseBranchModelId, type Command } from "@permitzip/bim-kernel";
-import { approvalIoFromRequest, createBimToolServer, familySlug, LOCAL_SCHEMAS, PACK_CONTROL_TOOL, type ApprovalGate, type BimToolHost, type ResolveBimCaller, type ScriptRunnerHost, type ToolCallWrapper } from "@permitzip/bim-mcp";
+import { approvalIoFromRequest, createBimToolServer, familySlug, LOCAL_SCHEMAS, PACK_CONTROL_TOOL, type ApprovalGate, type CoreSchemas, type BimToolHost, type ResolveBimCaller, type ScriptRunnerHost, type ToolCallWrapper } from "@permitzip/bim-mcp";
 import { localCaller, localModelAccess, MemoryScriptLibrary, type LocalModelServer } from "@permitzip/bim-mcp/local";
 import { localToolPacks } from "@permitzip/bim-mcp-packs";
 import type { AgentEditResult, AgentSocketFactory } from "@permitzip/bim-sync";
@@ -124,6 +124,12 @@ const SESSION_TOUCH_MS = 60_000;
 const MEMORY_SYNC_URL = "memory://mutinybim-web/sync";
 /** This app has no projects; tool families that ask for a project id take this one. */
 export const HOSTED_PROJECT_ID = "00000000-0000-4000-8000-000000000001";
+/** Given as a read's model_id, it answers with the signed-in person's models instead of reading one. */
+export const LIST_MODELS_WORD = "list";
+const HOSTED_SCHEMAS: CoreSchemas = {
+  reads: { ...LOCAL_SCHEMAS.reads, model_id: LOCAL_SCHEMAS.reads.model_id.describe(`Model id. Pass "${LIST_MODELS_WORD}" to see this person's models.`) },
+  scripts: LOCAL_SCHEMAS.scripts,
+};
 
 
 /** Where a library save lands, as the approval names it. */
@@ -578,14 +584,26 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
       `Hosted MutinyBIM at ${origin}, signed in as ${person.display_name}. ${modelsLine(person)}${linkedWords ? ` ${linkedWords}` : ""} This app has no projects: leave project_id out where you can, and where a tool needs one pass ${HOSTED_PROJECT_ID}. ` +
       `Scripts run ${options.scripts.where}: preview with bim_run_script, then land the result with bim_apply_output. ` +
       `Every change asks ${person.display_name} first: in your approval box if you have one, otherwise on ${origin}/approvals. Models shared view-only can be read, never changed.`;
+    const linkedTool = aroundTool;
+    // Not every assistant shows its model the instructions above, so the model list is also one call away.
+    const withModelList: ToolCallWrapper = (name, next) => {
+      const inner = linkedTool ? linkedTool(name, next) : next;
+      return (async (args: unknown, extra: unknown) => {
+        const given = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : null;
+        const asked = given && typeof given.model_id === "string" ? given.model_id.trim().toLowerCase() : null;
+        if (asked !== LIST_MODELS_WORD) return (inner as (a: unknown, e: unknown) => unknown)(args, extra);
+        const linkedNow = await linkedLine(person);
+        return { content: [{ type: "text" as const, text: `${modelsLine(person)}${linkedNow ? ` ${linkedNow}` : ""} Call again with one of these model ids. New models are made under My models at ${origin}/models.` }] };
+      }) as never;
+    };
     made = createBimToolServer({
       host,
-      schemas: LOCAL_SCHEMAS,
+      schemas: HOSTED_SCHEMAS,
       runsWhere: options.scripts.where,
       instructions,
       families: [...new Set([family, ...turnedOn].filter((f) => f.length > 0))],
       packs: [localToolPacks(host, path.join(options.dataDir, "assistant-files", person.id))],
-      ...(aroundTool ? { aroundTool } : {}),
+      aroundTool: withModelList,
     });
     return made;
   }
