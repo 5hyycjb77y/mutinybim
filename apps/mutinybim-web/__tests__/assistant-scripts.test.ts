@@ -181,8 +181,17 @@ test("a layout script: preview changes nothing, apply waits for the person on th
   const applying = call(client, "bim_apply_output", (preview.apply_with as { args: Body }).args);
   const id = await waitingApproval(sam);
   expect(await (await fetch(`${base}/approvals/${id}`, { headers: { cookie: sam } })).text()).toContain("Sample Warehouse");
+  // The list names the model, never its id.
+  const listed = await (await fetch(`${base}/approvals`, { headers: { cookie: sam } })).text();
+  expect(listed).toContain("1 new, 0 changed, 0 deleted, in “Sample Warehouse”");
+  expect(listed).not.toContain(modelId);
   await post(`/approvals/${id}`, { decision: "approve" }, sam);
   expect(await applying).toMatchObject({ status: "saved" });
+  // Approved while the assistant's call waited: once that call applied it, the page says so (not "applying it now" for good).
+  const applied = await (await fetch(`${base}/approvals/${id}`, { headers: { cookie: sam } })).text();
+  expect(applied).toContain("Approved and applied by your assistant.");
+  expect(applied).toContain(">Applied<");
+  expect(applied).not.toContain("applying it now");
   expect(await levels()).toBe(2);
   expect((await app?.models.head(modelId))?.elements["level-2"]).toMatchObject({ kind: "level", name: "Level 2" });
   await client.close();

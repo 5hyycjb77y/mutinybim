@@ -21,7 +21,7 @@ import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { LocalScriptRunner } from "@permitzip/bim-script-runner/local";
 import type { SyncHub } from "@permitzip/bim-sync";
 import { createEditorDemo, type EditorDemo } from "../../../packages/bim-editor/demo/server";
-import { ApprovalBook } from "./assistant-approvals";
+import { ApprovalBook, approvalTitle } from "./assistant-approvals";
 import { approveAuthorize, checkAuthorize, errorRedirect, type AssistantAuthOptions } from "./assistant-auth";
 import { createAssistantTools, type AttachModel, type ModelEndpoint } from "./assistant-tools";
 import type { OAuthProviderConfig, WebConfig } from "./config";
@@ -192,7 +192,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   const throttle = new Throttle(20, 10 * 60_000);
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
   const approvals = new ApprovalBook(db);
-  setWaitingApprovals((userId) => approvals.waitingCount(userId));
+  setWaitingApprovals((userId) => approvals.waiting(userId));
   const linkedHosts = createLinkedHosts({ config, db, keys: options.linkKeys !== undefined ? options.linkKeys : readLinkKeys(), ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
   const assistantAuth: AssistantAuthOptions = { origin: config.origin, families: TOOL_FAMILIES, db, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}), ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}) };
 
@@ -389,6 +389,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (method === "GET" && pathname === "/healthz") return json(res, 200, { ok: true });
     if (method === "GET" && pathname === "/static/app.css") return send(res, 200, "text/css; charset=utf-8", await bundleCss(), { "cache-control": "public, max-age=300" });
     if (method === "GET" && pathname === "/static/confirm.js") return send(res, 200, "text/javascript; charset=utf-8", await readFile(path.join(APP_DIR, "public/confirm.js")), { "cache-control": "public, max-age=300" });
+    if (method === "GET" && pathname === "/static/approvals.js") return send(res, 200, "text/javascript; charset=utf-8", await readFile(path.join(APP_DIR, "public/approvals.js")), { "cache-control": "public, max-age=300" });
     if (method === "GET" && pathname === "/static/settings.js") return send(res, 200, "text/javascript; charset=utf-8", await bundleSettings(), { "cache-control": "public, max-age=300" });
 
     if (method === "GET" && pathname === "/") return user ? redirect(res, "/models") : html(res, 200, landingPage(config));
@@ -691,10 +692,15 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         return item ? html(res, 200, approvalPage(config, user, item)) : html(res, 404, messagePage(config, user, "Not found", "That approval request isn't yours, or it was dropped after 30 minutes. Nothing changed.", { href: "/approvals", label: "Approvals" }));
       }
       if (method === "POST") {
+        // The editor's notice answers in the background and reads the result as JSON; a page form gets the page.
+        const wantsJson = (req.headers.accept ?? "").includes("application/json");
         const decision = (await readForm(req)).get("decision");
+        if (decision !== "approve" && decision !== "decline") throw new Refusal(400, "Choose Approve or Decline. Nothing changed.");
         const item = await approvals.answer(user.id, id, decision === "approve");
+        if (!item && wantsJson) return json(res, 404, { error: "That approval request isn't yours, or it was dropped after 30 minutes. Nothing changed." });
         if (!item) return html(res, 404, messagePage(config, user, "Not found", "That approval request isn't yours, or it was dropped after 30 minutes. Nothing changed.", { href: "/approvals", label: "Approvals" }));
         console.log("[mutinybim-web] a person answered an assistant's change", { userId: user.id, approved: decision === "approve", state: item.state });
+        if (wantsJson) return json(res, 200, { id: item.id, state: item.state, outcome: item.outcome, title: approvalTitle(item) });
         return html(res, 200, approvalPage(config, user, item));
       }
     }
@@ -729,6 +735,9 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       }
       return html(res, 200, quotePage(config, config.quote, user, list, chosen, summary));
     }
+
+    // What is waiting for this person's answer (the editor's notice and the header count read it every few seconds).
+    if (user && method === "GET" && pathname === "/api/hosted/approvals/waiting") return json(res, 200, { waiting: approvals.waiting(user.id) });
 
     const summaryRoute = pathname.match(/^\/api\/hosted\/models\/([a-z0-9-]+)\/summary$/);
     if (user && method === "GET" && summaryRoute?.[1]) {

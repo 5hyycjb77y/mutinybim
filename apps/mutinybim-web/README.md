@@ -34,7 +34,7 @@ account in a private window and share the model with it to edit together.
 | `/settings` | Their name; password; linking a sign-in provider; **Your AI**: their own provider key, kept only in their browser. |
 | `/connect` | The address to paste into Claude, ChatGPT, Grok or Cursor (`<this app>/mcp`), the assistants they have signed in (and Sign out), and agent keys for a tool server on their own computer. |
 | `/oauth/authorize` | "Let “<assistant>” use your models?": Allow or Don't allow. |
-| `/approvals`, `/approvals/<id>` | Changes an assistant proposed when it couldn't ask the person itself: exactly what changes, Approve or Decline. In the header while any wait. |
+| `/approvals`, `/approvals/<id>` | Changes an assistant proposed when it couldn't ask the person itself: exactly what changes, Approve or Decline. The header's Approvals link counts what is waiting; every signed-in page and the editor show a notice with Approve / Decline while any wait (the editor and the header re-check `/api/hosted/approvals/waiting`, the signed-in person's own requests, every few seconds). |
 
 ### Bring your own AI
 

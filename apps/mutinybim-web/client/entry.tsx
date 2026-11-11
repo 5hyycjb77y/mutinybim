@@ -16,6 +16,7 @@ import { TooltipProvider } from '@permitzip/bim-editor/ui/tooltip'
 import { BuildingModelSurface, type BuildingModelView } from '@permitzip/bim-editor/editor/BuildingModelSurface'
 import { mutinyToShadcnVars } from '../../../packages/bim-editor/demo/theme'
 import { AiError, ask, providerName, readAiSettings } from './ai'
+import { answerApproval, ApprovalsError, fetchWaitingApprovals, type ApprovalAnswer, type WaitingApproval } from './approvals'
 
 interface PageData {
   readonly modelId: string
@@ -224,6 +225,117 @@ function HostedBar() {
   )
 }
 
+const APPROVALS_EVERY_MS = 5000
+const APPROVALS_SHOWN = 2
+
+/** Changes an outside assistant is waiting for this person to approve, shown above the model without a reload. */
+function ApprovalNotices() {
+  const [waiting, setWaiting] = useState<readonly WaitingApproval[]>([])
+  const [problem, setProblem] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [result, setResult] = useState<{ readonly ok: boolean; readonly words: string } | null>(null)
+
+  /** False once checking should stop (signed out). */
+  const check = useCallback(async (): Promise<boolean> => {
+    if (document.visibilityState !== 'visible') return true
+    try {
+      setWaiting(await fetchWaitingApprovals())
+      setProblem(null)
+      return true
+    } catch (err) {
+      console.error('[mutinybim-web] checking for approval requests failed', err)
+      setProblem(err instanceof ApprovalsError ? err.message : 'Checking for approval requests failed. Open Approvals to see what is waiting.')
+      return !(err instanceof ApprovalsError && err.signedOut)
+    }
+  }, [])
+
+  useEffect(() => {
+    let timer = 0
+    let stopped = false
+    const tick = async () => {
+      if (stopped || (await check())) return
+      stopped = true
+      window.clearInterval(timer)
+    }
+    void tick()
+    timer = window.setInterval(() => void tick(), APPROVALS_EVERY_MS)
+    const onVisible = () => void tick()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [check])
+
+  useEffect(() => {
+    document.title = `${waiting.length > 0 ? `(${waiting.length}) ` : ''}${data.modelName} · MutinyBIM`
+  }, [waiting.length])
+
+  const answer = useCallback(
+    async (item: WaitingApproval, decision: ApprovalAnswer) => {
+      setBusy(item.id)
+      setResult(null)
+      try {
+        setResult(await answerApproval(item.id, decision))
+      } catch (err) {
+        console.error('[mutinybim-web] answering an approval request failed', err)
+        setResult({ ok: false, words: err instanceof ApprovalsError ? err.message : "Your answer wasn't sent. Check your connection, then answer it on Approvals." })
+      } finally {
+        setBusy(null)
+        void check()
+      }
+    },
+    [check],
+  )
+
+  if (waiting.length === 0 && !problem && !result) return null
+  return (
+    <div role="region" aria-label="Waiting for your approval" data-testid="approval-notices" className="flex flex-none flex-col gap-1.5 border-b border-(--mutiny-border) bg-(--mutiny-accent-subtle) px-3 py-2 text-sm text-(--mutiny-text)">
+      {waiting.slice(0, APPROVALS_SHOWN).map((item) => (
+        <div key={item.id} role="status" className="flex flex-wrap items-center gap-2" data-testid="approval-notice">
+          <span className="min-w-0 flex-1 basis-64 break-words">
+            <strong>{item.assistant}</strong> is waiting for your approval{item.modelId === data.modelId ? ' to change this model' : ''}: {item.title}
+          </span>
+          <Button type="button" size="sm" disabled={busy !== null} onClick={() => void answer(item, 'approve')}>
+            {busy === item.id ? <Spinner /> : null}
+            Approve
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => void answer(item, 'decline')}>
+            Decline
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <a href={item.href} target="_blank" rel="noopener noreferrer">
+              See exactly what changes
+            </a>
+          </Button>
+        </div>
+      ))}
+      {waiting.length > APPROVALS_SHOWN ? (
+        <a className="underline" href="/approvals" target="_blank" rel="noopener noreferrer">
+          And {waiting.length - APPROVALS_SHOWN} more waiting on Approvals
+        </a>
+      ) : null}
+      {result ? (
+        <p role="status" className={`flex flex-wrap items-center gap-2 ${result.ok ? '' : 'text-(--mutiny-danger)'}`}>
+          {result.words}
+          <Button type="button" variant="ghost" size="sm" onClick={() => setResult(null)}>
+            Dismiss
+          </Button>
+        </p>
+      ) : null}
+      {problem ? (
+        <p role="alert" className="text-(--mutiny-danger)">
+          {problem}{' '}
+          <a className="underline" href="/approvals" target="_blank" rel="noopener noreferrer">
+            Open Approvals
+          </a>
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 /** Menus, selects and dialogs mount inside the Mutiny root so they wear its palette. */
 function Overlays({ children }: { children: ReactNode }) {
   const root = useMutinyPortalContainer()
@@ -239,6 +351,7 @@ createRoot(mount).render(
       <TooltipProvider>
         <Overlays>
           <HostedBar />
+          <ApprovalNotices />
           <EditorHostProvider host={host}>
             <BuildingModelSurface projectId={data.modelId} projectName={data.modelName} projectNumber="" userId={data.userId} userName={data.displayName} initialView={initialView} />
           </EditorHostProvider>

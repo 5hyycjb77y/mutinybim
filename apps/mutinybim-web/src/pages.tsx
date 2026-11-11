@@ -7,7 +7,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Badge, Button, buttonVariants, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, cn, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Field, FieldHint, Input, Label, NativeSelect, Separator } from "@permitzip/bim-ui";
 import type { OAuthProviderConfig, QuoteConfig, WebConfig } from "./config";
-import type { PendingApproval } from "./assistant-approvals";
+import { approvalTitle, type PendingApproval } from "./assistant-approvals";
 import type { AgentKeyRow, AssistantGrantRow, LinkedModelRow, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
 import type { LinkedProvider, LinkedView } from "./linked-hosts";
 import type { ModelSummary } from "./models";
@@ -930,7 +930,7 @@ export function assistantConsentPage(_config: WebConfig, user: UserRow, consent:
 
 const APPROVAL_STATE_WORDS: Record<PendingApproval["state"], string> = {
   waiting: "Waiting for you",
-  approved: "Approved",
+  approved: "Approved, not applied yet",
   declined: "Declined",
   landed: "Applied",
   failed: "Couldn't apply",
@@ -975,10 +975,13 @@ export function approvalsPage(config: WebConfig, user: UserRow, items: readonly 
               <Card>
                 <CardHeader>
                   <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-                    <a href={`/approvals/${item.id}`}>{item.summary}</a> <ApprovalBadge state={item.state} />
+                    <a href={`/approvals/${item.id}`} className="min-w-0 break-words">
+                      {approvalTitle(item)}
+                    </a>{" "}
+                    <ApprovalBadge state={item.state} />
                   </CardTitle>
                   <CardDescription>
-                    {item.clientName} · “{item.modelName}” · {formatWhen(new Date(item.createdAt).toISOString())}
+                    {item.clientName} · {formatWhen(new Date(item.createdAt).toISOString())}
                   </CardDescription>
                 </CardHeader>
                 {item.outcome ? <CardDescription>{item.outcome}</CardDescription> : null}
@@ -994,19 +997,22 @@ export function approvalsPage(config: WebConfig, user: UserRow, items: readonly 
 }
 
 export function approvalPage(config: WebConfig, user: UserRow, item: PendingApproval): string {
+  const title = approvalTitle(item);
+  // The request word for word, as the assistant sent it, under the plain title.
+  const details = item.summary === title ? item.details : [item.summary, ...item.details];
   return page(
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-2xl">
-          {item.summary} <ApprovalBadge state={item.state} />
+          <span className="min-w-0 break-words">{title}</span> <ApprovalBadge state={item.state} />
         </CardTitle>
         <CardDescription>
           {item.clientName} wants to make this change in {item.modelId ? <a href={`/m/${encodeURIComponent(item.modelId.split("~")[0] ?? item.modelId)}`}>“{item.modelName}”</a> : item.modelName}, asked {formatWhen(new Date(item.createdAt).toISOString())}.
         </CardDescription>
       </CardHeader>
-      {item.details.length > 0 ? (
-        <pre className="max-h-80 overflow-auto rounded-(--mutiny-radius) border border-(--mutiny-border) bg-(--mutiny-canvas) p-3 text-xs/relaxed" aria-label="Exactly what changes">
-          <code>{item.details.join("\n")}</code>
+      {details.length > 0 ? (
+        <pre className="max-h-80 overflow-auto rounded-(--mutiny-radius) border border-(--mutiny-border) bg-(--mutiny-canvas) p-3 text-xs/relaxed whitespace-pre-wrap" aria-label="Exactly what changes">
+          <code>{details.join("\n")}</code>
         </pre>
       ) : null}
       {item.outcome ? (
