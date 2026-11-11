@@ -4,7 +4,7 @@
  * two bundled files on a sealed machine; `LocalScriptRunner` runs them on
  * this computer for one person's own scripts.
  */
-export { SCRIPT_CHILD_FILE, SCRIPT_RUNNER_CAPS, SCRIPT_RUNNER_FILE, childEnv, childNodeArgs, clampLimits, type ChildLine, type ScriptRunnerLimits, type ScriptRunnerRequestFile } from "./protocol";
+export { NEVER_FINISHED_WORDS, RUN_MESSAGE_MAX, SCRIPT_CHILD_FILE, SCRIPT_RUNNER_CAPS, SCRIPT_RUNNER_FILE, UNAWAITED_WORDS, childEnv, childNodeArgs, clampLimits, clipRunMessage, exitWords, type ChildLine, type ScriptRunnerLimits, type ScriptRunnerRequestFile } from "./protocol";
 export { superviseRun, type SupervisedResult, type SuperviseOptions } from "./supervisor";
 export { buildScriptRunner, type BuildScriptRunnerOptions } from "./build";
 export { RUNNER_RESULT_SCHEMA, toScriptRunResult, type RunnerResultLine } from "./result";

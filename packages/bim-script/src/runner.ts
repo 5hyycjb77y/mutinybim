@@ -72,6 +72,6 @@ export function runFailureWords(result: Extract<ScriptRunResult, { ok: false }>,
     case "script_error":
       return `The script stopped: ${result.message}`;
     case "runner_error":
-      return `The script couldn't be run here: ${result.message}`;
+      return `The script couldn't be run here: ${result.message.replace(/[.\s]+$/, "")}. That is the script machine, not a mistake in the script, so don't rewrite the script: run it once more as it is, and if it fails the same way tell the person.`;
   }
 }

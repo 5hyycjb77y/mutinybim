@@ -12,6 +12,9 @@
  *   view-only previews but never lands, and nobody is asked.
  * - A restart: the assistant's session carries on (with the family it turned
  *   on) and a change approved after the restart still lands.
+ * - A script is sent once: the preview names it by id, and the id still lands
+ *   after a restart, in a new session of the same person, and for nobody
+ *   else (kept scripts live in the account database).
  *
  * The runner here is the open local one (this test runs on any computer);
  * the sealed box it runs in on the server is script-sandbox.test.ts.
@@ -177,6 +180,9 @@ test("a layout script: preview changes nothing, apply waits for the person on th
   const preview = await call(client, "bim_run_script", { project_id: HOSTED_PROJECT_ID, model_id: modelId, script });
   expect(preview).toMatchObject({ status: "previewed", kind: "edits", changes: { creates: 1, edits: 0, deletes: 0 } });
   expect(await levels()).toBe(1);
+  // The script is sent once: the preview names it by id and doesn't send its text back.
+  expect(JSON.stringify(preview)).not.toContain("defineScript");
+  expect((preview.apply_with as { args: Body }).args.script).toEqual({ id: preview.script_id });
 
   const applying = call(client, "bim_apply_output", (preview.apply_with as { args: Body }).args);
   const id = await waitingApproval(sam);
@@ -232,4 +238,38 @@ test("after a restart the assistant's session carries on, with its family on, an
   expect(page).toContain("Approved and applied");
   expect(Object.values((await app?.models.head(modelId))?.elements ?? {}).filter((e) => e.kind === "level")).toHaveLength(2);
   await client.close();
+}, 120_000);
+
+test("a previewed script lands by its id after a restart, in a new session, and only for the person who sent it", async () => {
+  const sam = await signUp("sam@example.com", "Sam Example");
+  const modelId = await makeModel(sam, "Sample Warehouse");
+  const access = await signInAssistant(sam);
+  const client = await connect(access, () => "accept");
+  const script = { source: LEVEL_SCRIPT("level-2", "Level 2", 4000), reads: { levels: true } };
+  const checked = await call(client, "bim_check_output", { script });
+  expect(checked).toMatchObject({ status: "ok" });
+  const preview = await call(client, "bim_run_script", { project_id: HOSTED_PROJECT_ID, model_id: modelId, script: { id: checked.script_id } });
+  expect(preview).toMatchObject({ status: "previewed", script_id: checked.script_id });
+  const args = (preview.apply_with as { args: Body }).args;
+  expect(args.script).toEqual({ id: checked.script_id });
+  await client.close().catch(() => undefined);
+
+  await app?.close();
+  await start();
+
+  // Another person's assistant can't use the id, even on a model shared with them for editing.
+  // The restart closed the connections this process keeps open to the app; the first request after it can pick one up and is sent again.
+  const pat = await signUp("pat@example.com", "Pat Example").catch((err: unknown) => {
+    if (!String(err).includes("fetch failed")) throw err;
+    return signUp("pat@example.com", "Pat Example");
+  });
+  await post(`/models/${modelId}/share`, { email: "pat@example.com", role: "edit" }, sam);
+  const theirs = await connect(await signInAssistant(pat), () => "accept");
+  expect(await call(theirs, "bim_apply_output", args)).toMatchObject({ status: "refused", message: expect.stringContaining("That preview has expired"), nothing_changed: true });
+  await theirs.close();
+
+  const again = await connect(access, () => "accept");
+  expect(await call(again, "bim_apply_output", args)).toMatchObject({ status: "saved" });
+  expect((await app?.models.head(modelId))?.elements["level-2"]).toMatchObject({ kind: "level", name: "Level 2" });
+  await again.close();
 }, 120_000);

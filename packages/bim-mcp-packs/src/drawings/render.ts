@@ -39,13 +39,22 @@ const imageInput = {
   keep_copy: z.boolean().optional().describe("Also store the PNG in the project's files and return a 5-minute link (for a person)."),
 };
 
-function imageResult(summary: Record<string, unknown>, image: RenderedImage) {
+/**
+ * A picture's answer: the numbers as text and the PNG once, as MCP image
+ * content. The picture's bytes are never repeated in the text part.
+ */
+export function imageResult(summary: Record<string, unknown>, image: Pick<RenderedImage, "png">) {
   return {
     content: [
       { type: "text" as const, text: JSON.stringify(summary, null, 2) },
       { type: "image" as const, data: image.png.toString("base64"), mimeType: "image/png" },
     ],
   };
+}
+
+/** Said when the picture was drawn below the resolution asked for, so the agent zooms instead of squinting. */
+export function scaledWords(image: Pick<RenderedImage, "dpi">, askedDpi: number): string {
+  return image.dpi < askedDpi ? ` Scaled down to fit max_px (${image.dpi} dpi, not ${askedDpi}): to read small text, zoom with a region or raise max_px.` : "";
 }
 
 /** Grow a box about its centre to at least `mm` each way, so a zoom keeps some context. */
@@ -128,7 +137,7 @@ export function registerBimRenderTools(server: McpServer, caller: ResolveBimCall
         return imageResult(
           {
             status: "drawn",
-            message: `${view.name} from saved Rev ${scene.revision}, ${image.widthPx} × ${image.heightPx} px at ${image.dpi} dpi.${outside.length ? ` ${outside.length} of the focus elements are in the view but outside ${regionName}, so they aren't in the picture (${outside.join(", ")}); leave out ${regionName} to frame them, or widen it.` : ""}`,
+            message: `${view.name} from saved Rev ${scene.revision}, ${image.widthPx} × ${image.heightPx} px at ${image.dpi} dpi.${scaledWords(image, args.dpi ?? RENDER_DEFAULT_DPI)}${outside.length ? ` ${outside.length} of the focus elements are in the view but outside ${regionName}, so they aren't in the picture (${outside.join(", ")}); leave out ${regionName} to frame them, or widen it.` : ""}`,
             view: { id: view.id, name: view.name, type: view.viewType },
             revision: scene.revision,
             paper_in: inches({ min: { x: 0, y: 0 }, max: scene.paper }).max,
@@ -185,7 +194,7 @@ export function registerBimRenderTools(server: McpServer, caller: ResolveBimCall
         return imageResult(
           {
             status: "drawn",
-            message: `Sheet ${number} from saved Rev ${scene.revision}, ${image.widthPx} × ${image.heightPx} px at ${image.dpi} dpi.`,
+            message: `Sheet ${number} from saved Rev ${scene.revision}, ${image.widthPx} × ${image.heightPx} px at ${image.dpi} dpi.${scaledWords(image, args.dpi ?? RENDER_DEFAULT_DPI)}`,
             sheet: { number, name: title },
             title_block: { firm: printedTitle.firm, project: printedTitle.project, project_number: printedTitle.projectNumber },
             revision: scene.revision,

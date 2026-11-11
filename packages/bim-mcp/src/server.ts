@@ -118,7 +118,8 @@ const CORE_INSTRUCTIONS =
   "MutinyBIM tool server: read and change a MutinyBIM building model by writing scripts with the open-source kit. " +
   "Start with bim_script_reference (no arguments: the workflow, the kit's functions, whether scripts can run here), then bim_model_summary. " +
   "Workflow: write the script → bim_check_output → bim_run_script (a preview; nothing is saved) → show the person → bim_apply_output (or bim_save_part_type) with apply_with.args. " +
-  "Nothing changes until the person approves; one result is one undo step. Pass base_revision = the revision you read; a stale preview is refused and you run it again.";
+  "Nothing changes until the person approves; one result is one undo step. Pass base_revision = the revision you read; a stale preview is refused and you run it again. " +
+  "Send a script's text once: when an answer carries script_id, name the script by it afterwards (script: { id }), and fix an error with script: { id, replace: [{ old, new }] } instead of sending it again.";
 
 /** Packs that would break the server: a core name, a name twice, an empty id. */
 export function packProblems(packs: readonly BimToolPack[]): string[] {

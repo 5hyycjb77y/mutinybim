@@ -76,3 +76,30 @@ export function childEnv(): Record<string, string> {
 
 /** Lines the child prints on stdout. */
 export type ChildLine = { readonly ready: true; readonly heapLimitMb: number } | { readonly ok: true; readonly output: unknown; readonly manifest: unknown } | { readonly ok: false; readonly message: string };
+
+/** The longest failure message a run result carries (the host's result schema takes 4,000 characters; longer ones were refused whole). */
+export const RUN_MESSAGE_MAX = 3500;
+
+/** A failure message within `RUN_MESSAGE_MAX`, saying how much was cut. */
+export function clipRunMessage(message: string): string {
+  return message.length <= RUN_MESSAGE_MAX ? message : `${message.slice(0, RUN_MESSAGE_MAX)}… (${message.length - RUN_MESSAGE_MAX} more characters cut)`;
+}
+
+/**
+ * Words for a script process that ended with no answer. `started`: it said
+ * it was ready, so the machine itself came up and something in the run ended
+ * it; otherwise the machine never started and the script is not at fault.
+ */
+export function exitWords(code: number | null, signal: string | null, stderr: string, started: boolean): string {
+  const said = stderr.trim().slice(0, 300);
+  const base = `the script process exited ${code ?? signal} before answering${said ? `: ${said}` : ""}`;
+  if (!started) return `${base}. It ended before it was ready, so the script machine didn't start`;
+  if (signal === "SIGKILL") return `${base}. The machine stopped it, most often for using too much memory: read less or build less in one run`;
+  return base;
+}
+
+/** Said by the script process when it has nothing left to wait for and no result: `run()` awaits something that never finishes. */
+export const NEVER_FINISHED_WORDS = "The script ended without a result: run() is waiting on something that never finishes (a promise nothing resolves). A script has no timers or network to wait for; make the edits and return.";
+
+/** Added to an error from a promise the script made and didn't await. */
+export const UNAWAITED_WORDS = "(thrown by an async call the script didn't await: put await in front of it)";

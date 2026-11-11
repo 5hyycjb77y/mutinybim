@@ -23,6 +23,9 @@
  * - Sessions and approvals are kept in the account database: after a
  *   restart an assistant carries on in the same session (with the families
  *   it turned on), and requests waiting for the person are still there.
+ * - Scripts an assistant sent are kept there too (36 hours), so it sends a
+ *   script once, fixes it by id and lands a preview by id, also after a
+ *   restart.
  * - Linked models (linked-hosts.ts): a core tool call naming one is sent to
  *   the linked host's own tool server, which enforces its own permissions;
  *   a change asks the person here first, exactly as for their own models.
@@ -38,7 +41,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { ElicitResultSchema, isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { canonicalJson, parseBranchModelId, type Command } from "@permitzip/bim-kernel";
-import { approvalIoFromRequest, createBimToolServer, familySlug, LOCAL_SCHEMAS, PACK_CONTROL_TOOL, type ApprovalGate, type CoreSchemas, type BimToolHost, type ResolveBimCaller, type ScriptRunnerHost, type ToolCallWrapper } from "@permitzip/bim-mcp";
+import { approvalIoFromRequest, createBimToolServer, familySlug, LOCAL_SCHEMAS, PACK_CONTROL_TOOL, parseKeptScript, readKeptScript, type ApprovalGate, type CoreSchemas, type BimToolHost, type ResolveBimCaller, type ScriptPreviewStore, type ScriptRunnerHost, type ToolCallWrapper } from "@permitzip/bim-mcp";
 import { localCaller, localModelAccess, MemoryScriptLibrary, type LocalModelServer } from "@permitzip/bim-mcp/local";
 import { localToolPacks } from "@permitzip/bim-mcp-packs";
 import type { AgentEditResult, AgentSocketFactory } from "@permitzip/bim-sync";
@@ -122,6 +125,8 @@ const SESSION_IDLE_MS = 60 * 60_000;
 const SESSIONS_KEPT_PER_PERSON = 30;
 const SESSION_KEEP_MS = 30 * 24 * 60 * 60_000;
 const SESSION_TOUCH_MS = 60_000;
+/** Scripts kept per person so an assistant sends each one once (the oldest go first). */
+const KEPT_SCRIPTS_PER_PERSON = 200;
 const MEMORY_SYNC_URL = "memory://mutinybim-web/sync";
 /** This app has no projects; tool families that ask for a project id take this one. */
 /** An approval box answered "no" sooner than this was never shown to the person. */
@@ -438,6 +443,32 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
     return { answer: "approved", item };
   }
 
+  /** Scripts the assistant sent, kept in the account database: an id still works after a restart and in the person's other sessions. */
+  function keptScriptsOf(person: UserRow): ScriptPreviewStore {
+    return {
+      async put(script) {
+        db.saveKeptScript({ id: script.id, userId: person.id, body: script, expiresAt: script.expiresAt, keep: KEPT_SCRIPTS_PER_PERSON });
+      },
+      async get(id) {
+        return parseKeptScript(db.keptScript(id, person.id));
+      },
+    };
+  }
+
+  /**
+   * A call for a linked model that names a script this app kept (an id from a
+   * check made here) is sent with the script's text: the linked host keeps
+   * its own scripts under its own ids. An id this app doesn't have is the
+   * linked host's, and goes as it is.
+   */
+  async function withScriptText(person: UserRow, given: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const script = given.script;
+    if (typeof script !== "object" || script === null || !("id" in script) || typeof script.id !== "string" || "replace" in script) return given;
+    const kept = await readKeptScript(keptScriptsOf(person), person.id, script.id, Date.now());
+    if (!kept) return given;
+    return { ...given, script: { source: kept.source, reads: "reads" in script && script.reads !== undefined ? script.reads : kept.reads } };
+  }
+
   function makeHost(person: UserRow, grant: { readonly grantId: string; readonly clientName: string }, runId: string, server: () => McpServer): BimToolHost & { readonly caller: ResolveBimCaller; readonly runId: string; readonly person: string } {
     const actorId = agentActorId(person.id, runId);
     const modelServer = personModelServer(person, actorId);
@@ -503,6 +534,8 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
       },
     };
 
+    const keptScripts = keptScriptsOf(person);
+
     const runner: ScriptRunnerHost = {
       run: (request) => options.scripts.run(person.id, request),
       availability: () => options.scripts.availability(),
@@ -529,6 +562,7 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
         return ready.ok ? { ok: true } : { ok: false, reason: ready.reason };
       },
       approvals: approvalsGate,
+      previews: () => keptScripts,
     };
   }
 
@@ -597,9 +631,10 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
     const refusedLinked = (code: string, message: string, modelId: string) => ({ content: [{ type: "text" as const, text: JSON.stringify({ status: "refused", code, message, element_ids: [], model_id: modelId }) }], isError: true });
     return (name, next) =>
       (async (args: unknown, extra: unknown) => {
-        const given = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : null;
-        const modelId = given && typeof given.model_id === "string" ? given.model_id : null;
-        if (!given || !modelId || !isLinkedAlias(modelId)) return (next as (a: unknown, e: unknown) => unknown)(args, extra);
+        const sent = typeof args === "object" && args !== null ? (args as Record<string, unknown>) : null;
+        const modelId = sent && typeof sent.model_id === "string" ? sent.model_id : null;
+        if (!sent || !modelId || !isLinkedAlias(modelId)) return (next as (a: unknown, e: unknown) => unknown)(args, extra);
+        const given = await withScriptText(person, sent);
         const row = linked.byAlias(person.id, modelId);
         const provider = row ? linked.provider(row.provider) : null;
         const hostName = provider ? provider.label.replace(/^Log in with /i, "") : "the linked host";

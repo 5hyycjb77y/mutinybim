@@ -3,6 +3,7 @@ import type { PartTypeItem, ScriptItem } from "@permitzip/bim-library";
 import type { ScriptRunRequest, ScriptRunResult } from "@permitzip/bim-script";
 import type { AgentSession } from "@permitzip/bim-sync";
 import type { ApprovalGate } from "./approvals";
+import type { ScriptPreviewStore } from "./scripts/previews";
 
 /**
  * What a host gives the MutinyBIM tool server. The tools are the same
@@ -18,6 +19,8 @@ import type { ApprovalGate } from "./approvals";
  * - Script runner: where a script runs (`runner`). Never in the process
  *   serving the tools.
  * - Model server: how the tools reach the model (`models`).
+ *
+ * And, optionally, where scripts are kept between calls (`previews`).
  *
  * The open local host (`createLocalHost`) is one person on their own
  * computer. A hosted product supplies its own sign-in, permissions, approval
@@ -138,6 +141,14 @@ export interface ScriptToolHost {
   /** Asked right before a script runs. */
   authorize(extra: unknown, ask: AuthorizeAsk): Promise<AuthorizeAnswer>;
   readonly approvals: ApprovalGate;
+  /**
+   * Where scripts are kept between calls (scripts/previews.ts), so an agent
+   * sends a script once and lands a preview by its id. A hosted product
+   * returns a store that outlives a restart and its longest approval wait;
+   * one person's computer uses `MemoryScriptPreviewStore`. Absent: nothing
+   * is kept, and a preview returns the whole script in apply_with.args.
+   */
+  previews?(extra: unknown): ScriptPreviewStore;
   /** Loads the part geometry engine for part pictures (default: the open engine). */
   drawingEngine?(): Promise<void>;
   now?(): Date;

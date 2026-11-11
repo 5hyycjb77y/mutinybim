@@ -8,7 +8,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SCRIPT_CHILD_FILE, childEnv, childNodeArgs, clampLimits, type ChildLine, type ScriptRunnerLimits, type ScriptRunnerRequestFile } from "./protocol";
+import { SCRIPT_CHILD_FILE, childEnv, childNodeArgs, clampLimits, clipRunMessage, exitWords, type ChildLine, type ScriptRunnerLimits, type ScriptRunnerRequestFile } from "./protocol";
 
 export type SupervisedResult =
   | { readonly ok: true; readonly output: unknown; readonly manifest: unknown; readonly bytes: number; readonly ms: number }
@@ -67,7 +67,7 @@ export function superviseRun(run: ScriptRunnerRequestFile["run"], options: Super
         child.stdin.end(JSON.stringify(run));
         return;
       }
-      if (!msg.ok) return done({ ok: false, code: "script_error", message: msg.message, ms: ms() });
+      if (!msg.ok) return done({ ok: false, code: "script_error", message: clipRunMessage(msg.message), ms: ms() });
       const bytes = Buffer.byteLength(JSON.stringify(msg.output));
       if (bytes > limits.outputBytes) return done({ ok: false, code: "cap_output", message: `${bytes} bytes`, ms: ms() });
       done({ ok: true, output: msg.output, manifest: msg.manifest, bytes, ms: ms() });
@@ -98,7 +98,7 @@ export function superviseRun(run: ScriptRunnerRequestFile["run"], options: Super
     child.on("error", (err) => done({ ok: false, code: "runner_error", message: err.message, ms: ms() }));
     child.on("close", (code, signal) => {
       if (HEAP_LIMIT.test(stderr)) return done(overMemory());
-      done({ ok: false, code: "runner_error", message: `the script process exited ${code ?? signal} before answering: ${stderr.slice(0, 300)}`, ms: ms() });
+      done({ ok: false, code: "runner_error", message: exitWords(code, signal, stderr, readySeen), ms: ms() });
     });
   });
 }

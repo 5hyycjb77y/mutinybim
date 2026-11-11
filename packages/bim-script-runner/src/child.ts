@@ -13,7 +13,7 @@ import * as kit from "@permitzip/bim-script";
 import { stripTypeScriptTypes } from "node:module";
 import { getHeapStatistics } from "node:v8";
 import { runInNewContext } from "node:vm";
-import type { ChildLine } from "./protocol";
+import { NEVER_FINISHED_WORDS, UNAWAITED_WORDS, type ChildLine } from "./protocol";
 
 const KIT_MODULE = "@permitzip/bim-script";
 
@@ -92,15 +92,30 @@ export function scriptErrorWords(err: unknown): string {
 function main(): void {
   say({ ready: true, heapLimitMb: getHeapStatistics().heap_size_limit / 1048576 });
   let raw = "";
+  let answered = false;
+  /** One answer per run: whichever comes first. */
+  const answer = (line: ChildLine): void => {
+    if (answered) return;
+    answered = true;
+    say(line);
+  };
+  // A promise the script made and didn't await was rejected: Node would end this process with no answer, and the host could only call that a machine fault.
+  process.on("unhandledRejection", (err: unknown) => {
+    answer({ ok: false, message: `${scriptErrorWords(err)} ${UNAWAITED_WORDS}` });
+  });
+  // Nothing left to wait for and still no answer: say why instead of exiting silently.
+  process.on("beforeExit", () => {
+    answer({ ok: false, message: NEVER_FINISHED_WORDS });
+  });
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => {
     raw += chunk;
   });
   process.stdin.on("end", () => {
     runOnce(raw)
-      .then(say)
+      .then(answer)
       .catch((err: unknown) => {
-        say({ ok: false, message: scriptErrorWords(err) });
+        answer({ ok: false, message: scriptErrorWords(err) });
       });
   });
 }

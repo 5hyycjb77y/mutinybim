@@ -29,10 +29,10 @@ commands, one undo step) or **part types**. The core tools are:
 
 | Tool | Use it to |
 | --- | --- |
-| `bim_script_reference` | First in a thread. Says whether a script machine is ready here (`script_machine.ready`), then the kit by task (`search`: sheets, schedules, rooms, levels, walls, duct and pipe routing, equipment, tags, dimensions, checks, imports, calculations, each with a worked example), one command's exact fields (`command`), and the saved and starter scripts (`library: "list"` / `"read"` with `key`). Reads only |
-| `bim_check_output` | Lint and syntax findings for a `script`, each with its line (with `model_id`, also what its reads would send); or the kernel's checks on an `output` change set. Saves nothing |
-| `bim_run_script` | Run the script as a **preview** on a sealed machine: what it creates, changes and deletes, or the part types it makes, plus `apply_with`. Saves nothing |
-| `bim_apply_output` (approval) | Land a previewed edits result: call it with `apply_with.args` unchanged. The script runs again and lands only if its output is exactly what was previewed, as one undo step. An agent that ran the open kit in its own sandbox sends `output` and `provenance` (`script_hash`, `kit_version`, `client`) instead of `script`; the kernel checks every step again and the person still approves |
+| `bim_script_reference` | First in a thread, **once**: the index (no arguments) says whether a script machine is ready here (`script_machine.ready`) and lists the kit. Then only what the task needs: `search` a topic (sheets, schedules, rooms, levels, walls, duct and pipe routing, equipment, tags, dimensions, checks, imports, calculations; the two best matches come whole, the rest by name), `topic` for one function or recipe by name, `command` for one command's exact fields, `example` for a whole script, and the saved and starter scripts (`library: "list"` / `"read"` with `key`). Reads only |
+| `bim_check_output` | Lint and syntax findings for a `script`, each with its line, plus kit functions and commands that don't exist (with `model_id`, also what its reads would send); or the kernel's checks on an `output` change set. Saves nothing. Its `script_id` names the script from then on |
+| `bim_run_script` | Run the script as a **preview** on a sealed machine: what it creates, changes and deletes, or the part types it makes, plus `apply_with` and `script_id`. Saves nothing |
+| `bim_apply_output` (approval) | Land a previewed edits result: call it with `apply_with.args` unchanged (it names the script by id). The script runs again, with what the preview ran with, and lands only if its output is exactly what was previewed, as one undo step. An agent that ran the open kit in its own sandbox sends `output` and `provenance` (`script_hash`, `kit_version`, `client`) instead of `script`; the kernel checks every step again and the person still approves |
 | `bim_save_part_type` (approval) | Save previewed part types to the firm library (with `save_as`, also the script version that made them, unapproved). Asks every time |
 | `bim_model_summary` | Start here: counts by kind, levels, zones and disciplines, systems with total airflow, open issues, `notPlacedYet` (parts that exist but are not drawn yet), open questions and the **revision** |
 | `bim_query_elements` | Elements by kind (any kernel kind, `space`, `zone`, `drawing_underlay` and `question` included), `class` (a registry class id and its subclasses), level, zone, discipline or ids, with sizes, positions, airflow and connector ids. An unknown class is refused with close ids |
@@ -41,11 +41,13 @@ commands, one undo step) or **part types**. The core tools are:
 
 ### The workflow: reference → write → check → preview → approve
 
-1. **`bim_script_reference`** with no arguments. If it says
-   `ready: false`, **do not write a script**: tell the person why, and do the
-   job with a family's tools (below). Then search it for the task:
+1. **`bim_script_reference`** with no arguments, **once per thread**: never
+   ask for the index again. If it says `ready: false`, **do not write a
+   script**: tell the person why, and do the job with a family's tools
+   (below). Then search it for the task:
    `bim_script_reference({ search: "rooftop unit" })` returns the recipe and
-   the kit functions with a working example each.
+   the best kit functions with a working example each; read another by name
+   with `topic`. Don't search the same topic twice.
 2. **Read the model** with the four reads: `bim_model_summary`, then
    `bim_query_elements` on one level or zone. On large models always pass
    `level` (and `zone`); never load a whole model to answer a question about
@@ -54,15 +56,35 @@ commands, one undo step) or **part types**. The core tools are:
    Declare exactly the `reads` it needs (levels, kinds, ids or `"selection"`,
    part types). Every length is a measure (`units.ft(10)`), never a bare
    number.
-4. **`bim_check_output`** with `script`. Fix every finding.
+4. **`bim_check_output`** with `script`, whenever you are not sure of a
+   function, a command or the reads: it costs far less than a failed
+   preview. Fix every finding and read the warnings.
 5. **`bim_run_script`**. A failure names the script's line ("Line 14: Step 3
    (route_run) was refused: …"). Tell the person in plain words what the
    preview does: how many things it creates, changes and deletes, the label,
    any check that failed; for part types, each part and its connectors.
 6. **Approve.** Only when the status is `previewed`, call the tool in
    `apply_with.tool` with `apply_with.args` **unchanged** (`bim_apply_output`
-   for edits, `bim_save_part_type` for parts). It waits for the person's
-   approval. Report the saved revision, or the refusal, word for word.
+   for edits, `bim_save_part_type` for parts, with `save_as` filled in). It
+   waits for the person's approval. Report the saved revision, or the
+   refusal, word for word.
+
+**Send a script's text once.** The first call carries
+`script: { source, reads }`. Every answer about it has a `script_id`; after
+that, name it:
+
+- the preview after a check: `script: { id }`;
+- a fix after an error: `script: { id, replace: [{ old: "<exact text>",
+  new: "<fixed text>" }] }`. Change only what the error names, with one or
+  two replacements; `old` must be in the script exactly once. Never send the
+  whole script again to change a line;
+- landing: `apply_with.args` already names the id, and runs with the values
+  and selection the preview ran with.
+
+`code: "runner_error"` is the script machine, not the script: run it once
+more by id (`retry_with`) and don't rewrite it. "That preview has expired"
+means the id is too old: send the script again. A server that answers with no
+`script_id` keeps no scripts; send `{ source, reads }` each time there.
 
 `has_issues` or `refused`: nothing changed; fix the script or the values and
 preview again. `stale_preview`: the model moved; run it again and show the
@@ -210,9 +232,10 @@ The single-purpose tools come in families. Turn one on only when the
 reference says a job has no script yet, or for a one-off edit: on a
 MutinyBIM tool server that is `bim_enable_pack` (or connecting that family's
 own endpoint); a host that loads skills turns a family on with the skill of
-the same name. **Never turn on every family**: every tool is re-sent on every
-step, and long tool lists confuse models. Turn one off when the task moves
-on.
+the same name. **One family at a time, and only the one the task in front of
+you needs. Never turn on every family, and never turn one on "in case"**:
+every tool is re-sent on every step (four families is about 200 tools), and
+long tool lists confuse models. Turn one off when the task moves on.
 
 | Family (skill) | Turn it on for |
 | --- | --- |

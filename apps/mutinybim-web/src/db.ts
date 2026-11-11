@@ -310,6 +310,14 @@ CREATE TABLE IF NOT EXISTS assistant_sessions (
   last_seen_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS assistant_sessions_user ON assistant_sessions(user_id);
+CREATE TABLE IF NOT EXISTS assistant_kept_scripts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  saved_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS assistant_kept_scripts_user ON assistant_kept_scripts(user_id, saved_at);
 CREATE TABLE IF NOT EXISTS oauth_states (
   state TEXT PRIMARY KEY,
   provider TEXT NOT NULL,
@@ -749,6 +757,24 @@ export function openDb(file: string) {
     expireAssistantApprovals(cutoff: number, dropBefore: number, outcome: string): void {
       db.prepare("UPDATE assistant_approvals SET state = 'expired', outcome = ?, landing = NULL WHERE state = 'waiting' AND created_at < ?").run(outcome, cutoff);
       db.prepare("DELETE FROM assistant_approvals WHERE created_at < ?").run(dropBefore);
+    },
+
+    /**
+     * A script an assistant sent, kept so later calls name it by id (and a preview lands by it), across restarts.
+     * `body` is the tool server's record, stored whole; a person's oldest go once they hold more than `keep`.
+     */
+    saveKeptScript(input: { id: string; userId: string; body: unknown; expiresAt: number; keep: number }): void {
+      const at = Date.now();
+      db.prepare("DELETE FROM assistant_kept_scripts WHERE expires_at <= ?").run(at);
+      db.prepare(
+        "INSERT INTO assistant_kept_scripts (id, user_id, body, expires_at, saved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET body = excluded.body, expires_at = excluded.expires_at, saved_at = excluded.saved_at WHERE assistant_kept_scripts.user_id = excluded.user_id",
+      ).run(input.id, input.userId, JSON.stringify(input.body), input.expiresAt, at);
+      db.prepare("DELETE FROM assistant_kept_scripts WHERE user_id = ? AND id NOT IN (SELECT id FROM assistant_kept_scripts WHERE user_id = ? ORDER BY saved_at DESC, id LIMIT ?)").run(input.userId, input.userId, input.keep);
+    },
+    /** The kept script's record, only for the person it was kept for and only before it expires. */
+    keptScript(id: string, userId: string): unknown {
+      const row = db.prepare("SELECT body FROM assistant_kept_scripts WHERE id = ? AND user_id = ? AND expires_at > ?").get(id, userId, Date.now());
+      return isRecord(row) ? parseJson(strOrNull(row, "body")) : null;
     },
 
     saveAssistantSession(row: AssistantSessionRow): void {

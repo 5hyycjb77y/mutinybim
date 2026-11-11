@@ -24,6 +24,25 @@ export {
   type ScriptApprovalTier,
   type ScriptChangeSummary,
 } from "./scripts/tier";
+export {
+  KEPT_PREVIEWS_MAX,
+  KEPT_SCRIPT_ID,
+  KEPT_SCRIPT_KEEP_MS,
+  MemoryScriptPreviewStore,
+  SCRIPT_EXPIRED_WORDS,
+  applyReplacements,
+  keepScript,
+  keptScriptId,
+  notePreview,
+  parseKeptScript,
+  previewOf,
+  readKeptScript,
+  type KeptPreview,
+  type KeptScript,
+  type KeptValues,
+  type ScriptPreviewStore,
+  type ScriptReplacement,
+} from "./scripts/previews";
 export { editsChange, outputHash, partTypesChange, type ScriptChangeReport } from "./scripts/change-summary";
 export { classMembers, registerBimNetworkReadTools, registerBimSummaryReadTools } from "./reads/tools";
 export { chainOf, notPlacedYet, questionsList, withDesignFacts } from "./reads/design-reads";

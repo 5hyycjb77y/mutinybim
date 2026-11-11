@@ -40,10 +40,10 @@ assistant learns the kit instead of a hundred tools.
 
 | Tool | What it does |
 | --- | --- |
-| `bim_script_reference` | Start here. The workflow, the kit's functions and recipes, whether scripts can run here; `search` a topic, `command` for one command's fields. |
-| `bim_check_output` | Lint and syntax of a script with line numbers, what its reads would send, or the kernel's checks on an output. Runs nothing. |
-| `bim_run_script` | Runs a script and checks its output: a preview. Saves nothing; returns what would change and `apply_with`. |
-| `bim_apply_output` | Lands the preview as one undo step after you approve. Re-runs the script and lands only exactly what was previewed. |
+| `bim_script_reference` | Start here, once per conversation. A short index: the workflow, the kit's functions by name, whether scripts can run here. Then `search` a topic, `topic` for one function or recipe whole, `command` for one command's fields, `example` for a whole script. |
+| `bim_check_output` | Lint and syntax of a script with line numbers, kit functions and commands that don't exist, what its reads would send, or the kernel's checks on an output. Runs nothing. |
+| `bim_run_script` | Runs a script and checks its output: a preview. Saves nothing; returns what would change, `apply_with` and the script's `script_id`. |
+| `bim_apply_output` | Lands the preview as one undo step after you approve. Re-runs the script, with what the preview ran with, and lands only exactly what was previewed. |
 | `bim_save_part_type` | Saves a part script's part types and the script to the library after you approve. |
 | `bim_model_summary` | Counts by kind, levels, zones, systems, open issues, questions, and the revision read. |
 | `bim_query_elements` | Elements by kind, class, area and discipline, with the facts an edit needs. |
@@ -182,19 +182,52 @@ above Level 1 with a script."* It does this:
    ```
 
 3. `bim_check_output({ model_id: "demo", script: { source, reads: { levels: true } } })`:
-   `status: "ok"`, no findings.
-4. `bim_run_script({ model_id: "demo", script: { source, reads: { levels: true } } })`:
+   `status: "ok"`, no findings, and `script_id: "scr_…"`. This is the only
+   time the script's text is sent.
+4. `bim_run_script({ model_id: "demo", script: { id: "scr_…" } })`:
    `status: "previewed"`, `changes: { creates: 1, edits: 0, deletes: 0 }`, and
    `apply_with`. The model has not changed.
-5. `bim_apply_output(apply_with.args)`: your assistant shows you *land "…" in
-   model demo as one undo step: 1 new, 0 changed, 0 deleted. Approve?* You
-   approve; the answer is `status: "saved"` with the new revision.
+5. `bim_apply_output(apply_with.args)`: `apply_with.args` names the script by
+   its id, not its text. Your assistant shows you *land "…" in model demo as
+   one undo step: 1 new, 0 changed, 0 deleted. Approve?* You approve; the
+   answer is `status: "saved"` with the new revision.
 6. `bim_model_summary({ model_id: "demo" })` now counts two levels.
 
 If the model moved between the preview and the approval, the apply answers
 `stale_preview` and nothing lands; the assistant runs the preview again.
 This exact sequence runs in CI
 (`packages/bim-mcp/__tests__/oss-local-end-to-end.test.ts`).
+
+### A script is sent once
+
+An assistant pays for every character it sends and reads, on every step. So
+the tools keep each script it sends and give it a short id:
+
+| The assistant sends | When |
+| --- | --- |
+| `script: { source, reads }` | The first time. `reads` may be left out when the script declares them as plain values. |
+| `script: { id }` | Any later call about the same script: the preview after a check, a second preview with other values. |
+| `script: { id, replace: [{ old, new }] }` | A fix after an error. `old` is exact text that is in the script once (`all: true` changes every place). A replacement that isn't found, or is found more than once, changes nothing and says which one. The answer carries the changed script's own id. |
+| `script: { key, version }` | A script saved in the library. |
+
+What an id is tied to, so nothing can be swapped between the preview you saw
+and the change you approve:
+
+- The id is a fingerprint of the person, the script's text and its reads.
+  Another text, other reads or another person is another id, and only the
+  person who sent a script can use its id.
+- A successful preview is recorded with what it ran with: the model, the
+  level or zone, the values, the selection, and a fingerprint of its output.
+  `bim_apply_output` and `bim_save_part_type` by id run exactly that again
+  and land only that output. A call that names other values, another
+  selection, another area or another model is refused.
+- An id lasts 36 hours, longer than an approval can wait. After that the
+  answer is "That preview has expired; run the script again".
+
+Answers are kept short too: a search returns its two best matches whole and
+the rest by name; a preview lists at most 40 part types and a few plan
+pictures; long error messages are cut and say so. Each says how to get the
+rest.
 
 ### Hosting the tool server
 
@@ -213,6 +246,16 @@ questions through one interface (`BimToolHost` in
 - **Where scripts run:** a sealed machine per conversation, never the
   process serving the tools.
 - **The model server:** sessions on the model server as that person.
+
+One more, optional, answer saves an assistant most of what it would send
+again: **where scripts are kept between calls** (`previews` on the host, a
+`ScriptPreviewStore` with two methods, `put` and `get`, that stores each
+record whole under its id). A hosted product keeps them somewhere that
+outlives a restart and its longest approval wait (the hosted app uses its
+account database); one person's computer uses `MemoryScriptPreviewStore`. The
+tools check the owner, the expiry and the id themselves, so the store has no
+rules of its own. A host that gives no store still works: a preview then
+returns the whole script in `apply_with.args`, as before.
 
 `registerBimCoreTools(server, host)` puts the core pack on a server a host
 already runs (its own transport, sign-in and middleware);

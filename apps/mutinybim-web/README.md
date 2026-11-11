@@ -83,6 +83,10 @@ by address and the person signs in; there is no key to paste.
   its result lands only after the person approves it, as one undo step. Each
   run is in the sealed script box below. An assistant that runs the
   open-source kit itself can still send its output to `bim_apply_output`.
+  A script is sent once: it is kept in the account database for 36 hours
+  under a short id, so the assistant names the id to preview it, to fix it
+  (exact replacements) and to land it, also after a restart. Only the
+  person who sent it can use the id.
 - **Its name.** The assistant's changes, and the editor's list of who is
   here, carry the name it registered with ("Claude", "ChatGPT"), marked as an
   agent.

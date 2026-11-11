@@ -29,7 +29,15 @@ import {
 const MM_PER_IN = 25.4;
 export const RENDER_DEFAULT_DPI = 100;
 export const RENDER_MAX_DPI = 400;
-export const RENDER_DEFAULT_MAX_PX = 1600;
+/**
+ * The longest side of a picture unless the agent asks for more. A PNG rides
+ * in the answer as base64 (about 4 characters for every 3 bytes), and at
+ * 1,600 px one drawing was 100,000 to 177,000 characters kept in the agent's
+ * context. 1,280 px is about a megapixel on a sheet's proportions: as much as
+ * a vision model reads before it shrinks the picture itself. Zoom with a
+ * region, or raise max_px, to read small text.
+ */
+export const RENDER_DEFAULT_MAX_PX = 1280;
 export const RENDER_MAX_PX = 4000;
 
 export interface PaperBox {

@@ -4,6 +4,7 @@ import { RUNNER_CONTRACT, type ScriptRunner } from "@permitzip/bim-script";
 import { autoApproval, elicitationApproval, type ApprovalGate } from "../approvals";
 import type { BimToolHost, ScriptRunnerAvailability, ScriptRunnerHost } from "../host";
 import { MemoryScriptLibrary } from "./library";
+import { MemoryScriptPreviewStore } from "../scripts/previews";
 import type { LocalModelServer } from "./model-server";
 import { localCaller, localModelAccess, type LocalModelAccessOptions } from "./models";
 import type { ResolveBimCaller } from "../caller";
@@ -21,6 +22,8 @@ import type { ResolveBimCaller } from "../caller";
  *   (`LocalScriptRunner`). Local only: never host other people's scripts
  *   with it.
  * - Model server: in memory, or a running one at a WebSocket address.
+ * - Kept scripts: in this process's memory (`MemoryScriptPreviewStore`), so a
+ *   script is sent once and a preview lands by its id until the server stops.
  */
 export interface LocalHostOptions {
   readonly server: LocalModelServer;
@@ -52,6 +55,7 @@ export function createLocalHost(options: LocalHostOptions): LocalHost {
   const access = { server: options.server, person, runId, ...(options.readOnly ? { readOnly: true } : {}), ...(options.partGeometry ? { partGeometry: options.partGeometry } : {}) };
   const models = localModelAccess(access);
   const library = new MemoryScriptLibrary(person);
+  const kept = new MemoryScriptPreviewStore();
   const runner = options.runner ?? new LocalScriptRunner({ repoRoot: options.repoRoot, limits: RUNNER_CONTRACT });
   const scriptsOff = options.scripts === false;
   const runnerHost: ScriptRunnerHost = {
@@ -77,5 +81,6 @@ export function createLocalHost(options: LocalHostOptions): LocalHost {
       return scriptsOff ? { ok: false, reason: "this tool server was started with scripts off (--no-scripts)." } : { ok: true };
     },
     approvals,
+    previews: () => kept,
   };
 }
