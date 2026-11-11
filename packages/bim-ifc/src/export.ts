@@ -1,4 +1,5 @@
 import {
+  BUILDING_FALLBACK_CLASS_ID,
   DERIVED_ZONE_RULE_POINT,
   ZONE_PURPOSE_POINT,
   activeClassRegistry,
@@ -259,6 +260,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   }
   const homes = new ParameterHomes([...(opts.parameterHomes ?? []), ...registryParameterHomes(withPackParameters(registry)), ...baselineParameterHomes()]);
   const warnings: string[] = [];
+  const missingProxyClasses = new Map<string, number>();
   const warn = (s: string) => warnings.push(s);
   const ns = projectNamespace(opts.project.id);
   const guids = new Guids(ns, warn);
@@ -457,6 +459,9 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const ref = g.add(cls.entity.toUpperCase(), [str(guid), $, opt(name), $, opt(cls.objectType), placement ?? $, body ?? $, opt(tag), ...tail]);
     byEntity[cls.entity] = (byEntity[cls.entity] ?? 0) + 1;
     counts.elements++;
+    if (cls.entity === PROXY && cls.classId === BUILDING_FALLBACK_CLASS_ID && "classId" in el && el.classId && !registry.getClass(el.classId)) {
+      missingProxyClasses.set(el.classId, (missingProxyClasses.get(el.classId) ?? 0) + 1);
+    }
     if (cls.note && cls.entity === PROXY) warn(`${el.id}: written as ${PROXY} (${cls.note})`);
     else if (cls.note) warn(`${el.id}: ${cls.note}`);
     const p = { ref, guid, placement };
@@ -982,6 +987,9 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     },
     g,
   );
+  for (const [classId, count] of missingProxyClasses) {
+    warn(`IFC export used ${PROXY} for ${count} building element${count === 1 ? "" : "s"} because class "${classId}" is unavailable. Check that the export host has the add-on or library that provides this class.`);
+  }
   return {
     text,
     bytes: new TextEncoder().encode(text),
