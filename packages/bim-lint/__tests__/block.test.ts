@@ -11,7 +11,11 @@ import { config, FT, linkedBuilding, Model, RETURN, SUPPLY } from "./fixtures";
 function edit(engine: LintEngine, m: Model, apply: () => string[]): LintBlock {
   const before = m.head;
   const changed = apply();
-  return lintEdit(engine, { before, after: m.head, changedIds: changed, options: { config: config() } });
+  // No time budget: these check what the lint finds, not how fast the machine is.
+  // The budget has its own test below.
+  const block = lintEdit(engine, { before, after: m.head, changedIds: changed, options: { config: config() }, budgetMs: Number.POSITIVE_INFINITY });
+  expect(block.status).toBe("ok");
+  return block;
 }
 
 describe("lint block", () => {

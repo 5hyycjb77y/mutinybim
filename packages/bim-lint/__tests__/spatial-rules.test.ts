@@ -101,7 +101,8 @@ describe("the drill, through the per-edit lint block", () => {
   function edit(engine: LintEngine, m: Model, apply: () => string[]): LintBlock {
     const before = m.head;
     const changed = apply();
-    return lintEdit(engine, { before, after: m.head, changedIds: changed, options: { config: config() } });
+    // No time budget: these check what the lint finds, not how fast the machine is.
+    return lintEdit(engine, { before, after: m.head, changedIds: changed, options: { config: config() }, budgetMs: Number.POSITIVE_INFINITY });
   }
 
   it("RTU on a deck over the linked roof with service clearance → a second unit moved into it → the deck removed", () => {
