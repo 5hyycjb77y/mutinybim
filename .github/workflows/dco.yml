@@ -29,7 +29,10 @@ jobs:
           rows=""
           for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
             author_email=$(git show -s --format='%ae' "$sha")
-            if ! git show -s --format='%B' "$sha" | grep -qiE "^Signed-off-by: .+ <${author_email}>$"; then
+            # Compare the addresses as plain text, never as a pattern: GitHub's private
+            # addresses (12345+name@users.noreply.github.com) contain a "+".
+            signers=$(git show -s --format='%B' "$sha" | grep -iE '^Signed-off-by: .+ <[^<>]+>$' | sed -E 's/^.* <([^<>]+)>$/\1/' || true)
+            if ! printf '%s\n' "$signers" | grep -qixF -- "$author_email"; then
               echo "::error title=Missing sign-off::Commit $(git show -s --format='%h %s' "$sha") has no 'Signed-off-by:' line matching its author <${author_email}>."
               subject=$(git show -s --format='%s' "$sha" | sed 's/|/\\|/g; s/</\&lt;/g')
               rows="${rows}| \`$(git show -s --format='%h' "$sha")\` | ${subject} | \`${author_email}\` |"$'\n'
