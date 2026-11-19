@@ -38,6 +38,7 @@ import {
   type LoadPointElement,
   type MepSystem,
   type ModelState,
+  type ParamValue,
   type PartInstance,
   type PartTypeElement,
   type PortRef,
@@ -258,7 +259,17 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const home = zoneHomeOf(Reflect.get(p, "ifc"));
     if (home) purposeHomes.set(p.id, home);
   }
-  const homes = new ParameterHomes([...(opts.parameterHomes ?? []), ...registryParameterHomes(withPackParameters(registry)), ...baselineParameterHomes()]);
+  const parameterRegistry = withPackParameters(registry);
+  const homes = new ParameterHomes([...(opts.parameterHomes ?? []), ...registryParameterHomes(parameterRegistry), ...baselineParameterHomes()]);
+  const parameterUnits = new Map<string, string>();
+  for (const cls of parameterRegistry.listClasses({ includeAbstract: true })) {
+    for (const field of parameterRegistry.fieldsFor(cls.id)) {
+      if (!field.storedUnit) continue;
+      for (const key of [field.key ?? field.path, field.path, ...(field.aliases ?? [])]) {
+        if (!parameterUnits.has(key)) parameterUnits.set(key, field.storedUnit);
+      }
+    }
+  }
   const warnings: string[] = [];
   const missingProxyClasses = new Map<string, number>();
   const warn = (s: string) => warnings.push(s);
@@ -331,8 +342,18 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   };
   const frameOf = (levelId: string | null): StepRef => (levelId ? (storeys.get(levelId)?.placement ?? buildingPlacement) : buildingPlacement);
 
+  const parameterValues = (bag: PropertyBag, values: Readonly<Record<string, ParamValue>>, fallbackSet?: string) => {
+    for (const [key, value] of Object.entries(values).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+      const input: PropertyInput = typeof value === "number" ? { kind: "number", name: key, value, unit: parameterUnits.get(key) } : typeof value === "boolean" ? { kind: "bool", name: key, value } : { kind: "text", name: key, value };
+      bag.put(homes.find([key]), input, fallbackSet);
+    }
+  };
+
   // Properties attach after the object exists; collected here and written per object.
   const attachSets = (objectRef: StepRef, objectGuid: string, key: string, bag: PropertyBag) => {
+    const element = els[key];
+    // Parts and load points have their own value schemas and exporters.
+    if (element && element.kind !== "part" && element.kind !== "load_point" && "values" in element && element.values) parameterValues(bag, element.values);
     if (bag.empty) return [];
     const written = writeSets(g, units, bag, (name) => guids.derived(`set:${key}:${name}`));
     for (const w of written) {
@@ -590,10 +611,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const elementType = el.kind === "part" ? null : elementTypeOf(els, el);
     if (elementType) {
       const tb = new PropertyBag();
-      for (const [key, v] of Object.entries(elementType.values ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-        const input: PropertyInput = typeof v === "number" ? { kind: "number", name: key, value: v } : typeof v === "boolean" ? { kind: "bool", name: key, value: v } : { kind: "text", name: key, value: String(v) };
-        tb.put(homes.find([key]), input, "MutinyBIM_Type");
-      }
+      parameterValues(tb, elementType.values ?? {}, "MutinyBIM_Type");
       writeType(`etype:${elementType.id}|${cls.entity}`, cls.typeEntity ?? "IfcBuildingElementProxyType", cls.predefinedType, elementType.name, null, tb).members.push(product.ref);
     }
     organizationSets(bag, el);
