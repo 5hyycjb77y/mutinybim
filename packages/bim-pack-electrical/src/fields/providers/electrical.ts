@@ -1,4 +1,4 @@
-import { fieldProviderSupport, type FieldProvider, type ProviderField } from "@permitzip/bim-kernel";
+import { linkAdapterId, fieldProviderSupport, type FieldProvider, type ProviderField } from "@permitzip/bim-kernel";
 
 const { command, instanceParam, locked, resolvedNumber, resolvedText } = fieldProviderSupport;
 
@@ -76,7 +76,10 @@ const linkFields: ProviderField[] = [
   text(LINK, "Circuit", command("edit_service_link", "description"))(["description", "Description"]),
   text(LINK, "Circuit", command("edit_service_link", "electrical.feederType"))(["feeder_type", "Feeder type"]),
   text(LINK, "Circuit", command("edit_service_link", "electrical.loadClass"))(["load_class", "Load class"]),
-  quantity(LINK, "Circuit", "current", "A", command("edit_service_link", "electrical.ratingA"))(["rating_a", "Breaker rating"]),
+  quantity(LINK, "Circuit", "current", "A", command("edit_service_link", "electrical.ratingA"))(["rating_a", "Breaker rating", {
+    ifc: { pset: "MutinyBIM_Circuit", property: "Rating" },
+    read: (el) => el.kind === "service_link" && linkAdapterId(el) === "electrical" ? el.electrical?.ratingA ?? null : null,
+  }]),
   quantity(LINK, "Circuit", "length", "ft", command("edit_service_link", "electrical.lengthFt"))(["length", "Length"]),
   quantity(LINK, "Circuit", "power_apparent", "VA", locked("Added up from what is on the circuit."))(["load_va", "Load"]),
   quantity(LINK, "Circuit", "count", "ea", locked("Set by what is on the circuit."))(["poles", "Poles"]),

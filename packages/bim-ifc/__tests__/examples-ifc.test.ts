@@ -198,6 +198,37 @@ describe("electrical-room", () => {
     expect(Object.assign({}, ...Object.values(psets(file, board)))).toMatchObject({ "Panel name": "LP-1 synthetic", "Short-circuit rating": 22000 });
   });
 
+  it.each(["unrated", "other-adapter"])("omits the electrical rating for %s links", async (mode) => {
+    const model = await build(electricalRoom);
+    const elements = Object.fromEntries(Object.entries(model.elements).map(([id, element]) => [
+      id, element.kind === "service_link" ? {
+        ...element,
+        ...(mode === "unrated" ? { electrical: undefined } : { adapter: "sample-other" }),
+      } : element,
+    ]));
+    const output = exported({ ...model, elements });
+    const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
+    expect(circuits).toHaveLength(2);
+    for (const circuit of circuits) {
+      expect(psets(output, circuit).MutinyBIM_Circuit?.Rating).toBeUndefined();
+      expect(related(output, "IFCRELASSIGNSTOGROUP", 6, 4, circuit.id).length).toBeGreaterThan(1);
+    }
+  });
+
+  it("writes each stored 20 A circuit rating with an ampere unit (#64)", () => {
+    const circuits = ofType(file, "IFCDISTRIBUTIONCIRCUIT");
+    expect(circuits).toHaveLength(2);
+    for (const circuit of circuits) {
+      expect(psets(file, circuit).MutinyBIM_Circuit?.Rating).toBe(20);
+      const set = ofType(file, "IFCRELDEFINESBYPROPERTIES").filter((rel) => refs(rel, 4).includes(circuit.id))
+        .map((rel) => get(file, ref(rel, 5))).find((entry) => text(entry, 2) === "MutinyBIM_Circuit");
+      if (!set) throw new Error("Missing circuit properties");
+      const rating = refs(set, 4).map((id) => get(file, id)).find((entry) => text(entry, 0) === "Rating");
+      expect(rating?.args[2]).toEqual({ kind: "typed", type: "IFCELECTRICCURRENTMEASURE", value: { kind: "number", value: 20 } });
+    }
+    expect(ofType(file, "IFCSIUNIT").some((unit) => text(unit, 1) === "ELECTRICCURRENTUNIT" && text(unit, 3) === "AMPERE")).toBe(true);
+  });
+
   it("writes one circuit per room, each grouping the board, and every outlet in one", () => {
     const circuits = ofType(file, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits.map((c) => text(c, 2)).sort()).toEqual(["Bedroom receptacles", "Living room receptacles"]);

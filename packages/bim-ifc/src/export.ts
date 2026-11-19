@@ -5,6 +5,7 @@ import {
   activeClassRegistry,
   activeServiceRegistry,
   gridAxisFamily,
+  fieldProviderRegistry,
   hostLineOf,
   hostVoidsOf,
   ifcRelationRowsFor,
@@ -54,7 +55,7 @@ import { elementTypeOf } from "@permitzip/bim-kernel/elements";
 import { LEGACY_QUANTITY_KEYS, QUANTITY_BINDINGS } from "@permitzip/bim-units";
 import { GeometryWriter, type Vec3 } from "./geometry";
 import { derivedIfcGuid, isIfcGuid, isUuid, projectNamespace, relationshipIfcGuid, uuidToIfcGuid } from "./guid";
-import { PROXY, resolveIfcClass, type ResolvedIfcClass } from "./mapping";
+import { PROXY, primaryClass, resolveIfcClass, type ResolvedIfcClass } from "./mapping";
 import { ParameterHomes, PropertyBag, baselineParameterHomes, registryParameterHomes, writeSets, type ParameterHome, type PropertyInput } from "./properties";
 import { ownAttributes, predefinedTypes } from "./schema-ifc4x3";
 import { $, bool, en, int, list, opt, real, str, serializeStep, StepGraph, type StepRef, type StepValue } from "./step";
@@ -251,6 +252,7 @@ interface Product {
 export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   const { model } = opts;
   const registry = opts.registry ?? activeClassRegistry();
+  const fields = opts.registry ?? fieldProviderRegistry();
   const services = opts.services ?? activeServiceRegistry();
   const derivedRules = new Map(activePackSet().items(DERIVED_ZONE_RULE_POINT).map((r) => [r.id, r]));
   // A zone purpose row may state its IFC home (`ifc`, read tolerantly: the purpose point's v1 shape has no such field yet).
@@ -966,6 +968,18 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     bag.set("MutinyBIM_Circuit", { kind: "text", name: "Role", value: link.role });
     bag.set("MutinyBIM_Circuit", { kind: "text", name: "Adapter", value: adapter });
     if (link.source.positions.length > 0) bag.set("MutinyBIM_Circuit", { kind: "text", name: "Positions", value: link.source.positions.join(",") });
+    const cls = primaryClass(registry, index, link);
+    for (const field of cls && fields.getClass(cls.id) ? fields.fieldsFor(cls.id) : []) {
+      if (!field.ifc || !field.read) continue;
+      const value = field.read(link, { elements: els });
+      if (typeof value === "number" && Number.isFinite(value)) {
+        bag.put(field.ifc, { kind: "number", name: field.label, value, unit: field.unit });
+      } else if (typeof value === "boolean") {
+        bag.put(field.ifc, { kind: "bool", name: field.label, value });
+      } else if (typeof value === "string") {
+        bag.put(field.ifc, { kind: "text", name: field.label, value });
+      }
+    }
     attachSets(ref, guid, link.id, bag);
     servesSpaces(ref, guid, link.members.flatMap((m) => [...(zonesServedBy.get(m.elementId) ?? []), ...(plannedSpaceOf(m.elementId) ? [plannedSpaceOf(m.elementId) ?? ""] : [])]));
   }
