@@ -97,7 +97,7 @@ function planInScope(source: ImportSource, opts: PlanImportOptions): IfcImportPl
       version: 0,
       authoredRev: {},
       name,
-      elevationMm: Math.round(storey.elevationMm),
+      elevationMm: Math.round(storey.elevationMm * 10) / 10,
       source: { referenceId: opts.referenceId, storeyId: storey.sourceId, storeyName: storey.name },
     };
     push(level);

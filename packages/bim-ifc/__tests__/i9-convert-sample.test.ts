@@ -14,7 +14,7 @@ import { type BimElement, type Wall } from "@permitzip/bim-kernel";
 import { PackSet, bindModelPacks, unbindModelPacks } from "@permitzip/bim-kernel/packs";
 import { importIfc } from "../src";
 import { FIRE_PROTECTION_TEST_PACK, HEAD_CLASS } from "./fixtures/i9-fire-protection-pack";
-import { architectureAndStructure, hostModel, mechanicalAndSprinkler } from "./i9-fixtures";
+import { architectureAndStructure, hostModel, IfcText, mechanicalAndSprinkler } from "./i9-fixtures";
 
 const ofKind = <K extends BimElement["kind"]>(records: readonly BimElement[], kind: K) => records.filter((r): r is Extract<BimElement, { kind: K }> => r.kind === kind);
 
@@ -23,6 +23,26 @@ function arch(units: "mm" | "ft" = "mm") {
 }
 
 describe("i9-convert-sample", () => {
+  it.each([3657.6, -3657.6, 4000])("keeps a new storey at %s mm and its run at the original offset", (elevation) => {
+    const t = IfcText.start();
+    t.storey("Imported level", elevation);
+    const shape = t.body([t.extrude(t.rect(400, 300), 2000, t.axis3([0, 0, 0], [1, 0, 0], [0, 1, 0]))]);
+    const run = t.product("Imported level", "IFCDUCTSEGMENT", "Run", [0, 0, 250.2], shape, ".RIGIDSEGMENT.");
+    t.assign(t.system("Supply", "AIRCONDITIONING"), [run]);
+    const plan = importIfc(t.text(), {
+      model: hostModel([]), referenceId: "ref", sourceKey: "precision", sourceId: "v1",
+      label: "Fractional storey", disciplines: ["mechanical"],
+    });
+    const levels = ofKind(plan.records, "level");
+    expect(levels).toHaveLength(1);
+    expect(levels[0]?.elevationMm).toBeCloseTo(elevation, 6);
+    const runs = ofKind(plan.records, "run_segment");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.levelId).toBe(levels[0]?.id);
+    expect(runs[0]?.start.z).toBeCloseTo(250.2, 6);
+    expect(runs[0]?.end.z).toBeCloseTo(250.2, 6);
+  });
+
   it("converts an architecture + structure model: counts and geometry within 0.5 mm", () => {
     const plan = arch();
     const r = plan.records;

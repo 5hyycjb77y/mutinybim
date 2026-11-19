@@ -11,7 +11,7 @@
 import { DEFAULT_SETTINGS, asRevision, gatedRecordFeatures, type ModelState } from "@permitzip/bim-kernel";
 import { defineScript, runScript, sliceModel, type ScriptDefinition } from "@permitzip/bim-script";
 import { PROTOCOL_FEATURES } from "@permitzip/bim-sync";
-import { danglingReferences, entityCounts, exportIfc, readStep, type ReadEntity, type StepFile } from "../src";
+import { danglingReferences, entityCounts, exportIfc, importIfc, readStep, type ReadEntity, type StepFile } from "../src";
 import { Log } from "../../bim-kernel/__tests__/a13a-fixtures";
 import electricalRoom from "../../bim-script/examples/electrical-room";
 import rooftopUnit from "../../bim-script/examples/rooftop-unit";
@@ -82,6 +82,19 @@ describe("small-office", () => {
   let file: StepFile;
   beforeAll(async () => {
     file = exported(await build(smallOffice));
+  });
+
+  it("imports Level 2 at its original 12 ft elevation (#62)", async () => {
+    const model = await build(smallOffice);
+    const out = exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP });
+    const empty: ModelState = { ...model, modelId: "small-office-readback", elements: {}, connections: [] };
+    const back = importIfc(out.text, {
+      model: empty, referenceId: "ref", sourceKey: "small-office", sourceId: "v1",
+      label: "Small office", disciplines: ["architecture"],
+    });
+    const levels = back.records.filter((record) => record.kind === "level");
+    expect(levels).toHaveLength(2);
+    expect(levels.find((level) => level.name === "Level 2")?.elevationMm).toBeCloseTo(12 * FT, 6);
   });
 
   it("writes each storey at its elevation, with its six walls in it", () => {
