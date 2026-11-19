@@ -6,9 +6,10 @@
  * never twice for one commit, and never for a commit that is not on main.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { publishableDirs } from "../packages.mjs";
 import { nextVersion } from "../versions.mjs";
 
 const SCRIPT = resolve(__dirname, "../next-version.mjs");
@@ -80,5 +81,20 @@ describe("next-version.mjs on a repository", () => {
     const r = run({ EVENT: "workflow_run", RUN_SHA: side });
     expect(r.status).toBe(1);
     expect(r.err).toContain("is not on main");
+  });
+});
+
+describe("publishableDirs", () => {
+  it("skips private workspace packages under packages/ (e.g. tutorial packs)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "publishable-dirs-"));
+    try {
+      mkdirSync(join(dir, "packages/bim-public"), { recursive: true });
+      mkdirSync(join(dir, "packages/bim-pack-tutorial"), { recursive: true });
+      writeFileSync(join(dir, "packages/bim-public/package.json"), JSON.stringify({ name: "@permitzip/bim-public", version: "0.2.0" }));
+      writeFileSync(join(dir, "packages/bim-pack-tutorial/package.json"), JSON.stringify({ name: "@permitzip/bim-pack-tutorial", version: "0.1.0", private: true }));
+      expect(publishableDirs(dir)).toEqual(["packages/bim-public", "services/bim-authority"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

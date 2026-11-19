@@ -7,10 +7,15 @@ import { fileURLToPath } from "node:url";
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const REGISTRY = "https://npm.pkg.github.com";
 
-export function publishableDirs() {
+export function publishableDirs(root = ROOT) {
   const packages = fs
-    .readdirSync(path.join(ROOT, "packages"), { withFileTypes: true })
-    .filter((d) => d.isDirectory() && fs.existsSync(path.join(ROOT, "packages", d.name, "package.json")))
+    .readdirSync(path.join(root, "packages"), { withFileTypes: true })
+    .filter((d) => {
+      if (!d.isDirectory()) return false;
+      const manifestPath = path.join(root, "packages", d.name, "package.json");
+      if (!fs.existsSync(manifestPath)) return false;
+      return JSON.parse(fs.readFileSync(manifestPath, "utf8")).private !== true;
+    })
     .map((d) => `packages/${d.name}`)
     .sort();
   return [...packages, "services/bim-authority"];

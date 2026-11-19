@@ -1,6 +1,13 @@
 version: 2
 # Cap open version-update pull requests so the tracker stays readable.
 # Security updates are on separately and are not counted here.
+#
+# Majors that need a planned change are ignored here, not merged one package at a time:
+# - typescript 7: typescript-eslint has no peer range for it yet, so `npm ci` fails.
+# - @types/node and the node image: they follow the runtime CI tests (.nvmrc). Move CI,
+#   .nvmrc, `engines` and both Dockerfiles together.
+# - eslint 10 and postgres 4: breaking upgrades; postgres needs a real-database run of the
+#   model server first (CI does not run it against Postgres).
 updates:
   - package-ecosystem: npm
     directory: /
@@ -10,18 +17,43 @@ updates:
     groups:
       dev-tooling:
         patterns: ["@types/*", "@typescript-eslint/*", "eslint", "jest", "jest-*", "typescript", "tsx", "esbuild"]
+      # Packages released in lockstep: one bump alone leaves two copies of the core and fails typecheck.
+      tiptap:
+        patterns: ["@tiptap/*"]
+      radix:
+        patterns: ["@radix-ui/*"]
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /services/bim-authority
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: /services/bim-authority
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

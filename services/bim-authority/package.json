@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "jose": "6.2.7",
-    "postgres": "3.4.7",
+    "postgres": "3.4.9",
     "tsx": "4.23.13",
     "ws": "8.21.3",
     "zod": "4.6.6"
