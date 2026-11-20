@@ -45,6 +45,7 @@
       "@permitzip/bim-kernel/typicals": ["./bim-kernel/src/organization/typicals-extras.ts"],
       "@permitzip/bim-pack": ["./bim-pack/src/index.ts"],
       "@permitzip/bim-pack/runtime": ["./bim-pack/src/runtime.ts"],
+      "@permitzip/bim-pack-tutorial": ["./bim-pack-tutorial/src/index.ts"],
       "@permitzip/bim-ifc": ["./bim-ifc/src/index.ts"],
       "@permitzip/bim-pack-structural": ["./bim-pack-structural/src/index.ts"],
       "@permitzip/bim-pack-architecture": ["./bim-pack-architecture/src/index.ts"],

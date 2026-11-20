@@ -4,6 +4,8 @@ An add-on (in code, a **pack**) is how a trade, a firm or anyone else extends
 MutinyBIM. Every trade in this repository is built this way, with no edits to
 the kernel. Yours can be too.
 
+For a runnable, step-by-step example, start with [Your first add-on: a planter](YOUR-FIRST-ADD-ON.md).
+
 The contract lives in `@permitzip/bim-pack`. Its full, versioned reference is
 `packages/bim-pack/PACK-CONTRACT.md`; this page is the short version.
 

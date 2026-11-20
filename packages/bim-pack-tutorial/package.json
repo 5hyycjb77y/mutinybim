@@ -1,0 +1,10 @@
+{
+  "name": "@permitzip/bim-pack-tutorial",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "A synthetic planter for the first add-on tutorial.",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@permitzip/bim-pack": "*" }
+}
