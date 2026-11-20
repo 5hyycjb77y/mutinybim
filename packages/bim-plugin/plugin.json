@@ -27,7 +27,7 @@
           "purpose": "Write, check, preview and land scripts that read and change the model, save a part script's parts, and four reads to look before writing",
           "skill": "mutinybim",
           "server": "mutinybim",
-          "token_cap": 3500,
+          "token_cap": 4300,
           "tools": 9
         },
         {

@@ -136,7 +136,7 @@ export function LinkedModelsPanel({ projectId, linkOpen, onLinkOpenChange, onVie
   const [freshTick, setFreshTick] = useState(0)
 
   useEffect(() => {
-    // No linked-models service here: nothing to load, and the panel says so in words instead of failing.
+    // No linked-models service here: nothing to load, and the section says so in words instead of failing.
     if (!linked) return
     const controller = new AbortController()
     fetchLinkedModelsFrom(linked, projectId, controller.signal)

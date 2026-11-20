@@ -7,7 +7,7 @@ metadata:
   pack: "core"
   mcp-server: "mutinybim"
   family: "core"
-  token-cap: "3500"
+  token-cap: "4300"
   tools: "bim_script_reference bim_check_output bim_run_script bim_apply_output bim_save_part_type bim_model_summary bim_query_elements bim_inspect_network bim_validation_issues"
 ---
 

@@ -39,7 +39,7 @@ export const BIM_TOOL_PACKS: readonly BimToolPack[] = [
     purpose: "Write, check, preview and land scripts that read and change the model, save a part script's parts, and four reads to look before writing",
     skill: "mutinybim",
     slug: "core",
-    tokenCap: 3_500,
+    tokenCap: 4_300,
     tools: [
       "bim_script_reference",
       "bim_check_output",
