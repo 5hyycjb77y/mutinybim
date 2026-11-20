@@ -65,6 +65,9 @@ export const KIND_IDS = [
   // section properties: how a member's cross-section resists bending (beams, columns, joists, deck)
   "section_modulus",
   "second_moment_of_area",
+  "thermal_resistance",
+  "thermal_resistance_area",
+  "specific_heat",
 ] as const;
 
 export const UNIT_CODES = [
@@ -241,6 +244,14 @@ export const UNIT_CODES = [
   "mm4",
   "cm4",
   "in4",
+  // thermal resistance, insulation R-value and specific heat
+  "K/W",
+  "h.degF/Btu",
+  "m2.K/W",
+  "h.ft2.degF/Btu",
+  "J/kg.K",
+  "kJ/kg.K",
+  "Btu/lb.degF",
 ] as const;
 
 /**
@@ -303,4 +314,7 @@ export const KIND_UNITS = {
   airflow_per_person: ["L/s/occ", "cfm/occ"],
   section_modulus: ["mm3", "cm3", "in3"],
   second_moment_of_area: ["mm4", "cm4", "in4"],
+  thermal_resistance: ["K/W", "h.degF/Btu"],
+  thermal_resistance_area: ["m2.K/W", "h.ft2.degF/Btu"],
+  specific_heat: ["J/kg.K", "kJ/kg.K", "Btu/lb.degF"],
 } as const satisfies Readonly<Record<(typeof KIND_IDS)[number], readonly [(typeof UNIT_CODES)[number], ...(typeof UNIT_CODES)[number][]]>>;

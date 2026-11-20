@@ -50,6 +50,9 @@ const COUNT = dim({ C: 1 });
 const AREA_PER_COUNT = dim({ L: 2, C: -1 });
 const CURRENCY = dim({ $: 1 });
 const POWER_PER_AREA = dim({ M: 1, T: -3 });
+const THERMAL_RESISTANCE = dim({ M: -1, L: -2, T: 3, Th: 1 });
+const THERMAL_RESISTANCE_AREA = dim({ M: -1, T: 3, Th: 1 });
+const SPECIFIC_HEAT = dim({ L: 2, T: -2, Th: -1 });
 const FLOW_PER_COUNT = dim({ L: 3, T: -1, C: -1 });
 
 interface Options {
@@ -246,6 +249,15 @@ const LIST: readonly UnitDefinition[] = [
   unit("cfm/ft2", "cfm per square foot", VELOCITY, FT3 / 60 / FT2, "cfm/ft²", { aliases: ["cfm/sf", "CFM/SF", "cfm/ft²"] }),
   unit("L/s/occ", "Litres per second per person", FLOW_PER_COUNT, 1e-3, "L/s/person", { aliases: ["L/s/person", "l/s/person"] }),
   unit("cfm/occ", "cfm per person", FLOW_PER_COUNT, FT3 / 60, "cfm/person", { aliases: ["cfm/person", "CFM/person", "cfm/p"] }),
+  // Temperature factors here are intervals, not absolute temperatures. IT Btu,
+  // international foot and pound follow the definitions used above (NIST SP 811).
+  unit("K/W", "Kelvin per watt", THERMAL_RESISTANCE, 1, "K/W", { aliases: ["K per W"] }),
+  unit("h.degF/Btu", "Fahrenheit degree hours per Btu", THERMAL_RESISTANCE, (3600 * 5 / 9) / BTU, "h·°F/Btu", { aliases: ["h*F/BTU", "h F/Btu"] }),
+  unit("m2.K/W", "Square metre kelvin per watt", THERMAL_RESISTANCE_AREA, 1, "m²·K/W", { aliases: ["m2*K/W", "m2 K/W"] }),
+  unit("h.ft2.degF/Btu", "Square foot Fahrenheit degree hours per Btu", THERMAL_RESISTANCE_AREA, (3600 * FT2 * 5 / 9) / BTU, "h·ft²·°F/Btu", { aliases: ["h*ft2*F/BTU", "h ft2 F/Btu"] }),
+  unit("J/kg.K", "Joules per kilogram kelvin", SPECIFIC_HEAT, 1, "J/(kg·K)", { aliases: ["J/(kg*K)", "J/kg/K", "J/kgK"] }),
+  unit("kJ/kg.K", "Kilojoules per kilogram kelvin", SPECIFIC_HEAT, 1000, "kJ/(kg·K)", { aliases: ["kJ/(kg*K)", "kJ/kg/K", "kJ/kgK"] }),
+  unit("Btu/lb.degF", "Btu per pound Fahrenheit degree", SPECIFIC_HEAT, BTU / (LB * 5 / 9), "Btu/(lb·°F)", { aliases: ["Btu/(lb*F)", "BTU/lb/F", "Btu/lbF"] }),
 ];
 
 export const UNITS: Readonly<Record<UnitCode, UnitDefinition>> = Object.freeze(Object.fromEntries(LIST.map((u) => [u.code, u])) as Record<UnitCode, UnitDefinition>);

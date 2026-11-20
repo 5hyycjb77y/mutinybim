@@ -76,6 +76,9 @@ const LIST: readonly KindDefinition[] = [
   kind("section_modulus", "Section modulus", dim({ L: 3 }), intensive, ["structural"]),
   /** Second moment of area I (AISC Manual Part 1 lists Ix, Iy in in⁴). */
   kind("second_moment_of_area", "Moment of inertia", dim({ L: 4 }), intensive, ["structural"]),
+  kind("thermal_resistance", "Thermal resistance", dim({ M: -1, L: -2, T: 3, Th: 1 }), optional, ["mechanical", "architecture"]),
+  kind("thermal_resistance_area", "Thermal insulance (R-value)", dim({ M: -1, T: 3, Th: 1 }), optional, ["mechanical", "architecture"]),
+  kind("specific_heat", "Specific heat capacity", dim({ L: 2, T: -2, Th: -1 }), intensive, ["mechanical", "architecture"]),
 ];
 
 export const KINDS: Readonly<Record<Kind, KindDefinition>> = Object.freeze(Object.fromEntries(LIST.map((k) => [k.id, k])) as Record<Kind, KindDefinition>);
