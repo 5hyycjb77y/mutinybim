@@ -4,8 +4,33 @@ import { TrackedReader, requireKind } from "../model";
 import { draftElements } from "../store";
 import { asElementId, type BimElement, type ModelState } from "../types";
 import type { Pen } from "../drawing/sheet";
+import { VIEW_SCHEMATIC_DETAIL_FEATURE } from "../categories/types";
+import { defineExtensionPoint } from "../packs/contract";
+import { activePackSet } from "../packs/scope";
+import { peerReads } from "../elements/feature";
 import { activeServiceRegistry, serviceById, type ServiceRegistry } from "../services/registry";
 import type { MepSystem } from "./types";
+
+/**
+ * Default repeating inline code printed inside single-line runs for a service
+ * (e.g. `"CW"`, `"SAN"`, `"G"`). Add-ons contribute rows to
+ * `SERVICE_LINE_CODE_POINT` without changing a frozen `ServiceRow`'s meaning.
+ */
+export interface ServiceLineCodeDef {
+  /** Unique contribution id (e.g. `"pack.service_id"`). */
+  readonly id: string;
+  /** Service id this inline code applies to. */
+  readonly serviceId: string;
+  /** Short repeating inline code printed along single-line runs. */
+  readonly lineCode: string;
+}
+
+export const SERVICE_LINE_CODE_POINT = defineExtensionPoint<ServiceLineCodeDef>({
+  id: "kernel.service_line_code",
+  version: 1,
+  label: "Service inline codes",
+  idOf: (r) => r.id,
+});
 
 /**
  * How each system looks: its colour on screen (3D and the live plan), and its
@@ -51,6 +76,8 @@ export interface SystemGraphics {
   readonly colour?: string;
   readonly pattern?: SystemLinePattern;
   readonly weight?: SystemLineWeight;
+  /** Short repeating inline code printed inside single-line runs ("CW", "SAN", "G"). Empty string "" suppresses the service's default code; absent inherits it. */
+  readonly lineCode?: string;
 }
 
 export interface SystemStyle {
@@ -128,6 +155,23 @@ export function styleOfSystemId(elements: Readonly<Record<string, BimElement>>, 
   return s?.kind === "mep_system" ? systemStyle(s) : null;
 }
 
+/**
+ * The inline schematic code a system prints inside single-line runs (e.g. "CW",
+ * "SAN", "G"): its own override if set ("" explicitly suppresses it), else its
+ * service row's default `lineCode`, else undefined.
+ */
+export function systemLineCode(elements: Readonly<Record<string, BimElement>>, systemId: string): string | undefined {
+  const s = elements[systemId];
+  if (s?.kind !== "mep_system") return undefined;
+  const own = s.graphics?.lineCode;
+  if (own !== undefined) return own.length > 0 ? own : undefined;
+  for (const row of activePackSet().items(SERVICE_LINE_CODE_POINT)) {
+    if (row.serviceId === s.systemKind && row.lineCode.length > 0) return row.lineCode;
+  }
+  const fallback = serviceById(s.systemKind, activeServiceRegistry())?.lineCode;
+  return fallback && fallback.length > 0 ? fallback : undefined;
+}
+
 /** `#rrggbb` as the 0xRRGGBB number a renderer takes. */
 export function colourNumber(hex: string): number {
   return Number.parseInt(hex.slice(1), 16);
@@ -147,6 +191,8 @@ export const systemGraphicsCommandSchemas = [
     colour: hexSchema.nullable().optional(),
     pattern: z.enum(SYSTEM_LINE_PATTERNS).nullable().optional(),
     weight: z.enum(SYSTEM_LINE_WEIGHTS).nullable().optional(),
+    /** Null: back to the service's standard line code. Empty string "": hide inline code on this system. */
+    lineCode: z.string().trim().max(12).nullable().optional(),
   }),
 ] as const;
 
@@ -165,16 +211,20 @@ function pick<T>(next: T | null | undefined, prior: T | undefined): T | undefine
 export function executeSystemGraphicsCommand(model: ModelState, cmd: SystemGraphicsCommand): ExecuteResult {
   const reader = new TrackedReader(model);
   const system = requireKind(reader.get(asElementId(cmd.systemId)), "mep_system");
-  if (cmd.colour === undefined && cmd.pattern === undefined && cmd.weight === undefined) refuse("invalid_value", `Say what to change on ${system.name}: its colour, line pattern or line weight`, [system.id]);
+  if (cmd.colour === undefined && cmd.pattern === undefined && cmd.weight === undefined && cmd.lineCode === undefined) refuse("invalid_value", `Say what to change on ${system.name}: its colour, line pattern or line weight`, [system.id]);
   const given = typeof cmd.colour === "string" ? cmd.colour.trim().toLowerCase() : cmd.colour;
   if (typeof given === "string" && !HEX.test(given)) refuse("invalid_value", `${cmd.colour} isn't a colour; give it as #rrggbb (#1f6fd1)`, [system.id]);
   if (cmd.pattern && !SYSTEM_LINE_PATTERNS.includes(cmd.pattern)) refuse("invalid_value", `${cmd.pattern} isn't a line pattern; use ${SYSTEM_LINE_PATTERNS.join(", ")}`, [system.id]);
   if (cmd.weight && !SYSTEM_LINE_WEIGHTS.includes(cmd.weight)) refuse("invalid_value", `${cmd.weight} isn't a line weight; use ${SYSTEM_LINE_WEIGHTS.join(", ")}`, [system.id]);
+  if (cmd.lineCode !== undefined && !peerReads(VIEW_SCHEMATIC_DETAIL_FEATURE)) refuse("invalid_value", "Inline service codes can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [system.id]);
+  const givenCode = typeof cmd.lineCode === "string" ? cmd.lineCode.trim() : cmd.lineCode;
+  if (typeof givenCode === "string" && givenCode.length > 12) refuse("invalid_value", `Line code "${givenCode}" is too long (at most 12 characters)`, [system.id]);
   const prior = system.graphics ?? {};
   const colour = pick(given, prior.colour);
   const pattern = pick(cmd.pattern, prior.pattern);
   const weight = pick(cmd.weight, prior.weight);
-  const graphics: SystemGraphics = { ...(colour ? { colour } : {}), ...(pattern ? { pattern } : {}), ...(weight ? { weight } : {}) };
+  const lineCode = pick(givenCode, prior.lineCode);
+  const graphics: SystemGraphics = { ...(colour ? { colour } : {}), ...(pattern ? { pattern } : {}), ...(weight ? { weight } : {}), ...(lineCode !== undefined ? { lineCode } : {}) };
   const { graphics: _old, ...base } = system;
   const next: MepSystem = { ...base, ...(Object.keys(graphics).length > 0 ? { graphics } : {}) };
   const working = draftElements(model.elements);
@@ -184,6 +234,7 @@ export function executeSystemGraphicsCommand(model: ModelState, cmd: SystemGraph
   if (cmd.colour !== undefined) said.push(cmd.colour === null ? "its standard colour" : `colour ${style.colour}`);
   if (cmd.pattern !== undefined) said.push(`${SYSTEM_PATTERN_LABEL[style.pattern].toLowerCase()} lines${cmd.pattern === null ? " (standard)" : ""}`);
   if (cmd.weight !== undefined) said.push(cmd.weight === null ? "standard line weight" : `${SYSTEM_WEIGHT_LABEL[cmd.weight].toLowerCase()} lines`);
-  const authored: AuthoredWrite[] = [{ elementId: system.id, field: "graphics", value: `${style.colour}|${style.pattern}|${style.weight ?? ""}` }];
+  if (cmd.lineCode !== undefined) said.push(cmd.lineCode === null ? "its standard line code" : givenCode === "" ? "no inline code" : `line code "${givenCode}"`);
+  const authored: AuthoredWrite[] = [{ elementId: system.id, field: "graphics", value: `${style.colour}|${style.pattern}|${style.weight ?? ""}${lineCode !== undefined ? `|${lineCode}` : ""}` }];
   return finish(reader, working, [system.id], authored, () => [], { summary: [`${system.name} now draws with ${said.join(", ")} in 3D, plans and print`] });
 }

@@ -77,6 +77,8 @@ export interface ServiceDef {
   readonly carriedBy?: ServiceId;
   readonly ifc: ServiceIfc;
   readonly graphics?: ServiceLineStyle;
+  /** Short repeating code printed inside single-line schematic runs on plans (e.g. "CW", "SAN", "G", "V", "FP"). Absent: no inline code by default. */
+  readonly lineCode?: string;
   /**
    * The protocol feature a peer must advertise before a writer emits this
    * row (MIGRATION-PLAN §3). Absent: every peer reads it (today's rows).

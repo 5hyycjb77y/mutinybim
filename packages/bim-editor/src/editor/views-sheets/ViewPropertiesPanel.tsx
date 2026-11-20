@@ -70,9 +70,9 @@ const VISUAL_STYLE_LABEL: Record<VisualStyle, { label: string; hint: string }> =
 }
 
 const DETAIL_HINT: Record<DetailLevel, string> = {
-  coarse: 'Duct and pipe as single lines; fittings as their centrelines.',
-  medium: 'Duct double-line with fitting outlines.',
-  fine: 'Adds turning vanes and fitting joints.',
+  coarse: 'All runs single-line with schematic fitting, rise/drop symbols and inline service codes.',
+  medium: 'Duct double-line with fittings; pipe and conduit single-line schematic with fitting & rise/drop symbols.',
+  fine: 'All runs (duct, pipe and conduit) double-line with fitting bodies and turning vanes.',
 }
 
 const CUT_PATTERN_LABEL: Record<CutPattern, string> = { cross: 'Cross', solid: 'Solid', hatch: 'Hatch' }
@@ -117,7 +117,7 @@ interface Props {
 const DRAFTING_LABEL: Record<DraftingCategory, string> = { detail_lines: 'Detail lines', hatching: 'Hatching and fills', masking: 'Masking regions', components: 'Detail components', insulation: 'Insulation', text: 'Text and notes', dimensions: 'Dimensions', tags: 'Tags', clouds: 'Revision clouds' }
 
 /** The on/off settings that tick at once: they show the new value before the view redraws. */
-export type QuickProps = Partial<Pick<ViewPropsPatch, 'hiddenCategories' | 'hiddenDraftingCategories' | 'showHiddenLines' | 'hiddenLineCategories' | 'linkedHiddenLines' | 'cropView' | 'showCropBox' | 'annotationCrop'>>
+export type QuickProps = Partial<Pick<ViewPropsPatch, 'hiddenCategories' | 'hiddenDraftingCategories' | 'showHiddenLines' | 'hiddenLineCategories' | 'linkedHiddenLines' | 'showLineCodes' | 'cropView' | 'showCropBox' | 'annotationCrop'>>
 type QuickKey = keyof QuickProps
 type QuickSet = (patch: QuickProps, send: () => string | null) => void
 
@@ -608,6 +608,17 @@ function LinesFields({ view, canEdit, set, setQuick, children }: { view: ViewEle
           </ToggleGroup>
           <FieldDescription className="text-xs">{DETAIL_HINT[detail]}</FieldDescription>
         </Field>
+        {(view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan') && (
+          <Field orientation="horizontal">
+            <Checkbox id="vp-line-codes" checked={props.showLineCodes !== false} disabled={!canEdit} onCheckedChange={(v) => setQuick({ showLineCodes: v === true }, v === true ? 'show inline service codes' : 'hide inline service codes')} />
+            <FieldContent>
+              <FieldLabel htmlFor="vp-line-codes" className="font-normal">
+                Inline service codes
+              </FieldLabel>
+              <FieldDescription className="text-xs">Print repeating system codes (CW, SAN, G…) along single-line piping and conduit runs.</FieldDescription>
+            </FieldContent>
+          </Field>
+        )}
         <Field orientation="horizontal">
           <Checkbox id="vp-hidden-lines" checked={props.showHiddenLines === true} disabled={!canEdit || style === 'wireframe' || style === 'shaded'} onCheckedChange={(v) => setQuick({ showHiddenLines: v === true }, v === true ? 'show hidden lines' : 'remove hidden lines')} />
           <FieldContent>

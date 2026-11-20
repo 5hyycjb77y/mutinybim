@@ -66,6 +66,7 @@ describe("the Plumbing and gas add-on", () => {
         "kernel.fitting_family",
         "kernel.load_section",
         "kernel.service",
+        "kernel.service_line_code",
         "kernel.view_graphics",
         // Round 14: the riser and isometric layouts, moved out of the kernel.
         "kernel.diagram_layout",

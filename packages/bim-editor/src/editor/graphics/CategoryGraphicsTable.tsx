@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronRight, RotateCw, Search } from 'lucide-react'
 import {
+  DETAIL_LEVELS,
   LINE_WEIGHTS,
   SYSTEM_LINE_PATTERNS,
   SYSTEM_PATTERN_LABEL,
@@ -13,6 +14,7 @@ import {
   rawRegistryWords,
   type CategoryOverride,
   type CategoryRegistry,
+  type DetailLevel,
   disciplineLabel,
   type LineWeight,
   type RegisteredCategory,
@@ -35,6 +37,7 @@ import { useEditorHost } from '@permitzip/bim-editor/host'
 import { useFirmClassCategoriesFrom } from './use-firm-class-categories'
 
 const WEIGHT_LABEL: Record<LineWeight, string> = { thin: 'Thin', medium: 'Medium', wide: 'Wide', heavy: 'Heavy' }
+const DETAIL_LABEL: Record<DetailLevel, string> = { coarse: 'Coarse', medium: 'Medium', fine: 'Fine' }
 
 const NEWER_GROUP = 'Other categories this view sets'
 const GROUP_ORDER = ['Mechanical', 'Plumbing', 'Electrical', 'Fire protection', 'Architecture', 'Structure', 'Civil', 'General contracting', 'Systems', 'Firm library', 'General', 'Documentation', 'Drafting', NEWER_GROUP] as const
@@ -172,6 +175,7 @@ export function CategoryGraphicsTable({ view, canEdit, disabledHint, onPatch, se
                     <TableHead className="h-7 px-1">Cut</TableHead>
                     <TableHead className="h-7 px-1">Beyond</TableHead>
                     <TableHead className="h-7 px-1">Pattern</TableHead>
+                    <TableHead className="h-7 px-1">Detail</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -245,6 +249,25 @@ function CategoryRow({ view, category: c, categories, canEdit, disabledHint, onE
               {SYSTEM_LINE_PATTERNS.map((p) => (
                 <SelectItem key={p} value={p} className="text-xs">
                   {SYSTEM_PATTERN_LABEL[p]}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="px-1 py-1">
+        <Select value={own.detailLevel ?? 'default'} disabled={!canEdit} onValueChange={(v) => onEdit(c, { field: 'detailLevel', value: DETAIL_LEVELS.find((d) => d === v) ?? null }, `change the ${name} detail level`)}>
+          <SelectTrigger size="sm" className="h-7 w-full text-xs" aria-label={`${c.label} detail level`} title={disabledHint}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="default" className="text-xs">
+                {look.detailLevel && !own.detailLevel ? `By view (${DETAIL_LABEL[look.detailLevel]})` : 'By view'}
+              </SelectItem>
+              {DETAIL_LEVELS.map((d) => (
+                <SelectItem key={d} value={d} className="text-xs">
+                  {DETAIL_LABEL[d]}
                 </SelectItem>
               ))}
             </SelectGroup>

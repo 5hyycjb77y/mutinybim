@@ -49,13 +49,13 @@ import {
   type TagPlacement,
   type Tone,
 } from "./sheet";
-import { sizeLabel } from "../routing/rules";
 import { loadPointPosition, loadPointsOnHost } from "../load-points/model";
 import { drawScheduleView } from "../schedules/view";
 import { drawDimension, drawTag, type AnnotationDrawContext } from "../annotation/annotations";
 import { PATTERN_DASH, categoryOf, drawDetailItem } from "../annotation/detailing";
 import type { SheetRevision } from "../documents";
-import { drawPartSymbol, drawRunFitting, drawRunSegment, systemLine } from "./runs";
+import type { RunFitting } from "../routing/types";
+import { drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, systemLine } from "./runs";
 import { INSULATION_DASH, insulationSectionCuts } from "./insulation";
 import { insulationHiddenInView } from "../view-categories";
 import { elementCategoryChain, elementLook, elementViewCategory } from "../categories/element";
@@ -223,6 +223,18 @@ function textFits(p: Painter, at: Vec2, text: string, size: number, anchor: "sta
   const w = text.length * size * TEXT_WIDTH_PER_CHAR * p.scale;
   const x0 = anchor === "start" ? at.x : anchor === "middle" ? at.x - w / 2 : at.x - w;
   return x0 >= p.noteMin.x && x0 + w <= p.noteMax.x && at.y >= p.noteMin.y && at.y + size * p.scale <= p.noteMax.y;
+}
+
+/** Rotated centered text bounding-box check against the painter's annotation crop. */
+function rotatedTextFits(p: Painter, at: Vec2, text: string, size: number, modelAngleDeg: number): boolean {
+  const halfW = (text.length * size * TEXT_WIDTH_PER_CHAR * p.scale) / 2;
+  const halfH = (size * p.scale) / 2;
+  const rad = (modelAngleDeg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const hx = c * halfW + s * halfH;
+  const hy = s * halfW + c * halfH;
+  return at.x - hx >= p.noteMin.x && at.x + hx <= p.noteMax.x && at.y - hy >= p.noteMin.y && at.y + hy <= p.noteMax.y;
 }
 
 function textIn(p: Painter, at: Vec2, text: string, size: number, anchor: "start" | "middle" | "end", tone: Tone, bold = false): void {
@@ -597,8 +609,8 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
   const tagsShown = categoryLook(view, "tags").visible;
   // An element tagged in this view shows its tag, not the plan's own size label as well.
   const taggedHere = new Set((documentIndex(model).itemsByOwner.get(view.id) ?? []).flatMap((i) => (i.tag && !i.deleted ? [i.tag.elementId] : [])));
-  const coarse = display.detail === "coarse";
   const pending: PendingLine[] = [];
+  const pendingInline: { at: Vec2; text: string; size: number; tone: Tone; paperDeg: number; owner: string }[] = [];
   const bodies: BimElement[] = [];
   const floor = viewFloor(model, view);
   const shownAs = organizationDisplay(model, view);
@@ -638,7 +650,8 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
     // Looking up, the runs below the ceiling print screened.
     const line = lineToned(ceiling && el.kind === "run_segment" ? "halftone" : tone);
     if (body) bodies.push(el);
-    const graphics = planGraphicsOf(el, graphicsCtx);
+    const elGraphicsCtx = look.detailLevel ? { ...graphicsCtx, detail: look.detailLevel } : graphicsCtx;
+    const graphics = planGraphicsOf(el, elGraphicsCtx);
     if (graphics) {
       const showLabel = tagsShown && !taggedHere.has(el.id);
       drawPlanGraphics(p, el, graphics, { line, screened: lineToned("halftone") }, tone, showLabel, look.lineWeights.cut ?? "heavy");
@@ -703,32 +716,53 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
               textIn(p, at, text, size, "middle", tone);
             }
           : null;
-        if (coarse) {
-          // Single line: the centreline; a drop or rise shows as a circle.
-          const a = { x: el.start.x, y: el.start.y };
-          const b = { x: el.end.x, y: el.end.y };
-          const run = length(sub(b, a));
-          const sys = systemLine(model, el.systemId);
-          if (run < 0.01) circleAt(a, 3 * frame.scale / 2, line, "medium");
-          else line(a, b, sys.weight ?? (el.domain === "duct" ? "wide" : "medium"), sys.dash);
-          if (label && run / frame.scale > 25) label(add(scale(add(a, b), 0.5), scale(perp(unit(sub(b, a))), 6 * frame.scale)), sizeLabel(el.size), 2.5);
-        } else {
-          drawRunSegment(model, el, line, label, frame.scale);
-        }
+        const effectiveDetail = look.detailLevel ?? display.detail;
+        const showCodes = view.props?.showLineCodes !== false;
+        const sys = systemLine(model, el.systemId);
+        const frameRot = frame.rotationDeg ?? 0;
+        const inlineText = showCodes && sys.lineCode
+          ? (at: Vec2, text: string, size: number, rotationDeg: number): boolean => {
+              if (!rotatedTextFits(p, at, text, size, rotationDeg)) return false;
+              let paperDeg = rotationDeg + frameRot;
+              while (paperDeg > 90) paperDeg -= 180;
+              while (paperDeg <= -90) paperDeg += 180;
+              if (body) {
+                pendingInline.push({ at, text, size, tone, paperDeg, owner: el.id });
+              } else {
+                p.prims.push({ kind: "text", at: p.toPaper(at), text, size, anchor: "middle", ...(tone !== "ink" ? { tone } : {}), ...(paperDeg ? { rotate: -paperDeg } : {}) });
+              }
+              return true;
+            }
+          : undefined;
+        const fittingIsSingleLine = (f: RunFitting): boolean => {
+          const fLook = elementLook(model, view, f);
+          const fDetail = fLook.detailLevel ?? display.detail;
+          return isSingleLineRun(f.domain, f.ports[0]?.size ?? el.size, fDetail, fLook.singleLineBelowMm);
+        };
+        drawRunSegment(model, el, line, label, frame.scale, {
+          detail: effectiveDetail,
+          singleLineBelowMm: look.singleLineBelowMm,
+          ...(showCodes && sys.lineCode ? { lineCode: sys.lineCode, inlineText } : {}),
+          singleLinePen: el.domain === "duct" ? "wide" : "medium",
+          clipBounds: { min: p.min, max: p.max },
+          fittingIsSingleLine,
+        });
         drawLoadPoints(model, el.id, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), frame.scale);
         break;
       }
-      case "run_fitting":
-        if (coarse) {
-          for (const port of el.ports) line({ x: port.position.x, y: port.position.y }, { x: el.position.x, y: el.position.y }, el.domain === "duct" ? "wide" : "medium");
-        } else {
-          drawRunFitting(model, el, line, display.detail === "fine");
-        }
+      case "run_fitting": {
+        const effectiveDetail = look.detailLevel ?? display.detail;
+        drawRunFitting(model, el, line, effectiveDetail === "fine", frame.scale, {
+          detail: effectiveDetail,
+          singleLineBelowMm: look.singleLineBelowMm,
+          singleLinePen: el.domain === "duct" ? "wide" : "medium",
+        });
         drawLoadPoints(model, el.id, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), frame.scale);
         break;
+      }
       case "part":
         if (el.planned !== undefined) break;
-        drawPartSymbol(model, el, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), look.planSymbol, display.detail);
+        drawPartSymbol(model, el, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), look.planSymbol, look.detailLevel ?? display.detail);
         shownParts.set(el.id, el);
         break;
       case "ceiling":
@@ -744,8 +778,12 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
 
   // Hidden lines: element bodies seen from above (below for a ceiling plan).
   const style = display.style;
+  const emitInline = (t: { at: Vec2; text: string; size: number; tone: Tone; paperDeg: number }) => {
+    p.prims.push({ kind: "text", at: p.toPaper(t.at), text: t.text, size: t.size, anchor: "middle", ...(t.tone !== "ink" ? { tone: t.tone } : {}), ...(t.paperDeg ? { rotate: -t.paperDeg } : {}) });
+  };
   if (!hidesEdges(style) && !fillsFaces(style)) {
     for (const l of pending) lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
+    for (const t of pendingInline) emitInline(t);
     return;
   }
   const projector = planProjector(ceiling);
@@ -780,6 +818,15 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
     const split = splitHidden({ u: l.a.x, v: l.a.y, near }, { u: l.b.x, v: l.b.y, near }, index, () => near);
     for (const [a, b] of split.visible) lineIn(p, { x: a.u, y: a.v }, { x: b.u, y: b.v }, l.pen, l.tone, l.dash);
     if (display.dashed(l.category)) for (const [a, b] of split.hidden) lineIn(p, { x: a.u, y: a.v }, { x: b.u, y: b.v }, "thin", l.tone, HIDDEN_DASH);
+  }
+  for (const t of pendingInline) {
+    if (!hidesEdges(style)) {
+      emitInline(t);
+      continue;
+    }
+    const near = top.get(t.owner) ?? Infinity;
+    const vis = splitHidden({ u: t.at.x - 0.5, v: t.at.y, near }, { u: t.at.x + 0.5, v: t.at.y, near }, index, () => near);
+    if (vis.visible.length > 0) emitInline(t);
   }
 }
 
@@ -1033,7 +1080,7 @@ function drawSection(model: ModelState, view: ViewElement, p: Painter, display: 
     if (shown.dashed) dashed.add(el.id);
     if (!insulationHiddenInView(view)) for (const poly of insulationSectionCuts(model, el, projector)) insulationCuts.push({ poly, tone: tones.get(el.id) ?? "ink" });
   }
-  drawProjected(p, projected, tones, display, projector, slabCuts, dashed);
+  drawProjected(p, projected, tones, display, projector, slabCuts, dashed, true);
   for (const { poly, tone } of insulationCuts) poly.forEach((q, i) => lineIn(p, q, poly[(i + 1) % poly.length] ?? q, "thin", tone, INSULATION_DASH));
 }
 
@@ -1042,12 +1089,20 @@ function drawSection(model: ModelState, view: ViewElement, p: Painter, display: 
  * edges with hidden-line removal, cut shapes with poche, and single-line duct
  * and pipe at coarse detail.
  */
-function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: ReadonlyMap<string, Tone>, display: Display, projector: Projector, extraCuts: ReadonlyArray<{ poly: Vec2[]; tone: Tone }> = [], dashed: ReadonlySet<string> = NONE_DASHED): void {
+function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: ReadonlyMap<string, Tone>, display: Display, projector: Projector, extraCuts: ReadonlyArray<{ poly: Vec2[]; tone: Tone }> = [], dashed: ReadonlySet<string> = NONE_DASHED, schematic2d = false): void {
   const style = display.style;
-  const coarse = display.detail === "coarse";
   const toneOf = (owner: string) => tones.get(owner) ?? "ink";
   const solidOf = new Map<string, ElementSolid>(projected.map((x) => [x.solid.owner, x.solid]));
-  const singleLine = (s: ElementSolid) => coarse && (s.category === "duct" || s.category === "duct_fitting" || s.category === "pipe");
+  const singleLine = (s: ElementSolid) => {
+    // Only collapse to centrelines in 2D orthographic sections/elevations with visible edges and actual centerline geometry (never in shaded or 3D views, and never for portless/accessory parts without centerlines).
+    if (!schematic2d || !drawsEdges(style) || !s.centerline || s.centerline.length === 0) return false;
+    if (s.category !== "duct" && s.category !== "duct_fitting" && s.category !== "pipe") return false;
+    const look = display.lookOf(s.owner, s.category);
+    const detail = look.detailLevel ?? display.detail;
+    const domain = s.category === "pipe" ? "pipe" : "duct";
+    if (look.singleLineBelowMm !== null) return look.singleLineBelowMm > 0 && (s.sizeMm ?? 0) < look.singleLineBelowMm;
+    return isSingleLineRun(domain, s.sizeMm !== undefined ? { shape: "round", diameter: s.sizeMm } : undefined, detail, null);
+  };
   const index = new FaceIndex(cellFor(p.min.x, p.min.y, p.max.x, p.max.y));
   const faces: Face[] = [];
   const cutPlane = Number.isFinite(projector.nearMax) ? projector.nearMax : null;

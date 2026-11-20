@@ -9,7 +9,7 @@
  * then it contributes disciplines and the wet and dry sprinkler services
  * (round 14: round 13's kernel rows byte for byte).
  */
-import { DISCIPLINE_POINT, LINKED_PLAN_DISPLAY_POINT, SERVICES_REGISTRY_FEATURE, SERVICE_POINT, type DisciplineDef, type DisciplineGroup, type LinkedPlanDisplayRow, type ServiceRow } from "@permitzip/bim-kernel";
+import { DISCIPLINE_POINT, LINKED_PLAN_DISPLAY_POINT, SERVICES_REGISTRY_FEATURE, SERVICE_LINE_CODE_POINT, SERVICE_POINT, type DisciplineDef, type DisciplineGroup, type LinkedPlanDisplayRow, type ServiceLineCodeDef, type ServiceRow } from "@permitzip/bim-kernel";
 import { FIRE_PROTECTION_MANIFEST, contribute, definePack, type Pack } from "@permitzip/bim-kernel/packs";
 
 const MEP: DisciplineGroup = { id: "mep", label: "MEP" };
@@ -28,9 +28,20 @@ export const FIRE_PROTECTION_SERVICE_ROWS: readonly ServiceRow[] = [
   { id: "fire_protection_dry", label: "Fire protection, dry", discipline: "fire_protection", medium: "liquid", regime: "pressure", connector: "pipe", quantities: ["load.gpm_fixed"], asSystem: true, asLoad: false, ifc: dist("FIREPROTECTION"), graphics: { colour: "#ef6c00", pattern: "dashed" }, feature: SERVICES_REGISTRY_FEATURE, flowUnit: "GPM" },
 ];
 
+/** Default repeating inline schematic codes for fire protection services. */
+export const FIRE_PROTECTION_SERVICE_LINE_CODES: readonly ServiceLineCodeDef[] = [
+  { id: "fire_protection.fire_protection_wet", serviceId: "fire_protection_wet", lineCode: "FP" },
+  { id: "fire_protection.fire_protection_dry", serviceId: "fire_protection_dry", lineCode: "FPD" },
+];
+
 /** A linked model's sprinklers and their piping show in plans as MEP does: up to the view's top, and in ceiling plans. */
 export const FIRE_PROTECTION_LINKED_PLAN_DISPLAY: readonly LinkedPlanDisplayRow[] = [
   { id: "fire_protection.heads", label: "Sprinklers and fire suppression terminals", ifcEntities: ["IFCFIRESUPPRESSIONTERMINAL"], drawAs: "symbol", cut: true, below: true, above: true, ceilingPlan: true },
 ];
 
-export const FIRE_PROTECTION_PACK: Pack = definePack(FIRE_PROTECTION_MANIFEST, [contribute(DISCIPLINE_POINT, FIRE_PROTECTION_DISCIPLINES), contribute(SERVICE_POINT, FIRE_PROTECTION_SERVICE_ROWS), contribute(LINKED_PLAN_DISPLAY_POINT, FIRE_PROTECTION_LINKED_PLAN_DISPLAY)]);
+export const FIRE_PROTECTION_PACK: Pack = definePack(FIRE_PROTECTION_MANIFEST, [
+  contribute(DISCIPLINE_POINT, FIRE_PROTECTION_DISCIPLINES),
+  contribute(SERVICE_POINT, FIRE_PROTECTION_SERVICE_ROWS),
+  contribute(SERVICE_LINE_CODE_POINT, FIRE_PROTECTION_SERVICE_LINE_CODES),
+  contribute(LINKED_PLAN_DISPLAY_POINT, FIRE_PROTECTION_LINKED_PLAN_DISPLAY),
+]);

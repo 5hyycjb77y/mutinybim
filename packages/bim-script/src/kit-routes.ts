@@ -1,4 +1,4 @@
-import { fittingFamilies, type Command, type FittingFamily, type PipeMaterial, type RunDomain, type RunSize } from "@permitzip/bim-kernel";
+import { fittingFamilies, type Command, type FittingFamily, type PipeMaterial, type RunDomain, type RunSize, type SystemLinePattern, type SystemLineWeight } from "@permitzip/bim-kernel";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import type { ScriptContext } from "./context";
 import { levelOf } from "./levels";
@@ -172,5 +172,26 @@ export const routes = {
     const shift = levelHeightMm(ctx, spec.toLevel) - levelHeightMm(ctx, spec.level);
     const bottom: Measure = { kind: "length", value: (shift + mm(spec.heightAbove, "Height above the level")) / 1000 };
     return send(ctx, command(ctx, { ...spec, points: [...spec.points.slice(0, -1), { ...last, height: bottom }] }));
+  },
+
+  /**
+   * Sets a system's look across 3D, plans and print: screen colour (`#rrggbb`),
+   * line pattern (`solid`, `dashed`, `dash_dot`, `long_dash`…), line weight
+   * (`thin`, `medium`, `wide`, `heavy`), and repeating inline line code (`"CW"`,
+   * `"SAN"`, `"G"`, `""` to hide, `null` to reset to service default).
+   */
+  setSystemGraphics(
+    ctx: ScriptContext,
+    systemId: string,
+    changes: { readonly colour?: string | null; readonly pattern?: SystemLinePattern | null; readonly weight?: SystemLineWeight | null; readonly lineCode?: string | null },
+  ): void {
+    ctx.edit({
+      type: "set_system_graphics",
+      systemId,
+      ...(changes.colour !== undefined ? { colour: changes.colour } : {}),
+      ...(changes.pattern !== undefined ? { pattern: changes.pattern } : {}),
+      ...(changes.weight !== undefined ? { weight: changes.weight } : {}),
+      ...(changes.lineCode !== undefined ? { lineCode: changes.lineCode } : {}),
+    });
   },
 };

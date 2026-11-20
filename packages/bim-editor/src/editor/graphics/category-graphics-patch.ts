@@ -7,6 +7,7 @@ import {
   type CategoryOverride,
   type CategoryOverrides,
   type CategoryRegistry,
+  type DetailLevel,
   type LineWeight,
   type ViewElement,
   type ViewPropsPatch,
@@ -15,15 +16,17 @@ import {
 /**
  * What one change in Visibility/Graphics writes. View categories (Duct,
  * Electrical devices…) keep writing the older fields for show/hide and pens,
- * which every model server stores; halftone, pattern, and every class,
- * system and firm category write `categoryOverrides`, which the model server
- * stores once it advertises per-category graphics.
+ * which every model server stores; halftone, pattern, detail level, and every
+ * class, system and firm category write `categoryOverrides`, which the model
+ * server stores once it advertises per-category graphics.
  */
 export type GraphicsEdit =
   | { readonly field: 'visible'; readonly value: boolean }
   | { readonly field: 'halftone'; readonly value: boolean }
   | { readonly field: 'cut' | 'projection'; readonly value: LineWeight | null }
   | { readonly field: 'pattern'; readonly value: string | null }
+  | { readonly field: 'detailLevel'; readonly value: DetailLevel | null }
+  | { readonly field: 'singleLineBelowMm'; readonly value: number | null }
 
 function withoutField(o: CategoryOverride | undefined, field: keyof CategoryOverride): CategoryOverride {
   if (!o) return {}
@@ -100,6 +103,12 @@ export function graphicsPatch(view: Pick<ViewElement, 'props'>, id: CategoryId, 
     }
     case 'pattern':
       next = edit.value ? { ...withoutField(own, 'pattern'), pattern: edit.value } : withoutField(own, 'pattern')
+      break
+    case 'detailLevel':
+      next = edit.value ? { ...withoutField(own, 'detailLevel'), detailLevel: edit.value } : withoutField(own, 'detailLevel')
+      break
+    case 'singleLineBelowMm':
+      next = edit.value !== null ? { ...withoutField(own, 'singleLineBelowMm'), singleLineBelowMm: edit.value } : withoutField(own, 'singleLineBelowMm')
       break
   }
   return { categoryOverrides: withOverride(overrides, id, normalized(next)) }

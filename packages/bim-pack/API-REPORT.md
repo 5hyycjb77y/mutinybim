@@ -83,6 +83,7 @@ Contract version: **1.13.0**
 | `kernel.route_constraint` | 1 | Route constraints |
 | `kernel.serves_rule` | 1 | Serves relationships |
 | `kernel.service` | 1 | Services |
+| `kernel.service_line_code` | 1 | Service inline codes |
 | `kernel.stage_set` | 1 | Stage lists |
 | `kernel.starter_connection_type` | 1 | Starter connection types |
 | `kernel.starter_element_type` | 1 | Starter element types |
@@ -654,8 +655,10 @@ Contract version: **1.13.0**
 - `separatorsOnLevel`
 - `SERVES_RULE_POINT`
 - `type ServesRuleDef`
+- `SERVICE_LINE_CODE_POINT`
 - `SERVICE_POINT`
 - `type ServiceDef`
+- `type ServiceLineCodeDef`
 - `serviceNetworkTotals`
 - `type ServiceNetworkTotals`
 - `type ServiceRole`

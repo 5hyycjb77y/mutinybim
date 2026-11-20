@@ -1,4 +1,4 @@
-import { SERVICES_REGISTRY_FEATURE, type ServiceRow } from "@permitzip/bim-kernel";
+import { SERVICES_REGISTRY_FEATURE, type ServiceLineCodeDef, type ServiceRow } from "@permitzip/bim-kernel";
 
 /**
  * Plumbing and gas's service rows (round 12 P12 move handshake): what flows in
@@ -24,4 +24,17 @@ export const PLUMBING_SERVICE_ROWS: readonly ServiceRow[] = [
   { id: "gas", label: "Gas", discipline: "plumbing", medium: "gas", regime: "pressure", connector: "pipe", adapter: "plumbing", quantities: ["load.mbh"], asSystem: false, asLoad: true, carriedBy: "natural_gas", ifc: dist("GAS") },
   { id: "grease_waste", label: "Grease waste", discipline: "plumbing", medium: "liquid", regime: "gravity", connector: "pipe", adapter: "plumbing", quantities: ["load.dfu"], asSystem: true, asLoad: true, ifc: dist("USERDEFINED", "GreaseWaste"), graphics: { colour: "#6d4c1f", pattern: "solid", weight: "heavy" }, feature: SERVICES_REGISTRY_FEATURE, pipeFamily: "drainage", flowUnit: "DFU", sourceRoles: ["grease_interceptor"], solver: "dfu" },
   { id: "indirect_waste", label: "Indirect waste", discipline: "plumbing", medium: "liquid", regime: "gravity", connector: "pipe", adapter: "plumbing", quantities: ["load.dfu"], asSystem: true, asLoad: false, ifc: dist("USERDEFINED", "IndirectWaste"), graphics: { colour: "#a1795a", pattern: "dashed" }, feature: SERVICES_REGISTRY_FEATURE, pipeFamily: "drainage", flowUnit: "DFU", solver: "dfu" },
+];
+
+/** Default repeating inline schematic codes for plumbing and gas services. */
+export const PLUMBING_SERVICE_LINE_CODES: readonly ServiceLineCodeDef[] = [
+  { id: "plumbing_gas.domestic_cold_water", serviceId: "domestic_cold_water", lineCode: "CW" },
+  { id: "plumbing_gas.domestic_hot_water", serviceId: "domestic_hot_water", lineCode: "HW" },
+  { id: "plumbing_gas.domestic_hot_water_return", serviceId: "domestic_hot_water_return", lineCode: "HWR" },
+  { id: "plumbing_gas.sanitary", serviceId: "sanitary", lineCode: "SAN" },
+  { id: "plumbing_gas.vent", serviceId: "vent", lineCode: "V" },
+  { id: "plumbing_gas.storm", serviceId: "storm", lineCode: "ST" },
+  { id: "plumbing_gas.natural_gas", serviceId: "natural_gas", lineCode: "G" },
+  { id: "plumbing_gas.grease_waste", serviceId: "grease_waste", lineCode: "GW" },
+  { id: "plumbing_gas.indirect_waste", serviceId: "indirect_waste", lineCode: "IW" },
 ];

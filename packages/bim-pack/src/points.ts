@@ -32,7 +32,7 @@ import {
   withPackServices,
   withSymbolRows,
 } from "@permitzip/bim-kernel";
-import { CONNECTION_QUANTITY_CHECK_POINT, PIPE_RUN_CHECK_POINT, SERVES_RULE_POINT, STARTER_CONNECTION_TYPE_POINT, SYSTEM_LABEL_POINT } from "@permitzip/bim-kernel";
+import { CONNECTION_QUANTITY_CHECK_POINT, PIPE_RUN_CHECK_POINT, SERVES_RULE_POINT, SERVICE_LINE_CODE_POINT, STARTER_CONNECTION_TYPE_POINT, SYSTEM_LABEL_POINT } from "@permitzip/bim-kernel";
 import { CLASSIFICATION_POINT, COST_SOURCE_POINT, MEASURE_RULE_POINT, KNOWN_COST_PARTIES } from "@permitzip/bim-kernel";
 import { REQUIREMENTS_SOURCE_CONTRACT, REQUIREMENTS_SOURCE_POINT, PROPOSER_POINT, DISCIPLINE_POINT, disciplineAncestors, disciplineDef } from "@permitzip/bim-kernel";
 import { z } from "zod";
@@ -255,6 +255,7 @@ export const KNOWN_POINTS: readonly KnownPoint[] = [
   known(BLOCK_TABLE_POINT, (items) => items.flatMap((t) => (isFunction(t.render) && t.title.trim() ? [] : [`block table ${t.kind} needs a title and render`])), null),
   known(FORM_SCHEDULE_POINT, (items) => items.flatMap((f) => (isFunction(f.evaluate) ? [] : [`form schedule ${f.kind} has no evaluate`])), null),
   known(SYSTEM_LABEL_POINT, (items) => items.flatMap((r) => (isFunction(r.label) ? [] : [`system words ${r.id} has no label`])), null),
+  known(SERVICE_LINE_CODE_POINT, (items) => items.flatMap((r) => (r.serviceId.trim() && r.lineCode.trim() ? [] : [`service line code ${r.id} needs serviceId and lineCode`])), null),
   known(PIPE_RUN_CHECK_POINT, (items) => items.flatMap((c) => (isFunction(c.segment) || isFunction(c.fitting) ? [] : [`pipe run check ${c.id} needs segment or fitting`])), null),
   known(SERVES_RULE_POINT, (items) => items.flatMap((r) => (isFunction(r.served) && Number.isFinite(r.rank) ? [] : [`serves rule ${r.id} needs served and rank`])), null),
   known(CONNECTION_QUANTITY_CHECK_POINT, (items) => items.flatMap((c) => (isFunction(c.warning) && c.systemKinds.length > 0 ? [] : [`connection quantity check ${c.id} needs warning and systemKinds`])), null),

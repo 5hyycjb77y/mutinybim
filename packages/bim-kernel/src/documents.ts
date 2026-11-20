@@ -112,8 +112,10 @@ export interface ViewProps extends ViewGraphicsHints {
   readonly linkedHiddenLines?: boolean;
   /** Drawings: linked furniture, fixtures and other small things narrower than this, mm, are left out. Absent: 0 (all drawn). */
   readonly linkedMinObjectMm?: number;
-  /** Coarse: duct and pipe single-line, no fitting bodies. Medium: double-line with fittings. Fine: adds turning vanes and joints. Absent: medium. */
+  /** Coarse: all runs single-line with schematic fitting & rise/drop symbols. Medium: air runs double-line with fittings; other runs single-line schematic with fitting & rise/drop symbols. Fine: all runs double-line with fitting bodies and turning vanes. Absent: medium. */
   readonly detailLevel?: DetailLevel;
+  /** Plans: print repeating inline service codes (CW, SAN, G…) inside single-line runs when the service or system defines one. Absent: on. */
+  readonly showLineCodes?: boolean;
   /** Absent: hidden line. */
   readonly visualStyle?: VisualStyle;
   /** Draw edges hidden behind nearer elements dashed, for every category. Absent: off (hidden edges are removed). */

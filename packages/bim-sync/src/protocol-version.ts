@@ -7,7 +7,7 @@ import { FINDINGS_LEDGER_FEATURE } from "@permitzip/bim-kernel/findings";
 import { GATES_RECORDS_FEATURE } from "@permitzip/bim-kernel/lifecycle";
 import { LINEAGES_ACCEPT_BACK_FEATURE, LINEAGES_REVIEW_FEATURE, LINEAGES_ROLES_FEATURE } from "@permitzip/bim-kernel/lineages";
 import { VALUES_BASIS_FEATURE } from "@permitzip/bim-kernel/basis";
-import { BLOCKS_CALC_FEATURE, DIAGRAM_FAULT_CURRENT_FEATURE, TYPICALS_MIRROR_FEATURE, VIEW_HASH_MARKS_FEATURE, VIEW_TYP_LABELS_FEATURE } from "@permitzip/bim-kernel";
+import { BLOCKS_CALC_FEATURE, DIAGRAM_FAULT_CURRENT_FEATURE, TYPICALS_MIRROR_FEATURE, VIEW_HASH_MARKS_FEATURE, VIEW_SCHEMATIC_DETAIL_FEATURE, VIEW_TYP_LABELS_FEATURE } from "@permitzip/bim-kernel";
 import { PACKS_OUTSIDE_PINS_FEATURE } from "@permitzip/bim-kernel/packs";
 import { DIAGRAM_OPEN_KINDS_FEATURE, LIBRARY_ADDON_ROWS_FEATURE, ROUTING_INSERT_PART_FEATURE, ROUTING_TAP_OFFSET_FEATURE } from "@permitzip/bim-kernel";
 import { DOCUMENTS_SHEET_SETS_FEATURE, GEOMETRY_SOLID_PROGRAM_2_FEATURE, PARTS_CLASS_SOLIDS_FEATURE, PROJECT_PARAMETERS_FEATURE, ROUTING_CONNECT_INTO_FEATURE, ROUTING_PLUS_EVERY_RUN_FEATURE, SCHEDULES_EDIT_STEPS_FEATURE, WALLS_TOP_CONSTRAINT_FEATURE, WALLS_SURFACE_BINDING_FEATURE, ANNOTATION_LINKED_ANCHORS_FEATURE, ELEMENTS_LINKED_COPY_FEATURE } from "@permitzip/bim-kernel";
@@ -172,6 +172,8 @@ export const PROTOCOL_FEATURES = {
   routingInsertPart: ROUTING_INSERT_PART_FEATURE,
   /** Round 14: a view's diagram kind is any kind an add-on's layout row draws (lane K14); an older peer is sent only the four round-5 kinds. */
   diagramsOpenKinds: DIAGRAM_OPEN_KINDS_FEATURE,
+  /** Per-category detailLevel / singleLineBelowMm, view showLineCodes, and system inline lineCode. */
+  viewSchematicDetail: VIEW_SCHEMATIC_DETAIL_FEATURE,
   /** Round 11 A11, reserved: model pins carry an outside add-on's digest and trust tier. */
   packsOutsidePins: PACKS_OUTSIDE_PINS_FEATURE,
   /**

@@ -1,4 +1,4 @@
-import type { ServiceRow } from "@permitzip/bim-kernel";
+import type { ServiceLineCodeDef, ServiceRow } from "@permitzip/bim-kernel";
 
 /**
  * The Electrical add-on's service rows (`SERVICE_POINT`, round 14 K14): power
@@ -14,4 +14,9 @@ export const ELECTRICAL_SERVICE_ROWS: readonly ServiceRow[] = [
   { id: "lighting", label: "Lighting", discipline: "electrical", medium: "electric", regime: "electric", connector: "electrical", adapter: "electrical", quantities: ["load.va"], asSystem: true, asLoad: false, ifc: dist("LIGHTING"), graphics: { colour: "#e0b23a", pattern: "solid" }, flowUnit: "VA", solver: "nec_demand" },
   { id: "data", label: "Data", discipline: "electrical", medium: "data", regime: "signal", connector: "electrical", quantities: [], asSystem: true, asLoad: false, ifc: dist("DATA"), graphics: { colour: "#607d8b", pattern: "solid" }, flowUnit: "" },
   { id: "fire_alarm", label: "Fire alarm", discipline: "electrical", medium: "signal", regime: "signal", connector: "electrical", quantities: [], asSystem: true, asLoad: false, ifc: dist("SIGNAL"), graphics: { colour: "#d8463b", pattern: "solid" }, flowUnit: "" },
+];
+
+/** Default repeating inline schematic codes for electrical pathway services. */
+export const ELECTRICAL_SERVICE_LINE_CODES: readonly ServiceLineCodeDef[] = [
+  { id: "electrical.fire_alarm", serviceId: "fire_alarm", lineCode: "FA" },
 ];

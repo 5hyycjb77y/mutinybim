@@ -1,4 +1,4 @@
-import type { CategoryLineWeights, LineWeight, ViewProps } from "../documents";
+import type { CategoryLineWeights, DetailLevel, LineWeight, ViewProps } from "../documents";
 import type { ViewElement } from "../types";
 import { activeCategoryRegistry, builtinCategoryRegistry, draftingCategoryOf, isViewCategory, type CategoryRegistry } from "./registry";
 import type { CategoryId, CategoryOverride } from "./types";
@@ -31,10 +31,14 @@ export interface CategoryLook {
   readonly colour: string | null;
   /** Plans: true draws the plan symbol, false the body; null lets the part type decide. */
   readonly planSymbol: boolean | null;
+  /** Per-category detail level override; null inherits the view's detailLevel. */
+  readonly detailLevel: DetailLevel | null;
+  /** Runs narrower than this nominal width (mm) draw single-line; null lets the detail level decide. */
+  readonly singleLineBelowMm: number | null;
 }
 
 /** Nothing overridden: shown, the view's discipline decides the tone, the drawing's pens. */
-export const DEFAULT_LOOK: CategoryLook = Object.freeze({ visible: true, halftone: null, lineWeights: Object.freeze({}), pattern: null, colour: null, planSymbol: null });
+export const DEFAULT_LOOK: CategoryLook = Object.freeze({ visible: true, halftone: null, lineWeights: Object.freeze({}), pattern: null, colour: null, planSymbol: null, detailLevel: null, singleLineBelowMm: null });
 
 type PropsOf = Pick<ViewElement, "props">;
 
@@ -77,6 +81,8 @@ export function resolveChain(view: PropsOf, chain: readonly CategoryId[]): Categ
   let pattern: string | undefined;
   let colour: string | undefined;
   let planSymbol: boolean | undefined;
+  let detailLevel: DetailLevel | undefined;
+  let singleLineBelowMm: number | undefined;
   if (overrides) {
     for (const id of chain) {
       const o: CategoryOverride | undefined = overrides[id];
@@ -88,6 +94,8 @@ export function resolveChain(view: PropsOf, chain: readonly CategoryId[]): Categ
       pattern ??= o.pattern;
       colour ??= o.colour;
       planSymbol ??= o.planSymbol;
+      detailLevel ??= o.detailLevel;
+      singleLineBelowMm ??= o.singleLineBelowMm;
     }
   }
   // The older fields belong to the nearest view or drafting category on the line.
@@ -99,9 +107,9 @@ export function resolveChain(view: PropsOf, chain: readonly CategoryId[]): Categ
   }
   const lineWeights: CategoryLineWeights = cut === undefined && projection === undefined ? DEFAULT_LOOK.lineWeights : { ...(cut ? { cut } : {}), ...(projection ? { projection } : {}) };
   const look: CategoryLook =
-    visible === undefined && halftone === undefined && lineWeights === DEFAULT_LOOK.lineWeights && pattern === undefined && colour === undefined && planSymbol === undefined
+    visible === undefined && halftone === undefined && lineWeights === DEFAULT_LOOK.lineWeights && pattern === undefined && colour === undefined && planSymbol === undefined && detailLevel === undefined && singleLineBelowMm === undefined
       ? DEFAULT_LOOK
-      : { visible: visible ?? true, halftone: halftone ?? null, lineWeights, pattern: pattern ?? null, colour: colour ?? null, planSymbol: planSymbol ?? null };
+      : { visible: visible ?? true, halftone: halftone ?? null, lineWeights, pattern: pattern ?? null, colour: colour ?? null, planSymbol: planSymbol ?? null, detailLevel: detailLevel ?? null, singleLineBelowMm: singleLineBelowMm ?? null };
   if (!byChain) {
     byChain = new Map();
     cache.set(props, byChain);

@@ -136,7 +136,7 @@ export { declaredPoint, type KnownPoint } from "./known-point";
 export * from "@permitzip/bim-kernel/placement";
 export * from "@permitzip/bim-kernel/elements";
 
-export { CONNECTION_QUANTITY_CHECK_POINT, PIPE_RUN_CHECK_POINT, SERVES_RULE_POINT, STARTER_CONNECTION_TYPE_POINT, SYSTEM_LABEL_POINT, type ConnectionQuantityCheckDef, type PipeRunCheckDef, type ServesRuleDef, type SystemLabelDef } from "@permitzip/bim-kernel";
+export { CONNECTION_QUANTITY_CHECK_POINT, PIPE_RUN_CHECK_POINT, SERVES_RULE_POINT, SERVICE_LINE_CODE_POINT, STARTER_CONNECTION_TYPE_POINT, SYSTEM_LABEL_POINT, type ConnectionQuantityCheckDef, type PipeRunCheckDef, type ServesRuleDef, type ServiceLineCodeDef, type SystemLabelDef } from "@permitzip/bim-kernel";
 // Contract 1.9.0 (round 11 wave 1): one record registry (K11), copies (L11), the problem list (F11), stages and confidence (G11).
 export { type PackCommandClaim, claimedCommandCase, type HostedPlacementFace, type KindRecordRead, kindRowOf, KERNEL_KIND_ROWS } from "@permitzip/bim-kernel";
 export { type FindingRef, dispositionFromLintAcceptance } from "@permitzip/bim-kernel";

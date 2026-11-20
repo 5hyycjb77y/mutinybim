@@ -70,6 +70,7 @@ import { UNIT_CODES, type UnitCode } from "../registry/units";
 import { diagramDefinitionSchema } from "../diagrams/definition";
 import { SYSTEM_LINE_PATTERNS } from "../routing/system-graphics";
 import { categoryOverridesWritable } from "../categories/feature";
+import { VIEW_SCHEMATIC_DETAIL_FEATURE } from "../categories/types";
 import { isRegistryIdShape } from "../ids";
 import { diagramItemsOf } from "../diagrams/evaluate";
 import { diagramKindStoreRefusal } from "../diagrams/kinds";
@@ -214,6 +215,8 @@ const categoryOverrideSchema = z
     planSymbol: z.boolean(),
     maskBeneath: z.boolean(),
     transparency: z.number().finite().min(0).max(1),
+    detailLevel: z.enum(["coarse", "medium", "fine"]),
+    singleLineBelowMm: z.number().finite().min(0).max(3000),
   })
   .partial()
   .strict();
@@ -238,6 +241,7 @@ const viewPropsPatchObject = z
     linkedHiddenLines: z.boolean(),
     linkedMinObjectMm: z.number().finite().min(0).max(3000),
     detailLevel: z.enum(["coarse", "medium", "fine"]),
+    showLineCodes: z.boolean(),
     visualStyle: z.enum(VISUAL_STYLES),
     showHiddenLines: z.boolean(),
     hiddenLineCategories: z.array(z.enum(VIEW_CATEGORIES)).max(VIEW_CATEGORIES.length),
@@ -791,6 +795,8 @@ function checkCategoryOverridesPatch(patch: z.infer<typeof viewPropsPatch> | und
   const overrides = patch?.categoryOverrides;
   if (overrides === undefined || Object.keys(overrides).length === 0) return;
   if (!categoryOverridesWritable()) fail("This model server can't save per-category graphics yet, so the change wasn't made. Showing, hiding and pens for the standard categories (Duct, Electrical devices…) still save; an administrator can update the model server.", [viewId]);
+  const usesSchematicDetail = Object.values(overrides).some((ov) => ov.detailLevel !== undefined || ov.singleLineBelowMm !== undefined);
+  if (usesSchematicDetail && !peerReads(VIEW_SCHEMATIC_DETAIL_FEATURE)) fail("Per-category detail levels and single-line size thresholds can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
 }
 
 /** A diagram kind is written only when a row in force draws it and the peers read it; a view already holding one keeps it untouched. */
@@ -811,6 +817,7 @@ function checkProps(viewType: ViewElement["viewType"], props: ViewProps, viewId:
   if (viewType !== "section" && props.section) fail("Only section views have a cut line.", [viewId]);
   const isPlan = viewType === "floor_plan" || viewType === "ceiling_plan";
   if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  if (props.showLineCodes !== undefined && !peerReads(VIEW_SCHEMATIC_DETAIL_FEATURE)) fail("Inline service code settings can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
   if (!isPlan && (props.viewBottomMm !== undefined || props.viewTopMm !== undefined)) fail("Only plans have a top and bottom to what they show. A section's reach is its far clip depth.", [viewId]);
   if (isPlan && props.viewTopMm !== undefined && props.viewTopMm < (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The top of the view must be at or above the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);
   if (isPlan && viewType === "floor_plan" && props.viewBottomMm !== undefined && props.viewBottomMm > (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The bottom of the view must be at or below the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);

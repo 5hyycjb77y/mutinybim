@@ -23,14 +23,14 @@ import {
 } from "@permitzip/bim-pack/runtime";
 import { guard, isDuctDesignCommand, ductDesignCommandSchemas, refuse, type BlockTableDef, type FieldProviderRow, type NetworkAdapterItem, type PackCommandDef, type PressureTargetRow, type TagFieldAliasRow, type TagStylePresetRow } from "@permitzip/bim-kernel";
 import { MECHANICAL_MANIFEST } from "@permitzip/bim-kernel/packs";
-import { CONNECTOR_FACE_POINT, CONNECTOR_END_TYPE_POINT, DISCIPLINE_POINT, ELEMENT_KIND_POINT, FITTING_FAMILY_POINT, LIBRARY_ROWS_POINT, LINKED_PLAN_DISPLAY_POINT, LINKED_REFERENCE_POINT, LOAD_SECTION_POINT, SERVICE_POINT } from "@permitzip/bim-kernel";
+import { CONNECTOR_FACE_POINT, CONNECTOR_END_TYPE_POINT, DISCIPLINE_POINT, ELEMENT_KIND_POINT, FITTING_FAMILY_POINT, LIBRARY_ROWS_POINT, LINKED_PLAN_DISPLAY_POINT, LINKED_REFERENCE_POINT, LOAD_SECTION_POINT, SERVICE_LINE_CODE_POINT, SERVICE_POINT } from "@permitzip/bim-kernel";
 import { MECHANICAL_LINKED_PLAN_DISPLAY } from "./linked-plan-display";
 import { MECHANICAL_LINKED_REFERENCE } from "./linked-reference";
 import { MECHANICAL_SCHEDULE_TEMPLATES } from "./schedules/templates";
 import { MECHANICAL_KEYNOTE_TABLES } from "./keynotes";
 import { ROUTE_CONSTRAINT_POINT } from "@permitzip/bim-kernel/rated-routes";
 import { MECHANICAL_AIR_LOAD_SECTION } from "./facets/air";
-import { MECHANICAL_SERVICE_ROWS } from "./services/rows";
+import { MECHANICAL_SERVICE_LINE_CODES, MECHANICAL_SERVICE_ROWS } from "./services/rows";
 import { DUCT_FITTING_FAMILY_ROWS } from "./routing/duct-families";
 import { MECHANICAL_END_TYPES } from "./connections/end-types";
 import { MECHANICAL_KINDS, TERMINAL_AIRFLOW_COMMAND } from "./kinds";
@@ -138,6 +138,7 @@ export const MECHANICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(ROUTE_CONSTRAINT_POINT, MECHANICAL_ROUTE_RULES),
   contribute(DESIGN_LIMIT_DEFAULT_POINT, MECHANICAL_DESIGN_LIMIT_DEFAULTS),
   contribute(SERVICE_POINT, MECHANICAL_SERVICE_ROWS),
+  contribute(SERVICE_LINE_CODE_POINT, MECHANICAL_SERVICE_LINE_CODES),
   contribute(LOAD_SECTION_POINT, [MECHANICAL_AIR_LOAD_SECTION]),
   contribute(CONNECTOR_END_TYPE_POINT, MECHANICAL_END_TYPES),
   contribute(COMMAND_POINT, [...INSULATION_COMMANDS, TERMINAL_AIRFLOW_COMMAND, ...MECHANICAL_LEGACY_COMMANDS]),

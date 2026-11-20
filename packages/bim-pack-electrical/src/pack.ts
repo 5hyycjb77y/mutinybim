@@ -29,9 +29,9 @@ import { LINK_TYPE_CATALOG_POINT, type LinkTypeCatalogRow } from "./fields/feede
 import { ELECTRICAL_FIELD_RESOLVER } from "./fields/electrical-resolver";
 import { ELECTRICAL_FIELD_PROVIDER } from "./fields/providers/electrical";
 import { AGENT_TOOL_POINT, PACK_READ_POINT, contribute, definePack, type ErasedContribution, type Pack, ELECTRICAL_MANIFEST } from "@permitzip/bim-kernel/packs";
-import { DISCIPLINE_POINT, MEASURE_RULE_POINT, PROPOSER_POINT, SERVICE_POINT } from "@permitzip/bim-kernel";
+import { DISCIPLINE_POINT, MEASURE_RULE_POINT, PROPOSER_POINT, SERVICE_LINE_CODE_POINT, SERVICE_POINT } from "@permitzip/bim-kernel";
 import { ELECTRICAL_PLANNED_ROW_FACTS } from "./planned-row-facts";
-import { ELECTRICAL_SERVICE_ROWS } from "./services/rows";
+import { ELECTRICAL_SERVICE_LINE_CODES, ELECTRICAL_SERVICE_ROWS } from "./services/rows";
 import { ELECTRICAL_DISCIPLINES } from "./disciplines";
 import { RECEPTACLE_PROPOSER } from "./propose/proposer";
 import { ELECTRICAL_MEASURE_RULE } from "./measure";
@@ -202,6 +202,7 @@ export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(VIEW_GRAPHICS_POINT, [CIRCUIT_GRAPHICS_ROW]),
   contribute(LOAD_SECTION_POINT, [ELECTRICAL_LOAD_SECTION]),
   contribute(SERVICE_POINT, ELECTRICAL_SERVICE_ROWS),
+  contribute(SERVICE_LINE_CODE_POINT, ELECTRICAL_SERVICE_LINE_CODES),
   contribute(DESIGN_LIMIT_DEFAULT_POINT, ELECTRICAL_DESIGN_LIMIT_DEFAULTS),
   contribute(FIELD_PROVIDER_POINT, [FIELDS]),
   contribute(DIAGRAM_GRAPH_POINT, [ONE_LINE, RISER]),

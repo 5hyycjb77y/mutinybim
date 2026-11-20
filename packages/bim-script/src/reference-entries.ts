@@ -227,6 +227,13 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["connect fixtures", "drain", "into", "auto connect", "many fixtures"],
   },
   {
+    name: "routes.setSystemGraphics",
+    summary: "Overrides a system's colour, line pattern, line weight, or repeating inline service code (\"CW\", \"SAN\", \"G\"; \"\" hides the code, null resets to default).",
+    signature: "setSystemGraphics(ctx: ScriptContext, systemId: string, changes: { colour?: string | null; pattern?: SystemLinePattern | null; weight?: SystemLineWeight | null; lineCode?: string | null }): void",
+    example: route(`    routes.along(ctx, { level: "L1", domain: "pipe", size: routes.pipe(units.in(4), "pvc"), system: { id: "san-1", kind: "sanitary" }, height: units.ft(-1), points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(40), y: units.ft(0) }] });\n    routes.setSystemGraphics(ctx, "san-1", { pattern: "solid", weight: "medium", lineCode: "SAN" });`),
+    topics: ["system graphics", "line pattern", "line weight", "line code", "schematic", "colour", "piping style"],
+  },
+  {
     name: "parts.part",
     summary: "Start one size of a custom part (equipment, a fixture, a device): add bodies and connectors, then build().",
     signature: "part(name: string, start: { type: string; category: PartCategory; description?: string; tagFields?: string[] }): PartBuilder",
@@ -518,10 +525,17 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "documents.planView",
-    summary: "A floor plan of one level (for a discipline, at a scale); returns the view's id.",
+    summary: "A floor plan of one level (for a discipline, scale, detailLevel, showLineCodes, and per-category/service overrides including singleLineBelow); returns the view's id.",
     signature: "planView(ctx: ScriptContext, spec: PlanViewSpec): string",
-    example: layout(`    documents.planView(ctx, { level: "L1", name: "Level 1 - Mechanical", discipline: "mechanical", scale: 48 });`),
-    topics: ["view", "plan", "floor plan"],
+    example: layout(`    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium", categoryOverrides: { pipe: { singleLineBelow: units.in(4) } } });`),
+    topics: ["view", "plan", "floor plan", "detail level", "single line", "double line", "line code"],
+  },
+  {
+    name: "documents.setView",
+    summary: "Changes a view's detail level (coarse/medium/fine), visual style, inline service codes, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).",
+    signature: "setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void",
+    example: layout(`    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing" });\n    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, categoryOverrides: { "service:sanitary": { detailLevel: "fine" }, pipe: { singleLineBelow: units.in(4) } } });`),
+    topics: ["view", "detail level", "category overrides", "single line", "double line", "schematic", "line code"],
   },
   {
     name: "documents.ceilingView",

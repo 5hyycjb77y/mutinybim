@@ -1,4 +1,4 @@
-import { SERVICES_REGISTRY_FEATURE, type ServiceRow } from "@permitzip/bim-kernel";
+import { SERVICES_REGISTRY_FEATURE, type ServiceLineCodeDef, type ServiceRow } from "@permitzip/bim-kernel";
 
 /**
  * The Mechanical add-on's service rows (`SERVICE_POINT`, round 13 K13 step
@@ -41,4 +41,16 @@ export const MECHANICAL_SERVICE_ROWS: readonly ServiceRow[] = [
   { id: "chilled_water_return", label: "Chilled water return", discipline: "mechanical", medium: "liquid", regime: "pressure", connector: "pipe", quantities: ["load.gpm_fixed"], asSystem: true, asLoad: false, ifc: dist("CHILLEDWATER"), graphics: { colour: "#4fa3d8", pattern: "dashed" }, feature: SERVICES_REGISTRY_FEATURE, pipeFamily: "water", flowUnit: "GPM" },
   { id: "heating_water_supply", label: "Heating water supply", discipline: "mechanical", medium: "liquid", regime: "pressure", connector: "pipe", quantities: ["load.gpm_fixed"], asSystem: true, asLoad: false, ifc: dist("HEATING"), graphics: { colour: "#b71c1c", pattern: "solid" }, feature: SERVICES_REGISTRY_FEATURE, pipeFamily: "water", flowUnit: "GPM" },
   { id: "heating_water_return", label: "Heating water return", discipline: "mechanical", medium: "liquid", regime: "pressure", connector: "pipe", quantities: ["load.gpm_fixed"], asSystem: true, asLoad: false, ifc: dist("HEATING"), graphics: { colour: "#e57373", pattern: "dashed" }, feature: SERVICES_REGISTRY_FEATURE, pipeFamily: "water", flowUnit: "GPM" },
+];
+
+/** Default repeating inline schematic codes for mechanical piping services. */
+export const MECHANICAL_SERVICE_LINE_CODES: readonly ServiceLineCodeDef[] = [
+  { id: "mechanical.hydronic_supply", serviceId: "hydronic_supply", lineCode: "HWS" },
+  { id: "mechanical.hydronic_return", serviceId: "hydronic_return", lineCode: "HWR" },
+  { id: "mechanical.condensate", serviceId: "condensate", lineCode: "CD" },
+  { id: "mechanical.refrigerant", serviceId: "refrigerant", lineCode: "REF" },
+  { id: "mechanical.chilled_water_supply", serviceId: "chilled_water_supply", lineCode: "CWS" },
+  { id: "mechanical.chilled_water_return", serviceId: "chilled_water_return", lineCode: "CWR" },
+  { id: "mechanical.heating_water_supply", serviceId: "heating_water_supply", lineCode: "HWS" },
+  { id: "mechanical.heating_water_return", serviceId: "heating_water_return", lineCode: "HWR" },
 ];
