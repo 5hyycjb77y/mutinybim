@@ -534,14 +534,14 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "documents.planView",
     summary: "A floor plan of one level (for a discipline, scale, detailLevel, showLineCodes, and per-category/service overrides including singleLineBelow); returns the view's id.",
     signature: "planView(ctx: ScriptContext, spec: PlanViewSpec): string",
-    example: layout(`    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium", categoryOverrides: { pipe: { singleLineBelow: units.in(4) } } });`),
+    example: layout(`    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium" });`),
     topics: ["view", "plan", "floor plan", "detail level", "single line", "double line", "line code"],
   },
   {
     name: "documents.setView",
     summary: "Changes a view's detail level (coarse/medium/fine), visual style, inline service codes, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).",
     signature: "setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void",
-    example: layout(`    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing" });\n    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, categoryOverrides: { "service:sanitary": { detailLevel: "fine" }, pipe: { singleLineBelow: units.in(4) } } });`),
+    example: layout(`    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing" });\n    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, scale: 48 });`),
     topics: ["view", "detail level", "category overrides", "single line", "double line", "schematic", "line code"],
   },
   {

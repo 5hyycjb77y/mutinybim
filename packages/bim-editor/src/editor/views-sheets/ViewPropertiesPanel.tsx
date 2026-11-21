@@ -71,8 +71,8 @@ const VISUAL_STYLE_LABEL: Record<VisualStyle, { label: string; hint: string }> =
 
 const DETAIL_HINT: Record<DetailLevel, string> = {
   coarse: 'All runs single-line with schematic fitting, rise/drop symbols and inline service codes.',
-  medium: 'Duct double-line with fittings; pipe and conduit single-line schematic with fitting & rise/drop symbols.',
-  fine: 'All runs (duct, pipe and conduit) double-line with fitting bodies and turning vanes.',
+  medium: 'Duct double-line with fittings; pipe and raceway runs single-line schematic with fitting & rise/drop symbols.',
+  fine: 'All runs double-line with fitting bodies and turning vanes.',
 }
 
 const CUT_PATTERN_LABEL: Record<CutPattern, string> = { cross: 'Cross', solid: 'Solid', hatch: 'Hatch' }
@@ -615,7 +615,7 @@ function LinesFields({ view, canEdit, set, setQuick, children }: { view: ViewEle
               <FieldLabel htmlFor="vp-line-codes" className="font-normal">
                 Inline service codes
               </FieldLabel>
-              <FieldDescription className="text-xs">Print repeating system codes (CW, SAN, G…) along single-line piping and conduit runs.</FieldDescription>
+              <FieldDescription className="text-xs">Print repeating system codes (CW, SAN, G…) along single-line schematic runs.</FieldDescription>
             </FieldContent>
           </Field>
         )}

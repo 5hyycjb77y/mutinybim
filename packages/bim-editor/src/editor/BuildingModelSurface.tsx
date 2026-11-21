@@ -2263,7 +2263,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       )
       if (!refusal) {
         setVerticalViewTool(null)
-        toast(kind === 'elevation' ? `${name} created. It's in the panel under Elevations; click its mark to open it.` : `${name} created. It's in the panel under Sections; click its cut line to open it.`)
+        toast(kind === 'elevation' ? `${name} created. It's in the Views browser under Elevations; click its mark to open it.` : `${name} created. It's in the Views browser under Sections; click its cut line to open it.`)
       }
       return refusal
     },
@@ -2287,7 +2287,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (refusal) toast.error(refusal)
       else {
         openItem({ kind: 'view', id })
-        toast(`${name} created. It's in the panel under Elevations.`)
+        toast(`${name} created. It's in the Views browser under Elevations.`)
       }
     },
     [index, submitWithUndo, openItem],

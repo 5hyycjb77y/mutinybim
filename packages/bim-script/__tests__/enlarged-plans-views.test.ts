@@ -119,6 +119,6 @@ describe("documents enlargedPlan, callout, sectionView, elevationView, setCrop",
     expect(dts).toContain("export interface VerticalViewSpec");
     expect(dts).toContain("export interface EnlargedPlanSpec");
     expect(dts).toContain("export interface CalloutRefSpec");
-    expect(dts).toContain("crop?: CropBoxSpec");
+    expect(dts).toContain("crop?: { from: PlanPoint; to: PlanPoint }");
   });
 });
