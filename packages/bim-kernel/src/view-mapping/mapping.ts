@@ -89,7 +89,8 @@ export function viewMapping(model: ModelState, view: ViewElement): ViewMapping {
         depthOf: (p) => ({ elevationMm: p.z }),
       };
     }
-    case "section": {
+    case "section":
+    case "elevation": {
       const cut = view.props?.section;
       if (!cut) break;
       const len = Math.hypot(cut.end.x - cut.start.x, cut.end.y - cut.start.y);
@@ -140,7 +141,7 @@ export function viewMapping(model: ModelState, view: ViewElement): ViewMapping {
   return {
     ...base,
     kind: "drafting",
-    modelReason: view.viewType === "section" ? "This section has no cut line, so it has nothing of the model to show. Draw a new section across a plan." : DRAFTING_VIEW_REASON,
+    modelReason: view.viewType === "section" || view.viewType === "elevation" ? `This ${view.viewType} has no cut line, so it has nothing of the model to show. Draw a new ${view.viewType} across a plan.` : DRAFTING_VIEW_REASON,
     toDrawing: (p) => ({ u: p.x, v: p.y, depth: 0 }),
     toModel: () => null,
     deltaToModel: () => null,

@@ -238,7 +238,7 @@ export function annotationBoxes(model: ModelState, view: ViewElement, items: rea
 export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOptions): AutoTagPlan {
   const view = model.elements[viewId];
   if (view?.kind !== "view" || view.deleted) throw new Error(`View ${viewId} does not exist`);
-  if (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan" && view.viewType !== "section") throw new Error("Tags go in plans and sections, which show the model.");
+  if (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan" && view.viewType !== "section" && view.viewType !== "elevation") throw new Error("Tags go in plans, sections and elevations, which show the model.");
   const { toPaper, toModel } = paperMapping(view);
   const items = documentIndex(model).itemsByOwner.get(view.id) ?? [];
   const tagged = new Set(items.flatMap((i) => (i.tag ? [i.tag.elementId] : [])));
@@ -274,7 +274,7 @@ export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOpt
       }
     } else {
       // A part or unit blocks its whole footprint on a plan; elsewhere, a small box at its point.
-      const solid = view.viewType === "section" ? null : elementSolid(model, el, 0);
+      const solid = view.viewType === "section" || view.viewType === "elevation" ? null : elementSolid(model, el, 0);
       const outline = solid ? solid.pieces.flatMap((piece) => [...piece.r0, ...piece.r1]).map((q) => toPaper({ x: q.x, y: q.y })) : [];
       const p = toPaper(mid);
       const xs = outline.length > 0 ? outline.map((q) => q.x) : [p.x - 1.5, p.x + 1.5];
@@ -370,7 +370,7 @@ export function clearSpotForTag(model: ModelState, viewId: string, itemId: strin
   const item = model.elements[itemId];
   if (item?.kind !== "drawing_item" || item.deleted || !item.tag) return null;
   const view = model.elements[viewId];
-  if (view?.kind !== "view" || (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan" && view.viewType !== "section")) return null;
+  if (view?.kind !== "view" || (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan" && view.viewType !== "section" && view.viewType !== "elevation")) return null;
   const tag = item.tag;
   const el = model.elements[tag.elementId];
   const category = el ? categoryOf(model, el) : null;

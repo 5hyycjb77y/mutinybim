@@ -8,6 +8,7 @@ import {
   autoDimensionCommand,
   builtinFormTemplate,
   detailComponents,
+  enlargedPlanCommands,
   formScheduleKinds,
   isBoundFormKind,
   fieldProviderRegistry,
@@ -255,6 +256,8 @@ export interface PlanViewSpec {
   readonly hide?: ViewProps["hiddenCategories"];
   /** Per-category or per-service overrides (`pipe`, `service:sanitary`, `duct`…): detailLevel, singleLineBelow, lineWeights, pattern, halftone, visible. */
   readonly categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
+  /** Optional crop box corners on plan (model coordinates). */
+  readonly crop?: { readonly from: { readonly x: Measure; readonly y: Measure }; readonly to: { readonly x: Measure; readonly y: Measure } };
   readonly id?: string;
 }
 
@@ -282,6 +285,72 @@ function toCategoryOverrides(spec: Readonly<Record<string, CategoryOverrideSpec>
   return out;
 }
 
+/** A vertical orthographic view (section or elevation): the line it cuts/looks from, which side it faces, and how far it sees. */
+export interface VerticalViewSpec {
+  readonly name: string;
+  /** Start of the cut/view plane on plan. */
+  readonly from: { readonly x: Measure; readonly y: Measure };
+  /** End of the cut/view plane on plan. */
+  readonly to: { readonly x: Measure; readonly y: Measure };
+  /** +1 looks to the left of from→to, -1 to the right (default +1). */
+  readonly direction?: 1 | -1;
+  /** Far clip depth beyond the plane (default 20 ft). */
+  readonly depth?: Measure;
+  /** Drawing scale as a ratio (default 48 = 1/4" = 1'-0"). */
+  readonly scale?: number;
+  /** Optional level whose plan shows this marker; absent: shown on every level's plan it overlaps. */
+  readonly level?: string;
+  readonly discipline?: string;
+  readonly id?: string;
+}
+
+/** A Revit-style enlarged plan: creates a cropped plan view at enlarged scale AND places a live auto-updating callout bubble on the parent plan. */
+export interface EnlargedPlanSpec {
+  /** Parent floor plan or ceiling plan (id or name). */
+  readonly parent: string;
+  /** Name of the new enlarged plan view. */
+  readonly name: string;
+  /** One corner of the enlarged callout box on plan. */
+  readonly from: { readonly x: Measure; readonly y: Measure };
+  /** Opposite corner of the enlarged callout box on plan. */
+  readonly to: { readonly x: Measure; readonly y: Measure };
+  /** Enlarged scale ratio (e.g. 48 = 1/4"=1'-0", 24 = 1/2"=1'-0"). Defaults to 24 if parent is <= 48, else 48. */
+  readonly scale?: number;
+  /** Optional callout head label (e.g. "EEP"); absent: live detail number on its sheet. */
+  readonly label?: string;
+  /** Optional head bubble position on plan; absent: just outside the upper-left corner. */
+  readonly head?: { readonly x: Measure; readonly y: Measure };
+  readonly discipline?: string;
+  readonly cutHeight?: Measure;
+  readonly id?: string;
+  readonly calloutId?: string;
+}
+
+/** A live parametric callout box + split bubble placed on a view, referencing any existing enlarged plan, detail, section, or elevation view. */
+export interface CalloutRefSpec {
+  /** View the callout is drawn on (id or name). */
+  readonly view: string;
+  /** Existing view the callout refers to (id or name); head reads its live detail#/sheet#. */
+  readonly target: string;
+  readonly from: { readonly x: Measure; readonly y: Measure };
+  readonly to: { readonly x: Measure; readonly y: Measure };
+  /** Optional head bubble position on plan; absent: just outside the upper-left corner. */
+  readonly head?: { readonly x: Measure; readonly y: Measure };
+  /** Optional head label; absent: live detail number on its sheet. */
+  readonly label?: string;
+  readonly id?: string;
+}
+
+/** Changes a view's crop box (and optionally far clip depth for sections/elevations). */
+export interface CropBoxSpec {
+  readonly from?: { readonly x: Measure; readonly y: Measure };
+  readonly to?: { readonly x: Measure; readonly y: Measure };
+  readonly cropView?: boolean;
+  readonly showCropBox?: boolean;
+  /** Sections and elevations only: far clip depth beyond the cut/view plane. */
+  readonly depth?: Measure;
+}
+
 /** Where a view sits on its sheet: its centre, from the sheet's lower-left corner. */
 export interface SheetPoint {
   readonly x: Measure;
@@ -307,6 +376,27 @@ function view(ctx: ScriptContext, viewType: CreateView["viewType"], spec: PlanVi
     ...(spec.categoryOverrides ? { categoryOverrides: toCategoryOverrides(spec.categoryOverrides) } : {}),
   };
   const viewId = spec.id ?? ctx.id("view");
+  const crop = spec.crop
+    ? {
+        min: { x: Math.min(mm(spec.crop.from.x, "Crop x"), mm(spec.crop.to.x, "Crop x")), y: Math.min(mm(spec.crop.from.y, "Crop y"), mm(spec.crop.to.y, "Crop y")) },
+        max: { x: Math.max(mm(spec.crop.from.x, "Crop x"), mm(spec.crop.to.x, "Crop x")), y: Math.max(mm(spec.crop.from.y, "Crop y"), mm(spec.crop.to.y, "Crop y")) },
+      }
+    : undefined;
+  ctx.edit({ type: "create_view", viewId, name: spec.name, viewType, ...(crop ? { crop } : {}), props });
+  return viewId;
+}
+
+function verticalView(ctx: ScriptContext, viewType: "section" | "elevation", spec: VerticalViewSpec): string {
+  const viewId = spec.id ?? ctx.id("view");
+  const start = { x: mm(spec.from.x, `${viewType} start x`), y: mm(spec.from.y, `${viewType} start y`) };
+  const end = { x: mm(spec.to.x, `${viewType} end x`), y: mm(spec.to.y, `${viewType} end y`) };
+  const depthMm = spec.depth ? mm(spec.depth, `${viewType} depth`) : 20 * 304.8;
+  const props: ViewProps = {
+    ...(spec.level ? { level: levelName(ctx, spec.level) } : {}),
+    ...(spec.discipline ? { discipline: spec.discipline } : {}),
+    ...(spec.scale ? { scale: spec.scale } : {}),
+    section: { start, end, direction: spec.direction ?? 1, depthMm },
+  };
   ctx.edit({ type: "create_view", viewId, name: spec.name, viewType, props });
   return viewId;
 }
@@ -416,6 +506,92 @@ export const documents = {
   /** A reflected ceiling plan of one level; returns the view's id. */
   ceilingView(ctx: ScriptContext, spec: PlanViewSpec): string {
     return view(ctx, "ceiling_plan", spec);
+  },
+  /** A vertical building section cut across the model; its live section mark prints on overlapping plans. Returns the view's id. */
+  sectionView(ctx: ScriptContext, spec: VerticalViewSpec): string {
+    return verticalView(ctx, "section", spec);
+  },
+  /** An interior or exterior elevation looking from `from..to`; its live elevation marker prints on overlapping plans. Returns the view's id. */
+  elevationView(ctx: ScriptContext, spec: VerticalViewSpec): string {
+    return verticalView(ctx, "elevation", spec);
+  },
+  /**
+   * A Revit-style enlarged plan: creates a cropped plan view on the same level
+   * at enlarged scale and places a live auto-updating callout bubble on the
+   * parent plan pointing to it. Returns `{ viewId, calloutId }`.
+   */
+  enlargedPlan(ctx: ScriptContext, spec: EnlargedPlanSpec): { readonly viewId: string; readonly calloutId: string } {
+    const viewId = spec.id ?? ctx.id("view");
+    const calloutId = spec.calloutId ?? ctx.id("callout");
+    const box = {
+      min: { x: mm(spec.from.x, "Callout start x"), y: mm(spec.from.y, "Callout start y") },
+      max: { x: mm(spec.to.x, "Callout end x"), y: mm(spec.to.y, "Callout end y") },
+    };
+    const head = spec.head ? { x: mm(spec.head.x, "Callout head x"), y: mm(spec.head.y, "Callout head y") } : undefined;
+    const cutHeightMm = spec.cutHeight ? mm(spec.cutHeight, "Cut height") : undefined;
+    const commands = onWorking(ctx, "documents.enlargedPlan", (model) => {
+      const parent = viewIn(model, spec.parent, "parent plan view");
+      return enlargedPlanCommands(model, {
+        parentViewId: parent.id,
+        viewId,
+        calloutId,
+        name: spec.name,
+        box,
+        ...(spec.scale ? { scale: spec.scale } : {}),
+        ...(spec.label ? { label: spec.label } : {}),
+        ...(head ? { head } : {}),
+        ...(spec.discipline ? { discipline: spec.discipline } : {}),
+        ...(cutHeightMm !== undefined ? { cutHeightMm } : {}),
+      });
+    });
+    if (typeof commands === "string") throw new ScriptRunError(commands);
+    for (const step of commands) ctx.edit(step);
+    return { viewId, calloutId };
+  },
+  /**
+   * A live parametric callout box + split head bubble on `view` pointing to an
+   * existing `target` view (enlarged plan, 2D detail, section, or elevation).
+   * The head reads the target's live detail#/sheet# whenever it moves sheets.
+   */
+  callout(ctx: ScriptContext, spec: CalloutRefSpec): string {
+    const itemId = spec.id ?? ctx.id("callout");
+    const min = { x: Math.min(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.min(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
+    const max = { x: Math.max(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.max(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
+    const resolved = onWorking(ctx, "documents.callout", (model) => {
+      const owner = viewIn(model, spec.view, "view");
+      const target = viewIn(model, spec.target, "target view");
+      const scale = owner.props?.scale ?? 96;
+      const head = spec.head ? { x: mm(spec.head.x, "Callout head x"), y: mm(spec.head.y, "Callout head y") } : { x: min.x - 8 * scale, y: max.y + 8 * scale };
+      return { ownerId: owner.id, targetId: target.id, head };
+    });
+    ctx.edit({
+      type: "add_drawing_item",
+      itemId,
+      ownerId: resolved.ownerId,
+      shape: "callout",
+      points: [min, max, resolved.head],
+      callout: { viewId: resolved.targetId, ...(spec.label?.trim() ? { label: spec.label.trim() } : {}) },
+    });
+    return itemId;
+  },
+  /** Sets a view's crop box (and optionally crop on/off or far clip depth for sections/elevations). */
+  setCrop(ctx: ScriptContext, viewRef: string, spec: CropBoxSpec): void {
+    const viewId = onWorking(ctx, "documents.setCrop", (model) => viewIn(model, viewRef, "view").id);
+    const crop =
+      spec.from && spec.to
+        ? {
+            min: { x: Math.min(mm(spec.from.x, "Crop x"), mm(spec.to.x, "Crop x")), y: Math.min(mm(spec.from.y, "Crop y"), mm(spec.to.y, "Crop y")) },
+            max: { x: Math.max(mm(spec.from.x, "Crop x"), mm(spec.to.x, "Crop x")), y: Math.max(mm(spec.from.y, "Crop y"), mm(spec.to.y, "Crop y")) },
+          }
+        : undefined;
+    ctx.edit({
+      type: "set_view_crop",
+      viewId,
+      ...(crop ? { crop } : {}),
+      ...(spec.cropView !== undefined ? { cropView: spec.cropView } : {}),
+      ...(spec.showCropBox !== undefined ? { showCropBox: spec.showCropBox } : {}),
+      ...(spec.depth ? { farClipMm: mm(spec.depth, "Far clip depth") } : {}),
+    });
   },
   /** Changes a view's detail level, visual style, inline service codes, scale, discipline, or per-category/service graphics overrides. */
   setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void {

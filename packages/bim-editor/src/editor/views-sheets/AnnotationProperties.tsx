@@ -187,7 +187,7 @@ const NO_STYLE = 'none'
 
 /** Where the tag sits: whether it runs into other annotations or lines, and a button that moves it to the first clear spot. */
 function TagPlacement({ item, model, view, canEdit, onMoveTag }: { item: DrawingItem; model: ModelState; view: ViewElement; canEdit: boolean; onMoveTag: (at: Vec2) => void }) {
-  const showsModel = view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan' || view.viewType === 'section'
+  const showsModel = view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan' || view.viewType === 'section' || view.viewType === 'elevation'
   const situation = useMemo(() => (showsModel ? tagSituation(model, view.id, item) : null), [model, view, item, showsModel])
   const spot = useMemo(() => (showsModel && situation && !situation.clear ? clearSpotForTag(model, view.id, item.id) : null), [model, view, item, showsModel, situation])
   if (!situation) return null

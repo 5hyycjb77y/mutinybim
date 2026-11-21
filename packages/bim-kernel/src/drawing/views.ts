@@ -66,7 +66,7 @@ import { elementSolid, hull2, kindHasBody, planPointsOf, type ElementSolid, type
 import { cameraProjector, projectSolidInBox } from "./view3d-drawing";
 import { boxAabb, boxKeepPlanes, boxOverRect, elementFloorMm, viewCropBox3d } from "../view3d";
 import { drawViewGraphics } from "../layout/view-graphics-point";
-import { drawCallout } from "../annotation/callouts";
+import { drawCallout, drawElevationMark, drawSectionMark, drawViewTitleBubble, planReferenceViews, referencingSheet } from "../annotation/callouts";
 import { typicalCopiesOf } from "../organization/typicals";
 import { fieldBlockTextBlock, type FrozenBlocks } from "../blocks/sheet-block";
 import { renderFieldBlock } from "../blocks/render";
@@ -1518,7 +1518,7 @@ function drawViewBody(prims: Primitive[], tags: TagPlacement[], model: ModelStat
   const fills: Primitive[] = [];
   const p = painter(body, fills, tags, frame, view, viewCropAndWindow(model, view).crop, blocks);
   const display = displayOf(model, view);
-  if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section") {
+  if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section" || view.viewType === "elevation") {
     const refs = backgrounds.flatMap((r) => applyReferenceDisplay(r, resolveReferenceDisplay(view.props?.references?.[r.plan.id], "drawing", "architecture")) ?? []);
     if (refs.length > 0) drawReferenceLayers(prims, refs, p.min, p.max, p.toPaper);
   }
@@ -1528,9 +1528,15 @@ function drawViewBody(prims: Primitive[], tags: TagPlacement[], model: ModelStat
       const shownParts = new Map<string, PartInstance>();
       drawPlan(model, view, p, frame, display, shownParts);
       drawPlanConnections(model, view, p, shownParts);
+      const clipBounds = view.props?.cropView !== false ? { min: p.min, max: p.max } : undefined;
+      for (const refView of planReferenceViews(model, view)) {
+        if (refView.viewType === "elevation") drawElevationMark(model, refView, p.toPaper, p.prims, clipBounds);
+        else drawSectionMark(model, refView, p.toPaper, p.prims, clipBounds);
+      }
       break;
     }
     case "section":
+    case "elevation":
       drawSection(model, view, p, display);
       break;
     case "three_d":
@@ -1544,8 +1550,8 @@ function drawViewBody(prims: Primitive[], tags: TagPlacement[], model: ModelStat
       drawScheduleView(body, model, view.props, { x: frame.center.x - frame.size.x / 2, y: frame.center.y - frame.size.y / 2 });
       break;
   }
-  // Plans and sections carry their own notes, dimensions and tags, drawn over the model at paper size.
-  if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section") {
+  // Plans, sections and elevations carry their own notes, dimensions and tags, drawn over the model at paper size.
+  if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section" || view.viewType === "elevation") {
     const items = documentIndex(model).itemsByOwner.get(view.id) ?? [];
     if (items.length > 0) drawItemsInModel(p, items, model, view);
   }
@@ -1647,6 +1653,18 @@ export function sheetDependsOn(model: ModelState, sheetId: string): (elementId: 
       owned.add(item.id);
       if (item.callout) referenced.add(item.callout.viewId);
     }
+    for (const refView of planReferenceViews(model, view)) referenced.add(refView.id);
+    const backRef = referencingSheet(model, view);
+    if (backRef) referenced.add(backRef.sourceViewId);
+    // Track any incoming callout targeting this view so adding, deleting, or retargeting it invalidates the title bubble.
+    for (const items of index.itemsByOwner.values()) {
+      for (const item of items) {
+        if (!item.deleted && item.shape === "callout" && item.callout?.viewId === view.id) {
+          owned.add(item.id);
+          referenced.add(item.ownerId);
+        }
+      }
+    }
     if (view.props?.diagram) {
       // A live diagram is drawn from the whole model's connection graph.
       allLevels = true;
@@ -1671,8 +1689,8 @@ export function sheetDependsOn(model: ModelState, sheetId: string): (elementId: 
   return (elementId, el) => {
     if (owned.has(elementId)) return true;
     if (!el) return false;
-    // Something new drawn on this sheet or in one of its views.
-    if (el.kind === "drawing_item") return owned.has(el.ownerId);
+    // Something new drawn on this sheet or in one of its views, or an incoming callout pointing at one of its views.
+    if (el.kind === "drawing_item") return owned.has(el.ownerId) || (el.shape === "callout" && !!el.callout?.viewId && owned.has(el.callout.viewId));
     if (el.kind === "viewport") return owned.has(el.sheetId) || referenced.has(el.viewId);
     if (el.kind === "sheet") return sheetList || referenced.size > 0;
     if (el.kind === "view") return referenced.has(elementId);
@@ -1703,13 +1721,28 @@ export function buildSheetSceneFor(model: ModelState, sheetId: string, opts: She
     if (view.viewType === "schedule") continue;
     const left = frame.center.x - frame.size.x / 2;
     const titleY = frame.center.y + frame.size.y / 2 + 8;
-    prims.push({ kind: "line", a: { x: left, y: titleY + 1.5 }, b: { x: left + Math.min(frame.size.x, 120), y: titleY + 1.5 }, pen: "wide" });
-    prims.push({ kind: "text", at: { x: left, y: titleY }, text: `${number}  ${view.name.toUpperCase()}`, size: 3.5, anchor: "start", bold: true });
+    const ruleLen = Math.min(frame.size.x, 120);
     const scaleText = view.viewType === "three_d" ? (view.props?.camera3d ? "3D VIEW, NOT TO SCALE" : "NOT TO SCALE (ISOMETRIC)") : view.viewType === "detail" && viewport.scale === 1 ? "SCALE: NONE" : `SCALE: ${scaleLabel(viewport.scale)}`;
-    prims.push({ kind: "text", at: { x: left, y: titleY + 5.5 }, text: scaleText, size: 2.2, anchor: "start" });
+    const backRef = referencingSheet(model, view);
+    let titleEnd = left + ruleLen;
+    if (backRef) {
+      // NCS / Revit back-referenced view title: split circle (detail# / referencing sheet) + rule + title/scale.
+      const r = 6.35;
+      const bubbleY = titleY + 1.5;
+      drawViewTitleBubble({ x: left + r, y: bubbleY }, String(number), backRef.sheetNumber, prims);
+      const textX = left + r * 2 + 2.5;
+      titleEnd = Math.max(left + ruleLen, textX + Math.max(view.name.length * 2.2, 48));
+      prims.push({ kind: "line", a: { x: left + r * 2, y: bubbleY }, b: { x: titleEnd, y: bubbleY }, pen: "wide" });
+      prims.push({ kind: "text", at: { x: textX, y: bubbleY - 1.5 }, text: view.name.toUpperCase(), size: 3.5, anchor: "start", bold: true });
+      prims.push({ kind: "text", at: { x: textX, y: bubbleY + 4.0 }, text: scaleText, size: 2.2, anchor: "start" });
+    } else {
+      prims.push({ kind: "line", a: { x: left, y: titleY + 1.5 }, b: { x: titleEnd, y: titleY + 1.5 }, pen: "wide" });
+      prims.push({ kind: "text", at: { x: left, y: titleY }, text: `${number}  ${view.name.toUpperCase()}`, size: 3.5, anchor: "start", bold: true });
+      prims.push({ kind: "text", at: { x: left, y: titleY + 5.5 }, text: scaleText, size: 2.2, anchor: "start" });
+    }
     const arrow = viewportNorthArrow(model, viewport, view);
     // Beside the title, low enough that the N clears the frame whichever way it points.
-    if (arrow) drawNorthArrow(prims, { x: left + Math.min(frame.size.x, 120) + NORTH_ARROW_RADIUS_MM + 8, y: titleY + 7 }, arrow.deg);
+    if (arrow) drawNorthArrow(prims, { x: titleEnd + NORTH_ARROW_RADIUS_MM + 8, y: titleY + 7 }, arrow.deg);
   }
 
   const images: SheetImage[] = [];

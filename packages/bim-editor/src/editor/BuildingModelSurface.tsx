@@ -314,7 +314,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const cameraMemory = useViewCameraMemoryFrom(host.data.viewPrefs, projectId)
   /** The person picked live model or printed drawing since this view opened (their saved choice arriving late must not undo it). */
   const displayChosenRef = useRef(false)
-  const [sectionTool, setSectionTool] = useState(false)
+  const [verticalViewTool, setVerticalViewTool] = useState<'section' | 'elevation' | null>(null)
   const [request, setRequest] = useState<PanelRequest | null>(null)
   /** Sheets › Project info, open over whatever else is open (the sheet dialog keeps what was typed). */
   const [projectInfoOpen, setProjectInfoOpen] = useState(false)
@@ -662,7 +662,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   /** Every plan and section, so opening a sheet draws the architect's background from this tab. */
   const warmViews = useMemo(() => (documentsModel ? elementsOfKind(documentsModel.elements, 'view') : []), [documentsModel])
   useWarmViewBackgroundsFrom(host.data.viewBackgrounds, projectId, warmViews, (referenceList ?? config?.references ?? []).length > 0, backgroundLevels)
-  const drawingSection = sectionTool && planOpen
+  const drawingSection = verticalViewTool !== null && planOpen
   /** A 3D camera (the free model, a 3D view or a section's live model) fills the canvas. */
   const live3dOpen = !showDrawing && !planOpen && !(open.kind === 'model' && open.mode === 'plan')
   const livePlanOpen = !showDrawing && (planOpen || (open.kind === 'model' && open.mode === 'plan'))
@@ -764,7 +764,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         await viewer.framePlanRect(view.cropMin, view.cropMax, { animate: false })
         // Crop view on: the live model is cut at the crop box too, as it prints.
         if (!cancelled) viewer.setPlanCrop(props.cropView === false ? null : { min: view.cropMin, max: view.cropMax })
-      } else if (view.viewType === 'section' && props.section) {
+      } else if ((view.viewType === 'section' || view.viewType === 'elevation') && props.section) {
         await viewer.isolateLevel(null)
         await viewer.setVerticalSection({ ...props.section, eyeElevationMm: floor + 1600 })
       } else if (view.viewType === 'three_d') {
@@ -932,7 +932,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       const view = item.kind === 'view' ? index?.views.find((v) => v.id === item.id) : undefined
       displayChosenRef.current = display !== undefined
       setViewDisplay(display ?? (view ? viewDisplayPrefs.displayFor(view) : 'model'))
-      setSectionTool(false)
+      setVerticalViewTool(null)
       // Equipment picked on a live diagram stays picked in the plan or 3D (and the other way): the diagram is the model.
       if (!view?.props?.diagram && !from?.props?.diagram) setSelection(null)
       setPlaceLevel(null)
@@ -1111,21 +1111,25 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     </ModelFromStore>
   )
 
-  const startSection = useCallback(() => {
-    if (planOpen) {
-      setSectionTool(true)
-      return
-    }
-    const plan = index?.views.find((v) => v.viewType === 'floor_plan')
-    if (plan) {
-      openItem({ kind: 'view', id: plan.id })
-      setSectionTool(true)
-      toast(`Opened ${plan.name}. Drag across it where the section cuts.`)
-    } else {
-      toast('Sections are drawn on a floor plan. Make one first.')
-      setRequest({ kind: 'new_view', viewType: 'floor_plan' })
-    }
-  }, [planOpen, index, openItem])
+  const startVerticalView = useCallback(
+    (kind: 'section' | 'elevation') => {
+      if (planOpen) {
+        setVerticalViewTool(kind)
+        return
+      }
+      const plan = index?.views.find((v) => v.viewType === 'floor_plan')
+      if (plan) {
+        openItem({ kind: 'view', id: plan.id })
+        setVerticalViewTool(kind)
+        toast(kind === 'elevation' ? `Opened ${plan.name}. Drag across it where the elevation looks.` : `Opened ${plan.name}. Drag across it where the section cuts.`)
+      } else {
+        toast(kind === 'elevation' ? 'Elevations are placed on a floor plan. Make one first.' : 'Sections are drawn on a floor plan. Make one first.')
+        setRequest({ kind: 'new_view', viewType: 'floor_plan' })
+      }
+    },
+    [planOpen, index, openItem],
+  )
+  const startSection = useCallback(() => startVerticalView('section'), [startVerticalView])
 
   /** Open the live diagram of a kind, making it (one undoable view, no line work) when there is none yet or `forceNew`. */
   const openDiagram = useCallback(
@@ -1154,7 +1158,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         if (refusal) toast.error(refusal)
       } else if (r.kind === 'new_schedule') setListScheduleFor('mechanical_equipment')
       else if (r.kind === 'project_info') setProjectInfoOpen(true)
-      else if (r.kind === 'new_view' && r.viewType === 'section') startSection()
+      else if (r.kind === 'new_view' && (r.viewType === 'section' || r.viewType === 'elevation')) startVerticalView(r.viewType)
       else if (r.kind === 'duplicate_view') {
         const id = newId('view')
         const refusal = submitWithUndo({ type: 'duplicate_view', viewId: r.view.id, newViewId: id }, `duplicate ${r.view.name}`)
@@ -1162,7 +1166,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else openItem({ kind: 'view', id })
       } else setRequest(r)
     },
-    [startSection, submitWithUndo, openItem, openDiagram],
+    [startVerticalView, submitWithUndo, openItem, openDiagram],
   )
 
   const downAt = useRef<{ x: number; y: number } | null>(null)
@@ -2241,12 +2245,13 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       const plan = openView
       const id = newId('view')
       const props = plan?.props ?? {}
+      const kind = verticalViewTool ?? 'section'
       const refusal = submitWithUndo(
         {
           type: 'create_view',
           viewId: id,
           name,
-          viewType: 'section',
+          viewType: kind,
           props: {
             section: cut,
             scale: props.scale ?? 48,
@@ -2257,12 +2262,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         `create ${name}`,
       )
       if (!refusal) {
-        setSectionTool(false)
-        toast(`${name} created. It's in the panel under Sections; click its cut line to open it.`)
+        setVerticalViewTool(null)
+        toast(kind === 'elevation' ? `${name} created. It's in the panel under Elevations; click its mark to open it.` : `${name} created. It's in the panel under Sections; click its cut line to open it.`)
       }
       return refusal
     },
-    [openView, submitWithUndo, levelElevations],
+    [openView, verticalViewTool, submitWithUndo, levelElevations],
   )
 
   /** The orientation controls' "elevation from here": a section just outside the model on the camera's side, looking across all of it. */
@@ -2278,11 +2283,11 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       let name = title
       for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${title} ${n}`
       const id = newId('view')
-      const refusal = submitWithUndo({ type: 'create_view', viewId: id, name, viewType: 'section', props: { section: elevationCut(side, rect), scale: 48 } }, `create ${name}`)
+      const refusal = submitWithUndo({ type: 'create_view', viewId: id, name, viewType: 'elevation', props: { section: elevationCut(side, rect), scale: 48 } }, `create ${name}`)
       if (refusal) toast.error(refusal)
       else {
         openItem({ kind: 'view', id })
-        toast(`${name} created. It's in the panel under Sections.`)
+        toast(`${name} created. It's in the panel under Elevations.`)
       }
     },
     [index, submitWithUndo, openItem],
@@ -2351,7 +2356,14 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   }
   const saveLabel: SaveLabel = save.retrying > 0 || save.message ? 'not_saved' : save.pending > 0 ? 'saving' : 'saved'
   const sectionsOnPlan = useMemo(
-    () => (planOpen && openView ? (index?.views ?? []).filter((v) => v.viewType === 'section' && (v.props?.level ?? null) === (openView.props?.level ?? null)) : []),
+    () =>
+      planOpen && openView
+        ? (index?.views ?? []).filter(
+            (v) =>
+              (v.viewType === 'section' || v.viewType === 'elevation') &&
+              (!v.props?.level || !openView.props?.level || v.props.level === openView.props.level),
+          )
+        : [],
     [planOpen, openView, index],
   )
   const backSheet = returnSheet && open.kind === 'view' ? (index?.sheets.find((s) => s.id === returnSheet) ?? null) : null
@@ -2862,7 +2874,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     tagAll,
     request: onPanelRequest,
     sectionDrawing: drawingSection,
-    toggleSection: () => (drawingSection ? setSectionTool(false) : startSection()),
+    toggleSection: () => (drawingSection ? setVerticalViewTool(null) : startSection()),
     planOpen,
     openModel: (mode) => openItem({ kind: 'model', mode }),
     crop:
@@ -3426,16 +3438,17 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           />
           {planOpen && viewer && openView && (
             <SectionCutOverlay
-              key={drawingSection ? 'drawing' : 'marks'}
+              key={verticalViewTool ?? 'marks'}
               viewer={viewer}
               elevationMm={openFloorMm + (openView.props?.cutHeightMm ?? 1219.2)}
               drawing={drawingSection}
+              kind={verticalViewTool ?? 'section'}
               sections={sectionsOnPlan}
-              suggestedName={nextSectionName(index?.views ?? [])}
+              suggestedName={verticalViewTool === 'elevation' ? nextElevationName(index?.views ?? []) : nextSectionName(index?.views ?? [])}
               onOpenSection={(id) => openItem({ kind: 'view', id })}
               onCreate={createSection}
-              onCancel={() => setSectionTool(false)}
-              onFarClip={canEdit ? (viewId, depthMm) => submitWithUndo({ type: 'set_view_crop', viewId, farClipMm: depthMm }, 'change how far the section sees') : undefined}
+              onCancel={() => setVerticalViewTool(null)}
+              onFarClip={canEdit ? (viewId, depthMm) => submitWithUndo({ type: 'set_view_crop', viewId, farClipMm: depthMm }, 'change how far the view sees') : undefined}
             />
           )}
           {viewer && model && !showDrawing && (showOrigin || pickingNorth) && (
@@ -4026,12 +4039,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       ) : null}
       <DeleteConfirmDialog pending={pendingDelete} onClose={() => setPendingDelete(null)} onConfirm={confirmDelete} />
 
-      {request?.kind === 'new_view' && request.viewType !== 'section' && (
+      {request?.kind === 'new_view' && request.viewType !== 'section' && request.viewType !== 'elevation' && (
         <NewViewDialog
           viewType={request.viewType}
           levels={planLevels}
           onCancel={() => setRequest(null)}
-          onCreate={(input) => createView(request.viewType === 'section' ? 'floor_plan' : request.viewType, input)}
+          onCreate={(input) => createView(request.viewType === 'section' || request.viewType === 'elevation' ? 'floor_plan' : request.viewType, input)}
         />
       )}
       {(request?.kind === 'new_sheet' || request?.kind === 'edit_sheet') && (
@@ -4280,6 +4293,15 @@ function nextSectionName(views: readonly ViewElement[]): string {
     if (!taken.has(name.toLowerCase())) return name
   }
   return `Section ${views.length + 1}`
+}
+
+function nextElevationName(views: readonly ViewElement[]): string {
+  const taken = new Set(views.map((v) => v.name.toLowerCase()))
+  for (let n = 1; n < 100; n++) {
+    const name = `Elevation ${n}`
+    if (!taken.has(name.toLowerCase())) return name
+  }
+  return `Elevation ${views.length + 1}`
 }
 
 

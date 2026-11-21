@@ -155,7 +155,7 @@ function ownerOf(reader: TrackedReader, ownerId: string): { readonly owner: BimE
   if (owner.kind === "sheet") return { owner, space: "paper", scale: 1, paper: sheetPaperSize(owner) };
   if (owner.kind === "view" && owner.viewType === "detail") return { owner, space: "model", scale: owner.props?.scale ?? DEFAULT_DETAIL_SCALE, paper: null };
   // Plans and sections take notes too: the box stays paper-sized at any view scale.
-  if (owner.kind === "view" && (owner.viewType === "floor_plan" || owner.viewType === "ceiling_plan" || owner.viewType === "section")) return { owner, space: "model", scale: owner.props?.scale ?? DEFAULT_PLAN_SCALE, paper: null };
+  if (owner.kind === "view" && (owner.viewType === "floor_plan" || owner.viewType === "ceiling_plan" || owner.viewType === "section" || owner.viewType === "elevation")) return { owner, space: "model", scale: owner.props?.scale ?? DEFAULT_PLAN_SCALE, paper: null };
   fail("Notes go on a sheet, a detail view, a plan or a section. To label an element with its own data, use a tag.", [ownerId], "wrong_kind");
 }
 

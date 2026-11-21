@@ -78,16 +78,17 @@ export function sheetKeynoteKeys(model: Pick<ModelState, "elements">, sheet: She
   const keys = new Set<string>();
   const views = (documentIndex({ elements: model.elements, connections: [] }).viewportsBySheet.get(sheet.id) ?? []).flatMap((vp) => {
     const view = model.elements[vp.viewId];
-    return view?.kind === "view" && !view.deleted && (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section") ? [view] : [];
+    return view?.kind === "view" && !view.deleted && (view.viewType === "floor_plan" || view.viewType === "ceiling_plan" || view.viewType === "section" || view.viewType === "elevation") ? [view] : [];
   });
   if (views.length === 0) return [];
   const carriers = keynoteCarriers(model.elements);
   for (const view of views) {
-    const levels = view.viewType === "section" ? null : viewLevelNames(model, view.props?.level, view.props?.levelElevationMm);
+    const isVert = view.viewType === "section" || view.viewType === "elevation";
+    const levels = isVert ? null : viewLevelNames(model, view.props?.level, view.props?.levelElevationMm);
     for (const el of carriers) {
       if (levels && !levels.has((("partition" in el ? el.partition : undefined) ?? DEFAULT_PARTITION).level)) continue;
       const at = anchorOf(el);
-      if (view.viewType !== "section" && at && (at.x < view.cropMin.x || at.x > view.cropMax.x || at.y < view.cropMin.y || at.y > view.cropMax.y)) continue;
+      if (!isVert && at && (at.x < view.cropMin.x || at.x > view.cropMax.x || at.y < view.cropMin.y || at.y > view.cropMax.y)) continue;
       const key = keynoteOf(el);
       if (key) keys.add(key);
     }

@@ -6,7 +6,7 @@ import type { SheetTitle } from '../../contracts/building-model/sheet-title'
 import { toast } from 'sonner'
 import { escapeLeavesField, leftFieldHint } from '../escape-step'
 import { ChevronDown, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
-import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, canonicalJson, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, resolveNote, textBlockToSvg, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
+import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, canonicalJson, enlargedPlanCommands, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, resolveNote, textBlockToSvg, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
 import { distributionEquipment } from '@permitzip/bim-pack-electrical'
 import type { Presence } from '@permitzip/bim-sync'
 import { NOTE_LOCK_REFRESH_MS, PresenceClock, editingNoteActivity, lockMessage, noteLocks, type NoteLock } from '@permitzip/bim-sync/note-locks'
@@ -242,7 +242,7 @@ const MODEL_VIEW_TOOLS: ReadonlyArray<{ tool: Tool; label: string; icon: React.R
 /** A plan or section drawing opened on its own: the same tools as on a sheet. */
 const VIEW_DRAWING_TOOLS = MODEL_VIEW_TOOLS
 
-const ANNOTATED_VIEW_TYPES: ReadonlySet<string> = new Set(['floor_plan', 'ceiling_plan', 'section'])
+const ANNOTATED_VIEW_TYPES: ReadonlySet<string> = new Set(['floor_plan', 'ceiling_plan', 'section', 'elevation'])
 /** How close a click must be to snap a dimension point, paper mm. */
 const SNAP_REACH_MM = 3
 /** How close a Tag click must be to an element, paper mm. */
@@ -1693,6 +1693,26 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
             ownerId={ownerId}
             open
             onCancel={() => setCalloutDraft(null)}
+            onCreateEnlarged={(input) => {
+              const viewId = newId('view')
+              const calloutId = newId('callout')
+              const steps = enlargedPlanCommands(model, {
+                parentViewId: ownerId,
+                viewId,
+                calloutId,
+                name: input.name,
+                box: { min: calloutDraft.a, max: calloutDraft.b },
+                scale: input.scale,
+                head: calloutDraft.head,
+                ...(input.label ? { label: input.label } : {}),
+              })
+              if (typeof steps === 'string') {
+                toast.error(steps)
+                return
+              }
+              if (send({ type: 'batch_documents', label: `Create enlarged plan ${input.name}`, commands: steps }, `create enlarged plan ${input.name}`)) setSelection({ kind: 'item', id: calloutId })
+              setCalloutDraft(null)
+            }}
             onPlace={(callout) => {
               const id = newId('callout')
               if (send({ type: 'add_drawing_item', itemId: id, ownerId, shape: 'callout', points: [calloutDraft.a, calloutDraft.b, calloutDraft.head], callout }, 'add a callout')) setSelection({ kind: 'item', id })

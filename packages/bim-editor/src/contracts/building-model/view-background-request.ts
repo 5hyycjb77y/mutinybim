@@ -72,7 +72,7 @@ function backgroundCutOf(view: ViewElement, levels: readonly Level[]): ViewBackg
       ...detailOf(view),
     };
   }
-  if (view.viewType === "section" && props.section) return { kind: "section", cut: props.section, ...detailOf(view) };
+  if ((view.viewType === "section" || view.viewType === "elevation") && props.section) return { kind: "section", cut: props.section, ...detailOf(view) };
   return null;
 }
 

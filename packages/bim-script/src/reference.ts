@@ -280,6 +280,7 @@ export interface CategoryOverrideSpec {
   detailLevel?: "coarse" | "medium" | "fine";
   singleLineBelow?: Measure;
 }
+export interface CropBoxSpec { min: PlanPoint; max: PlanPoint }
 export interface PlanViewSpec {
   level: string; name: string; discipline?: string; scale?: number; cutHeight?: Measure;
   detailLevel?: "coarse" | "medium" | "fine";
@@ -287,6 +288,7 @@ export interface PlanViewSpec {
   showLineCodes?: boolean;
   hide?: string[];
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
+  crop?: CropBoxSpec;
   id?: string;
 }
 export interface ViewChanges {
@@ -298,6 +300,9 @@ export interface ViewChanges {
   /** Replaces the view's category override map; pass {} to clear all overrides. */
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
 }
+export interface VerticalViewSpec { name: string; start: PlanPoint; end: PlanPoint; direction?: 1 | -1; depth?: Measure; level?: string; discipline?: string; scale?: number; hide?: string[]; id?: string }
+export interface EnlargedPlanSpec { parentViewId: string; name: string; box: CropBoxSpec; scale?: number; label?: string; head?: PlanPoint; discipline?: string; cutHeight?: Measure; id?: string; calloutId?: string }
+export interface CalloutRefSpec { parentViewId: string; targetViewId: string; box: CropBoxSpec; label?: string; head?: PlanPoint; id?: string }
 `;
 
 function member(e: KitEntry): string {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { ExternalLink, Trash2 } from 'lucide-react'
-import { calloutHead, documentIndex, type CalloutSpec, type DrawingItem, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
+import { STANDARD_SCALES, calloutHead, documentIndex, type CalloutSpec, type DrawingItem, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
 import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../../ui/empty'
@@ -42,33 +42,105 @@ function ViewPicker({ model, ownerId, value, onChange, disabled }: { model: Mode
   )
 }
 
+export interface EnlargedPlanDialogInput {
+  readonly name: string
+  readonly scale: number
+  readonly label?: string
+}
+
 interface DialogProps {
   readonly model: ModelState
   readonly ownerId: string
   readonly open: boolean
   readonly onCancel: () => void
   readonly onPlace: (spec: CalloutSpec) => void
+  /** Revit-style one-step enlarged plan creation (cropped plan view + live callout). */
+  readonly onCreateEnlarged?: (input: EnlargedPlanDialogInput) => void
 }
 
-/** After the box is dragged: which view the callout refers to, and an optional head label. Esc or Cancel saves nothing. */
-export function CalloutViewDialog({ model, ownerId, open, onCancel, onPlace }: DialogProps) {
+/**
+ * After the callout box is dragged: create a new cropped enlarged plan at a
+ * larger scale (Revit default on floor/ceiling plans) OR reference an existing
+ * view ("Reference other view"). Esc or Cancel saves nothing.
+ */
+export function CalloutViewDialog({ model, ownerId, open, onCancel, onPlace, onCreateEnlarged }: DialogProps) {
+  const owner = model.elements[ownerId]
+  const canCreateEnlarged = Boolean(onCreateEnlarged && owner?.kind === 'view' && (owner.viewType === 'floor_plan' || owner.viewType === 'ceiling_plan'))
+  const parentScale = owner?.kind === 'view' ? (owner.props?.scale ?? 96) : 96
+  const defaultScale = parentScale <= 48 ? 24 : 48
+  const defaultName = owner?.kind === 'view' ? `Enlarged ${owner.name}` : 'Enlarged Plan'
+
+  const [mode, setMode] = useState<'create' | 'reference'>(canCreateEnlarged ? 'create' : 'reference')
+  const [name, setName] = useState(defaultName)
+  const [scale, setScale] = useState(defaultScale)
   const [viewId, setViewId] = useState('')
   const [label, setLabel] = useState('')
+
   const views = calloutTargets(model, ownerId)
   const picked = views.find((v) => v.id === viewId)
-  const reason = views.length === 0 ? 'There is no other plan, section or detail view to refer to. Make the enlarged view first.' : !picked ? 'Pick the view this callout refers to.' : null
+  const reason =
+    mode === 'create'
+      ? !name.trim()
+        ? 'Give the enlarged plan a name.'
+        : null
+      : views.length === 0
+        ? 'There is no other plan, section, elevation or detail view to refer to. Make the view first or create an enlarged plan.'
+        : !picked
+          ? 'Pick the view this callout refers to.'
+          : null
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent data-testid="callout-dialog" className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Callout</DialogTitle>
-          <DialogDescription>The head shows the view’s number and the sheet it is on, and updates when the view moves to another sheet.</DialogDescription>
+          <DialogDescription>The head shows the view’s number and the sheet it is on, and updates automatically when the view moves to another sheet.</DialogDescription>
         </DialogHeader>
-        {views.length === 0 ? (
+        {canCreateEnlarged && (
+          <div className="flex gap-2" role="tablist" aria-label="Callout mode">
+            <Button type="button" size="sm" variant={mode === 'create' ? 'default' : 'outline'} onClick={() => setMode('create')} data-testid="callout-mode-create">
+              Create enlarged plan
+            </Button>
+            <Button type="button" size="sm" variant={mode === 'reference' ? 'default' : 'outline'} onClick={() => setMode('reference')} data-testid="callout-mode-reference">
+              Reference existing view
+            </Button>
+          </div>
+        )}
+        {mode === 'create' && canCreateEnlarged ? (
+          <FieldGroup className="gap-3">
+            <Field>
+              <FieldLabel htmlFor="callout-enlarged-name">Enlarged plan name</FieldLabel>
+              <Input id="callout-enlarged-name" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} data-testid="callout-enlarged-name" />
+              <FieldDescription>Creates a cropped plan view of this box on the same level and links this callout to it.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="callout-enlarged-scale">Scale</FieldLabel>
+              <Select value={String(scale)} onValueChange={(v) => setScale(Number(v))}>
+                <SelectTrigger id="callout-enlarged-scale" size="sm" data-testid="callout-enlarged-scale">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {STANDARD_SCALES.map((s) => (
+                      <SelectItem key={s.scale} value={String(s.scale)}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="callout-label">Head label (optional)</FieldLabel>
+              <Input id="callout-label" value={label} maxLength={12} placeholder="EEP" onChange={(e) => setLabel(e.target.value)} data-testid="callout-label" />
+              <FieldDescription>Left empty, the head shows the view’s number on its sheet.</FieldDescription>
+            </Field>
+          </FieldGroup>
+        ) : views.length === 0 ? (
           <Empty>
             <EmptyHeader>
               <EmptyTitle>No view to refer to</EmptyTitle>
-              <EmptyDescription>Make the enlarged plan or section first (Views → New view), then draw the callout again.</EmptyDescription>
+              <EmptyDescription>Make the enlarged plan, section, elevation or detail view first (Views → New view), then draw the callout again.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -91,10 +163,16 @@ export function CalloutViewDialog({ model, ownerId, open, onCancel, onPlace }: D
           <Button
             disabled={reason !== null}
             title={reason ?? undefined}
-            onClick={() => picked && onPlace({ viewId: picked.id, ...(label.trim() ? { label: label.trim() } : {}) })}
+            onClick={() => {
+              if (mode === 'create' && canCreateEnlarged && onCreateEnlarged) {
+                onCreateEnlarged({ name: name.trim(), scale, ...(label.trim() ? { label: label.trim() } : {}) })
+              } else if (picked) {
+                onPlace({ viewId: picked.id, ...(label.trim() ? { label: label.trim() } : {}) })
+              }
+            }}
             data-testid="callout-place"
           >
-            Place callout
+            {mode === 'create' && canCreateEnlarged ? 'Create enlarged plan' : 'Place callout'}
           </Button>
         </DialogFooter>
       </DialogContent>

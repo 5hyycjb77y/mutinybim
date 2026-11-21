@@ -56,7 +56,7 @@ export function CropBoxOverlay({ viewer, view, crop, elevationMm, canEdit, block
     return () => window.removeEventListener('keydown', onKey)
   }, [drag, viewer])
 
-  const cut = view.viewType === 'section' ? view.props?.section ?? null : null
+  const cut = view.viewType === 'section' || view.viewType === 'elevation' ? view.props?.section ?? null : null
   const axis = cut ? unit({ x: cut.end.x - cut.start.x, y: cut.end.y - cut.start.y }) : null
 
   /** Canvas pixel of a point in the crop's frame. */

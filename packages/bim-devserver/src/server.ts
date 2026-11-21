@@ -36,6 +36,7 @@ import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { buildSampleMarketGas } from "../../bim-kernel/__tests__/fixtures/sample-market-gas";
 import { createEditorDemo, type EditorDemo } from "../../bim-editor/demo/server";
+import { enlargedPlansDemoModel } from "./enlarged-plans-demo";
 
 // The kernel carries no trade: gas, plumbing and air systems are first-party add-ons, installed before any model is built.
 installFirstPartyAddOns();
@@ -78,7 +79,9 @@ const startingModel =
       ? openIssueModel()
       : process.env.BIM_DEV_MODEL === "sample-market-gas"
         ? sampleMarketGasModel()
-        : createDemoModel("f-a-demo");
+        : process.env.BIM_DEV_MODEL === "enlarged-plans"
+          ? enlargedPlansDemoModel()
+          : createDemoModel("f-a-demo");
 // Main plus branches, versions and copies, all in memory (bim-sync's in-memory branch host).
 const models = await InMemoryBranchHost.start(startingModel);
 const { sequencer, hub } = models.main;

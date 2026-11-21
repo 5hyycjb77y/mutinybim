@@ -92,6 +92,7 @@ export function sectionDefaultCrop(view: Pick<ViewElement, "props">): Rect {
 export function fitCrop(model: Pick<ModelState, "elements"> & Partial<Pick<ModelState, "connections">>, view: Pick<ViewElement, "viewType" | "props">, items: readonly DrawingItem[]): Rect {
   switch (view.viewType) {
     case "section":
+    case "elevation":
       return sectionDefaultCrop(view);
     case "detail":
       // A live diagram is drawn at its own size: a paper margin, not a foot of model.

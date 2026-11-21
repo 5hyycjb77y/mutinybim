@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Box, ChevronDown, ChevronRight, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
+import { Box, ChevronDown, ChevronRight, Compass, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
 import { canonicalViewLevel, type DiagramKind, documentIndex, type ModelState, type Sheet, type ViewElement } from '@permitzip/bim-kernel'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
@@ -80,6 +80,7 @@ const GROUPS: ReadonlyArray<{ type: ViewElement['viewType']; title: string }> = 
   { type: 'floor_plan', title: 'Floor plans' },
   { type: 'ceiling_plan', title: 'Ceiling plans' },
   { type: 'section', title: 'Sections' },
+  { type: 'elevation', title: 'Elevations' },
   { type: 'three_d', title: '3D views' },
   { type: 'detail', title: 'Detail views' },
   { type: 'schedule', title: 'Schedules' },
@@ -102,6 +103,10 @@ export function NewMenuItems({ onRequest, disabled }: { onRequest: (request: Pan
         <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_view', viewType: 'section' })}>
           <Scissors data-icon="inline-start" />
           Section (draw a cut line)
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_view', viewType: 'elevation' })}>
+          <Compass data-icon="inline-start" />
+          Elevation (draw view plane)
         </DropdownMenuItem>
         <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_view', viewType: 'three_d' })}>
           <Box data-icon="inline-start" />

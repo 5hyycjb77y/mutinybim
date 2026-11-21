@@ -133,7 +133,7 @@ export function NewViewDialog({
   onCancel,
   onCreate,
 }: {
-  viewType: Exclude<CreatableViewType, 'section'>
+  viewType: Exclude<CreatableViewType, 'section' | 'elevation'>
   levels: readonly string[]
   onCancel: () => void
   onCreate: (input: { name: string; level: string | null; scale: number }) => string | null | Promise<string | null>

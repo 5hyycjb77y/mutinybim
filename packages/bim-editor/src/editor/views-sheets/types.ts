@@ -9,12 +9,13 @@ export type OpenItem =
 /** Send one command; null when it is on its way, or the plain reason it was refused. */
 export type SubmitCommand = (command: Command, undoLabel?: string) => string | null
 
-export type CreatableViewType = 'floor_plan' | 'ceiling_plan' | 'section' | 'three_d' | 'detail'
+export type CreatableViewType = 'floor_plan' | 'ceiling_plan' | 'section' | 'elevation' | 'three_d' | 'detail'
 
 export const VIEW_TYPE_LABEL: Record<CreatableViewType | 'schedule', string> = {
   floor_plan: 'Floor plan',
   ceiling_plan: 'Ceiling plan',
   section: 'Section',
+  elevation: 'Elevation',
   three_d: '3D view',
   detail: 'Detail view (drawing-only)',
   schedule: 'Schedule',

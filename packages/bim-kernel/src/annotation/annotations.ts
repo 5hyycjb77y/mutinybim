@@ -317,7 +317,7 @@ export function anchorInView(model: Pick<ModelState, "elements">, view: ViewElem
   const p = modelAnchor(model, ref);
   if (!p) return null;
   const cut = view?.props?.section;
-  if (view?.viewType === "section" && cut) {
+  if ((view?.viewType === "section" || view?.viewType === "elevation") && cut) {
     const q = sectionProjector(cut.start, cut.end, cut.direction, cut.depthMm).project(p);
     return { x: q.u, y: q.v };
   }
@@ -342,7 +342,7 @@ export function dimensionPoints(model: Pick<ModelState, "elements">, view: ViewE
       }
       if (!found) return stored;
       const cut = view?.props?.section;
-      if (view?.viewType === "section") return cut ? linkedAnchorInSection(found.item, ref.anchor, cut, stored) : stored;
+      if (view?.viewType === "section" || view?.viewType === "elevation") return cut ? linkedAnchorInSection(found.item, ref.anchor, cut, stored) : stored;
       return linkedAnchorPoint(found.item, ref.anchor, stored);
     }
     const at = anchorInView(model, view, ref);
@@ -535,7 +535,7 @@ export function dimensionValues(model: Pick<ModelState, "elements">, view: ViewE
       const ref = spec.refs?.[0];
       const z = ref ? modelAnchor(model, ref)?.z : undefined;
       if (z !== undefined) return [z];
-      return view?.viewType === "section" ? [p0.y] : [];
+      return view?.viewType === "section" || view?.viewType === "elevation" ? [p0.y] : [];
     }
     case "spot_coordinate":
       return [p0.x, p0.y];

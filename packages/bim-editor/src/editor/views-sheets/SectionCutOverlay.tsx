@@ -15,9 +15,11 @@ interface Props {
   readonly viewer: ModelViewer3D
   /** Elevation (mm) the cut line is drawn at: the plan's level plus its cut height. */
   readonly elevationMm: number
-  /** Drawing a new cut (the Section tool is on). */
+  /** Drawing a new cut (the Section or Elevation tool is on). */
   readonly drawing: boolean
-  /** Sections whose cut lines show on this plan; click one to open it. */
+  /** Whether the active drawing tool is placing a section or an elevation (default: 'section'). */
+  readonly kind?: 'section' | 'elevation'
+  /** Sections and elevations whose marks show on this plan; click one to open it. */
   readonly sections: readonly ViewElement[]
   readonly suggestedName: string
   readonly onOpenSection: (viewId: string) => void
@@ -35,7 +37,7 @@ interface Props {
  * handle (how far it sees) and flip which side it looks at, name it and create
  * the section. Existing sections on this level show as cut lines you can open.
  */
-export function SectionCutOverlay({ viewer, elevationMm, drawing, sections, suggestedName, onOpenSection, onCreate, onCancel, onFarClip }: Props) {
+export function SectionCutOverlay({ viewer, elevationMm, drawing, kind = 'section', sections, suggestedName, onOpenSection, onCreate, onCancel, onFarClip }: Props) {
   const ref = useRef<SVGSVGElement | null>(null)
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const [cut, setCut] = useState<SectionCut | null>(null)
@@ -246,11 +248,11 @@ export function SectionCutOverlay({ viewer, elevationMm, drawing, sections, sugg
               }}
             >
               <span className="whitespace-nowrap">
-                {(g.len / FT).toFixed(1)} ft cut, sees {(cut.depthMm / FT).toFixed(0)} ft.
+                {(g.len / FT).toFixed(1)} ft {kind === 'elevation' ? 'width' : 'cut'}, sees {(cut.depthMm / FT).toFixed(0)} ft.
               </span>
-              <Input value={name} onChange={(e) => setName(e.target.value)} aria-label="Section name" className="h-7 w-44" maxLength={120} required />
+              <Input value={name} onChange={(e) => setName(e.target.value)} aria-label={kind === 'elevation' ? 'Elevation name' : 'Section name'} className="h-7 w-44" maxLength={120} required />
               <Button type="submit" size="sm" disabled={!name.trim()}>
-                Create section
+                {kind === 'elevation' ? 'Create elevation' : 'Create section'}
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
                 Cancel
@@ -258,7 +260,7 @@ export function SectionCutOverlay({ viewer, elevationMm, drawing, sections, sugg
             </form>
           ) : (
             <>
-              <span>{error ?? 'Drag across the plan where the section cuts. Esc to cancel.'}</span>
+              <span>{error ?? (kind === 'elevation' ? 'Drag across the plan where the elevation looks. Esc to cancel.' : 'Drag across the plan where the section cuts. Esc to cancel.')}</span>
               <Button size="sm" variant="ghost" onClick={onCancel}>
                 Cancel
               </Button>
