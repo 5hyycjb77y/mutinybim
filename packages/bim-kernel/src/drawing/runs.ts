@@ -1056,28 +1056,40 @@ export function drawPartSymbol(
   let hasCenterText = false;
 
   // Pass 1: opaque white masks first so background linework and under-parts runs never bleed through.
+  // Cache tessellated circle rings so Pass 3 reuses the exact vertices without recomputing cos/sin.
+  const circleRings = new Map<number, Vec2[]>();
+  const ringFor = (idx: number, c: Vec2, r: number): Vec2[] => {
+    let pts = circleRings.get(idx);
+    if (!pts) {
+      pts = circlePolygon(c, r, r <= 2.5 * viewScale ? 12 : 20);
+      circleRings.set(idx, pts);
+    }
+    return pts;
+  };
   if (fill) {
-    for (const s of symbols) {
+    for (let idx = 0; idx < symbols.length; idx++) {
+      const s = symbols[idx]!;
       if (s.kind === "rect" && s.fill === "mask") {
         const hx = s.size.x / 2;
         const hy = s.size.y / 2;
         const c = s.center;
         fill([w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })], 1);
       } else if (s.kind === "circle" && s.fill === "mask") {
-        fill(circlePolygon(w(s.center), s.radius), 1);
+        fill(ringFor(idx, w(s.center), s.radius), 1);
       } else if (s.kind === "polyline" && s.closed && s.fill === "mask" && s.points.length >= 3) {
         fill(s.points.map(w), 1);
       }
     }
     // Pass 2: solid black fills (half-filled indicators, shaded symbols).
-    for (const s of symbols) {
+    for (let idx = 0; idx < symbols.length; idx++) {
+      const s = symbols[idx]!;
       if (s.kind === "rect" && s.fill === "solid") {
         const hx = s.size.x / 2;
         const hy = s.size.y / 2;
         const c = s.center;
         fill([w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })], 0);
       } else if (s.kind === "circle" && s.fill === "solid") {
-        fill(circlePolygon(w(s.center), s.radius), 0);
+        fill(ringFor(idx, w(s.center), s.radius), 0);
       } else if (s.kind === "polyline" && s.closed && s.fill === "solid" && s.points.length >= 3) {
         fill(s.points.map(w), 0);
       }
@@ -1085,7 +1097,8 @@ export function drawPartSymbol(
   }
 
   // Pass 3: symbol strokes and embedded text.
-  for (const s of symbols) {
+  for (let idx = 0; idx < symbols.length; idx++) {
+    const s = symbols[idx]!;
     switch (s.kind) {
       case "rect": {
         const hx = s.size.x / 2;
@@ -1103,7 +1116,9 @@ export function drawPartSymbol(
       }
       case "circle": {
         const c = w(s.center);
-        circle(c, s.radius, line, s.pen ?? "medium");
+        const pts = ringFor(idx, c, s.radius);
+        const pen = s.pen ?? "medium";
+        for (let i = 0; i < pts.length; i++) line(pts[i]!, pts[(i + 1) % pts.length]!, pen);
         growBox(bb, { x: c.x - s.radius, y: c.y - s.radius });
         growBox(bb, { x: c.x + s.radius, y: c.y + s.radius });
         break;

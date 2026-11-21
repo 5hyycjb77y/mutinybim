@@ -180,61 +180,115 @@ function symbolOutline(model: ModelState, part: PartInstance, scale: number, det
   return partPlanOutline(model, part, { detail, scale }).outline;
 }
 
-/** First/last crossing parameter t in (0, 1] of segment `from -> to` against `outline`, or null when it doesn't cross. */
+/** First/last crossing parameter t in (0, 1] of segment `from -> to` against `outline`, or null when it doesn't cross. Zero-allocation hot path. */
 function lastCrossT(outline: readonly Outline[], from: Vec2, to: Vec2): number | null {
-  const d = { x: to.x - from.x, y: to.y - from.y };
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
   let best = -1;
-  for (const o of outline) {
+  for (let i = 0; i < outline.length; i++) {
+    const o = outline[i]!;
     if (o.kind === "seg") {
-      const e = { x: o.b.x - o.a.x, y: o.b.y - o.a.y };
-      const den = d.x * e.y - d.y * e.x;
-      if (Math.abs(den) < 1e-12) continue;
-      const w = { x: o.a.x - from.x, y: o.a.y - from.y };
-      const t = (w.x * e.y - w.y * e.x) / den;
-      const u = (w.x * d.y - w.y * d.x) / den;
-      if (t > best && t > 1e-6 && t <= 1 && u >= -1e-9 && u <= 1 + 1e-9) best = t;
+      const ex = o.b.x - o.a.x;
+      const ey = o.b.y - o.a.y;
+      const den = dx * ey - dy * ex;
+      if (den > -1e-12 && den < 1e-12) continue;
+      const wx = o.a.x - from.x;
+      const wy = o.a.y - from.y;
+      const t = (wx * ey - wy * ex) / den;
+      if (t <= best || t <= 1e-6 || t > 1) continue;
+      const u = (wx * dy - wy * dx) / den;
+      if (u >= -1e-9 && u <= 1 + 1e-9) best = t;
     } else {
-      const f = { x: from.x - o.c.x, y: from.y - o.c.y };
-      const a = d.x * d.x + d.y * d.y;
-      const b = 2 * (f.x * d.x + f.y * d.y);
-      const c = f.x * f.x + f.y * f.y - o.r * o.r;
+      const fx = from.x - o.c.x;
+      const fy = from.y - o.c.y;
+      const a = dx * dx + dy * dy;
+      if (a < 1e-12) continue;
+      const b = 2 * (fx * dx + fy * dy);
+      const c = fx * fx + fy * fy - o.r * o.r;
       const disc = b * b - 4 * a * c;
-      if (a < 1e-12 || disc < 0) continue;
+      if (disc < 0) continue;
       const root = Math.sqrt(disc);
-      for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
-        if (t > best && t > 1e-6 && t <= 1) best = t;
-      }
+      const inv2a = 1 / (2 * a);
+      const t1 = (-b - root) * inv2a;
+      if (t1 > best && t1 > 1e-6 && t1 <= 1) best = t1;
+      const t2 = (-b + root) * inv2a;
+      if (t2 > best && t2 > 1e-6 && t2 <= 1) best = t2;
     }
   }
   return best > 0 ? best : null;
 }
 
-/** Trim the start of a polyline (arc or run) so it begins at the last point where it leaves `outline`. */
-function trimPolylineStart(pts: readonly Vec2[], outline: readonly Outline[]): Vec2[] {
-  if (pts.length < 2 || outline.length === 0) return [...pts];
-  let bestSeg = -1;
-  let bestT = 0;
-  // Walk the first half+ of the polyline to find where it exits the starting symbol's outline.
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const t = lastCrossT(outline, pts[i]!, pts[i + 1]!);
-    if (t !== null) {
-      bestSeg = i;
-      bestT = t;
+/** Trim both ends of a polyline (curved arc or straight run) against its start and end symbol outlines without intermediate copies. */
+function trimPolylineEnds(pts: readonly Vec2[], startOutline: readonly Outline[], endOutline: readonly Outline[]): Vec2[] {
+  const n = pts.length;
+  if (n < 2) return [...pts];
+  // Start trim: last crossing going forward from pts[0] toward pts[n - 1].
+  let startIdx = 0;
+  let startPt: Vec2 | null = null;
+  if (startOutline.length > 0) {
+    let bestSeg = -1;
+    let bestT = 0;
+    for (let i = 0; i + 1 < n; i++) {
+      const t = lastCrossT(startOutline, pts[i]!, pts[i + 1]!);
+      if (t !== null) {
+        bestSeg = i;
+        bestT = t;
+      }
+    }
+    if (bestSeg >= 0) {
+      const exit = lerp(pts[bestSeg]!, pts[bestSeg + 1]!, bestT);
+      if (dist(exit, pts[bestSeg + 1]!) < 0.5) {
+        startIdx = bestSeg + 1;
+      } else {
+        startIdx = bestSeg + 1;
+        startPt = exit;
+      }
     }
   }
-  if (bestSeg < 0) return [...pts];
-  const exit = lerp(pts[bestSeg]!, pts[bestSeg + 1]!, bestT);
-  const rest = pts.slice(bestSeg + 1);
-  if (rest.length > 0 && dist(exit, rest[0]!) < 0.5) return rest;
-  return [exit, ...rest];
-}
-
-/** Trim both ends of a polyline (curved arc or straight run) against its start and end symbol outlines. */
-function trimPolylineEnds(pts: readonly Vec2[], startOutline: readonly Outline[], endOutline: readonly Outline[]): Vec2[] {
-  const fromStart = trimPolylineStart(pts, startOutline);
-  const rev = [...fromStart].reverse();
-  const trimmedRev = trimPolylineStart(rev, endOutline);
-  const out = trimmedRev.reverse();
+  // End trim: last crossing going backward over ONLY the start-trimmed path (including startPt).
+  let endIdx = n - 1;
+  let endPt: Vec2 | null = null;
+  if (endOutline.length > 0) {
+    let bestSeg = -1;
+    let bestT = 0;
+    let bestFrom: Vec2 | null = null;
+    let bestTo: Vec2 | null = null;
+    for (let i = n - 1; i > startIdx; i--) {
+      const t = lastCrossT(endOutline, pts[i]!, pts[i - 1]!);
+      if (t !== null) {
+        bestSeg = i;
+        bestT = t;
+        bestFrom = pts[i]!;
+        bestTo = pts[i - 1]!;
+      }
+    }
+    if (startPt && startIdx < n) {
+      const t = lastCrossT(endOutline, pts[startIdx]!, startPt);
+      if (t !== null) {
+        bestSeg = startIdx;
+        bestT = t;
+        bestFrom = pts[startIdx]!;
+        bestTo = startPt;
+      }
+    }
+    if (bestSeg >= 0 && bestFrom && bestTo) {
+      const exit = lerp(bestFrom, bestTo, bestT);
+      if (bestSeg === startIdx && startPt) {
+        // Crossing happened on the final [startPt, pts[startIdx]] segment.
+        return dist(startPt, exit) >= 0.5 ? [startPt, exit] : [...pts];
+      }
+      if (dist(exit, bestTo) < 0.5) {
+        endIdx = bestSeg - 1;
+      } else {
+        endIdx = bestSeg - 1;
+        endPt = exit;
+      }
+    }
+  }
+  const out: Vec2[] = [];
+  if (startPt) out.push(startPt);
+  for (let i = startIdx; i <= endIdx; i++) out.push(pts[i]!);
+  if (endPt) out.push(endPt);
   return out.length >= 2 ? out : [...pts];
 }
 
@@ -898,6 +952,12 @@ export const CIRCUIT_GRAPHICS_ROW: ViewGraphicsRow = {
   hintsRefusal: circuitGraphicsRefusal,
 };
 
+/** Per-render cache keyed by `ctx.shown` so `draw` ("lines") and `drawOver` ("labels") share one derive+layout pass. */
+const LAST_LAID = new WeakMap<
+  ReadonlyMap<string, PartInstance>,
+  { readonly model: ModelState; readonly view: ViewElement; readonly scale: number; readonly detail: DetailLevel; readonly laid: PaperGraphic[] }
+>();
+
 function drawCircuitGraphicsInk(
   ctx: CircuitDrawContext,
   model: ModelState,
@@ -906,7 +966,12 @@ function drawCircuitGraphicsInk(
   pass: "all" | "lines" | "labels" = "all",
 ): PaperGraphic[] {
   const detail: DetailLevel = ctx.detail ?? "medium";
-  const laid = layoutCircuitGraphics(deriveCircuitGraphics(model, view, shown, ctx.scale, detail), ctx.toPaper);
+  // Only reuse the cached layout on the paired "labels" pass so every "lines" or standalone "all" render recomputes with its own `ctx.toPaper`.
+  const cached = pass === "labels" ? LAST_LAID.get(shown) : undefined;
+  const hit = cached && cached.model === model && cached.view === view && cached.scale === ctx.scale && cached.detail === detail;
+  const laid = hit ? cached.laid : layoutCircuitGraphics(deriveCircuitGraphics(model, view, shown, ctx.scale, detail), ctx.toPaper);
+  if (pass === "lines") LAST_LAID.set(shown, { model, view, scale: ctx.scale, detail, laid });
+  else if (hit) LAST_LAID.delete(shown);
   const marks = resolveCircuitGraphics(view).hashMarks;
   const { min, max } = ctx.window;
   const fits = (p: Vec2, w: number, anchor: TextAnchor) => {
