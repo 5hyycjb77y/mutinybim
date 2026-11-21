@@ -3,14 +3,16 @@ import {
   copyPoint,
   copyText,
   organizationOf,
+  partPlanOutline,
   partToWorld,
   pushTo,
   resolveConnectors,
-  resolveSymbol,
   serviceLinkName,
+  type DetailLevel,
   type GroupEntry,
   type ModelState,
   type PartInstance,
+  type PlanOutline,
   type Primitive,
   type ServiceLink,
   type TypicalCopy,
@@ -171,28 +173,69 @@ const RUN_CELL_MM = 20;
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
 const lerp = (a: Vec2, b: Vec2, t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
 
-type Outline = { readonly kind: "seg"; readonly a: Vec2; readonly b: Vec2 } | { readonly kind: "circle"; readonly c: Vec2; readonly r: number };
+type Outline = PlanOutline;
 
-/** A placed part's plan symbol as boundaries in world mm (text as a box the size it prints). */
-function symbolOutline(model: ModelState, part: PartInstance, scale: number): Outline[] {
-  const type = model.elements[part.typeId];
-  if (type?.kind !== "part_type") return [];
-  const w = (q: Vec2) => partToWorld(part, q);
-  const out: Outline[] = [];
-  const box = (c: Vec2, hx: number, hy: number) => {
-    const k = [w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })];
-    for (let i = 0; i < 4; i++) out.push({ kind: "seg", a: k[i] ?? c, b: k[(i + 1) % 4] ?? c });
-  };
-  for (const s of resolveSymbol(type.definition, part.values)) {
-    if (s.kind === "rect") box(s.center, s.size.x / 2, s.size.y / 2);
-    else if (s.kind === "circle") out.push({ kind: "circle", c: w(s.center), r: s.radius });
-    else if (s.kind === "line") out.push({ kind: "seg", a: w(s.from), b: w(s.to) });
-    else if (s.kind === "polyline") {
-      for (let i = 0; i + 1 < s.points.length; i++) out.push({ kind: "seg", a: w(s.points[i] ?? s.points[0]!), b: w(s.points[i + 1] ?? s.points[0]!) });
-      if (s.closed && s.points.length > 2) out.push({ kind: "seg", a: w(s.points[s.points.length - 1]!), b: w(s.points[0]!) });
-    } else box(s.at, 0.6 * NUMBER_MM * scale, 0.6 * NUMBER_MM * scale);
+/** A placed part's rendered plan boundary in world mm (symbol, schema-2 detail symbol, class symbol, or 3D body footprint). */
+function symbolOutline(model: ModelState, part: PartInstance, scale: number, detail: DetailLevel = "medium"): Outline[] {
+  return partPlanOutline(model, part, { detail, scale }).outline;
+}
+
+/** First/last crossing parameter t in (0, 1] of segment `from -> to` against `outline`, or null when it doesn't cross. */
+function lastCrossT(outline: readonly Outline[], from: Vec2, to: Vec2): number | null {
+  const d = { x: to.x - from.x, y: to.y - from.y };
+  let best = -1;
+  for (const o of outline) {
+    if (o.kind === "seg") {
+      const e = { x: o.b.x - o.a.x, y: o.b.y - o.a.y };
+      const den = d.x * e.y - d.y * e.x;
+      if (Math.abs(den) < 1e-12) continue;
+      const w = { x: o.a.x - from.x, y: o.a.y - from.y };
+      const t = (w.x * e.y - w.y * e.x) / den;
+      const u = (w.x * d.y - w.y * d.x) / den;
+      if (t > best && t > 1e-6 && t <= 1 && u >= -1e-9 && u <= 1 + 1e-9) best = t;
+    } else {
+      const f = { x: from.x - o.c.x, y: from.y - o.c.y };
+      const a = d.x * d.x + d.y * d.y;
+      const b = 2 * (f.x * d.x + f.y * d.y);
+      const c = f.x * f.x + f.y * f.y - o.r * o.r;
+      const disc = b * b - 4 * a * c;
+      if (a < 1e-12 || disc < 0) continue;
+      const root = Math.sqrt(disc);
+      for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
+        if (t > best && t > 1e-6 && t <= 1) best = t;
+      }
+    }
   }
-  return out;
+  return best > 0 ? best : null;
+}
+
+/** Trim the start of a polyline (arc or run) so it begins at the last point where it leaves `outline`. */
+function trimPolylineStart(pts: readonly Vec2[], outline: readonly Outline[]): Vec2[] {
+  if (pts.length < 2 || outline.length === 0) return [...pts];
+  let bestSeg = -1;
+  let bestT = 0;
+  // Walk the first half+ of the polyline to find where it exits the starting symbol's outline.
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const t = lastCrossT(outline, pts[i]!, pts[i + 1]!);
+    if (t !== null) {
+      bestSeg = i;
+      bestT = t;
+    }
+  }
+  if (bestSeg < 0) return [...pts];
+  const exit = lerp(pts[bestSeg]!, pts[bestSeg + 1]!, bestT);
+  const rest = pts.slice(bestSeg + 1);
+  if (rest.length > 0 && dist(exit, rest[0]!) < 0.5) return rest;
+  return [exit, ...rest];
+}
+
+/** Trim both ends of a polyline (curved arc or straight run) against its start and end symbol outlines. */
+function trimPolylineEnds(pts: readonly Vec2[], startOutline: readonly Outline[], endOutline: readonly Outline[]): Vec2[] {
+  const fromStart = trimPolylineStart(pts, startOutline);
+  const rev = [...fromStart].reverse();
+  const trimmedRev = trimPolylineStart(rev, endOutline);
+  const out = trimmedRev.reverse();
+  return out.length >= 2 ? out : [...pts];
 }
 
 /** The connector's plan position, the symbol's connection point (the insertion point when the part has none). */
@@ -378,17 +421,19 @@ function squareJoin(a: Node, b: Node, bend: Vec2 | undefined, drawn: DrawnRuns, 
   return best ?? squarePath(a, b, []);
 }
 
-/** The joining line between two members in the view's style, ends on the symbols. */
+/** The joining line between two members in the view's style, trimmed cleanly at each symbol's rendered boundary. */
 function joinPath(style: CircuitGraphicStyle, a: Node, b: Node, bend: Vec2 | undefined, drawn: DrawnRuns, step: number): Vec2[] {
   if (style === "orthogonal") return squareJoin(a, b, bend, drawn, step);
-  if (bend) return arcThrough(exitPoint(a.outline, a.point, bend), bend, exitPoint(b.outline, b.point, bend));
+  if (bend) return trimPolylineEnds(arcThrough(a.point, bend, b.point), a.outline, b.outline);
   const pa = exitPoint(a.outline, a.point, b.point);
   const pb = exitPoint(b.outline, b.point, a.point);
-  const chord = dist(pa, pb);
+  const chord = dist(a.point, b.point);
   if (chord < 1) return [pa, pb];
-  const n = { x: -(pb.y - pa.y) / chord, y: (pb.x - pa.x) / chord };
-  const mid = lerp(pa, pb, 0.5);
-  return arcThrough(pa, { x: mid.x + n.x * chord * ARC_SAG, y: mid.y + n.y * chord * ARC_SAG }, pb);
+  const visibleSpan = dist(pa, pb);
+  const n = { x: -(b.point.y - a.point.y) / chord, y: (b.point.x - a.point.x) / chord };
+  const mid = lerp(a.point, b.point, 0.5);
+  const fullArc = arcThrough(a.point, { x: mid.x + n.x * visibleSpan * ARC_SAG, y: mid.y + n.y * visibleSpan * ARC_SAG }, b.point);
+  return trimPolylineEnds(fullArc, a.outline, b.outline);
 }
 
 /** Members joined nearest-neighbour from `start` (ties: the order they were added). Display only. */
@@ -444,16 +489,16 @@ function joinPairs(style: CircuitGraphicStyle, start: Node, rest: readonly Node[
   return ordered.slice(1).map((b, i) => [ordered[i]!, b] as const);
 }
 
-function nodeOf(model: ModelState, part: PartInstance, connector: string, scale: number): Node {
-  return { id: part.id, part, point: connectionPoint(model, part, connector), outline: symbolOutline(model, part, scale) };
+function nodeOf(model: ModelState, part: PartInstance, connector: string, scale: number, detail: DetailLevel = "medium"): Node {
+  return { id: part.id, part, point: connectionPoint(model, part, connector), outline: symbolOutline(model, part, scale, detail) };
 }
 
 /** The circuit drawing for one link in model mm, or null when none of its members is shown. */
-function linkGraphic(model: ModelState, link: ServiceLink, shown: ReadonlyMap<string, PartInstance>, settings: ResolvedCircuitGraphics, scale: number, typ: boolean, drawn: DrawnRuns): CircuitGraphic | null {
+function linkGraphic(model: ModelState, link: ServiceLink, shown: ReadonlyMap<string, PartInstance>, settings: ResolvedCircuitGraphics, scale: number, typ: boolean, drawn: DrawnRuns, detail: DetailLevel = "medium"): CircuitGraphic | null {
   const nodes: Node[] = [];
   for (const m of link.members) {
     const part = shown.get(m.elementId);
-    if (part) nodes.push(nodeOf(model, part, m.connector, scale));
+    if (part) nodes.push(nodeOf(model, part, m.connector, scale, detail));
   }
   if (nodes.length === 0) return null;
   const hint = settings.hints[link.id];
@@ -503,7 +548,7 @@ function legOf(part: PartInstance): string {
 }
 
 /** Dashed switch legs: each switch to the shown fixtures with its switch leg letter, nearest-neighbour. */
-function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>, settings: ResolvedCircuitGraphics, scale: number, drawn: DrawnRuns): CircuitGraphic[] {
+function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>, settings: ResolvedCircuitGraphics, scale: number, drawn: DrawnRuns, detail: DetailLevel = "medium"): CircuitGraphic[] {
   const fixtures = new Map<string, PartInstance[]>();
   const switches: PartInstance[] = [];
   for (const part of shown.values()) {
@@ -520,10 +565,10 @@ function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>,
   for (const sw of switches.sort((a, b) => (a.id < b.id ? -1 : 1))) {
     const lit = fixtures.get(legOf(sw)) ?? [];
     if (lit.length === 0) continue;
-    const start = nodeOf(model, sw, "power", scale);
+    const start = nodeOf(model, sw, "power", scale, detail);
     const paths: Vec2[][] = [];
     const joins: Array<[string, string]> = [];
-    for (const [a, b] of joinPairs(style, start, lit.map((f) => nodeOf(model, f, "power", scale)))) {
+    for (const [a, b] of joinPairs(style, start, lit.map((f) => nodeOf(model, f, "power", scale, detail)))) {
       const path = joinPath(style, a, b, undefined, drawn, SQUARE_RUN_OFFSET_MM * scale);
       if (style === "orthogonal") drawn.add(path);
       paths.push(path);
@@ -559,7 +604,7 @@ export function typLabel(g: CircuitGraphic, spec: TypicalSpec, template: string 
  * the links serving the parts shown (`shown`, what the plan drew), switch
  * legs, and the copies of typicals.
  */
-export function deriveCircuitGraphics(model: ModelState, view: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number): CircuitGraphic[] {
+export function deriveCircuitGraphics(model: ModelState, view: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number, detail: DetailLevel = "medium"): CircuitGraphic[] {
   const settings = resolveCircuitGraphics(view);
   if (settings.style === "off") return [];
   const links = new Map<string, ServiceLink>();
@@ -582,7 +627,7 @@ export function deriveCircuitGraphics(model: ModelState, view: ViewElement, show
     const groups = new Set(link.members.map((m) => model.elements[m.elementId]?.groupId));
     const only = groups.size === 1 ? [...groups][0] : undefined;
     const spec = only ? typicals.get(only) : undefined;
-    const g = linkGraphic(model, link, shown, settings, scale, spec !== undefined && !settings.allCopies, drawn);
+    const g = linkGraphic(model, link, shown, settings, scale, spec !== undefined && !settings.allCopies, drawn, detail);
     if (!g) continue;
     if (!spec || !settings.allCopies) {
       out.push(g);
@@ -594,7 +639,7 @@ export function deriveCircuitGraphics(model: ModelState, view: ViewElement, show
     out.push(once ? withHomeRunLabel(g, typLabel(g, spec, typLabelTemplateOf(model))) : g);
     for (const c of copies) out.push(once ? withHomeRunLabel(c, "") : c);
   }
-  if (settings.switchLegs) out.push(...switchLegs(model, shown, settings, scale, drawn));
+  if (settings.switchLegs) out.push(...switchLegs(model, shown, settings, scale, drawn, detail));
   return out;
 }
 
@@ -805,6 +850,7 @@ function homeRunLabel(from: Vec2, tip: Vec2, u: Vec2, n: Vec2, w: number): Array
 export interface CircuitDrawContext {
   readonly toPaper: (p: Vec2) => Vec2;
   readonly scale: number;
+  readonly detail?: DetailLevel;
   /** Paper rectangle the view prints inside: lines clip to it, text must fit in it. */
   readonly window: { readonly min: Vec2; readonly max: Vec2 };
   readonly prims: Primitive[];
@@ -818,7 +864,7 @@ export function drawCircuitGraphics(ctx: CircuitDrawContext, model: ModelState, 
   const look = categoryLook(view, CIRCUIT_GRAPHICS_CATEGORY);
   if (!look.visible) return [];
   const from = ctx.prims.length;
-  const laid = drawCircuitGraphicsInk(ctx, model, view, shown);
+  const laid = drawCircuitGraphicsInk(ctx, model, view, shown, "all");
   if (look.halftone === true) {
     for (let i = from; i < ctx.prims.length; i++) {
       const prim = ctx.prims[i];
@@ -830,9 +876,10 @@ export function drawCircuitGraphics(ctx: CircuitDrawContext, model: ModelState, 
 
 /**
  * Circuit lines, home runs and switch legs on plans, through the kernel's view
- * graphics point. The kernel shows, hides and halftones them by the row's
- * category (as `drawCircuitGraphics` does) and draws them after the view's
- * parts and typicals' copies; the view keeps its settings under `circuitGraphics`.
+ * graphics point. Wire arcs, switch legs and home-run shafts draw on
+ * `layer: "under_parts"` (behind light fixtures and device symbols), while
+ * home-run labels and circuit numbers draw on `drawOver` so text stays above
+ * symbol masks and avoids every placed part mark.
  */
 export const CIRCUIT_GRAPHICS_ROW: ViewGraphicsRow = {
   id: "circuit_lines",
@@ -840,30 +887,47 @@ export const CIRCUIT_GRAPHICS_ROW: ViewGraphicsRow = {
   hintsKey: "circuitGraphics",
   category: CIRCUIT_GRAPHICS_CATEGORY,
   order: 100,
+  layer: "under_parts",
   draw: (ctx) => {
-    drawCircuitGraphicsInk(ctx, ctx.model, ctx.view, ctx.shown);
+    drawCircuitGraphicsInk(ctx, ctx.model, ctx.view, ctx.shown, "lines");
+  },
+  drawOver: (ctx) => {
+    drawCircuitGraphicsInk(ctx, ctx.model, ctx.view, ctx.shown, "labels");
   },
   hintsSchema: circuitGraphicsSchema,
   hintsRefusal: circuitGraphicsRefusal,
 };
 
-function drawCircuitGraphicsInk(ctx: CircuitDrawContext, model: ModelState, view: ViewElement, shown: ReadonlyMap<string, PartInstance>): PaperGraphic[] {
-  const laid = layoutCircuitGraphics(deriveCircuitGraphics(model, view, shown, ctx.scale), ctx.toPaper);
+function drawCircuitGraphicsInk(
+  ctx: CircuitDrawContext,
+  model: ModelState,
+  view: ViewElement,
+  shown: ReadonlyMap<string, PartInstance>,
+  pass: "all" | "lines" | "labels" = "all",
+): PaperGraphic[] {
+  const detail: DetailLevel = ctx.detail ?? "medium";
+  const laid = layoutCircuitGraphics(deriveCircuitGraphics(model, view, shown, ctx.scale, detail), ctx.toPaper);
   const marks = resolveCircuitGraphics(view).hashMarks;
   const { min, max } = ctx.window;
   const fits = (p: Vec2, w: number, anchor: TextAnchor) => {
     const b = textBox(p, w, LABEL_MM, anchor);
     return b.min.x >= min.x && b.max.x <= max.x && p.y - LABEL_MM >= min.y && p.y <= max.y;
   };
+  const drawLines = pass === "all" || pass === "lines";
+  const drawLabels = pass === "all" || pass === "labels";
   // Text already on the plan (part marks such as the panel's "P1", tags): home-run labels keep clear of it.
   const taken: Box[] = [];
-  for (const prim of ctx.prims) if (prim.kind === "text") taken.push(textBox(prim.at, prim.text.length * prim.size * 0.6, prim.size, prim.anchor));
+  if (drawLabels) {
+    for (const prim of ctx.prims) if (prim.kind === "text") taken.push(textBox(prim.at, prim.text.length * prim.size * 0.6, prim.size, prim.anchor));
+  }
   for (const { source, lines } of laid) {
     const pen = source.kind === "switch_leg" ? "thin" : "medium";
-    for (const line of lines) {
-      for (let i = 0; i + 1 < line.length; i++) {
-        const c = clipSegment(line[i]!, line[i + 1]!, min, max);
-        if (c) ctx.prims.push({ kind: "line", a: c[0], b: c[1], pen, ...(source.dashed ? { dash: SWITCH_LEG_DASH } : {}) });
+    if (drawLines) {
+      for (const line of lines) {
+        for (let i = 0; i + 1 < line.length; i++) {
+          const c = clipSegment(line[i]!, line[i + 1]!, min, max);
+          if (c) ctx.prims.push({ kind: "line", a: c[0], b: c[1], pen, ...(source.dashed ? { dash: SWITCH_LEG_DASH } : {}) });
+        }
       }
     }
     if (source.homeRun) {
@@ -873,27 +937,33 @@ function drawCircuitGraphicsInk(ctx: CircuitDrawContext, model: ModelState, view
       if (l > 1e-6 && tip.x >= min.x && tip.x <= max.x && tip.y >= min.y && tip.y <= max.y) {
         const u = { x: (tip.x - from.x) / l, y: (tip.y - from.y) / l };
         const n = { x: -u.y, y: u.x };
-        const back = { x: tip.x - u.x * ARROW_HEAD_MM, y: tip.y - u.y * ARROW_HEAD_MM };
-        ctx.prims.push({ kind: "line", a: tip, b: { x: back.x + n.x * ARROW_HEAD_MM * 0.4, y: back.y + n.y * ARROW_HEAD_MM * 0.4 }, pen: "medium" });
-        ctx.prims.push({ kind: "line", a: tip, b: { x: back.x - n.x * ARROW_HEAD_MM * 0.4, y: back.y - n.y * ARROW_HEAD_MM * 0.4 }, pen: "medium" });
-        for (const [a, b] of hashMarkLines(from, tip, circuitConductorMarks(model, source.linkId, marks))) ctx.prims.push({ kind: "line", a, b, pen: "thin" });
-        const text = source.homeRun.label;
-        const w = text.length * LABEL_MM * 0.6;
-        const label = homeRunLabel(from, tip, u, n, w).find((c) => fits(c.at, w, c.anchor) && !taken.some((t) => boxesMeet(t, textBox(c.at, w, LABEL_MM, c.anchor))));
-        const fallback = homeRunLabel(from, tip, u, n, w)[0]!;
-        const place = text === "" ? null : (label ?? (fits(fallback.at, w, fallback.anchor) ? fallback : null));
-        if (place) {
-          ctx.prims.push({ kind: "text", at: place.at, text, size: LABEL_MM, anchor: place.anchor });
-          taken.push(textBox(place.at, w, LABEL_MM, place.anchor));
+        if (drawLines) {
+          const back = { x: tip.x - u.x * ARROW_HEAD_MM, y: tip.y - u.y * ARROW_HEAD_MM };
+          ctx.prims.push({ kind: "line", a: tip, b: { x: back.x + n.x * ARROW_HEAD_MM * 0.4, y: back.y + n.y * ARROW_HEAD_MM * 0.4 }, pen: "medium" });
+          ctx.prims.push({ kind: "line", a: tip, b: { x: back.x - n.x * ARROW_HEAD_MM * 0.4, y: back.y - n.y * ARROW_HEAD_MM * 0.4 }, pen: "medium" });
+          for (const [a, b] of hashMarkLines(from, tip, circuitConductorMarks(model, source.linkId, marks))) ctx.prims.push({ kind: "line", a, b, pen: "thin" });
+        }
+        if (drawLabels) {
+          const text = source.homeRun.label;
+          const w = text.length * LABEL_MM * 0.6;
+          const label = homeRunLabel(from, tip, u, n, w).find((c) => fits(c.at, w, c.anchor) && !taken.some((t) => boxesMeet(t, textBox(c.at, w, LABEL_MM, c.anchor))));
+          const fallback = homeRunLabel(from, tip, u, n, w)[0]!;
+          const place = text === "" ? null : (label ?? (fits(fallback.at, w, fallback.anchor) ? fallback : null));
+          if (place) {
+            ctx.prims.push({ kind: "text", at: place.at, text, size: LABEL_MM, anchor: place.anchor });
+            taken.push(textBox(place.at, w, LABEL_MM, place.anchor));
+          }
         }
       }
     }
-    for (const n of source.numbers) {
-      const at = ctx.toPaper(n.at);
-      const w = n.text.length * NUMBER_MM * 0.6;
-      if (fits(at, w, "start")) {
-        ctx.prims.push({ kind: "text", at, text: n.text, size: NUMBER_MM, anchor: "start" });
-        taken.push(textBox(at, w, NUMBER_MM, "start"));
+    if (drawLabels) {
+      for (const n of source.numbers) {
+        const at = ctx.toPaper(n.at);
+        const w = n.text.length * NUMBER_MM * 0.6;
+        if (fits(at, w, "start")) {
+          ctx.prims.push({ kind: "text", at, text: n.text, size: NUMBER_MM, anchor: "start" });
+          taken.push(textBox(at, w, NUMBER_MM, "start"));
+        }
       }
     }
   }

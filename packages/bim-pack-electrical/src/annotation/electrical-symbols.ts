@@ -1,4 +1,4 @@
-import type { Symbol2D, SymbolPrim } from "@permitzip/bim-kernel";
+import type { Symbol2D, SymbolDef, SymbolPrim } from "@permitzip/bim-kernel";
 
 /**
  * Electrical one-line (single-line) symbols for the 2D detail component
@@ -315,5 +315,122 @@ export const ELECTRICAL_COMPONENTS: readonly Symbol2D[] = [
     heightMm: 0.45 * IN,
     terminals: { line: [0.5, 1] },
     prims: [box],
+  },
+];
+
+/**
+ * Reusable ANSI/NEC plan symbols (paper-scaled mm) registered on `SYMBOL_POINT`.
+ * Any custom part built in `@permitzip/bim-script` can attach one via
+ * `b.symbolRef(["coarse", "medium", "fine"], "electrical.plan_gfci")`.
+ */
+export const ELECTRICAL_PLAN_SYMBOLS: readonly SymbolDef[] = [
+  {
+    id: "electrical.plan_duplex",
+    label: "Duplex receptacle (plan)",
+    connectionPoint: [0, 2.0],
+    primitives: [
+      { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "line", from: [-0.6, 0], to: [-0.6, 3.35], pen: "medium", units: "paper" },
+      { kind: "line", from: [0.6, 0], to: [0.6, 3.35], pen: "medium", units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_gfci",
+    label: "GFCI duplex receptacle (plan)",
+    connectionPoint: [0, 2.0],
+    primitives: [
+      { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "line", from: [-0.6, 0], to: [-0.6, 3.35], pen: "medium", units: "paper" },
+      { kind: "line", from: [0.6, 0], to: [0.6, 3.35], pen: "medium", units: "paper" },
+      { kind: "text", at: [3.1, 2.0], text: "GFI", heightMm: 1.5, units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_quad",
+    label: "Quad receptacle (plan)",
+    connectionPoint: [0, 2.0],
+    primitives: [
+      { kind: "circle", center: [-1.45, 2.0], radius: 1.35, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "circle", center: [1.45, 2.0], radius: 1.35, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "line", from: [-1.95, 0], to: [-1.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [-0.95, 0], to: [-0.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [0.95, 0], to: [0.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [1.95, 0], to: [1.95, 3.2], pen: "medium", units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_switch",
+    label: "Single-pole switch (plan)",
+    connectionPoint: [0, 2.2],
+    primitives: [
+      { kind: "line", from: [0, 0], to: [0, 0.75], pen: "thin", units: "paper" },
+      { kind: "text", at: [0, 2.2], text: "S", heightMm: 2.5, units: "paper" },
+      { kind: "line", from: [0.3, 0.55], to: [-0.3, 3.85], pen: "medium", units: "paper", upright: true },
+    ],
+  },
+  {
+    id: "electrical.plan_switch_3way",
+    label: "Three-way switch (plan)",
+    connectionPoint: [0, 2.2],
+    primitives: [
+      { kind: "line", from: [0, 0], to: [0, 0.75], pen: "thin", units: "paper" },
+      { kind: "text", at: [0, 2.2], text: "S", heightMm: 2.5, units: "paper" },
+      { kind: "line", from: [0.3, 0.55], to: [-0.3, 3.85], pen: "medium", units: "paper", upright: true },
+      { kind: "text", at: [0, 2.2], uprightOffset: [1.55, -0.7], text: "3", heightMm: 1.4, units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_switch_dimmer",
+    label: "Dimmer switch (plan)",
+    connectionPoint: [0, 2.2],
+    primitives: [
+      { kind: "line", from: [0, 0], to: [0, 0.75], pen: "thin", units: "paper" },
+      { kind: "text", at: [0, 2.2], text: "S", heightMm: 2.5, units: "paper" },
+      { kind: "line", from: [0.3, 0.55], to: [-0.3, 3.85], pen: "medium", units: "paper", upright: true },
+      { kind: "text", at: [0, 2.2], uprightOffset: [1.55, -0.7], text: "D", heightMm: 1.4, units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_occ_sensor",
+    label: "Occupancy sensor (plan)",
+    connectionPoint: [0, 0],
+    primitives: [
+      { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "text", at: [0, 0], text: "OS", heightMm: 1.6, units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_downlight",
+    label: "Recessed downlight (plan)",
+    connectionPoint: [0, 0],
+    primitives: [{ kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" }],
+  },
+  {
+    id: "electrical.plan_downlight_em",
+    label: "Emergency recessed downlight (plan)",
+    connectionPoint: [0, 0],
+    primitives: [
+      { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "polyline", points: [[-1.8, 0], [1.8, 0], [1.56, 0.9], [0.9, 1.56], [0, 1.8], [-0.9, 1.56], [-1.56, 0.9]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_exit_sign",
+    label: "Exit sign (plan)",
+    connectionPoint: [0, 0],
+    primitives: [
+      { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "polyline", points: [[0, 0], [1.8, 0], [1.56, 0.9], [0.9, 1.56], [0, 1.8]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+      { kind: "polyline", points: [[0, 0], [-1.8, 0], [-1.56, -0.9], [-0.9, -1.56], [0, -1.8]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+    ],
+  },
+  {
+    id: "electrical.plan_jbox",
+    label: "Junction box (plan)",
+    connectionPoint: [0, 0],
+    primitives: [
+      { kind: "circle", center: [0, 0], radius: 1.6, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "text", at: [0, 0], text: "J", heightMm: 1.8, units: "paper" },
+    ],
   },
 ];

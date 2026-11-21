@@ -3,17 +3,22 @@ import { categoryLook } from "../categories/resolve";
 import type { Primitive } from "../drawing/sheet";
 import { defineExtensionPoint } from "../packs/contract";
 import { activePackSet } from "../packs/scope";
+import type { DetailLevel } from "../part-model/schema";
 import type { ModelState, PartInstance, Vec2, ViewElement } from "../types";
 
 /**
  * View graphics (contract 1.10.0, `kernel.view_graphics` v1).
  *
- * Plan graphics an add-on derives for a view from the model, drawn after the
- * view's parts: lines between the things a network connects, load-path
- * arrows, loop lines. The view stores each add-on's switches as an opaque
- * record under the row's `hintsKey` (`ViewProps[hintsKey]`); the kernel never
- * reads inside it. Rows draw in `order`, lowest first.
+ * Plan graphics an add-on derives for a view from the model: lines between the
+ * things a network connects, load-path arrows, loop lines. Rows can draw under
+ * parts (`layer: "under_parts"`, e.g. branch wiring behind parts and device
+ * symbols) or over parts (`layer: "over_parts"`, the default). The view stores
+ * each add-on's switches as an opaque record under the row's `hintsKey`
+ * (`ViewProps[hintsKey]`); the kernel never reads inside it. Rows draw in
+ * `order`, lowest first.
  */
+
+export type ViewGraphicsLayer = "under_parts" | "over_parts";
 
 export interface ViewGraphicsContext {
   readonly model: ModelState;
@@ -23,6 +28,8 @@ export interface ViewGraphicsContext {
   readonly toPaper: (p: Vec2) => Vec2;
   /** Model mm per paper mm. */
   readonly scale: number;
+  /** The view's detail level (absent: "medium"). */
+  readonly detail?: DetailLevel;
   /** Paper rectangle the view prints inside: lines clip to it, text must fit in it. */
   readonly window: { readonly min: Vec2; readonly max: Vec2 };
   /** Where the row pushes what it draws. */
@@ -40,8 +47,12 @@ export interface ViewGraphicsRow {
   readonly category?: string;
   /** Draw order among rows, lowest first. */
   readonly order: number;
+  /** Whether this row draws behind parts (`under_parts`) or above them (`over_parts`, default). */
+  readonly layer?: ViewGraphicsLayer;
   /** Draw into `ctx.prims`. `hints` is the view's stored record under `hintsKey` (undefined when the view has none). */
   draw(ctx: ViewGraphicsContext, hints: unknown): void;
+  /** Optional second pass drawn on top of parts (e.g. labels for an `under_parts` row so labels stay above masks and avoid part marks). */
+  drawOver?(ctx: ViewGraphicsContext, hints: unknown): void;
   /** Strict writer for the record a view stores under `hintsKey`. Absent: any object. (Round 13, additive.) */
   readonly hintsSchema?: z.ZodType<object>;
   /** Why a parsed record can't be saved on this view, in words (a view type it doesn't draw on, a peer that can't store a switch yet); null when it can. (Round 13, additive.) */
@@ -113,16 +124,22 @@ export function viewGraphicsRows(): readonly ViewGraphicsRow[] {
  * Draw every row in force onto the view, in order (round 12, additive): a row
  * with a category draws only when the view shows that category, and its lines
  * and text turn halftone when the view halftones it. Each row gets the view's
- * stored record under its `hintsKey`.
+ * stored record under its `hintsKey`. Pass `layer` to run only rows on that
+ * layer (`under_parts` or `over_parts`); omit to run every row in order.
  */
-export function drawViewGraphics(ctx: ViewGraphicsContext): void {
+export function drawViewGraphics(ctx: ViewGraphicsContext, layer?: ViewGraphicsLayer): void {
   // The kernel never reads inside a row's record: each is passed through as stored.
   const props = (ctx.view.props ?? {}) as Readonly<Record<string, unknown>>;
   for (const row of viewGraphicsRows()) {
+    const rowLayer = row.layer ?? "over_parts";
+    const runMain = layer === undefined || rowLayer === layer;
+    const runOver = row.drawOver !== undefined && (layer === undefined || layer === "over_parts");
+    if (!runMain && !runOver) continue;
     const look = row.category === undefined ? null : categoryLook(ctx.view, row.category);
     if (look && !look.visible) continue;
     const from = ctx.prims.length;
-    row.draw(ctx, props[row.hintsKey]);
+    if (runMain) row.draw(ctx, props[row.hintsKey]);
+    if (runOver) row.drawOver?.(ctx, props[row.hintsKey]);
     if (look?.halftone !== true) continue;
     for (let i = from; i < ctx.prims.length; i++) {
       const prim = ctx.prims[i];

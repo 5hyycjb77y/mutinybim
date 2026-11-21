@@ -40,6 +40,33 @@ function reports(engine: ElectricalLoadEngine, model: Pick<ModelState, "elements
   return JSON.stringify(engine.distribution(model).map((id) => engine.report(model, id)));
 }
 
+/**
+ * Strip post-round-6 CABINET plan-symbol upgrades (opaque white mask + solid
+ * half-fill + pen weight) back to the pre-round-6 rectangle+slash so the
+ * immutable pre-round-6 baseline in `c6e-goldens.json` stays untouched while
+ * still proving every other field in the command and model is byte-identical.
+ */
+function stripUpgradedCabinetSymbol(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripUpgradedCabinetSymbol);
+  if (value && typeof value === "object") {
+    const rec = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rec)) {
+      if (k === "symbol" && Array.isArray(v) && v.length >= 2 && (v[0] as Record<string, unknown>)?.fill === "mask" && (v[1] as Record<string, unknown>)?.fill === "solid") {
+        out[k] = [
+          { kind: "rect", center: [0, { param: "depth", scale: 0.5 }], size: [{ param: "width" }, { param: "depth" }] },
+          { kind: "line", from: [{ param: "width", scale: -0.5 }, { param: "depth" }], to: [{ param: "width", scale: 0.5 }, { param: "depth" }] },
+          ...v.slice(2),
+        ];
+      } else {
+        out[k] = stripUpgradedCabinetSymbol(v);
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
 describe("c6e: electrical goldens are identical before and after the move", () => {
   for (const [name, request] of Object.entries(REQUESTS)) {
     it(`${name} service layout: the stored command, the model it leaves and its load flow`, () => {
@@ -47,14 +74,14 @@ describe("c6e: electrical goldens are identical before and after the move", () =
       const plan = planServiceLayout(b.head, { levelId: "lvl-1", ...request });
       if (!plan.ok) throw new Error(plan.reason);
       const bytes = JSON.stringify(plan.command);
-      expectGolden(`${name}.command`, bytes);
+      expectGolden(`${name}.command`, JSON.stringify(stripUpgradedCabinetSymbol(plan.command)));
       // The kernel's command check (a pack command now) reads it exactly as the command's own schema does, as the static union did.
       const parsed = commandSchema.safeParse(JSON.parse(bytes));
       expect(parsed.success).toBe(true);
       expect(parsed.success ? JSON.stringify(parsed.data) : null).toBe(JSON.stringify(serviceLayoutCommandSchemas[0].parse(JSON.parse(bytes))));
       const done = executeCommand(b.head, plan.command);
       if (!done.ok) throw new Error(done.error.message);
-      expect(GOLDENS[`${name}.elements.sha256`]?.sha256).toBe(sha(canonicalJson(done.model.elements)));
+      expect(GOLDENS[`${name}.elements.sha256`]?.sha256).toBe(sha(canonicalJson(stripUpgradedCabinetSymbol(done.model.elements))));
       // The kernel dispatches it to the add-on's own executor: same result as calling it directly.
       const direct = executeServiceLayoutCommand(b.head, plan.command);
       if (!direct.ok) throw new Error(direct.error.message);

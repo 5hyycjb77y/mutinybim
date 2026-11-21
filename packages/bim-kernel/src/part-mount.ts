@@ -93,6 +93,8 @@ export function mountedSymbol(symbols: readonly ResolvedSymbol[], mount: PartMou
         return { ...s, center: m(s.center) };
       case "circle":
         return { ...s, center: m(s.center) };
+      case "arc":
+        return { ...s, center: m(s.center), startDeg: -s.startDeg, sweepDeg: -s.sweepDeg };
       case "line":
         return { ...s, from: m(s.from), to: m(s.to) };
       case "polyline":

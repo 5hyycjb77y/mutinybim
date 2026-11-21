@@ -9,7 +9,7 @@ import { headlineKindValue, storedField } from "../kinds";
 import { elementKindTable } from "../registry/element-kind-point";
 import type { PlanGraphic } from "../registry/kind-row-faces";
 import { dashOf, graphicSegments, penOf, planGraphicsContext, planGraphicsOf } from "./plan-graphics";
-import { drawPartSymbol, drawRunFitting, drawRunSegment } from "./runs";
+import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, partPlanOutline } from "./runs";
 
 /** Paper-space drawing primitives, in millimetres, origin top-left, y down. */
 export type Pen = "thin" | "medium" | "wide" | "heavy";
@@ -302,6 +302,26 @@ export function buildSheetScene(model: ModelState, def: SheetDefinition): SheetS
   if (def.references?.length) drawReferences(prims, def, toPaper);
 
   const graphicsCtx = planGraphicsContext(model, { scale: def.scale, levelId: "", detail: "medium", drawing: "sheet" });
+  const takenPartBoxes = new PartLabelIndex(def.scale);
+  const wallPad = 0.6 * def.scale;
+  const partPad = 0.45 * def.scale;
+  for (const el of elementValues(model.elements)) {
+    if (el.kind === "wall") {
+      const half = el.thickness / 2 + wallPad;
+      takenPartBoxes.add({
+        min: { x: Math.min(el.start.x, el.end.x) - half, y: Math.min(el.start.y, el.end.y) - half },
+        max: { x: Math.max(el.start.x, el.end.x) + half, y: Math.max(el.start.y, el.end.y) + half },
+      });
+    } else if (el.kind === "part") {
+      const b = partPlanOutline(model, el, { detail: "medium", scale: def.scale }).bounds;
+      if (b) {
+        takenPartBoxes.add({
+          min: { x: b.min.x - partPad, y: b.min.y - partPad },
+          max: { x: b.max.x + partPad, y: b.max.y + partPad },
+        });
+      }
+    }
+  }
   for (const el of elementValues(model.elements)) {
     const graphics = planGraphicsOf(el, graphicsCtx);
     if (graphics) {
@@ -320,7 +340,11 @@ export function buildSheetScene(model: ModelState, def: SheetDefinition): SheetS
         drawRunFitting(model, el, line);
         break;
       case "part":
-        drawPartSymbol(model, el, line, (at, text, size) => prims.push({ kind: "text", at: toPaper(at), text, size, anchor: "middle" }));
+        drawPartSymbol(model, el, line, (at, text, size, anchor) => prims.push({ kind: "text", at: toPaper(at), text, size, anchor: anchor ?? "middle" }), null, "medium", {
+          scale: def.scale,
+          fill: (pts, grey) => prims.push({ kind: "fill", points: pts.map(toPaper), grey }),
+          takenBoxes: takenPartBoxes,
+        });
         break;
       default:
         break;

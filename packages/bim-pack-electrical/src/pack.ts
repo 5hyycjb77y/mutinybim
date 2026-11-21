@@ -9,7 +9,7 @@
  * `bim-pack` reads lint, and the lint rules read this package, so a runtime
  * import of `bim-pack` here would load this file half-initialised.
  */
-import { ELECTRICAL_COMPONENTS } from "./annotation/electrical-symbols";
+import { ELECTRICAL_COMPONENTS, ELECTRICAL_PLAN_SYMBOLS } from "./annotation/electrical-symbols";
 import { TAG_STYLE_PRESET_POINT, BLOCK_DEPENDENCY_POINT, BLOCK_HOP_POINT, SERVICE_HOP, type BlockDependencyDef, type BlockHopDef, catalogElementId, linkServing, loadAnchorOf, loadIndexOf, FORM_SCHEDULE_POINT, type BimElement, type ElementId, type PartInstance, SYMBOL_POINT, symbolOfComponent, COMMAND_POINT, type PackCommandDef, refuse, POSITION_POLICY_POINT, NETWORK_ADAPTER_POINT, CATALOG_ENTRY_POINT, CONNECTION_FIELD_POINT, DIAGRAM_LAYOUT_POINT, VIEW_GRAPHICS_POINT, LOAD_SECTION_POINT, type NetworkAdapterItem, DIAGRAM_GRAPH_POINT, type DiagramGraphDef, FIELD_PROVIDER_POINT, type FieldProviderRow, FIELD_RESOLVER_POINT, DEDICATED_SPACE_RULE, DERIVED_ZONE_RULE_POINT, type DerivedZoneRuleDef, BUILTIN_LIBRARY_VERSION, PART_TYPE_POINT, type BuiltinPartTypeRow } from "@permitzip/bim-kernel";
 import { distributionOf, electricalConnectorIds } from "./connections/systems";
 import { ELECTRICAL_CATALOG_ROWS, ELECTRICAL_CONNECTION_FIELDS, feederTypeScheduleRecords } from "./catalog";
@@ -206,7 +206,7 @@ export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(DESIGN_LIMIT_DEFAULT_POINT, ELECTRICAL_DESIGN_LIMIT_DEFAULTS),
   contribute(FIELD_PROVIDER_POINT, [FIELDS]),
   contribute(DIAGRAM_GRAPH_POINT, [ONE_LINE, RISER]),
-  contribute(SYMBOL_POINT, ELECTRICAL_COMPONENTS.map(symbolOfComponent)),
+  contribute(SYMBOL_POINT, [...ELECTRICAL_COMPONENTS.map(symbolOfComponent), ...ELECTRICAL_PLAN_SYMBOLS]),
   contribute(BLOCK_HOP_POINT, [SERVICE_HOP_ROW]),
   contribute(BLOCK_DEPENDENCY_POINT, [DISTRIBUTION_DEPS]),
   contribute(FORM_SCHEDULE_POINT, DISTRIBUTION_FORM_ROWS),

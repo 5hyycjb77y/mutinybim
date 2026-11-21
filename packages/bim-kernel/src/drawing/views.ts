@@ -55,7 +55,7 @@ import { drawDimension, drawTag, type AnnotationDrawContext } from "../annotatio
 import { PATTERN_DASH, categoryOf, drawDetailItem } from "../annotation/detailing";
 import type { SheetRevision } from "../documents";
 import type { RunFitting } from "../routing/types";
-import { drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, systemLine } from "./runs";
+import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, partPlanOutline, systemLine } from "./runs";
 import { INSULATION_DASH, insulationSectionCuts } from "./insulation";
 import { insulationHiddenInView } from "../view-categories";
 import { elementCategoryChain, elementLook, elementViewCategory } from "../categories/element";
@@ -604,7 +604,15 @@ function drawLoadPoints(model: ModelState, hostId: string, line: (a: Vec2, b: Ve
   }
 }
 
-function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewFrame, display: Display, shownParts: Map<string, PartInstance>): void {
+function drawPlan(
+  model: ModelState,
+  view: ViewElement,
+  p: Painter,
+  frame: ViewFrame,
+  display: Display,
+  shownParts: Map<string, PartInstance>,
+  takenPartBoxes: PartLabelIndex,
+): number {
   const ceiling = view.viewType === "ceiling_plan";
   const tagsShown = categoryLook(view, "tags").visible;
   // An element tagged in this view shows its tag, not the plan's own size label as well.
@@ -624,7 +632,52 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
     others.push(x.el);
   }
   const own = levelElements(model, view);
-  for (const el of others.length === 0 ? own : [...own, ...others]) {
+  const deferredParts: { readonly el: PartInstance; readonly tone: Tone; readonly planSymbol: boolean | null; readonly detail: DetailLevel; readonly projectionPen: (pen: Pen) => Pen; readonly elementDash: readonly number[] | undefined }[] = [];
+  const flushParts = (): number => {
+    const startIdx = deferredParts.length > 0 ? p.prims.length : -1;
+    for (const dp of deferredParts) {
+      drawPartSymbol(
+        model,
+        dp.el,
+        (a, b, pen, dash) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash),
+        (at, text, size, anchor) => textIn(p, at, text, size, anchor ?? "middle", dp.tone),
+        dp.planSymbol,
+        dp.detail,
+        {
+          scale: frame.scale,
+          showMark: tagsShown && !taggedHere.has(dp.el.id),
+          fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) }),
+          takenBoxes: takenPartBoxes,
+        },
+      );
+    }
+    return startIdx;
+  };
+  const candidates = others.length === 0 ? own : [...own, ...others];
+  // Pre-seed spatial index with walls and every visible part's symbol bounds so auto-placed marks never land on walls or neighboring symbols.
+  const wallPad = 0.6 * frame.scale;
+  const partPad = 0.45 * frame.scale;
+  for (const el of candidates) {
+    if (!nearWindow(p, el) || leftOutOfDisciplineView(view, el)) continue;
+    if (el.kind === "wall") {
+      const half = el.thickness / 2 + wallPad;
+      takenPartBoxes.add({
+        min: { x: Math.min(el.start.x, el.end.x) - half, y: Math.min(el.start.y, el.end.y) - half },
+        max: { x: Math.max(el.start.x, el.end.x) + half, y: Math.max(el.start.y, el.end.y) + half },
+      });
+    } else if (el.kind === "part") {
+      const look = elementLook(model, view, el);
+      if (!look.visible || !shownAs(el).visible) continue;
+      const b = partPlanOutline(model, el, { detail: look.detailLevel ?? display.detail, scale: frame.scale, planSymbol: look.planSymbol }).bounds;
+      if (b) {
+        takenPartBoxes.add({
+          min: { x: b.min.x - partPad, y: b.min.y - partPad },
+          max: { x: b.max.x + partPad, y: b.max.y + partPad },
+        });
+      }
+    }
+  }
+  for (const el of candidates) {
     if (!nearWindow(p, el)) continue;
     if (leftOutOfDisciplineView(view, el)) continue;
     const look = elementLook(model, view, el);
@@ -762,7 +815,7 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
       }
       case "part":
         if (el.planned !== undefined) break;
-        drawPartSymbol(model, el, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), look.planSymbol, look.detailLevel ?? display.detail);
+        deferredParts.push({ el, tone, planSymbol: look.planSymbol, detail: look.detailLevel ?? display.detail, projectionPen, elementDash });
         shownParts.set(el.id, el);
         break;
       case "ceiling":
@@ -784,7 +837,7 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
   if (!hidesEdges(style) && !fillsFaces(style)) {
     for (const l of pending) lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
     for (const t of pendingInline) emitInline(t);
-    return;
+    return flushParts();
   }
   const projector = planProjector(ceiling);
   const index = new FaceIndex(cellFor(p.min.x, p.min.y, p.max.x, p.max.y));
@@ -808,7 +861,7 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
     tones.set(el.id, shownAs(el).halftone ? "halftone" : toneFor(model, view, el));
   }
   if (fillsFaces(style)) fillFaces(p, faces, (o) => roles.get(o) ?? "mep", (o) => tones.get(o) ?? "ink");
-  if (!drawsEdges(style)) return;
+  if (!drawsEdges(style)) return flushParts();
   for (const l of pending) {
     if (!hidesEdges(style)) {
       lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
@@ -828,6 +881,7 @@ function drawPlan(model: ModelState, view: ViewElement, p: Painter, frame: ViewF
     const vis = splitHidden({ u: t.at.x - 0.5, v: t.at.y, near }, { u: t.at.x + 0.5, v: t.at.y, near }, index, () => near);
     if (vis.visible.length > 0) emitInline(t);
   }
+  return flushParts();
 }
 
 /**
@@ -919,17 +973,37 @@ function drawStoredOutline(el: BimElement, line: PlanLine): void {
   for (const [a, b] of graphicSegments({ form: "rect", center: position, size: box, pen: "thin" })) line(a, b, "thin");
 }
 
-/** Typicals' copies (their parts, in place) and the plan's circuit lines, home runs and switch legs, over the model. */
-function drawPlanConnections(model: ModelState, view: ViewElement, p: Painter, shownParts: Map<string, PartInstance>): void {
+/** Typicals' copies (their parts, in place) and the plan's view graphics: under-parts runs behind parts, over-parts annotations above them. */
+function drawPlanConnections(
+  model: ModelState,
+  view: ViewElement,
+  p: Painter,
+  display: Display,
+  shownParts: Map<string, PartInstance>,
+  takenPartBoxes: PartLabelIndex,
+  firstPartIdx: number,
+): void {
+  const tagsShown = categoryLook(view, "tags").visible;
   for (const copy of typicalCopiesOf(model, shownParts.values())) {
     const look = elementLook(model, view, copy);
     const tone = lookTone(look, disciplineTone(view, copy));
-    drawPartSymbol(model, copy, (a, b, pen) => lineIn(p, a, b, pen, tone), (at, text, size) => textIn(p, at, text, size, "middle", tone), look.planSymbol);
+    drawPartSymbol(model, copy, (a, b, pen) => lineIn(p, a, b, pen, tone), (at, text, size, anchor) => textIn(p, at, text, size, anchor ?? "middle", tone), look.planSymbol, display.detail, {
+      scale: p.scale,
+      showMark: tagsShown,
+      fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) }),
+      takenBoxes: takenPartBoxes,
+    });
   }
   const lo = p.toPaper({ x: p.min.x, y: p.max.y });
   const hi = p.toPaper({ x: p.max.x, y: p.min.y });
   const window = { min: { x: Math.min(lo.x, hi.x), y: Math.min(lo.y, hi.y) }, max: { x: Math.max(lo.x, hi.x), y: Math.max(lo.y, hi.y) } };
-  drawViewGraphics({ model, view, shown: shownParts, toPaper: p.toPaper, scale: p.scale, window, prims: p.prims });
+  const underPrims: Primitive[] = [];
+  drawViewGraphics({ model, view, shown: shownParts, toPaper: p.toPaper, scale: p.scale, detail: display.detail, window, prims: underPrims }, "under_parts");
+  if (underPrims.length > 0) {
+    const insertAt = firstPartIdx >= 0 ? firstPartIdx : p.prims.length;
+    p.prims.splice(insertAt, 0, ...underPrims);
+  }
+  drawViewGraphics({ model, view, shown: shownParts, toPaper: p.toPaper, scale: p.scale, detail: display.detail, window, prims: p.prims }, "over_parts");
 }
 
 /**
@@ -1526,8 +1600,9 @@ function drawViewBody(prims: Primitive[], tags: TagPlacement[], model: ModelStat
     case "floor_plan":
     case "ceiling_plan": {
       const shownParts = new Map<string, PartInstance>();
-      drawPlan(model, view, p, frame, display, shownParts);
-      drawPlanConnections(model, view, p, shownParts);
+      const takenPartBoxes = new PartLabelIndex(frame.scale);
+      const firstPartIdx = drawPlan(model, view, p, frame, display, shownParts, takenPartBoxes);
+      drawPlanConnections(model, view, p, display, shownParts, takenPartBoxes, firstPartIdx);
       const clipBounds = view.props?.cropView !== false ? { min: p.min, max: p.max } : undefined;
       for (const refView of planReferenceViews(model, view)) {
         if (refView.viewType === "elevation") drawElevationMark(model, refView, p.toPaper, p.prims, clipBounds);

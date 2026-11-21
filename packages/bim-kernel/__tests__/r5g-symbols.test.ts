@@ -8,7 +8,7 @@
  * `electrical-symbols.ts` / `detailing.ts`, and an unknown id was refused.
  */
 import { DEFAULT_SETTINGS, buildViewScene, builtinPartType, builtinRegistry, detailComponent, planCommit, type Command, type ModelState, type Primitive } from "../src";
-import { ELECTRICAL_COMPONENTS } from "@permitzip/bim-pack-electrical";
+import { ELECTRICAL_COMPONENTS, ELECTRICAL_PLAN_SYMBOLS } from "@permitzip/bim-pack-electrical";
 import {
   BUILTIN_SYMBOL_REGISTRY,
   activeSymbolRegistry,
@@ -47,7 +47,7 @@ const SMOKE: SymbolDef = {
 describe("r5g symbol registry", () => {
   it("every electrical one-line symbol is a row of the Electrical pack (round 6: the kernel's own registry is empty), and drafts as the same symbol object (byte-identical prints)", () => {
     expect(BUILTIN_SYMBOL_REGISTRY.rows).toEqual([]);
-    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual(ELECTRICAL_COMPONENTS.map((c) => c.id));
+    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual([...ELECTRICAL_COMPONENTS.map((c) => c.id), ...ELECTRICAL_PLAN_SYMBOLS.map((s) => s.id)]);
     for (const c of ELECTRICAL_COMPONENTS) {
       expect(detailComponent(c.id)).toBe(c);
       const row = symbolById(c.id);

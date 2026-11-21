@@ -1,6 +1,6 @@
 import { add, perp, scale, sub, unit } from "../geometry";
-import { partToWorld } from "../parts";
-import { placedSymbol } from "../part-placed";
+import { localBounds, partToWorld, type ResolvedSymbol } from "../parts";
+import { placedGeometry, placedSymbol } from "../part-placed";
 import { flexPlanLines } from "../routing/flex";
 import { FaceIndex, cellFor, planProjector, projectSolid, splitHidden } from "./projection";
 import { elementSolid } from "./solids";
@@ -27,9 +27,90 @@ import { partSymbolLines } from "../part-model/symbols";
  */
 
 export type LineFn = (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => void;
-export type TextFn = (at: Vec2, text: string, size: number) => void;
+export type TextFn = (at: Vec2, text: string, size: number, anchor?: "start" | "middle" | "end") => void;
 /** Emits a rotated inline label; returns true when it fit and was placed (so the caller cuts a gap in the line only when placed). */
 export type InlineTextFn = (at: Vec2, text: string, size: number, rotationDeg: number) => boolean;
+export type FillFn = (points: readonly Vec2[], grey: number) => void;
+
+/** A 2D axis-aligned box in model millimetres, used to keep plan labels clear of symbols and each other. */
+export interface PartLabelBox {
+  readonly min: Vec2;
+  readonly max: Vec2;
+}
+
+/** Spatial hash index for occupied label/symbol boxes — O(1) average lookup so large plans stay linear. */
+export class PartLabelIndex {
+  private readonly cellSize: number;
+  private readonly cells = new Map<string, PartLabelBox[]>();
+
+  constructor(viewScale = DEFAULT_SYMBOL_SCALE) {
+    this.cellSize = Math.max(20 * viewScale, 500);
+  }
+
+  private range(box: PartLabelBox): readonly [number, number, number, number] {
+    const cs = this.cellSize;
+    return [Math.floor(box.min.x / cs), Math.floor(box.max.x / cs), Math.floor(box.min.y / cs), Math.floor(box.max.y / cs)];
+  }
+
+  add(box: PartLabelBox): void {
+    const [x0, x1, y0, y1] = this.range(box);
+    // Guard against huge boxes (e.g. long perimeter walls) spanning hundreds of cells: clamp cell span.
+    const spanX = Math.min(x1 - x0, 64);
+    const spanY = Math.min(y1 - y0, 64);
+    for (let x = x0; x <= x0 + spanX; x++) {
+      for (let y = y0; y <= y0 + spanY; y++) {
+        const k = `${x},${y}`;
+        let list = this.cells.get(k);
+        if (!list) {
+          list = [];
+          this.cells.set(k, list);
+        }
+        list.push(box);
+      }
+    }
+  }
+
+  overlaps(box: PartLabelBox): boolean {
+    const [x0, x1, y0, y1] = this.range(box);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const list = this.cells.get(`${x},${y}`);
+        if (!list) continue;
+        for (const other of list) if (boxesOverlap(box, other)) return true;
+      }
+    }
+    return false;
+  }
+}
+
+export type PartLabelStore = PartLabelIndex | PartLabelBox[];
+
+function addLabelBox(store: PartLabelStore | undefined, box: PartLabelBox): void {
+  if (!store) return;
+  if (store instanceof PartLabelIndex) store.add(box);
+  else store.push(box);
+}
+
+function overlapsLabelStore(store: PartLabelStore, box: PartLabelBox): boolean {
+  if (store instanceof PartLabelIndex) return store.overlaps(box);
+  return store.some((t) => boxesOverlap(box, t));
+}
+
+/** One boundary piece of a placed part's plan representation, in model millimetres. */
+export type PlanOutline =
+  | { readonly kind: "seg"; readonly a: Vec2; readonly b: Vec2 }
+  | { readonly kind: "circle"; readonly c: Vec2; readonly r: number };
+
+export interface DrawPartSymbolOptions {
+  /** View scale (model mm per paper mm). Used to size paper-space symbols and smart label offsets. Default 48. */
+  readonly scale?: number;
+  /** Whether to draw the part's automatic mark. Set to false when a real tag is placed on the part or tags are hidden. Default true. */
+  readonly showMark?: boolean;
+  /** Filled polygon callback (grey 1 = opaque white mask, 0 = solid black fill). */
+  readonly fill?: FillFn;
+  /** Occupied label/symbol boxes in model mm so auto-placed marks avoid colliding with symbols and each other. */
+  readonly takenBoxes?: PartLabelStore;
+}
 
 export interface RunDrawOptions {
   /** Resolved detail level for this run (category override ?? view detailLevel). */
@@ -661,68 +742,456 @@ function drawPartModelPlan(model: ModelState, part: PartInstance, line: LineFn):
   }
 }
 
-/** A placed part's plan symbol from its type, in model coordinates. Modeled parts draw their model, their symbol or both. */
+const DEFAULT_SYMBOL_SCALE = 48;
+const MARK_SIZE_MM = 2.5;
+const CLEARANCE_TEXT_MM = 1.8;
+
+function circlePolygon(center: Vec2, r: number, steps = 20): Vec2[] {
+  return Array.from({ length: steps }, (_, i) => {
+    const a = (i / steps) * Math.PI * 2;
+    return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
+  });
+}
+
+function arcPolyline(center: Vec2, r: number, startDeg: number, sweepDeg: number): Vec2[] {
+  const steps = Math.max(2, Math.min(32, Math.ceil(Math.abs(sweepDeg) / 15)));
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const a = ((startDeg + (sweepDeg * i) / steps) * Math.PI) / 180;
+    return { x: center.x + r * Math.cos(a), y: center.y + r * Math.sin(a) };
+  });
+}
+
+function scaleLocalSymbol(s: ResolvedSymbol, viewScale: number): ResolvedSymbol {
+  if (s.units !== "paper") return s;
+  const k = viewScale;
+  const sc = (p: Vec2): Vec2 => ({ x: p.x * k, y: p.y * k });
+  switch (s.kind) {
+    case "rect":
+      return { ...s, center: sc(s.center), size: sc(s.size) };
+    case "circle":
+      return { ...s, center: sc(s.center), radius: s.radius * k };
+    case "arc":
+      return { ...s, center: sc(s.center), radius: s.radius * k };
+    case "line":
+      return { ...s, from: sc(s.from), to: sc(s.to) };
+    case "polyline":
+      return { ...s, points: s.points.map(sc) };
+    case "text":
+      return { ...s, at: sc(s.at) };
+  }
+}
+
+function lineEndpoints(s: Extract<ResolvedSymbol, { kind: "line" }>, w: (q: Vec2) => Vec2): readonly [Vec2, Vec2] {
+  if (!s.upright) return [w(s.from), w(s.to)];
+  const mid = w({ x: (s.from.x + s.to.x) / 2, y: (s.from.y + s.to.y) / 2 });
+  const hx = (s.to.x - s.from.x) / 2;
+  const hy = (s.to.y - s.from.y) / 2;
+  return [{ x: mid.x - hx, y: mid.y - hy }, { x: mid.x + hx, y: mid.y + hy }];
+}
+
+function resolvePartPlan(
+  model: ModelState,
+  part: PartInstance,
+  planSymbol: boolean | null,
+  detail: DetailLevel,
+  viewScale: number,
+): { readonly symbols: ResolvedSymbol[]; readonly planDisplay: "symbol" | "model" | "both"; readonly bodyOutline: PlanOutline[]; readonly bodyBounds: PartLabelBox | null } | null {
+  if (part.planned !== undefined) return null;
+  const type = model.elements[part.typeId];
+  if (type?.kind !== "part_type") return null;
+  const classSymbolId = elementSymbolId(model.elements, part);
+  const classSymbol = classSymbolId === null ? null : symbolById(classSymbolId);
+  const solidProgram = type.definition.model !== undefined && isPartModel2(type.definition.model);
+  const levelSymbol = !classSymbol && solidProgram ? partSymbolLines(type.definition, part.values, "plan", detail) : null;
+  const symbolSource = classSymbol ? [...classSymbol.primitives] : levelSymbol;
+  const rawSymbols = placedSymbol(symbolSource ? { ...type, definition: { ...type.definition, symbol: symbolSource } } : type, part);
+  // Keep only primitives matching the requested detail level (do not restore excluded primitives).
+  const ownSymbols = rawSymbols.filter((s) => !s.detailLevels || s.detailLevels.includes(detail)).map((s) => scaleLocalSymbol(s, viewScale));
+  const typeDisplay = solidProgram && !classSymbol && levelSymbol === null ? "model" : type.definition.model?.planDisplay;
+  const planDisplay = planDisplayFor(planSymbol, { typeDisplay, hasSymbol: ownSymbols.length > 0, hasBody: type.definition.model !== undefined });
+  const symbols = planDisplay === "model" ? [] : ownSymbols;
+  const bodyOutline: PlanOutline[] = [];
+  let bodyBounds: PartLabelBox | null = null;
+  if (planDisplay === "model" || planDisplay === "both" || symbols.length === 0) {
+    const geom = placedGeometry(type, part);
+    if (geom.length > 0) {
+      const w = (q: Vec2) => partToWorld(part, q);
+      const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const p of geom) {
+        if (p.kind === "cylinder" && p.axis === "z") {
+          const c = w({ x: p.center[0], y: p.center[1] });
+          bodyOutline.push({ kind: "circle", c, r: p.radius });
+          growBox(bb, { x: c.x - p.radius, y: c.y - p.radius });
+          growBox(bb, { x: c.x + p.radius, y: c.y + p.radius });
+        } else if (p.kind === "extrusion" && p.profile.length >= 3) {
+          const pts = p.profile.map(w);
+          for (let i = 0; i < pts.length; i++) {
+            const a = pts[i]!;
+            const b = pts[(i + 1) % pts.length]!;
+            bodyOutline.push({ kind: "seg", a, b });
+            growBox(bb, a);
+          }
+        } else {
+          const b = localBounds([p]);
+          if (Number.isFinite(b.min[0]) && Number.isFinite(b.max[0])) {
+            const corners = [
+              w({ x: b.min[0], y: b.min[1] }),
+              w({ x: b.max[0], y: b.min[1] }),
+              w({ x: b.max[0], y: b.max[1] }),
+              w({ x: b.min[0], y: b.max[1] }),
+            ];
+            for (let i = 0; i < 4; i++) {
+              bodyOutline.push({ kind: "seg", a: corners[i]!, b: corners[(i + 1) % 4]! });
+              growBox(bb, corners[i]!);
+            }
+          }
+        }
+      }
+      if (Number.isFinite(bb.minX)) bodyBounds = { min: { x: bb.minX, y: bb.minY }, max: { x: bb.maxX, y: bb.maxY } };
+    }
+  }
+  return { symbols, planDisplay, bodyOutline, bodyBounds };
+}
+
+function growBox(box: { minX: number; minY: number; maxX: number; maxY: number }, p: Vec2): void {
+  if (p.x < box.minX) box.minX = p.x;
+  if (p.y < box.minY) box.minY = p.y;
+  if (p.x > box.maxX) box.maxX = p.x;
+  if (p.y > box.maxY) box.maxY = p.y;
+}
+
+function boxesOverlap(a: PartLabelBox, b: PartLabelBox): boolean {
+  return a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y;
+}
+
+function worldTextBox(at: Vec2, text: string, sizeMm: number, viewScale: number, anchor: "start" | "middle" | "end" = "middle"): PartLabelBox {
+  const h = sizeMm * viewScale;
+  const w = Math.max(h * 0.75, text.length * sizeMm * 0.74 * viewScale);
+  const padX = 1.2 * viewScale;
+  const padY = 0.55 * viewScale;
+  const minX = anchor === "start" ? at.x : anchor === "end" ? at.x - w : at.x - w / 2;
+  return {
+    min: { x: minX - padX, y: at.y - h / 2 - padY },
+    max: { x: minX + w + padX, y: at.y + h / 2 + padY },
+  };
+}
+
+/**
+ * The exact plan boundary (world-mm segments and circles) and bounding box of
+ * what a plan draws for `part` at `detail` and `scale`. Shared by symbol
+ * drawing, view-graphics line trimming, and label/tag collision avoidance.
+ */
+export function partPlanOutline(
+  model: ModelState,
+  part: PartInstance,
+  opts: { readonly detail?: DetailLevel; readonly scale?: number; readonly planSymbol?: boolean | null } = {},
+): { readonly outline: PlanOutline[]; readonly bounds: PartLabelBox | null } {
+  const viewScale = opts.scale ?? DEFAULT_SYMBOL_SCALE;
+  const resolved = resolvePartPlan(model, part, opts.planSymbol ?? null, opts.detail ?? "medium", viewScale);
+  if (!resolved) return { outline: [], bounds: null };
+  const w = (q: Vec2) => partToWorld(part, q);
+  const outline: PlanOutline[] = [];
+  const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const addRect = (c: Vec2, hx: number, hy: number) => {
+    const corners = [w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })];
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i] ?? c;
+      const b = corners[(i + 1) % 4] ?? c;
+      outline.push({ kind: "seg", a, b });
+      growBox(bb, a);
+    }
+  };
+  for (const s of resolved.symbols) {
+    switch (s.kind) {
+      case "rect":
+        addRect(s.center, s.size.x / 2, s.size.y / 2);
+        break;
+      case "circle": {
+        const c = w(s.center);
+        outline.push({ kind: "circle", c, r: s.radius });
+        growBox(bb, { x: c.x - s.radius, y: c.y - s.radius });
+        growBox(bb, { x: c.x + s.radius, y: c.y + s.radius });
+        break;
+      }
+      case "arc": {
+        const pts = arcPolyline(s.center, s.radius, s.startDeg, s.sweepDeg).map(w);
+        for (let i = 0; i + 1 < pts.length; i++) {
+          outline.push({ kind: "seg", a: pts[i]!, b: pts[i + 1]! });
+          growBox(bb, pts[i]!);
+          growBox(bb, pts[i + 1]!);
+        }
+        break;
+      }
+      case "line": {
+        const [a, b] = lineEndpoints(s, w);
+        outline.push({ kind: "seg", a, b });
+        growBox(bb, a);
+        growBox(bb, b);
+        break;
+      }
+      case "polyline": {
+        const pts = s.points.map(w);
+        for (let i = 0; i + 1 < pts.length; i++) {
+          outline.push({ kind: "seg", a: pts[i]!, b: pts[i + 1]! });
+          growBox(bb, pts[i]!);
+          growBox(bb, pts[i + 1]!);
+        }
+        if (s.closed && pts.length > 2) outline.push({ kind: "seg", a: pts[pts.length - 1]!, b: pts[0]! });
+        break;
+      }
+      case "text": {
+        // Text primitives are labels, not hard symbol geometry; include only when no geometric outline exists.
+        break;
+      }
+    }
+  }
+  if (resolved.bodyOutline.length > 0 && (resolved.planDisplay === "model" || resolved.planDisplay === "both" || outline.length === 0)) {
+    outline.push(...resolved.bodyOutline);
+    if (resolved.bodyBounds) {
+      growBox(bb, resolved.bodyBounds.min);
+      growBox(bb, resolved.bodyBounds.max);
+    }
+  }
+  if (outline.length === 0) {
+    for (const s of resolved.symbols) {
+      if (s.kind !== "text") continue;
+      const half = 0.6 * (s.units === "paper" ? s.heightMm : 2) * viewScale;
+      addRect(s.at, half, half);
+    }
+  }
+  const bounds: PartLabelBox | null = Number.isFinite(bb.minX) ? { min: { x: bb.minX, y: bb.minY }, max: { x: bb.maxX, y: bb.maxY } } : null;
+  return { outline, bounds };
+}
+
+/** Pick a collision-free world-mm position for a part's default mark outside its symbol bounds. */
+function placePartMark(
+  part: PartInstance,
+  mark: string,
+  bounds: PartLabelBox | null,
+  viewScale: number,
+  taken: PartLabelStore | undefined,
+  hasCenterText: boolean,
+): Vec2 {
+  const textH = MARK_SIZE_MM * viewScale;
+  const textW = Math.max(textH * 0.75, mark.length * MARK_SIZE_MM * 0.72 * viewScale);
+  const gap = 1.8 * viewScale;
+  const box = bounds ?? { min: { x: part.position.x - 1.5 * viewScale, y: part.position.y - 1.5 * viewScale }, max: { x: part.position.x + 1.5 * viewScale, y: part.position.y + 1.5 * viewScale } };
+  const cx = (box.min.x + box.max.x) / 2;
+  const cy = (box.min.y + box.max.y) / 2;
+  const bw = box.max.x - box.min.x;
+  const bh = box.max.y - box.min.y;
+  // Large parts with empty interior (e.g. wide boxes) can keep their mark centered when clear.
+  const canCenter = !hasCenterText && bw >= textW * 1.6 && bh >= textH * 2.2;
+  const candidates: Vec2[] = [];
+  if (canCenter) candidates.push({ x: cx, y: cy });
+  // Prefer the room-facing side (+Y in part local coordinates) first so wall-mounted devices never stamp marks onto their host wall.
+  const normal = sub(partToWorld(part, { x: 0, y: 1 }), part.position);
+  const nLen = Math.hypot(normal.x, normal.y) || 1;
+  const nx = normal.x / nLen;
+  const ny = normal.y / nLen;
+  for (const ring of [1, 2.1, 3.2]) {
+    const dx = textW / 2 + gap * ring;
+    const dy = textH / 2 + gap * ring;
+    const roomSide: Vec2 = {
+      x: cx + nx * (bw / 2 + dx) + (Math.abs(nx) < 0.2 ? 0 : 0),
+      y: cy + ny * (bh / 2 + dy),
+    };
+    const roomDiagR: Vec2 = {
+      x: roomSide.x + (Math.abs(ny) > 0.5 ? dx * 0.7 : 0),
+      y: roomSide.y + (Math.abs(nx) > 0.5 ? dy * 0.8 : 0),
+    };
+    const roomDiagL: Vec2 = {
+      x: roomSide.x - (Math.abs(ny) > 0.5 ? dx * 0.7 : 0),
+      y: roomSide.y - (Math.abs(nx) > 0.5 ? dy * 0.8 : 0),
+    };
+    candidates.push(
+      roomSide,
+      roomDiagR,
+      roomDiagL,
+      { x: box.max.x + dx * 0.85, y: box.max.y + dy * 0.75 }, // top-right
+      { x: cx, y: box.max.y + dy }, // top
+      { x: box.max.x + dx, y: cy }, // right
+      { x: cx, y: box.min.y - dy }, // bottom
+      { x: box.min.x - dx, y: cy }, // left
+      { x: box.max.x + dx * 0.85, y: box.min.y - dy * 0.75 }, // bottom-right
+      { x: box.min.x - dx * 0.85, y: box.max.y + dy * 0.75 }, // top-left
+      { x: box.min.x - dx * 0.85, y: box.min.y - dy * 0.75 }, // bottom-left
+    );
+  }
+  if (!taken) return candidates[0] ?? part.position;
+  for (const at of candidates) {
+    const tb = worldTextBox(at, mark, MARK_SIZE_MM, viewScale);
+    if (!overlapsLabelStore(taken, tb)) {
+      addLabelBox(taken, tb);
+      return at;
+    }
+  }
+  const fallback = candidates[0] ?? part.position;
+  addLabelBox(taken, worldTextBox(fallback, mark, MARK_SIZE_MM, viewScale));
+  return fallback;
+}
+
 /**
  * A placed part in a plan: its plan symbol, its 3D body seen from above, or
  * both, as its type says unless the view's category says symbol or body
  * (`planSymbol`, from `categories/resolve.ts`; null keeps the type's).
  */
-export function drawPartSymbol(model: ModelState, part: PartInstance, line: LineFn, text: TextFn, planSymbol: boolean | null = null, detail: DetailLevel = "medium"): void {
-  // Not placed yet: it has no location to draw at (placement/planned-index.ts reports it instead).
-  if (part.planned !== undefined) return;
-  const type = model.elements[part.typeId];
-  if (type?.kind !== "part_type") return;
+export function drawPartSymbol(
+  model: ModelState,
+  part: PartInstance,
+  line: LineFn,
+  text: TextFn,
+  planSymbol: boolean | null = null,
+  detail: DetailLevel = "medium",
+  opts: DrawPartSymbolOptions = {},
+): void {
+  const viewScale = opts.scale ?? DEFAULT_SYMBOL_SCALE;
+  const resolved = resolvePartPlan(model, part, planSymbol, detail, viewScale);
+  if (!resolved) return;
   const w = (q: Vec2) => partToWorld(part, q);
-  // A class that names a symbol (a firm's smoke detector) draws that row in place of the type's own lines.
-  const classSymbolId = elementSymbolId(model.elements, part);
-  const classSymbol = classSymbolId === null ? null : symbolById(classSymbolId);
-  // A solid-program part draws its symbol for this detail level; at a level with none, the solid seen from above.
-  const solidProgram = type.definition.model !== undefined && isPartModel2(type.definition.model);
-  const levelSymbol = !classSymbol && solidProgram ? partSymbolLines(type.definition, part.values, "plan", detail) : null;
-  const symbolSource = classSymbol ? [...classSymbol.primitives] : levelSymbol;
-  const ownSymbols = placedSymbol(symbolSource ? { ...type, definition: { ...type.definition, symbol: symbolSource } } : type, part);
-  const typeDisplay = solidProgram && !classSymbol && levelSymbol === null ? "model" : type.definition.model?.planDisplay;
-  const planDisplay = planDisplayFor(planSymbol, { typeDisplay, hasSymbol: ownSymbols.length > 0, hasBody: type.definition.model !== undefined });
-  if (planDisplay === "model" || planDisplay === "both") drawPartModelPlan(model, part, line);
-  const symbols = planDisplay === "model" ? [] : ownSymbols;
+  if (resolved.planDisplay === "model" || resolved.planDisplay === "both") drawPartModelPlan(model, part, line);
+  const symbols = resolved.symbols;
+  const fill = opts.fill;
+  const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  let hasCenterText = false;
+
+  // Pass 1: opaque white masks first so background linework and under-parts runs never bleed through.
+  if (fill) {
+    for (const s of symbols) {
+      if (s.kind === "rect" && s.fill === "mask") {
+        const hx = s.size.x / 2;
+        const hy = s.size.y / 2;
+        const c = s.center;
+        fill([w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })], 1);
+      } else if (s.kind === "circle" && s.fill === "mask") {
+        fill(circlePolygon(w(s.center), s.radius), 1);
+      } else if (s.kind === "polyline" && s.closed && s.fill === "mask" && s.points.length >= 3) {
+        fill(s.points.map(w), 1);
+      }
+    }
+    // Pass 2: solid black fills (half-filled indicators, shaded symbols).
+    for (const s of symbols) {
+      if (s.kind === "rect" && s.fill === "solid") {
+        const hx = s.size.x / 2;
+        const hy = s.size.y / 2;
+        const c = s.center;
+        fill([w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })], 0);
+      } else if (s.kind === "circle" && s.fill === "solid") {
+        fill(circlePolygon(w(s.center), s.radius), 0);
+      } else if (s.kind === "polyline" && s.closed && s.fill === "solid" && s.points.length >= 3) {
+        fill(s.points.map(w), 0);
+      }
+    }
+  }
+
+  // Pass 3: symbol strokes and embedded text.
   for (const s of symbols) {
     switch (s.kind) {
       case "rect": {
         const hx = s.size.x / 2;
         const hy = s.size.y / 2;
         const c = s.center;
+        const pen = s.pen ?? "medium";
         const corners = [w({ x: c.x - hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y - hy }), w({ x: c.x + hx, y: c.y + hy }), w({ x: c.x - hx, y: c.y + hy })];
-        for (let i = 0; i < 4; i++) line(corners[i] ?? c, corners[(i + 1) % 4] ?? c, "medium");
+        for (let i = 0; i < 4; i++) {
+          const a = corners[i] ?? c;
+          const b = corners[(i + 1) % 4] ?? c;
+          line(a, b, pen);
+          growBox(bb, a);
+        }
         break;
       }
-      case "circle":
-        circle(w(s.center), s.radius, line, "medium");
+      case "circle": {
+        const c = w(s.center);
+        circle(c, s.radius, line, s.pen ?? "medium");
+        growBox(bb, { x: c.x - s.radius, y: c.y - s.radius });
+        growBox(bb, { x: c.x + s.radius, y: c.y + s.radius });
         break;
-      case "line":
-        line(w(s.from), w(s.to), "thin");
+      }
+      case "arc": {
+        const pts = arcPolyline(s.center, s.radius, s.startDeg, s.sweepDeg).map(w);
+        const pen = s.pen ?? "medium";
+        for (let i = 0; i + 1 < pts.length; i++) {
+          line(pts[i]!, pts[i + 1]!, pen);
+          growBox(bb, pts[i]!);
+          growBox(bb, pts[i + 1]!);
+        }
         break;
-      case "polyline":
-        for (let i = 0; i + 1 < s.points.length; i++) line(w(s.points[i] ?? s.points[0] ?? part.position), w(s.points[i + 1] ?? part.position), "medium");
-        if (s.closed && s.points.length > 2) line(w(s.points[s.points.length - 1] ?? part.position), w(s.points[0] ?? part.position), "medium");
+      }
+      case "line": {
+        const [a, b] = lineEndpoints(s, w);
+        line(a, b, s.pen ?? "thin");
+        growBox(bb, a);
+        growBox(bb, b);
         break;
-      case "text":
-        text(w(s.at), s.text, 2);
+      }
+      case "polyline": {
+        const pts = s.points.map(w);
+        const pen = s.pen ?? "medium";
+        for (let i = 0; i + 1 < pts.length; i++) {
+          line(pts[i]!, pts[i + 1]!, pen);
+          growBox(bb, pts[i]!);
+          growBox(bb, pts[i + 1]!);
+        }
+        if (s.closed && pts.length > 2) line(pts[pts.length - 1]!, pts[0]!, pen);
         break;
+      }
+      case "text": {
+        const baseAt = w(s.at);
+        const uScale = s.units === "paper" ? viewScale : 1;
+        const rawAt = s.uprightOffset ? { x: baseAt.x + s.uprightOffset[0] * uScale, y: baseAt.y + s.uprightOffset[1] * uScale } : baseAt;
+        const sizeMm = s.units === "paper" ? s.heightMm : 2;
+        // SVG/PDF text `y` is the baseline; shift down by 0.35em (negative world Y) so centered glyphs ("S", "J", "OS") sit dead-center.
+        const at = { x: rawAt.x, y: rawAt.y - sizeMm * 0.35 * viewScale };
+        text(at, s.text, sizeMm, s.anchor);
+        const tb = worldTextBox(rawAt, s.text, sizeMm, viewScale, s.anchor ?? "middle");
+        growBox(bb, tb.min);
+        growBox(bb, tb.max);
+        addLabelBox(opts.takenBoxes, tb);
+        if (Math.hypot(s.at.x, s.at.y) < 1e-3) hasCenterText = true;
+        break;
+      }
     }
   }
-  if (part.mark) text(part.position, part.mark, 2.5);
-  drawPartClearances(model, part, line, text);
+  if (!Number.isFinite(bb.minX) && resolved.bodyBounds) {
+    growBox(bb, resolved.bodyBounds.min);
+    growBox(bb, resolved.bodyBounds.max);
+  }
+  const symbolBox: PartLabelBox | null = Number.isFinite(bb.minX) ? { min: { x: bb.minX, y: bb.minY }, max: { x: bb.maxX, y: bb.maxY } } : null;
+  if (symbolBox) addLabelBox(opts.takenBoxes, symbolBox);
+  if (part.mark && opts.showMark !== false) {
+    const markAt = placePartMark(part, part.mark, symbolBox, viewScale, opts.takenBoxes, hasCenterText);
+    // Center the mark vertically on markAt (SVG/PDF text y is baseline).
+    text({ x: markAt.x, y: markAt.y - MARK_SIZE_MM * 0.35 * viewScale }, part.mark, MARK_SIZE_MM, "middle");
+  }
+  drawPartClearances(model, part, line, text, viewScale, opts.takenBoxes);
 }
 
 /** Clearance zones draw dashed (paper mm), never as part of the part's body. */
 export const CLEARANCE_DASH: readonly number[] = [3, 1.5];
 
-/** A placed part's clearance zones in plan: a dashed outline each, named inside. */
-export function drawPartClearances(model: ModelState, part: PartInstance, line: LineFn, text: TextFn): void {
+/** A placed part's clearance zones in plan: a dashed outline each, named cleanly away from the part mark. */
+export function drawPartClearances(model: ModelState, part: PartInstance, line: LineFn, text: TextFn, viewScale = DEFAULT_SYMBOL_SCALE, takenBoxes?: PartLabelStore): void {
   for (const z of partClearances(model, part)) {
     const c = z.corners;
     for (let i = 0; i < 4; i++) line(c[i] ?? c[0], c[(i + 1) % 4] ?? c[0], "thin", [...CLEARANCE_DASH]);
-    text({ x: (c[0].x + c[2].x) / 2, y: (c[0].y + c[2].y) / 2 }, z.name.toUpperCase(), 1.8);
+    const label = z.name.toUpperCase();
+    const mid: Vec2 = { x: (c[0].x + c[2].x) / 2, y: (c[0].y + c[2].y) / 2 };
+    // Push the clearance label toward the outer side of the zone (away from the part origin) if the center collides.
+    const outDir = sub(mid, part.position);
+    const outLen = Math.hypot(outDir.x, outDir.y);
+    const candidates: Vec2[] = [mid];
+    if (outLen > 1) {
+      const u = scale(outDir, 1 / outLen);
+      candidates.push(add(mid, scale(u, outLen * 0.45)), add(mid, scale(u, outLen * 0.85)));
+    }
+    let at = mid;
+    if (takenBoxes) {
+      const clear = candidates.find((p) => !overlapsLabelStore(takenBoxes, worldTextBox(p, label, CLEARANCE_TEXT_MM, viewScale)));
+      at = clear ?? candidates[candidates.length - 1] ?? mid;
+      addLabelBox(takenBoxes, worldTextBox(at, label, CLEARANCE_TEXT_MM, viewScale));
+    }
+    text(at, label, CLEARANCE_TEXT_MM, "middle");
   }
 }
 

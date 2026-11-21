@@ -382,10 +382,17 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "PartBuilder.symbol",
-    summary: "Lines plans draw instead of the solid at some detail levels (a coarse rectangle with an X; fine falls back to the solid seen from above).",
-    signature: "symbol(levels: DetailLevel | DetailLevel[], draw: { shapes?: Profile[]; lines?: [[Length, Length], [Length, Length]][] }, view?: \"plan\" | \"below\"): PartBuilder",
-    example: part(`${BOX}\n    b.symbol("coarse", { shapes: [parts.rect(v.width, units.in(12))], lines: [[[units.in(-12), units.in(-6)], [units.in(12), units.in(6)]]] });\n    ctx.parts.define("acme.box.24", b.build());`),
-    topics: ["symbol", "plan symbol", "detail level", "coarse", "fine", "drafting"],
+    summary: "Plan symbol drawn instead of the solid at chosen detail levels: shapes, lines, texts, optional paper-space scaling (`units: \"paper\"`), opaque white mask (`mask: true`), solid black fill (`filled: true`), and pen weight. Levels without a symbol fall back to the solid seen from above.",
+    signature: "symbol(levels: DetailLevel | DetailLevel[], draw: { shapes?: Profile[]; lines?: [[Length, Length], [Length, Length]][]; texts?: { at: [Length, Length]; text: string; heightMm?: number; anchor?: \"start\" | \"middle\" | \"end\" }[]; units?: \"model\" | \"paper\"; pen?: \"thin\" | \"medium\" | \"wide\" | \"heavy\"; filled?: boolean; mask?: boolean }, view?: \"plan\" | \"below\"): PartBuilder",
+    example: part(`${BOX}\n    b.symbol(["coarse", "medium"], { units: "paper", mask: true, shapes: [parts.circle(units.mm(3.2))], lines: [[[units.mm(-0.65), units.mm(-2.5)], [units.mm(-0.65), units.mm(1.45)]], [[units.mm(0.65), units.mm(-2.5)], [units.mm(0.65), units.mm(1.45)]]], texts: [{ at: [units.mm(2.2), units.mm(1.7)], text: "WP", heightMm: 1.7, anchor: "start" }] });\n    ctx.parts.define("acme.wp_receptacle", b.build());`),
+    topics: ["symbol", "plan symbol", "custom symbol", "paper scale", "mask", "fill", "detail level", "coarse", "fine", "drafting"],
+  },
+  {
+    name: "PartBuilder.symbolRef",
+    summary: "Attach a registered plan symbol from SYMBOL_POINT (e.g. electrical.plan_duplex, electrical.plan_gfci, electrical.plan_switch, electrical.plan_occ_sensor, electrical.plan_downlight_em) at chosen detail levels.",
+    signature: "symbolRef(levels: DetailLevel | DetailLevel[], symbolId: string, view?: \"plan\" | \"below\"): PartBuilder",
+    example: part(`${BOX}\n    b.symbolRef(["coarse", "medium", "fine"], "electrical.plan_gfci");\n    ctx.parts.define("acme.gfci_custom", b.build());`),
+    topics: ["symbol", "symbolRef", "electrical symbol", "plan symbol", "receptacle", "switch", "detail level"],
   },
   {
     name: "PartBuilder.clearance",
@@ -613,6 +620,20 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "tag(ctx: ScriptContext, spec: { view: string; element: string; at: { x: Measure; y: Measure }; template?: TagTemplate; fields?: readonly string[]; leader?: boolean; id?: string }): string",
     example: layout(`${WALLS}\n${PLAN}\n    documents.tag(ctx, { view: plan, element: walls.element(1), at: { x: units.ft(10), y: units.ft(-3) } });`),
     topics: ["tag", "tags", "label", "mark", "annotate"],
+  },
+  {
+    name: "documents.moveTag",
+    summary: "Moves an existing tag in a plan view to a clear position (and optionally toggles its leader).",
+    signature: "moveTag(ctx: ScriptContext, tagId: string, at: { x: Measure; y: Measure }, opts?: { leader?: boolean }): void",
+    example: layout(`${WALLS}\n${PLAN}\n    const t = documents.tag(ctx, { view: plan, element: walls.element(1), at: { x: units.ft(10), y: units.ft(-3) } });\n    documents.moveTag(ctx, t, { x: units.ft(12), y: units.ft(-4) }, { leader: true });`),
+    topics: ["move tag", "tag", "label", "overlap", "legibility"],
+  },
+  {
+    name: "documents.planLabels",
+    summary: "Returns every rendered text label on a plan view (paper mm coordinates and bounding boxes) plus any overlapping pairs, so scripts can verify legibility and move colliding tags.",
+    signature: "planLabels(ctx: ScriptContext, viewRef: string): { viewId: string; scale: number; labels: { text: string; at: { xMm: number; yMm: number }; sizeMm: number; anchor: string; box: { minX: number; minY: number; maxX: number; maxY: number } }[]; overlaps: { a: string; b: string; overlapAreaMm2: number }[] }",
+    example: layout(`${WALLS}\n${PLAN}\n    const report = documents.planLabels(ctx, plan);\n    ctx.label(\`\${report.labels.length} labels, \${report.overlaps.length} overlaps\`);`),
+    topics: ["plan labels", "overlaps", "legibility", "tags", "inspect", "qa"],
   },
   {
     name: "documents.dimension",

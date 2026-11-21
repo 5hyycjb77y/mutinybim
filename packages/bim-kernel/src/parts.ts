@@ -209,12 +209,35 @@ export const primitiveSchema = z.discriminatedUnion("kind", [
 ]);
 export type PartPrimitive = z.infer<typeof primitiveSchema>;
 
+const symbolUnitsSchema = z.enum(["model", "paper"]);
+const symbolPenSchema = z.enum(["thin", "medium", "wide", "heavy"]);
+const symbolFillSchema = z.enum(["solid", "mask"]);
+const symbolDetailLevelsSchema = z.array(z.enum(["coarse", "medium", "fine"])).min(1).max(3);
+const symbolCommonShape = {
+  /** Coordinate units: "model" (default, mm in model space) or "paper" (annotative mm on paper, scaled by view scale). */
+  units: symbolUnitsSchema.optional(),
+  pen: symbolPenSchema.optional(),
+  detailLevels: symbolDetailLevelsSchema.optional(),
+  /** Keep glyph strokes upright (world-aligned) even when the part is rotated on a wall. */
+  upright: z.boolean().optional(),
+};
+
 export const symbolSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("rect"), center: dim2Schema, size: dim2Schema }),
-  z.object({ kind: z.literal("circle"), center: dim2Schema, radius: dimSchema }),
-  z.object({ kind: z.literal("line"), from: dim2Schema, to: dim2Schema }),
-  z.object({ kind: z.literal("polyline"), points: z.array(dim2Schema).min(2).max(64), closed: z.boolean() }),
-  z.object({ kind: z.literal("text"), at: dim2Schema, text: z.string().min(1).max(40), heightMm: z.number().positive().max(1000) }),
+  z.object({ kind: z.literal("rect"), center: dim2Schema, size: dim2Schema, fill: symbolFillSchema.optional(), ...symbolCommonShape }),
+  z.object({ kind: z.literal("circle"), center: dim2Schema, radius: dimSchema, fill: symbolFillSchema.optional(), ...symbolCommonShape }),
+  z.object({ kind: z.literal("arc"), center: dim2Schema, radius: dimSchema, startDeg: z.number().finite(), sweepDeg: z.number().finite(), ...symbolCommonShape }),
+  z.object({ kind: z.literal("line"), from: dim2Schema, to: dim2Schema, ...symbolCommonShape }),
+  z.object({ kind: z.literal("polyline"), points: z.array(dim2Schema).min(2).max(64), closed: z.boolean(), fill: symbolFillSchema.optional(), ...symbolCommonShape }),
+  z.object({
+    kind: z.literal("text"),
+    at: dim2Schema,
+    text: z.string().min(1).max(40),
+    heightMm: z.number().positive().max(1000),
+    anchor: z.enum(["start", "middle", "end"]).optional(),
+    /** Upright (unrotated) world/paper offset added after placing `at` — keeps switch subscripts ("3", "D") cleanly to the lower-right of "$" on any wall rotation. */
+    uprightOffset: z.tuple([z.number().finite(), z.number().finite()]).optional(),
+    ...symbolCommonShape,
+  }),
 ]);
 export type SymbolPrimitive = z.infer<typeof symbolSchema>;
 
@@ -393,7 +416,7 @@ function referencedParams(def: PartTypeDefinition): Set<string> {
   }
   for (const s of def.symbol) {
     if (s.kind === "rect") each([...s.center, ...s.size]);
-    else if (s.kind === "circle") each([...s.center, s.radius]);
+    else if (s.kind === "circle" || s.kind === "arc") each([...s.center, s.radius]);
     else if (s.kind === "line") each([...s.from, ...s.to]);
     else if (s.kind === "polyline") each(s.points.flat());
     else each(s.at);
@@ -695,12 +718,24 @@ export type ResolvedPrimitive =
   | { readonly kind: "cylinder"; readonly center: Vec3; readonly radius: number; readonly height: number; readonly axis: "x" | "y" | "z" }
   | { readonly kind: "extrusion"; readonly profile: readonly Vec2[]; readonly z: number; readonly height: number };
 
+export type SymbolUnits = "model" | "paper";
+export type SymbolPen = "thin" | "medium" | "wide" | "heavy";
+export type SymbolFill = "solid" | "mask";
+
+interface ResolvedSymbolCommon {
+  readonly units?: SymbolUnits;
+  readonly pen?: SymbolPen;
+  readonly detailLevels?: readonly ("coarse" | "medium" | "fine")[];
+  readonly upright?: boolean;
+}
+
 export type ResolvedSymbol =
-  | { readonly kind: "rect"; readonly center: Vec2; readonly size: Vec2 }
-  | { readonly kind: "circle"; readonly center: Vec2; readonly radius: number }
-  | { readonly kind: "line"; readonly from: Vec2; readonly to: Vec2 }
-  | { readonly kind: "polyline"; readonly points: readonly Vec2[]; readonly closed: boolean }
-  | { readonly kind: "text"; readonly at: Vec2; readonly text: string; readonly heightMm: number };
+  | ({ readonly kind: "rect"; readonly center: Vec2; readonly size: Vec2; readonly fill?: SymbolFill } & ResolvedSymbolCommon)
+  | ({ readonly kind: "circle"; readonly center: Vec2; readonly radius: number; readonly fill?: SymbolFill } & ResolvedSymbolCommon)
+  | ({ readonly kind: "arc"; readonly center: Vec2; readonly radius: number; readonly startDeg: number; readonly sweepDeg: number } & ResolvedSymbolCommon)
+  | ({ readonly kind: "line"; readonly from: Vec2; readonly to: Vec2 } & ResolvedSymbolCommon)
+  | ({ readonly kind: "polyline"; readonly points: readonly Vec2[]; readonly closed: boolean; readonly fill?: SymbolFill } & ResolvedSymbolCommon)
+  | ({ readonly kind: "text"; readonly at: Vec2; readonly text: string; readonly heightMm: number; readonly anchor?: "start" | "middle" | "end"; readonly uprightOffset?: readonly [number, number] } & ResolvedSymbolCommon);
 
 export interface ResolvedConnector {
   readonly id: string;
@@ -753,17 +788,25 @@ export function resolveSymbol(def: PartTypeDefinition, values: Readonly<Record<s
   const r = (d: Dim) => resolveDim(def, values, d);
   const v2 = (t: readonly [Dim, Dim]): Vec2 => ({ x: r(t[0]), y: r(t[1]) });
   return def.symbol.map((s): ResolvedSymbol => {
+    const common: ResolvedSymbolCommon = {
+      ...(s.units !== undefined ? { units: s.units } : {}),
+      ...(s.pen !== undefined ? { pen: s.pen } : {}),
+      ...(s.detailLevels !== undefined ? { detailLevels: s.detailLevels } : {}),
+      ...(s.upright ? { upright: true } : {}),
+    };
     switch (s.kind) {
       case "rect":
-        return { kind: "rect", center: v2(s.center), size: v2(s.size) };
+        return { kind: "rect", center: v2(s.center), size: v2(s.size), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
       case "circle":
-        return { kind: "circle", center: v2(s.center), radius: r(s.radius) };
+        return { kind: "circle", center: v2(s.center), radius: r(s.radius), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
+      case "arc":
+        return { kind: "arc", center: v2(s.center), radius: r(s.radius), startDeg: s.startDeg, sweepDeg: s.sweepDeg, ...common };
       case "line":
-        return { kind: "line", from: v2(s.from), to: v2(s.to) };
+        return { kind: "line", from: v2(s.from), to: v2(s.to), ...common };
       case "polyline":
-        return { kind: "polyline", points: s.points.map(v2), closed: s.closed };
+        return { kind: "polyline", points: s.points.map(v2), closed: s.closed, ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
       case "text":
-        return { kind: "text", at: v2(s.at), text: s.text, heightMm: s.heightMm };
+        return { kind: "text", at: v2(s.at), text: s.text, heightMm: s.heightMm, ...(s.anchor !== undefined ? { anchor: s.anchor } : {}), ...(s.uprightOffset !== undefined ? { uprightOffset: s.uprightOffset } : {}), ...common };
     }
   });
 }

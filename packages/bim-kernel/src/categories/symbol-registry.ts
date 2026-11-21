@@ -145,6 +145,17 @@ const PLAN_TO_PRIMS: { readonly [K in SymbolPrimitive["kind"]]: (p: Extract<Symb
     return [{ k: "line", pts: [to(cx - hx, cy - hy), to(cx + hx, cy - hy), to(cx + hx, cy + hy), to(cx - hx, cy + hy), to(cx - hx, cy - hy)] }];
   },
   circle: (p, to, w) => [{ k: "circle", c: to(num(p.center[0]), num(p.center[1])), r: num(p.radius) / w }],
+  arc: (p, to) => {
+    const cx = num(p.center[0]);
+    const cy = num(p.center[1]);
+    const r = num(p.radius);
+    const steps = Math.max(2, Math.min(32, Math.ceil(Math.abs(p.sweepDeg) / 15)));
+    const pts = Array.from({ length: steps + 1 }, (_, i) => {
+      const a = ((p.startDeg + (p.sweepDeg * i) / steps) * Math.PI) / 180;
+      return to(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    });
+    return [{ k: "line", pts }];
+  },
   line: (p, to) => [{ k: "line", pts: [to(num(p.from[0]), num(p.from[1])), to(num(p.to[0]), num(p.to[1]))] }],
   polyline: (p, to) => {
     const pts = p.points.map((q) => to(num(q[0]), num(q[1])));
@@ -166,7 +177,7 @@ function extentOf(prims: readonly SymbolPrimitive[]): { minX: number; minY: numb
     if (p.kind === "rect") {
       add(num(p.center[0]) - num(p.size[0]) / 2, num(p.center[1]) - num(p.size[1]) / 2);
       add(num(p.center[0]) + num(p.size[0]) / 2, num(p.center[1]) + num(p.size[1]) / 2);
-    } else if (p.kind === "circle") {
+    } else if (p.kind === "circle" || p.kind === "arc") {
       add(num(p.center[0]) - num(p.radius), num(p.center[1]) - num(p.radius));
       add(num(p.center[0]) + num(p.radius), num(p.center[1]) + num(p.radius));
     } else if (p.kind === "line") {

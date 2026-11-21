@@ -29,13 +29,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { WebSocketServer } from "ws";
-import { branchModelId, buildSheetScene, demoSheetDefinition, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
+import { branchModelId, buildSheetScene, buildSheetSceneFor, demoSheetDefinition, elementValues, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
 import { createDemoModel, createPlacedDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { captureSnapshot, issueFromSnapshot, renderSheetPdf } from "@permitzip/bim-sheets";
 import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { buildSampleMarketGas } from "../../bim-kernel/__tests__/fixtures/sample-market-gas";
 import { createEditorDemo, type EditorDemo } from "../../bim-editor/demo/server";
+import { createElectricalDemoModel } from "./electrical-demo";
 import { enlargedPlansDemoModel } from "./enlarged-plans-demo";
 
 // The kernel carries no trade: gas, plumbing and air systems are first-party add-ons, installed before any model is built.
@@ -73,15 +74,17 @@ function openIssueModel(): ModelState {
 const sampleMarketGasModel = (): ModelState => buildSampleMarketGas();
 
 const startingModel =
-  process.env.BIM_DEV_MODEL === "site-7301"
-    ? createPlacedDemoModel("site-7301", SITE_7301_ORIGIN)
-    : process.env.BIM_DEV_MODEL === "open-issue"
-      ? openIssueModel()
-      : process.env.BIM_DEV_MODEL === "sample-market-gas"
-        ? sampleMarketGasModel()
-        : process.env.BIM_DEV_MODEL === "enlarged-plans"
-          ? enlargedPlansDemoModel()
-          : createDemoModel("f-a-demo");
+  process.env.BIM_DEV_MODEL === "electrical-plan"
+    ? createElectricalDemoModel("electrical-plan-demo")
+    : process.env.BIM_DEV_MODEL === "site-7301"
+      ? createPlacedDemoModel("site-7301", SITE_7301_ORIGIN)
+      : process.env.BIM_DEV_MODEL === "open-issue"
+        ? openIssueModel()
+        : process.env.BIM_DEV_MODEL === "sample-market-gas"
+          ? sampleMarketGasModel()
+          : process.env.BIM_DEV_MODEL === "enlarged-plans"
+            ? enlargedPlansDemoModel()
+            : createDemoModel("f-a-demo");
 // Main plus branches, versions and copies, all in memory (bim-sync's in-memory branch host).
 const models = await InMemoryBranchHost.start(startingModel);
 const { sequencer, hub } = models.main;
@@ -163,20 +166,24 @@ async function exportPdf(res: ServerResponse) {
   // Capture an immutable snapshot at the current head; render only from it.
   const snapshot = await sequencer.exportSnapshot();
   const sha = createHash("sha256").update(snapshot.canonical).digest("hex");
-  const scene = buildSheetScene(snapshot.model, demoSheetDefinition());
+  const firstSheet = elementValues(snapshot.model.elements).find((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet" && !el.deleted);
+  const scene = firstSheet ? buildSheetSceneFor(snapshot.model, firstSheet.id, { projectName: "MutinyBIM Electrical Demo" }) : buildSheetScene(snapshot.model, demoSheetDefinition());
+  const title = firstSheet ? `${firstSheet.number} ${firstSheet.title}` : "M-101 Mechanical Plan";
+  const rawFileTag = firstSheet ? firstSheet.number : "M-101";
+  const fileTag = rawFileTag.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "sheet";
   const started = performance.now();
   const pdf = (
     await renderSheetPdf(scene, {
-      title: "M-101 Mechanical Plan",
+      title,
       modelRevision: snapshot.revision,
       snapshotSha256: sha,
       renderer: RENDERER,
     })
   ).bytes;
   const ms = Math.round(performance.now() - started);
-  console.log("[bim-devserver] exported M-101", { revision: snapshot.revision, sha256: sha.slice(0, 12), ms, bytes: pdf.length });
+  console.log(`[bim-devserver] exported ${fileTag}`, { revision: snapshot.revision, sha256: sha.slice(0, 12), ms, bytes: pdf.length });
   send(res, 200, "application/pdf", pdf, {
-    "content-disposition": `inline; filename="M-101-rev${snapshot.revision}.pdf"`,
+    "content-disposition": `inline; filename="${fileTag}-rev${snapshot.revision}.pdf"`,
     "x-model-revision": String(snapshot.revision),
     "x-snapshot-sha256": sha,
     "x-render-ms": String(ms),

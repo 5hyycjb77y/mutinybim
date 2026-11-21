@@ -732,19 +732,76 @@ export class PartBuilder {
   }
 
   /**
-   * Lines drawings use instead of the solid at some detail levels: a coarse
-   * plan rectangle with an X, a fine outline with its sections. At a level
-   * with no symbol for the view, drawings show the solid seen from that side.
+   * Lines, shapes, fills, masks, and text drawings use instead of the solid at
+   * some detail levels: a paper-scaled schematic symbol (`units: "paper"`,
+   * `mask: true`), a coarse plan rectangle with an X, or a shaded emergency
+   * indicator (`filled: true`). At a level with no symbol for the view,
+   * drawings show the solid seen from that side.
    */
-  symbol(levels: DetailLevel | readonly DetailLevel[], draw: { readonly shapes?: readonly Profile[]; readonly lines?: readonly (readonly [readonly [Length, Length], readonly [Length, Length]])[] }, view: "plan" | "below" = "plan"): this {
-    const s = this.sketchOn("base", `${view} symbol`);
-    for (const p of draw.shapes ?? []) {
-      this.shape(s, p.outline, 0, 0);
-      for (const h of p.holes) this.shape(s, h, 0, 0);
+  symbol(
+    levels: DetailLevel | readonly DetailLevel[],
+    draw: {
+      readonly shapes?: readonly Profile[];
+      readonly lines?: readonly (readonly [readonly [Length, Length], readonly [Length, Length]])[];
+      readonly texts?: readonly { readonly at: readonly [Length, Length]; readonly text: string; readonly heightMm?: number; readonly anchor?: "start" | "middle" | "end" }[];
+      /** "model" (default) or "paper" (annotative paper mm, scaled automatically by the view's scale). */
+      readonly units?: "model" | "paper";
+      readonly pen?: "thin" | "medium" | "wide" | "heavy";
+      /** Solid black fill on closed shapes (e.g. half-switched or emergency indicators). */
+      readonly filled?: boolean;
+      /** Opaque white mask behind the symbol so background lines and wires never bleed through. */
+      readonly mask?: boolean;
+    },
+    view: "plan" | "below" = "plan",
+  ): this {
+    const hasGeom = (draw.shapes?.length ?? 0) > 0 || (draw.lines?.length ?? 0) > 0;
+    const hasTexts = (draw.texts?.length ?? 0) > 0;
+    if (!hasGeom && !hasTexts) throw new PartBuildError("A symbol needs shapes, lines, or texts.");
+    let sketchId: string | undefined;
+    if (hasGeom) {
+      const s = this.sketchOn("base", `${view} symbol`);
+      for (const p of draw.shapes ?? []) {
+        this.shape(s, p.outline, 0, 0);
+        for (const h of p.holes) this.shape(s, h, 0, 0);
+      }
+      for (const [a, b] of draw.lines ?? []) this.line(s, this.point(s, mm(a[0], "Line"), mm(a[1], "Line")), this.point(s, mm(b[0], "Line"), mm(b[1], "Line")));
+      sketchId = s.id;
     }
-    for (const [a, b] of draw.lines ?? []) this.line(s, this.point(s, mm(a[0], "Line"), mm(a[1], "Line")), this.point(s, mm(b[0], "Line"), mm(b[1], "Line")));
-    if (s.entities.length === 0) throw new PartBuildError("A symbol needs shapes or lines.");
-    this.symbols.push({ id: this.nextId("sy"), name: `${view} symbol`, view, detailLevels: typeof levels === "string" ? [levels] : [...levels], sketch: s.id });
+    const texts = draw.texts?.map((t) => ({
+      at: [mm(t.at[0], "Symbol text x"), mm(t.at[1], "Symbol text y")] as [Dim, Dim],
+      text: t.text,
+      heightMm: t.heightMm ?? 1.8,
+      ...(t.anchor !== undefined ? { anchor: t.anchor } : {}),
+    }));
+    this.symbols.push({
+      id: this.nextId("sy"),
+      name: `${view} symbol`,
+      view,
+      detailLevels: typeof levels === "string" ? [levels] : [...levels],
+      ...(sketchId !== undefined ? { sketch: sketchId } : {}),
+      ...(draw.units !== undefined ? { units: draw.units } : {}),
+      ...(draw.pen !== undefined ? { pen: draw.pen } : {}),
+      ...(draw.filled ? { filled: true } : {}),
+      ...(draw.mask ? { mask: true } : {}),
+      ...(texts && texts.length > 0 ? { texts } : {}),
+    });
+    return this;
+  }
+
+  /**
+   * Attach a registered symbol from `SYMBOL_POINT` (e.g. `"electrical.plan_gfci"`,
+   * `"electrical.plan_switch"`, `"electrical.plan_occ_sensor"`) at the chosen
+   * detail levels instead of drawing the solid.
+   */
+  symbolRef(levels: DetailLevel | readonly DetailLevel[], symbolId: string, view: "plan" | "below" = "plan"): this {
+    if (!symbolId.trim()) throw new PartBuildError("A symbol reference needs a non-empty symbolId.");
+    this.symbols.push({
+      id: this.nextId("sy"),
+      name: `${view} symbol (${symbolId})`,
+      view,
+      detailLevels: typeof levels === "string" ? [levels] : [...levels],
+      symbolId,
+    });
     return this;
   }
 

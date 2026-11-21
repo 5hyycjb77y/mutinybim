@@ -1,6 +1,6 @@
 import { detailComponents, buildViewScene, executeCommand, layoutOneLine, oneLineCommands, oneLineCropCommand, type OneLineSpec } from "../src";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
-import { ELECTRICAL_COMPONENTS, checkOneLineSpec, oneLineSpecSchema } from "@permitzip/bim-pack-electrical";
+import { ELECTRICAL_COMPONENTS, ELECTRICAL_PLAN_SYMBOLS, checkOneLineSpec, oneLineSpecSchema } from "@permitzip/bim-pack-electrical";
 
 /** 480Y/277V service: utility, CT cabinet, switchboard; an ATS with a generator feeding a 480 V panel; a transformer to 208Y/120V feeding another. */
 export const SERVICE_480: OneLineSpec = {
@@ -87,7 +87,7 @@ function boxesOf(layout: ReturnType<typeof layoutOneLine>) {
 describe("electrical one-line symbols", () => {
   it("are in the detail component library under electrical", () => {
     const ids = detailComponents().filter((c) => c.category === "electrical").map((c) => c.id);
-    expect(ids).toEqual(ELECTRICAL_COMPONENTS.map((c) => c.id));
+    expect(ids).toEqual([...ELECTRICAL_COMPONENTS.map((c) => c.id), ...ELECTRICAL_PLAN_SYMBOLS.map((s) => s.id)]);
     expect(ids).toEqual(
       expect.arrayContaining([
         "elec_utility_source", "elec_meter", "elec_ct_cabinet", "elec_breaker", "elec_breaker_drawout", "elec_fuse", "elec_disconnect", "elec_disconnect_fused",

@@ -476,7 +476,7 @@ export function resolvePartModel2(model: PartModel2, num: (d: Dim, field: string
   const firstShown = steps[0];
   if (firstShown && firstShown.operation !== "join" && unloaded.length === 0) issues.push({ field: firstShown.id, message: "The first solid feature must add material (join); there is nothing yet to cut or intersect" });
   if (model.features.length > 0 && !model.features.some((f) => f.kind !== "pattern" && f.kind !== "mirror" && f.operation === "join")) issues.push({ field: "features", message: "The model has no solid feature; add one that joins" });
-  for (const s of model.symbols) if (!sketches.has(s.sketch)) issues.push({ field: s.id, message: `Symbol "${s.name}" draws sketch ${s.sketch}, which doesn't exist or has a problem` });
+  for (const s of model.symbols) if (s.sketch !== undefined && !sketches.has(s.sketch)) issues.push({ field: s.id, message: `Symbol "${s.name}" draws sketch ${s.sketch}, which doesn't exist or has a problem` });
   const rowNames = new Set<string>();
   for (const row of model.types) {
     if (rowNames.has(row.name)) issues.push({ field: row.name, message: `The types table lists ${row.name} twice` });

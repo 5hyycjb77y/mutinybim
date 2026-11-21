@@ -37,8 +37,31 @@ function letter(t: string, size = 90): SymbolPrimitive {
 /** A wall-mounted cabinet sitting 300 mm up, front face on the insertion line (like the 208 V panelboard). */
 const CABINET: Pick<PartTypeDefinition, "geometry" | "symbol"> = {
   geometry: [{ kind: "box", center: [0, half("depth"), { param: "height", scale: 0.5, add: 300 }], size: [p("width"), p("depth"), p("height")] }],
-  symbol: [{ kind: "rect", center: [0, half("depth")], size: [p("width"), p("depth")] }, { kind: "line", from: [{ param: "width", scale: -0.5 }, p("depth")], to: [half("width"), p("depth")] }],
+  symbol: [
+    { kind: "rect", center: [0, half("depth")], size: [p("width"), p("depth")], fill: "mask", pen: "medium" },
+    { kind: "rect", center: [0, { param: "depth", scale: 0.75 }], size: [p("width"), { param: "depth", scale: 0.5 }], fill: "solid", pen: "medium" },
+  ],
 };
+
+/** ANSI/NEC paper-scaled wall-mounted duplex receptacle: prongs start flush at the wall face (y = 0) and extend into the room (+Y) through the masked circle. */
+function duplexSymbol(subscript?: string): SymbolPrimitive[] {
+  return [
+    { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
+    { kind: "line", from: [-0.6, 0], to: [-0.6, 3.35], pen: "medium", units: "paper" },
+    { kind: "line", from: [0.6, 0], to: [0.6, 3.35], pen: "medium", units: "paper" },
+    ...(subscript ? [{ kind: "text" as const, at: [3.1, 2.0] as [number, number], text: subscript, heightMm: 1.5, units: "paper" as const }] : []),
+  ];
+}
+
+/** ANSI/NEC paper-scaled wall-mounted switch ($): short stem touches wall face (y = 0), upright $ sits cleanly in the room (+Y) regardless of wall rotation. */
+function switchSymbol(subscript?: string): SymbolPrimitive[] {
+  return [
+    { kind: "line", from: [0, 0], to: [0, 0.75], pen: "thin", units: "paper" },
+    { kind: "text", at: [0, 2.2], text: "S", heightMm: 2.5, units: "paper" },
+    { kind: "line", from: [0.3, 0.55], to: [-0.3, 3.85], pen: "medium", units: "paper", upright: true },
+    ...(subscript ? [{ kind: "text" as const, at: [0, 2.2] as [number, number], uprightOffset: [1.55, -0.7] as [number, number], text: subscript, heightMm: 1.4, units: "paper" as const }] : []),
+  ];
+}
 
 export function electricalStarterTypes(version: string): LibraryEntry[] {
   const SWITCH: LibraryEntry = {
@@ -52,7 +75,61 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls")],
       connectors: [power("power", 50, p("voltage"), 1, 0)],
       geometry: [{ kind: "box", center: [0, -10, 60], size: [70, 20, 115] }],
-      symbol: [letter("S", 140)],
+      symbol: switchSymbol(),
+      tagFields: ["circuit"],
+      source: source(version),
+    },
+  };
+
+  const SWITCH_3WAY: LibraryEntry = {
+    id: "builtin:switch-three-way@1",
+    definition: {
+      familyName: "Switch, three-way",
+      typeName: "20A 120/277V",
+      category: "electrical_device",
+      typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a")],
+      typeValues: { voltage: 120, rating: 20 },
+      instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls")],
+      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      geometry: [{ kind: "box", center: [0, -10, 60], size: [70, 20, 115] }],
+      symbol: switchSymbol("3"),
+      tagFields: ["circuit"],
+      source: source(version),
+    },
+  };
+
+  const SWITCH_DIMMER: LibraryEntry = {
+    id: "builtin:switch-dimmer@1",
+    definition: {
+      familyName: "Switch, dimmer",
+      typeName: "0-10V / LED 120/277V",
+      category: "electrical_device",
+      typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a")],
+      typeValues: { voltage: 120, rating: 20 },
+      instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls")],
+      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      geometry: [{ kind: "box", center: [0, -10, 60], size: [70, 20, 115] }],
+      symbol: switchSymbol("D"),
+      tagFields: ["circuit"],
+      source: source(version),
+    },
+  };
+
+  const OCC_SENSOR: LibraryEntry = {
+    id: "builtin:occupancy-sensor-ceiling@1",
+    definition: {
+      familyName: "Occupancy sensor, ceiling",
+      typeName: "Dual-tech 120/277V",
+      category: "electrical_device",
+      typeParams: [num("voltage", "Voltage", "v")],
+      typeValues: { voltage: 120 },
+      instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls")],
+      connectors: [power("power", 0, p("voltage"), 1, 0)],
+      geometry: [{ kind: "cylinder", center: [0, 0, 20], radius: 55, height: 40, axis: "z" }],
+      symbol: [
+        { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
+        { kind: "text", at: [0, 0], text: "OS", heightMm: 1.6, units: "paper" },
+      ],
       tagFields: ["circuit"],
       source: source(version),
     },
@@ -70,7 +147,10 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       instanceParams: [num("voltage", "Voltage", "v", voltage), num("load", "Load", "va", va), num("mocp", "Maximum overcurrent protection", "a"), text("serves", "Serves"), text("circuit", "Circuit")],
       connectors: [power("power", 0, p("voltage"), poles, p("load"))],
       geometry: [{ kind: "box", center: [0, 0, half("size")], size: [p("size"), p("size"), p("size")] }],
-      symbol: [{ kind: "circle", center: [0, 0], radius: half("size") }, { kind: "line", from: [{ param: "size", scale: -0.35 }, { param: "size", scale: -0.35 }], to: [{ param: "size", scale: 0.35 }, { param: "size", scale: 0.35 }] }],
+      symbol: [
+        { kind: "circle", center: [0, 0], radius: 1.6, fill: "mask", pen: "medium", units: "paper" },
+        { kind: "polyline", points: [[-1.6, 0], [1.6, 0], [1.38, 0.8], [0.8, 1.38], [0, 1.6], [-0.8, 1.38], [-1.38, 0.8]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+      ],
       tagFields: ["mark", "circuit"],
       source: source(version),
     },
@@ -129,7 +209,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
     },
   };
 
-  return [SWITCH, equipmentConnection(1, 120, 1000), equipmentConnection(2, 208, 3000), equipmentConnection(3, 208, 5000), PANEL_480, SWITCHBOARD, TRANSFORMER, makeupAirUnit(version), ...distributionTypes(version), ...deviceTypes(version)];
+  return [SWITCH, SWITCH_3WAY, SWITCH_DIMMER, OCC_SENSOR, equipmentConnection(1, 120, 1000), equipmentConnection(2, 208, 3000), equipmentConnection(3, 208, 5000), PANEL_480, SWITCHBOARD, TRANSFORMER, makeupAirUnit(version), ...distributionTypes(version), ...deviceTypes(version)];
 }
 
 function makeupAirUnitV1(version: string): LibraryEntry {
@@ -375,7 +455,7 @@ function distributionTypes(version: string): LibraryEntry[] {
  */
 function deviceTypes(version: string): LibraryEntry[] {
   // Mounting height is where it is placed (the placement height); `mounting` only says where it goes.
-  const receptacle = (id: string, familyName: string, typeName: string, load: number, gfci: boolean, mounting: string, mark: SymbolPrimitive[]): LibraryEntry => ({
+  const receptacle = (id: string, familyName: string, typeName: string, load: number, gfci: boolean, mounting: string, symbol: SymbolPrimitive[]): LibraryEntry => ({
     id,
     definition: {
       familyName,
@@ -386,7 +466,7 @@ function deviceTypes(version: string): LibraryEntry[] {
       instanceParams: [text("circuit", "Circuit"), num("load", "Load", "va", load), yesNo("gfci", "GFCI", gfci), CONNECTION_TYPE],
       connectors: [{ ...power("power", 50, p("voltage"), 1, p("load")), loadClass: "receptacle" }],
       geometry: [{ kind: "box", center: [0, -10, 60], size: [70, 20, 115] }],
-      symbol: [{ kind: "circle", center: [0, 0], radius: 100 }, { kind: "line", from: [-60, -40], to: [-60, 40] }, { kind: "line", from: [60, -40], to: [60, 40] }, ...mark],
+      symbol,
       tagFields: ["circuit"],
       source: source(version),
     },
@@ -410,14 +490,38 @@ function deviceTypes(version: string): LibraryEntry[] {
   });
 
   return [
-    receptacle("builtin:quad-receptacle@1", "Receptacle, quad", "20A 125V NEMA 5-20R, two duplexes", 360, false, "Wall", [{ kind: "line", from: [-90, 0], to: [90, 0] }]),
-    receptacle("builtin:gfci-receptacle@1", "Receptacle, GFCI duplex", "20A 125V NEMA 5-20R GFCI", 180, true, "Wall", [letter("GFI", 60)]),
-    receptacle("builtin:countertop-receptacle@1", "Receptacle, countertop GFCI", "20A 125V NEMA 5-20R GFCI, above counter", 180, true, "Above counter", [letter("C", 60)]),
-    receptacle("builtin:floor-receptacle@1", "Receptacle, floor box", "20A 125V NEMA 5-20R in floor box", 180, false, "Floor", [{ kind: "rect", center: [0, 0], size: [240, 240] }]),
-    receptacle("builtin:ceiling-receptacle@1", "Receptacle, ceiling", "20A 125V NEMA 5-20R, ceiling mounted", 180, false, "Ceiling", [letter("CLG", 50)]),
-    light("builtin:downlight-6-led@1", "Downlight, recessed LED", '6", 1500 lm', 15, 277, false, [7 * IN, 7 * IN], [{ kind: "circle", center: [0, 0], radius: 3.5 * IN }]),
-    light("builtin:troffer-2x4-led-em@1", "Troffer, recessed LED", "2x4, 4000 lm, emergency battery", 32, 277, true, [4 * FT_MM, 2 * FT_MM], [{ kind: "rect", center: [0, 0], size: [4 * FT_MM, 2 * FT_MM] }, { kind: "line", from: [-2 * FT_MM, 0], to: [2 * FT_MM, 0] }, letter("EM", 120)]),
-    light("builtin:exit-sign-led@1", "Exit sign, LED", "Single face, battery", 2, 277, true, [12 * IN, 2 * IN], [{ kind: "rect", center: [0, 0], size: [12 * IN, 3 * IN] }, letter("EXIT", 60)]),
+    receptacle("builtin:quad-receptacle@1", "Receptacle, quad", "20A 125V NEMA 5-20R, two duplexes", 360, false, "Wall", [
+      { kind: "circle", center: [-1.45, 2.0], radius: 1.35, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "circle", center: [1.45, 2.0], radius: 1.35, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "line", from: [-1.95, 0], to: [-1.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [-0.95, 0], to: [-0.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [0.95, 0], to: [0.95, 3.2], pen: "medium", units: "paper" },
+      { kind: "line", from: [1.95, 0], to: [1.95, 3.2], pen: "medium", units: "paper" },
+    ]),
+    receptacle("builtin:gfci-receptacle@1", "Receptacle, GFCI duplex", "20A 125V NEMA 5-20R GFCI", 180, true, "Wall", duplexSymbol("GFI")),
+    receptacle("builtin:countertop-receptacle@1", "Receptacle, countertop GFCI", "20A 125V NEMA 5-20R GFCI, above counter", 180, true, "Above counter", duplexSymbol("GFI/C")),
+    receptacle("builtin:floor-receptacle@1", "Receptacle, floor box", "20A 125V NEMA 5-20R in floor box", 180, false, "Floor", [
+      { kind: "rect", center: [0, 0], size: [4.4, 4.4], fill: "mask", pen: "medium", units: "paper" },
+      { kind: "circle", center: [0, 0], radius: 1.4, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "line", from: [-0.55, -1.8], to: [-0.55, 1.3], pen: "medium", units: "paper" },
+      { kind: "line", from: [0.55, -1.8], to: [0.55, 1.3], pen: "medium", units: "paper" },
+    ]),
+    receptacle("builtin:ceiling-receptacle@1", "Receptacle, ceiling", "20A 125V NEMA 5-20R, ceiling mounted", 180, false, "Ceiling", duplexSymbol("CLG")),
+    light("builtin:downlight-6-led@1", "Downlight, recessed LED", '6", 1500 lm', 15, 277, false, [7 * IN, 7 * IN], [
+      { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper", detailLevels: ["coarse", "medium"] },
+      { kind: "circle", center: [0, 0], radius: 3.5 * IN, fill: "mask", pen: "medium", detailLevels: ["fine"] },
+      { kind: "circle", center: [0, 0], radius: 2.5 * IN, pen: "thin", detailLevels: ["fine"] },
+    ]),
+    light("builtin:troffer-2x4-led-em@1", "Troffer, recessed LED", "2x4, 4000 lm, emergency battery", 32, 277, true, [4 * FT_MM, 2 * FT_MM], [
+      { kind: "rect", center: [0, 0], size: [4 * FT_MM, 2 * FT_MM], fill: "mask", pen: "medium" },
+      { kind: "rect", center: [-1 * FT_MM, 0], size: [2 * FT_MM, 2 * FT_MM], fill: "solid", pen: "medium" },
+      { kind: "line", from: [-2 * FT_MM, 0], to: [2 * FT_MM, 0], pen: "thin", detailLevels: ["medium", "fine"] },
+    ]),
+    light("builtin:exit-sign-led@1", "Exit sign, LED", "Single face, battery", 2, 277, true, [12 * IN, 2 * IN], [
+      { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
+      { kind: "polyline", points: [[0, 0], [1.8, 0], [1.56, 0.9], [0.9, 1.56], [0, 1.8]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+      { kind: "polyline", points: [[0, 0], [-1.8, 0], [-1.56, -0.9], [-0.9, -1.56], [0, -1.8]], closed: true, fill: "solid", pen: "thin", units: "paper" },
+    ]),
   ];
 }
 

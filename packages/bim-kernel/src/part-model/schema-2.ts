@@ -147,14 +147,33 @@ export type PartFeature2 = z.infer<typeof featureSchema2>;
 export const PART_SYMBOL_VIEWS = ["plan", "below", "front", "back", "left", "right"] as const;
 export type PartSymbolView = (typeof PART_SYMBOL_VIEWS)[number];
 
+export const partSymbolTextSchema = z.object({
+  at: z.tuple([dimSchema, dimSchema]),
+  text: z.string().min(1).max(40),
+  heightMm: z.number().positive().max(1000),
+  anchor: z.enum(["start", "middle", "end"]).optional(),
+});
+
 export const partSymbolSchema = z.object({
   id: idSchema,
   name: nameSchema,
   view: z.enum(PART_SYMBOL_VIEWS),
   /** Detail levels it is drawn at. */
   detailLevels: z.array(z.enum(DETAIL_LEVELS)).min(1).max(3),
-  /** The sketch whose lines are the symbol (on a plane square to the view). */
-  sketch: idSchema,
+  /** The sketch whose lines are the symbol (on a plane square to the view). Optional when `symbolId` or `texts` supplies the symbol. */
+  sketch: idSchema.optional(),
+  /** Coordinate units: "model" (default) or "paper" (annotative paper mm, scaled by view scale). */
+  units: z.enum(["model", "paper"]).optional(),
+  /** Line weight for the symbol's strokes. */
+  pen: z.enum(["thin", "medium", "wide", "heavy"]).optional(),
+  /** When true, closed shapes in this symbol fill solid black. */
+  filled: z.boolean().optional(),
+  /** When true, closed shapes in this symbol draw an opaque white mask behind the strokes. */
+  mask: z.boolean().optional(),
+  /** Optional registered symbol id from SYMBOL_POINT to draw instead of a sketch. */
+  symbolId: z.string().min(1).max(120).optional(),
+  /** Optional text labels inside or beside the symbol (in the symbol's units). */
+  texts: z.array(partSymbolTextSchema).max(32).optional(),
 });
 export type PartSymbol = z.infer<typeof partSymbolSchema>;
 

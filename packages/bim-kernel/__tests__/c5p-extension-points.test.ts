@@ -15,7 +15,7 @@
  */
 import { activePackSet, definePack, contribute, PackSet, PackSetError, withPackSet, withModelPacks, bindModelPacks, unbindModelPacks } from "../src/packs";
 import { FIRST_PARTY_ADDONS as FIRST_PARTY_PACKS } from "@permitzip/bim-first-party";
-import { ELECTRICAL_COMPONENTS, electricalAdapter } from "@permitzip/bim-pack-electrical";
+import { ELECTRICAL_COMPONENTS, ELECTRICAL_PLAN_SYMBOLS, electricalAdapter } from "@permitzip/bim-pack-electrical";
 import { NETWORK_ADAPTER_POINT, adapterForService, networkAdapterOwner, tradeAdapter } from "../src/connections/model";
 import { plumbingAdapter } from "@permitzip/bim-pack-plumbing";
 import { mechanicalAdapter } from "@permitzip/bim-pack-mechanical";
@@ -74,7 +74,7 @@ describe("c5p kernel points outside any scope: what they answered before packs",
     expect([...services.byId.keys()].filter((id) => /[.:]/.test(id))).toEqual(["struct.gravity_load"]);
     expect(activeFacetRegistry()).toBe(BUILTIN_FACET_REGISTRY);
     expect(BUILTIN_SYMBOL_REGISTRY.rows).toEqual([]);
-    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual(ELECTRICAL_COMPONENTS.map((c) => c.id));
+    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual([...ELECTRICAL_COMPONENTS.map((c) => c.id), ...ELECTRICAL_PLAN_SYMBOLS.map((s) => s.id)]);
     expect(activeSymbolRegistry()).toBe(activeSymbolRegistry());
     expect(activeCategoryRegistry()).toBe(builtinCategoryRegistry());
     expect(activeClassRegistry()).toBe(builtinRegistry());
