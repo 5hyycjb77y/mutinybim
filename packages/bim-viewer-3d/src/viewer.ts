@@ -355,6 +355,9 @@ export class ModelViewer3D {
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Shadows only change when geometry, visibility, clipping, sun, or quality change — never on mouse hover/orbit.
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.localClippingEnabled = false;
     // Counted per frame, across the model pass and the crop box outline pass.
     this.renderer.info.autoReset = false;
@@ -547,6 +550,7 @@ export class ModelViewer3D {
     this.referencesBoxCache = null;
     if (this.referenceTones.has(spec.id) || this.sessionHiddenReferences.has(spec.id)) await this.applyReferenceTone(spec.id, entry);
     void this.refreshOrbitFallback();
+    this.invalidateShadows();
     return info;
   }
 
@@ -560,6 +564,7 @@ export class ModelViewer3D {
     this.referencesBoxCache = null;
     await this.fragments.disposeModel(id);
     await this.fragments.update(true);
+    this.invalidateShadows();
     await this.refreshOrbitFallback();
   }
 
@@ -582,6 +587,7 @@ export class ModelViewer3D {
     const ref = this.references.get(id);
     if (ref && ref.model.object.visible !== visible) {
       ref.model.object.visible = visible;
+      this.invalidateShadows();
       this.referencesBoxCache = null;
       void this.refreshOrbitFallback();
     }
@@ -805,6 +811,7 @@ export class ModelViewer3D {
     }
     this.keepInPlanCut(this.authoredBox());
     this.drawPlanSymbols();
+    this.invalidateShadows();
     // Previews (a drag, a route being drawn) leave the orbit point alone; it follows the model once the edit lands.
     if (view === accepted) void this.refreshOrbitFallback();
   }
@@ -1453,6 +1460,11 @@ export class ModelViewer3D {
     this.setPlanCut((work.isEmpty() ? 1.5 : work.min.y + 1.5) / MM);
   }
 
+  /** Mark the cached directional shadow map dirty so the next frame refreshes it once. */
+  private invalidateShadows() {
+    this.renderer.shadowMap.needsUpdate = true;
+  }
+
   /** Set the 3D directional sun angle in degrees (`azimuthDeg`: 0 = East, 90 = South, 180 = West; `elevationDeg`: 5..85). */
   setSun(azimuthDeg: number, elevationDeg: number) {
     if (!this.sunLight) return;
@@ -1461,6 +1473,7 @@ export class ModelViewer3D {
     const dist = 120;
     const horiz = Math.cos(el) * dist;
     this.sunLight.position.set(Math.cos(az) * horiz, Math.sin(el) * dist, Math.sin(az) * horiz);
+    this.invalidateShadows();
   }
 
   /** Turn 3D sun shadows on or off (always off in 2D plan mode so floor plans stay crisp). */
@@ -1469,6 +1482,7 @@ export class ModelViewer3D {
     const active = this.mode === "3d" && enabled;
     if (this.sunLight) this.sunLight.castShadow = active;
     if (this.groundShadowPlane) this.groundShadowPlane.visible = active;
+    this.invalidateShadows();
   }
 
   /** Switch 3D visual rendering quality (`draft` = fast matte, `standard` = balanced PBR + shadows, `high` = crisp 4K shadow map + rich studio exposure). */
@@ -1497,6 +1511,7 @@ export class ModelViewer3D {
         this.sunLight.castShadow = this.mode === "3d" && this.shadowsEnabled;
       }
     }
+    this.invalidateShadows();
   }
 
   getRenderQuality(): "draft" | "standard" | "high" {
@@ -1628,6 +1643,7 @@ export class ModelViewer3D {
 
   private applyClipping() {
     this.renderer.clippingPlanes = [...(this.cutPlane ? [this.cutPlane] : []), ...this.sectionPlanes, ...this.cropBoxPlanes];
+    this.invalidateShadows();
     void this.fragments.update(true);
   }
 
