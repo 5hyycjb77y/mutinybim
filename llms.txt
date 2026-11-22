@@ -1,0 +1,39 @@
+# MutinyBIM
+
+> Open-source, browser-based building information modeling (BIM) engine for every trade, built for many people and AI agents editing one model at once. Agents work by writing scripts with the kit (@permitzip/bim-script), checking and previewing them, and applying them after a person approves.
+
+The tool server lists at most 10 core tools by default (168 in all, opt-in by family). Write a script rather than looking for a tool. Start from an example script, check it, preview it, apply it.
+
+## Start here
+
+- [AGENTS.md](AGENTS.md): rules for coding agents working in this repository
+- [Connect an agent](docs/CONNECT-AN-AGENT.md): connecting Claude, ChatGPT, Cursor and others to the tool server
+- [Scripting](docs/SCRIPTING.md): how scripts work: kinds, reads, parameters, checks, preview and approval
+- [Example scripts](docs/reference/examples.md): whole scripts to copy
+- [Recipes](docs/reference/recipes.md): worked tasks
+
+## Reference
+
+- [ctx: the script context](docs/reference/script-kit/ctx.md): What a script's `run(ctx)` gets: reading the model slice it declared, sending edits, running calcs and reads, proposals, labels and reports.
+- [units](docs/reference/script-kit/units.md): Typed lengths and other measures. Every length a kit function takes is a `units.*` value, never a bare number.
+- [building](docs/reference/script-kit/building.md): Levels, grids, walls, doors, windows, floors, ceilings, roofs, stairs, rooms and spaces.
+- [routes](docs/reference/script-kit/routes.md): Duct, pipe and conduit runs: sizes, systems, slopes, where a run starts and ends, and connecting into a run.
+- [equipment](docs/reference/script-kit/equipment.md): Placing parts (equipment, fixtures, devices) by type, and their connectors.
+- [parts](docs/reference/script-kit/parts.md): Making part types: a part's bodies, connectors and parameters.
+- [PartBuilder](docs/reference/script-kit/part-builder.md): The builder `parts.part()` returns: boxes, extrusions, sweeps, connectors and parameters on one part type.
+- [documents](docs/reference/script-kit/documents.md): Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set.
+- [checks](docs/reference/script-kit/checks.md): Checks a script runs on its own output before a person sees it.
+- [defineScript](docs/reference/script-kit/define-script.md): The one top-level function: a script's kind, what it reads, its parameters and its `run`.
+- [Edit commands](docs/reference/commands.md): every command ctx.edit takes, with its fields
+- [Calcs](docs/reference/calcs.md): every calculation ctx.calc runs
+- [Pack reads](docs/reference/reads.md): every read ctx.read runs
+- [Tool server tools](docs/reference/mcp-tools.md): every MCP tool, by family
+- [Add-ons](docs/reference/add-ons.md): the trade add-ons and what each contributes
+
+## Optional
+
+- [Architecture](docs/ARCHITECTURE.md): kernel, add-ons, sync and the model server
+- [Add-on contract](docs/ADD-ON-CONTRACT.md): the extension points an add-on plugs into
+- [Your first add-on](docs/YOUR-FIRST-ADD-ON.md): a tutorial
+- [Scripting coverage](docs/SCRIPTING-COVERAGE.md): what scripts can do of each add-on, and what is missing
+- [Contributing](CONTRIBUTING.md): sign-off, setup, tests and the bedrock rule

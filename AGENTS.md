@@ -28,6 +28,9 @@ apply scripts, plus a few reads.
   `packages/bim-mcp/__tests__/core-tool-budget.test.ts` enforces the limit.
 - What a script does of each add-on tool, and what is still missing:
   `docs/SCRIPTING-COVERAGE.md`. Close a gap in the kit, not with a tool.
+- `docs/reference/` and `llms.txt` are generated from the code. After a change
+  to the kit, a command, a calc, a pack read, an add-on or a tool, run
+  `npm run docs` and commit the result; never edit them by hand.
 
 ### Why
 

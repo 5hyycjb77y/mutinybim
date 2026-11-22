@@ -1,0 +1,6 @@
+node_modules/
+content/
+.vitepress/cache/
+.vitepress/dist/
+.vitepress/theme/mutiny.generated.css
+.vitepress/sidebar.generated.json

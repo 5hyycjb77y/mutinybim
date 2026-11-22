@@ -179,6 +179,21 @@ Every calculation must:
 | `discipline: architecture` · `structural` · `civil` · `fire protection` · `mechanical` · `electrical` · `plumbing` | Which trade it serves. |
 | `area: kernel` · `add-on` · `scripting` · `sheets` · `viewer` · `model-server` · `docs` · `perf` | Which part of the code it touches. |
 
+## Docs
+
+Two kinds, kept apart:
+
+- **Written by hand:** the guides in `docs/`. Edit them like any other file.
+- **Generated from the code:** the reference in `docs/reference/` and
+  `llms.txt` (the script kit, edit commands, calcs, pack reads, add-ons and
+  tool server tools). Never edit these by hand. Change the code they read,
+  then run `npm run docs` and commit the result. The `docs-current` test fails
+  when they are stale.
+
+`tools/docs-site` builds the docs site from both (`npm install && npm run
+build` in that folder). It has its own dependencies and lockfile, apart from
+the engine's.
+
 ## Writing style
 
 Error messages, labels and docs speak to the person using the software. Say

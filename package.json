@@ -30,6 +30,8 @@
     "mcp": "node packages/bim-mcp/bin/mutinybim-mcp.mjs",
     "mcp:http": "node packages/bim-mcp/bin/mutinybim-mcp.mjs --http --port 3333",
     "mcp:all": "node packages/bim-mcp/bin/mutinybim-mcp.mjs --http --port 3333 --packs all",
+    "docs": "node --import tsx tools/docs/write-docs.ts",
+    "docs:check": "node --import tsx tools/docs/write-docs.ts --check",
     "licenses": "node tools/licenses/dependency-licenses.mjs",
     "licenses:write": "node tools/licenses/dependency-licenses.mjs --write",
     "perf:bim": "node --import tsx scripts/perf/mutinybim/run.ts",

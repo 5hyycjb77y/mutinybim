@@ -1,0 +1,50 @@
+/* VitePress's colors and fonts from the MutinyBIM theme (--mutiny-*, generated from @permitzip/bim-ui). No colors of its own. */
+:root,
+html.dark {
+  --vp-c-bg: var(--mutiny-surface);
+  --vp-c-bg-alt: var(--mutiny-canvas);
+  --vp-c-bg-elv: var(--mutiny-field);
+  --vp-c-bg-soft: var(--mutiny-subtle);
+  --vp-c-text-1: var(--mutiny-text);
+  --vp-c-text-2: var(--mutiny-muted);
+  --vp-c-text-3: var(--mutiny-muted);
+  --vp-c-divider: var(--mutiny-border);
+  --vp-c-border: var(--mutiny-border);
+  --vp-c-gutter: var(--mutiny-border);
+  --vp-c-brand-1: var(--mutiny-selection);
+  --vp-c-brand-2: var(--mutiny-selection);
+  --vp-c-brand-3: var(--mutiny-accent);
+  --vp-c-brand-soft: var(--mutiny-accent-subtle);
+  --vp-button-brand-bg: var(--mutiny-accent);
+  --vp-button-brand-text: var(--mutiny-accent-foreground);
+  --vp-button-brand-hover-bg: var(--mutiny-accent);
+  --vp-button-brand-hover-text: var(--mutiny-accent-foreground);
+  --vp-c-tip-1: var(--mutiny-selection);
+  --vp-c-tip-soft: var(--mutiny-accent-subtle);
+  --vp-c-warning-1: var(--mutiny-warning);
+  --vp-c-danger-1: var(--mutiny-danger);
+  --vp-font-family-base: var(--mutiny-font-body);
+  --vp-font-family-mono: var(--mutiny-font-mono);
+  --vp-code-color: var(--mutiny-text);
+  --vp-code-bg: var(--mutiny-subtle);
+  --vp-local-search-highlight-bg: var(--mutiny-accent-subtle);
+  --vp-local-search-highlight-text: var(--mutiny-text);
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPNavBarTitle .title {
+  font-family: var(--mutiny-font-heading);
+  font-weight: var(--mutiny-heading-weight);
+}
+
+.vp-doc a {
+  color: var(--mutiny-selection);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:root {
+  --vp-layout-max-width: 1600px;
+}

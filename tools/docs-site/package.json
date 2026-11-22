@@ -1,0 +1,16 @@
+{
+  "name": "mutinybim-docs-site",
+  "private": true,
+  "description": "The MutinyBIM docs site: docs/ and the generated reference, built with VitePress. Not a workspace package: it has its own lockfile so the engine's dependencies don't change.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "assemble": "cd ../.. && node --import tsx tools/docs-site/assemble.ts",
+    "dev": "npm run assemble && vitepress dev",
+    "build": "npm run assemble && vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

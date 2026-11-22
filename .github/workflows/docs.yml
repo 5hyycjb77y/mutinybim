@@ -1,0 +1,79 @@
+name: Docs
+
+# Builds the VitePress docs site (tools/docs-site) on pull requests touching
+# docs or the kit/theme they read, and publishes it to GitHub Pages on push to
+# main. Fork pull requests run with read-only permissions; only the main deploy
+# job requests pages: write / id-token: write.
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "tools/docs/**"
+      - "tools/docs-site/**"
+      - "packages/bim-script/**"
+      - "packages/bim-ui/**"
+      - "README.md"
+      - "ROADMAP.md"
+      - "CONTRIBUTING.md"
+      - "AGENTS.md"
+      - "GOVERNANCE.md"
+      - "SECURITY.md"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event.pull_request.number || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build docs site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install engine dependencies (needed to assemble generated docs)
+        run: npm ci --no-audit --no-fund
+      - name: Install docs-site dependencies
+        working-directory: tools/docs-site
+        run: npm ci --no-audit --no-fund
+      - name: Assemble and build VitePress site
+        working-directory: tools/docs-site
+        run: npm run build
+      - name: Upload GitHub Pages artifact
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: tools/docs-site/.vitepress/dist
+
+  deploy:
+    name: Deploy docs to GitHub Pages
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
