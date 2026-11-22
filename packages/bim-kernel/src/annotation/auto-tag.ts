@@ -1,11 +1,14 @@
 import { documentIndex } from "../commands/views";
 import { effectiveCrop } from "../crop";
 import { viewLevelElements } from "../drawing/views";
+import { viewModelLevel } from "../levels";
+import { spacesOnLevel } from "../spaces/space-index";
+import { elementsOfKind } from "../store";
 import { elementSolid } from "../drawing/solids";
 import { addOnRun, addOnTagCategory } from "./addon-kinds";
 import type { DrawingItem } from "../documents";
 import type { BimElement, ModelState, Vec2, ViewElement } from "../types";
-import { anchorInView, defaultTagStyleFor, dimensionLabels, dimensionPoints, isGasRun, paperTextWidth, tagHeadBox, tagItemBox, tagLines, tagRotationDeg, tagShape, tagTextSizeMm, type AnnotationBox, type TagSpec, type TagTemplate } from "./annotations";
+import { anchorInView, defaultTagStyleFor, dimensionLabels, dimensionPoints, isGasRun, isPointInsideHostArea, paperTextWidth, tagHeadBox, tagItemBox, tagLines, tagRotationDeg, tagShape, tagTextSizeMm, type AnnotationBox, type TagSpec, type TagTemplate } from "./annotations";
 
 /**
  * Tag everything of some categories in a view, deterministically: elements in
@@ -15,7 +18,7 @@ import { anchorInView, defaultTagStyleFor, dimensionLabels, dimensionPoints, isG
  * No randomness, no global optimisation (internal design note).
  */
 
-export const AUTO_TAG_CATEGORIES = ["duct", "pipe", "air_terminal", "equipment", "fixture", "part"] as const;
+export const AUTO_TAG_CATEGORIES = ["duct", "pipe", "air_terminal", "equipment", "fixture", "part", "room", "space", "opening"] as const;
 export type AutoTagCategory = (typeof AUTO_TAG_CATEGORIES)[number];
 
 export interface AutoTagOptions {
@@ -64,15 +67,19 @@ function categoryOf(model: Pick<ModelState, "elements">, el: BimElement): AutoTa
       if (cat === "mechanical_equipment" || cat === "electrical_equipment") return "equipment";
       return "part";
     }
+    case "room":
+      return "room";
+    case "space":
+      return "space";
+    case "opening":
+      return "opening";
     default: {
-      // Tag all labels runs and parts; a room or space is tagged one at a time.
-      const c = addOnTagCategory(el);
-      return c === "room" || c === "space" ? null : c;
+      return addOnTagCategory(el);
     }
   }
 }
 
-const TEMPLATE_FOR: Record<AutoTagCategory, TagTemplate> = { duct: "duct_size", pipe: "pipe_size", air_terminal: "air_terminal", equipment: "equipment", fixture: "fixture", part: "mark" };
+const TEMPLATE_FOR: Record<AutoTagCategory, TagTemplate> = { duct: "duct_size", pipe: "pipe_size", air_terminal: "air_terminal", equipment: "equipment", fixture: "fixture", part: "mark", room: "name_number", space: "name_number", opening: "mark" };
 
 /** Paper boxes and segments a candidate must stay clear of. Bucketed on a grid so each check reads a few cells. */
 class Obstacles {
@@ -254,7 +261,19 @@ export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOpt
   // Obstacles matter only near the crop: elements well outside it can't collide with a tag inside.
   const reach = 30 * paperMapping(view).scale;
   const nearCrop = (p: Vec2) => p.x >= crop.min.x - reach && p.x <= crop.max.x + reach && p.y >= crop.min.y - reach && p.y <= crop.max.y + reach;
-  for (const el of viewLevelElements(model, view)) {
+  const level = wanted.has("space") ? viewModelLevel(model, view.props?.level, view.props?.levelElevationMm) : null;
+  const levelEls = viewLevelElements(model, view);
+  const seen = new Set<string>(levelEls.map((e) => e.id));
+  const extraSpaces =
+    wanted.has("space")
+      ? level
+        ? spacesOnLevel(model.elements, level.id)
+        : view.viewType === "section" || view.viewType === "elevation"
+          ? elementsOfKind(model.elements, "space")
+          : []
+      : [];
+  const allEls: BimElement[] = extraSpaces.length > 0 ? [...levelEls, ...extraSpaces.filter((s) => !seen.has(s.id))] : levelEls;
+  for (const el of allEls) {
     if ("deleted" in el && el.deleted) continue;
     const category = categoryOf(model, el);
     // Linework of everything that draws is an obstacle, tagged or not.
@@ -272,7 +291,7 @@ export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOpt
         seg = { a: toPaper(a), b: toPaper(b), half: Math.max(0.3, width / 2 / paperMapping(view).scale) };
         obstacles.addSegment(seg.a, seg.b, seg.half);
       }
-    } else {
+    } else if (el.kind !== "room" && el.kind !== "space") {
       // A part or unit blocks its whole footprint on a plan; elsewhere, a small box at its point.
       const solid = view.viewType === "section" || view.viewType === "elevation" ? null : elementSolid(model, el, 0);
       const outline = solid ? solid.pieces.flatMap((piece) => [...piece.r0, ...piece.r1]).map((q) => toPaper({ x: q.x, y: q.y })) : [];
@@ -337,7 +356,18 @@ export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOpt
       }
     }
     const foot = footprints.get(c.el.id);
-    const spots = c.seg ? runCandidates(c.seg.a, c.seg.b, c.seg.half, w, h) : foot ? footprintCandidates(foot, w, h) : pointCandidates(c.anchor, w, h);
+    const isArea = c.category === "room" || c.category === "space";
+    const areaCandidates = isArea
+      ? [
+          c.anchor,
+          { x: c.anchor.x, y: c.anchor.y - h * 0.7 },
+          { x: c.anchor.x, y: c.anchor.y + h * 0.7 },
+          { x: c.anchor.x - w * 0.55, y: c.anchor.y },
+          { x: c.anchor.x + w * 0.55, y: c.anchor.y },
+          ...pointCandidates(c.anchor, w, h),
+        ]
+      : null;
+    const spots = areaCandidates ?? (c.seg ? runCandidates(c.seg.a, c.seg.b, c.seg.half, w, h) : foot ? footprintCandidates(foot, w, h) : pointCandidates(c.anchor, w, h));
     const itemId = `${opts.idPrefix}-${c.el.id}`.slice(0, 200);
     let chosen: { at: Vec2; index: number } | null = null;
     for (const [index, at] of spots.entries()) {
@@ -353,9 +383,10 @@ export function planAutoTags(model: ModelState, viewId: string, opts: AutoTagOpt
     }
     obstacles.addBox(tagHeadBox(itemId, lines, chosen.at, size, rotation, shape));
     if (c.seg && isSizeTemplate(spec.template)) sizeTagged.push({ label: lines.join(" "), seg: c.seg });
-    const away = c.seg ? chosen.index >= 2 : chosen.index >= 8;
+    const placedModel = toModel(chosen.at);
+    const away = isArea ? isPointInsideHostArea(model, c.el.id, placedModel, view) === false : c.seg ? chosen.index >= 2 : chosen.index >= 8;
     const leader = opts.leader === "always" || (opts.leader !== "never" && away);
-    placed.push({ itemId, elementId: c.el.id, text: lines.join(" "), at: toModel(chosen.at), tag: given ?? { ...spec, leader, ...(leader ? { elbow: "auto" as const } : {}) } });
+    placed.push({ itemId, elementId: c.el.id, text: lines.join(" "), at: placedModel, tag: given ?? { ...spec, leader, ...(leader ? { elbow: "auto" as const } : {}) } });
   }
   return { items: placed, skipped, alreadyTagged };
 }

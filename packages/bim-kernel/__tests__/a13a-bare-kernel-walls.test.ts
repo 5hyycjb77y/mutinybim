@@ -45,7 +45,7 @@ describe("a13a bare kernel walls", () => {
     expect(addonOffNote(wall, m.head.elements)).toBe("Types and rules for this wall come from the Architecture add-on, which isn't on");
     expect(addonOffNote(door, m.head.elements)).toBe("Types and rules for this door come from the Architecture add-on, which isn't on");
     const ends = endCleanupsOf(m.head, wall.id);
-    expect(Array.isArray(ends) && ends.map((e) => e.style)).toEqual(["butt", "butt"]);
+    expect(Array.isArray(ends) && ends.map((e) => e.style)).toEqual(["miter", "miter"]);
     const voids = voidsOf(m.head, wall.id);
     expect(Array.isArray(voids) && voids.length).toBe(1);
     expect(elementSolid(m.head, wall, 0)?.pieces.length).toBe(3);

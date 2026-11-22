@@ -15,9 +15,14 @@ import { MM } from "./coords";
 const toScene = (q: Point3): THREE.Vector3 => new THREE.Vector3(q.x * MM, q.z * MM, -q.y * MM);
 const dirToScene = (n: Point3): THREE.Vector3 => new THREE.Vector3(n.x, n.z, -n.y);
 
-/** The six planes that keep the inside of the box, in scene space (three.js keeps where distance >= 0). */
-export function cropBoxScenePlanes(box: CropBox3d): THREE.Plane[] {
-  return boxKeepPlanes(box).map((pl) => new THREE.Plane(dirToScene(pl.normal), pl.constant * MM));
+/**
+ * The six planes that keep the inside of the box, in scene space (three.js keeps where distance >= 0).
+ * Pass `epsilonMm > 0` for rendering so model faces lying flush on the crop box boundary are never
+ * precision-shredded by GPU clipping planes.
+ */
+export function cropBoxScenePlanes(box: CropBox3d, epsilonMm = 0): THREE.Plane[] {
+  const pad = epsilonMm * MM;
+  return boxKeepPlanes(box).map((pl) => new THREE.Plane(dirToScene(pl.normal), pl.constant * MM + pad));
 }
 
 /** Is a scene point on the kept side of every clipping plane (what the renderer draws, and the only thing picking may hit)? */

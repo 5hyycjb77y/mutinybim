@@ -232,7 +232,8 @@ describe("sections are real cuts", () => {
   it("level datum lines carry their name and elevation; no outline disclaimer", () => {
     const { scene } = sectionLinesModel(sectionModel());
     const t = texts(scene.primitives).map((x) => x.text);
-    expect(t).toContain("LEVEL 1  EL. 0'-0\"");
+    expect(t).toContain("LEVEL 1");
+    expect(t).toContain("EL. 0'-0\"");
     expect(t.some((x) => x.startsWith("OUTLINE SECTION"))).toBe(false);
   });
 

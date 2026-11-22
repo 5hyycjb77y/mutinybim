@@ -538,7 +538,13 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
         break;
       }
       case "set_element_values": {
-        const targets = ids.map((id) => valuesTarget(reader, id));
+        const targets = ids.map((id) => {
+          const found = reader.find(asElementId(id));
+          if (found && (found.kind === "ceiling" || !isCoreElement(found) && !isClassifiedElement(found) && found.kind.includes("."))) {
+            return found;
+          }
+          return valuesTarget(reader, id);
+        });
         for (const el of targets) {
           if (el.kind === "part") {
             for (const [k, v] of Object.entries(command.values)) {
@@ -552,6 +558,17 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
               else values[k] = v;
             }
             write(el, { ...el, values });
+            continue;
+          }
+          if (!isCoreElement(el) && !isClassifiedElement(el)) {
+            const raw = el as BimElement & { readonly values?: Record<string, ParamValue> };
+            const values: Record<string, ParamValue> = { ...(raw.values ?? {}) };
+            for (const [k, v] of Object.entries(command.values)) {
+              if (v === null) delete values[k];
+              else values[k] = v;
+            }
+            const next = Object.keys(values).length === 0 ? without(raw as never, "values") : { ...raw, values };
+            write(el as never, next as never);
             continue;
           }
           const base = current(el);

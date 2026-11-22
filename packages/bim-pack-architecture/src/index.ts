@@ -9,7 +9,7 @@ export { ARCHITECTURE_LINKED_PLAN_DISPLAY } from "./linked-plan-display";
 export { ARCHITECTURE_CLASSES } from "./classes";
 export { ARCHITECTURE_PARAMETER_SET, ROOM_BOUNDING_KEY, SMOKE_BARRIER_KEY } from "./parameters";
 export { ARCHITECTURE_PLAN_GRAPHICS, DOOR_PLAN_GRAPHICS, WINDOW_PLAN_GRAPHICS, DOOR_OPERATION_KEY } from "./graphics";
-export { ARCHITECTURE_KIND_ROWS, ROOF_KIND, STAIR_KIND, ROOF_KIND_ROW, STAIR_KIND_ROW, MAX_RISER_MM, asRoof, asStair, stairGeometry, roofBlocks, roofPlane, roofFaceAt, ROOF_SURFACE_FACE_ROW, type RoofRecord, type StairRecord, type StairGeometry, type RoofSlope } from "./kinds";
+export { ARCHITECTURE_KIND_ROWS, ROOF_KIND, STAIR_KIND, ROOF_KIND_ROW, STAIR_KIND_ROW, MAX_RISER_MM, asRoof, asStair, stairGeometry, stairLayout, roofBlocks, roofPlane, roofFaceAt, ROOF_SURFACE_FACE_ROW, type RoofRecord, type StairRecord, type StairForm, type StairTurn, type StairGeometry, type StairLayout, type StairFlightLayout, type StairLandingLayout, type RoofSlope } from "./kinds";
 export { ARCHITECTURE_RATINGS, FIRE_RESISTANCE_RATING, SMOKE_BARRIER_RATING, FIRE_RESISTANCE_KEY, DOOR_FIRE_RATING_KEY, ratingHours } from "./ratings";
 // Plain data for host screens (tab ids, labels, slots); a host imports `ADDON_UI` under its own name.
 export { ARCHITECTURE_FIELD_PROVIDER } from "./fields";
@@ -18,3 +18,4 @@ export { ADDON_UI } from "./ui";
 export { ARCHITECTURE_BODIES, DOOR_BODY, WINDOW_BODY, FRAME_DEPTH_KEY } from "./bodies";
 export { ARCHITECTURE_SCHEDULE_TEMPLATES, DOOR_SCHEDULE, WINDOW_SCHEDULE, WALL_TYPES_SCHEDULE } from "./schedules";
 export { ARCHITECTURE_STARTER_TYPES } from "./starter-types";
+export { ARCHITECTURE_MATERIALS } from "./materials";

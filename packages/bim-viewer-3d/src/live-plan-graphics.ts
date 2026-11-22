@@ -85,6 +85,7 @@ function take(g: PlanGraphic, owner: string, segments: LivePlanSegment[], texts:
     if (g.text !== undefined && g.text.trim().length > 0) texts.push({ at: g.at, text: g.text, heightMm: g.heightMm ?? 2.5, rotationDeg: g.rotationDeg, owner });
     return;
   }
+  if (g.pen === "none") return;
   const pen: PlanPen = g.pen;
   const dashed = "dash" in g && g.dash !== undefined && g.dash !== "solid";
   const halftone = "tone" in g && g.tone === "halftone";

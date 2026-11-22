@@ -62,10 +62,12 @@ describe("a13a roof and stair kinds", () => {
     expect(g?.riserMm).toBeCloseTo(173.91, 2);
     expect(g?.treadMm).toBeCloseTo(280, 6);
     const body = elementSolid(m.head, element(m.head, "s"), 0);
+    // 22 waisted architectural steps (preserving 1:1 step count for IFC round-trip)
     expect(body?.pieces).toHaveLength(22);
     expect(body?.pieces[21]?.r1[0]?.z).toBeCloseTo(22 * (4000 / 23), 6);
     const plan = planGraphicsOf(element(m.head, "s"), ctx(m)) ?? [];
-    expect(plan.filter((x) => x.form === "line")).toHaveLength(21 + 1);
+    // 21 tread nosings + 1 centerline walk path + 2 V arrowhead strokes = 24 lines
+    expect(plan.filter((x) => x.form === "line")).toHaveLength(24);
     expect(plan.find((x) => x.form === "text")).toMatchObject({ text: "UP" });
   });
 

@@ -64,6 +64,7 @@ Contract version: **1.13.0**
 | `kernel.linked_plan_display` | 1 | Linked model categories in plans |
 | `kernel.linked_reference` | 1 | Linked model elements as reference geometry |
 | `kernel.load_section` | 1 | Load sections |
+| `kernel.material` | 1 | Materials |
 | `kernel.measure_rule` | 1 | Measure rules |
 | `kernel.network_adapter` | 1 | Network adapters |
 | `kernel.network_coupling` | 1 | Network couplings |
@@ -121,6 +122,7 @@ Contract version: **1.13.0**
 - `agentToolPackSetProblems`
 - `type AgentToolTarget`
 - `type AggregationDirection`
+- `allMaterials`
 - `ancestorsOf`
 - `type AnswerMadeStale`
 - `answersMadeStaleByEdit`
@@ -442,6 +444,7 @@ Contract version: **1.13.0**
 - `type KindRecordRead`
 - `kindRowOf`
 - `KINDS_ADDON_SHAPES_FEATURE`
+- `type KindSectionGraphicsFace`
 - `kindShapeAccepts`
 - `type KindShapeField`
 - `type KindSymbol`
@@ -499,6 +502,17 @@ Contract version: **1.13.0**
 - `type LookupTable`
 - `lookupTableProblems`
 - `lookupTableSchema`
+- `MATERIAL_CUT_HATCHES`
+- `MATERIAL_ID_KEY`
+- `MATERIAL_PATTERNS`
+- `MATERIAL_POINT`
+- `MATERIAL_SURFACE_HATCHES`
+- `materialCutGrey`
+- `type MaterialCutHatch`
+- `type MaterialDef`
+- `materialOf`
+- `type MaterialPattern`
+- `type MaterialSurfaceHatch`
 - `MECHANICAL_MANIFEST`
 - `type MemberCandidate`
 - `modelIdsOf`
@@ -557,6 +571,7 @@ Contract version: **1.13.0**
 - `type PackSummary`
 - `PARAMETER_SET_POINT`
 - `parentOf`
+- `parseHexColor`
 - `parseJurisdiction`
 - `PART_MODEL_SCHEMA_2`
 - `PART_SYMBOL_VIEWS`
@@ -623,6 +638,7 @@ Contract version: **1.13.0**
 - `reservedToolInputProblem`
 - `type ResolvedDesignLimit`
 - `type ResolvedField`
+- `resolveElementMaterial`
 - `resolvePackPins`
 - `type Responsibility`
 - `RESPONSIBILITY_FEATURE`
@@ -652,6 +668,8 @@ Contract version: **1.13.0**
 - `satisfies`
 - `type ScheduleEditStep`
 - `SCHEDULES_EDIT_STEPS_FEATURE`
+- `type SectionGraphic`
+- `type SectionGraphicsContext`
 - `separatorsOnLevel`
 - `SERVES_RULE_POINT`
 - `type ServesRuleDef`

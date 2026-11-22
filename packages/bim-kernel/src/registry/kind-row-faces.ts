@@ -53,7 +53,7 @@ export type PlanTextAnchor = "start" | "middle" | "end";
  */
 export type PlanGraphic =
   | { readonly form: "line"; readonly a: Vec2; readonly b: Vec2; readonly pen: PlanPen; readonly dash?: string; readonly tone?: PlanTone }
-  | { readonly form: "polyline"; readonly points: readonly Vec2[]; readonly closed: boolean; readonly pen: PlanPen; readonly dash?: string; readonly fill?: string; readonly tone?: PlanTone }
+  | { readonly form: "polyline"; readonly points: readonly Vec2[]; readonly closed: boolean; readonly pen: PlanPen | "none"; readonly dash?: string; readonly fill?: string; readonly tone?: PlanTone }
   /** An axis-aligned box about `center`, `size` across (a unit's outline). */
   | { readonly form: "rect"; readonly center: Vec2; readonly size: Vec2; readonly pen: PlanPen }
   | { readonly form: "arc"; readonly center: Vec2; readonly radiusMm: number; readonly startDeg: number; readonly sweepDeg: number; readonly pen: PlanPen; readonly dash?: string }
@@ -105,6 +105,33 @@ export interface PlanGraphicsContext {
 
 /** Plan graphics for one record, or null to fall back to the symbol / outline the view draws today. */
 export type KindPlanGraphicsFace = (el: BimElement, ctx: PlanGraphicsContext) => readonly PlanGraphic[] | null;
+
+/** One 2D primitive in a section or elevation view, in section coordinates (`u` along cut, `z` elevation, mm), with optional depth along view direction for back-to-front masking. */
+export interface SectionGraphic {
+  readonly graphic: PlanGraphic;
+  /** Depth from the section cut plane along `look` in mm; larger values paint first so nearer layers mask farther ones. */
+  readonly depthMm?: number;
+}
+
+export interface SectionGraphicsContext {
+  readonly elements: Elements;
+  /** The view's scale denominator (48 for 1/4" = 1'-0"). */
+  readonly scale: number;
+  readonly detail: "coarse" | "medium" | "fine";
+  /** The view's baseline floor elevation in mm. */
+  readonly floorMm: number;
+  /** Origin of the section cut line on plan (model mm). */
+  readonly cutStart: Vec2;
+  /** Unit vector along the section cut line (`u` axis). */
+  readonly axis: Vec2;
+  /** Unit vector pointing into the section viewing depth (+depth). */
+  readonly look: Vec2;
+  /** Far clip depth beyond the cut plane in model mm. */
+  readonly depthMm: number;
+}
+
+/** Section/elevation graphics for one record in `(u, z)` coordinates, or null to fall back to projected 3D solid geometry. */
+export type KindSectionGraphicsFace = (el: BimElement, ctx: SectionGraphicsContext) => readonly SectionGraphic[] | null;
 
 /**
  * Contract 1.11.0: a record's body, for sections, 3D views and plan hiding,
@@ -160,9 +187,9 @@ export interface KindCreateFace {
 }
 
 /** Problems with the faces on one row (pack conformance), in words. */
-export function kindRowFaceProblems(kind: string, row: { readonly symbol?: unknown; readonly tagText?: unknown; readonly pickShape?: unknown; readonly planGraphics?: unknown; readonly solid?: unknown; readonly create?: unknown }): string[] {
+export function kindRowFaceProblems(kind: string, row: { readonly symbol?: unknown; readonly tagText?: unknown; readonly pickShape?: unknown; readonly planGraphics?: unknown; readonly sectionGraphics?: unknown; readonly solid?: unknown; readonly create?: unknown }): string[] {
   const out: string[] = [];
-  for (const face of ["symbol", "tagText", "pickShape", "planGraphics", "solid"] as const) {
+  for (const face of ["symbol", "tagText", "pickShape", "planGraphics", "sectionGraphics", "solid"] as const) {
     if (row[face] !== undefined && typeof row[face] !== "function") out.push(`element kind ${kind}: ${face} must be a function`);
   }
   if (row.create !== undefined) out.push(...createFaceProblems(kind, row.create));

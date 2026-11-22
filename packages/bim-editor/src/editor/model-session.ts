@@ -379,6 +379,7 @@ function boxAccepts(el: BimElement | undefined, categories: ReadonlySet<BoxCateg
   if (el.kind === 'run_segment' || el.kind === 'run_fitting') return categories.has(el.domain === 'pipe' ? 'pipe' : 'duct')
   if (el.kind === 'duct_segment' || el.kind === 'tap' || el.kind === 'elbow') return categories.has(el.service && el.service !== 'air' ? 'pipe' : 'duct')
   if (el.kind === 'terminal' || el.kind === 'equipment') return categories.has('parts')
+  if (el.kind === 'wall' || el.kind === 'opening' || el.kind === 'column' || el.kind === 'slab' || el.kind === 'ceiling') return true
   return false
 }
 

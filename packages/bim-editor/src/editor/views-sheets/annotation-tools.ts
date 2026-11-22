@@ -3,6 +3,7 @@ import {
   dimensionPoints,
   defaultTagStyleFor,
   elementsOfKind,
+  hostAreaOutlinesInView,
   organizationOf,
   tagHasLeader,
   tagItemBox,
@@ -33,7 +34,7 @@ export interface SnapPoint {
   readonly label: string
 }
 
-const TAGGABLE = new Set(['run_segment', 'duct_segment', 'terminal', 'equipment', 'part'])
+const TAGGABLE = new Set(['run_segment', 'duct_segment', 'terminal', 'equipment', 'part', 'opening'])
 
 function anchorsFor(kind: string): readonly AnchorName[] {
   if (kind === 'run_segment' || kind === 'duct_segment' || kind === 'wall') return ['start', 'end', 'mid', 'edge_left', 'edge_right']
@@ -94,20 +95,30 @@ function insidePaper(outline: readonly Vec2[], p: Vec2): boolean {
   return inside
 }
 
-/** Rooms and spaces this plan shows: rooms by their level, spaces placed on the plan's level. */
+/** Rooms and spaces this view shows: floor polygons in plans/RCPs, and exact sliced room rectangles in sections/elevations. */
 function floorAreasInView(model: ModelState, view: ViewElement): Array<{ readonly id: string; readonly outlines: ReadonlyArray<readonly Vec2[]> }> {
-  if (view.viewType !== 'floor_plan' && view.viewType !== 'ceiling_plan') return []
+  if (view.viewType !== 'floor_plan' && view.viewType !== 'ceiling_plan' && view.viewType !== 'section' && view.viewType !== 'elevation') return []
   const out: Array<{ readonly id: string; readonly outlines: ReadonlyArray<readonly Vec2[]> }> = []
+  const seen = new Set<string>()
   for (const el of viewLevelElements(model, view)) {
-    if (el.kind === 'room' && !('deleted' in el && el.deleted)) out.push({ id: el.id, outlines: [el.outline] })
+    if (el.kind === 'room' && !('deleted' in el && el.deleted)) {
+      const outlines = hostAreaOutlinesInView(model, view, el)
+      if (outlines.length > 0) {
+        out.push({ id: el.id, outlines })
+        seen.add(el.id)
+      }
+    }
   }
   const levelName = view.props?.level
+  const isVertical = view.viewType === 'section' || view.viewType === 'elevation'
   for (const space of elementsOfKind(model.elements, 'space')) {
-    const level = space.levelId ? model.elements[space.levelId] : undefined
-    if (levelName === undefined || level?.kind !== 'level' || level.name !== levelName) continue
-    const bounds = space.bounds
-    if (bounds.kind === 'outline' || bounds.kind === 'bounded') out.push({ id: space.id, outlines: [bounds.outline] })
-    else if (bounds.kind === 'rooms') out.push({ id: space.id, outlines: bounds.roomIds.flatMap((rid) => { const r = model.elements[rid]; return r?.kind === 'room' ? [r.outline] : [] }) })
+    if (seen.has(space.id)) continue
+    if (!isVertical) {
+      const level = space.levelId ? model.elements[space.levelId] : undefined
+      if (levelName === undefined || level?.kind !== 'level' || level.name !== levelName) continue
+    }
+    const outlines = hostAreaOutlinesInView(model, view, space)
+    if (outlines.length > 0) out.push({ id: space.id, outlines })
   }
   return out
 }

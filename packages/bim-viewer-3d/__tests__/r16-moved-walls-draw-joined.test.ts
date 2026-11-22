@@ -79,7 +79,8 @@ describe("r16 moved walls still draw joined", () => {
     const el = model.elements["w-2"];
     if (!el) throw new Error("no w-2");
     const graphics = lineJoinPlanGraphics(el, { elements: model.elements, scale: 100, levelId: "L1", detail: "medium", drawing: "view", lookingUp: false, connectedTo: () => null });
-    // Its two faces, carried round both corners; a free end would add a line across the wall (and round 15 drew none: null, a plain box).
-    expect(graphics).toHaveLength(2);
+    // Its two cut faces carried round both corners (plus cut poché fill); a free end would add an extra line across the wall.
+    expect(graphics?.filter((g) => g.form === "line")).toHaveLength(2);
+    expect(graphics?.some((g) => g.form === "polyline" && g.fill)).toBe(true);
   });
 });

@@ -346,12 +346,18 @@ function solveEnd(ctx: Ctx, me: Frame, end: End): EndSolve {
     return result("butt", stopAt(o, faceToward(o, d)));
   }
 
-  // Three or more: the highest runs through, with anything in line with it.
+  // Three or more: the highest priority runs through; at equal priority a collinear continuous run wins over a perpendicular stem.
   const all: Frame[] = [me, ...meets.map((m) => m.frame)];
   let top = all[0] as Frame;
   for (const f of all) if (outranks(ctx, f, top)) top = f;
+  const topP = priorityOf(ctx, top);
+  const collinear = all.find((a) => priorityOf(ctx, a) === topP && all.some((b) => b !== a && inLine(a, b) && priorityOf(ctx, b) === topP));
+  if (collinear) top = collinear;
   const runsThrough = top === me || (inLine(me, top) && through.length === 0);
   if (!runsThrough) return result("cross", stopAt(top, faceToward(top, d)));
+  if (meets.some((m) => inLine(me, m.frame) && priorityOf(ctx, m.frame) === priorityOf(ctx, me))) {
+    return { style: "cross", with: ids, left: at, right: at };
+  }
   // Run to the outer face of the one most across it.
   let across: Frame | null = null;
   for (const m of meets) if (!inLine(me, m.frame) && (!across || Math.abs(cross(me.u, m.frame.u)) > Math.abs(cross(me.u, across.u)))) across = m.frame;

@@ -1,3 +1,4 @@
+import { resolveElementMaterial } from "../materials";
 import { withFlatLine } from "../placement/line-face";
 import { elementsOfKind } from "../store";
 import type { BimElement, ElementId, Wall } from "../types";
@@ -37,9 +38,15 @@ function priorityValue(el: BimElement): number | null {
 export const WALL_JOIN_ROW: LineJoinRow = {
   kind: "wall",
   label: "Wall",
-  styles: ["butt", "miter"],
+  styles: ["miter", "butt"],
   line: (el, elements) => (el.kind === "wall" ? { start: el.start, end: el.end, widthMm: el.thickness, levelId: lineLevelId(el, elements) as ElementId } : null),
-  priority: (el) => priorityValue(el) ?? (el.kind === "wall" ? el.thickness : 0),
+  priority: (el, elements) => {
+    const explicit = priorityValue(el);
+    if (explicit !== null) return explicit;
+    // Glazed assemblies yield to opaque solid walls at corner/tee junctions.
+    if (resolveElementMaterial({ elements }, el)?.pattern === "glass") return 1;
+    return el.kind === "wall" ? el.thickness : 0;
+  },
   withLine: (el, line) => (el.kind === "wall" ? withFlatLine(el, line.start, line.end, el.thickness) : el),
 };
 

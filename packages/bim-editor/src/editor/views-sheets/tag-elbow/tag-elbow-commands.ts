@@ -1,4 +1,4 @@
-import { paperMapping, planTagSpread, tagHasLeader, tagTarget, type Command, type DrawingItem, type ModelState, type Vec2, type ViewElement } from '@permitzip/bim-kernel'
+import { isPointInsideHostArea, paperMapping, planTagSpread, tagHasLeader, tagTarget, type Command, type DrawingItem, type ModelState, type Vec2, type ViewElement } from '@permitzip/bim-kernel'
 
 /**
  * Tag elbow leaders on drawings (ROADMAP U9), as the commands the canvas
@@ -32,6 +32,26 @@ export function tagMoveCommand(model: ModelState, view: ViewElement | null, item
   const plain: TagCommand = { command: { type: 'update_drawing_item', itemId: item.id, points: [head] }, label: item.tag ? 'move the tag' : 'move it' }
   const tag = item.tag
   if (!tag || !view) return plain
+  // Rooms and spaces: auto-attach an elbow leader when dragged outside the room/space outline (plan or section),
+  // and cleanly remove the leader when dragged back inside.
+  const insideArea = isPointInsideHostArea(model, tag.elementId, head, view)
+  if (insideArea !== null) {
+    if (!insideArea) {
+      if (tagHasLeader(model, tag) && tag.elbow !== undefined) return plain
+      return {
+        command: { type: 'update_drawing_item', itemId: item.id, points: [head], tag: { ...tag, leader: true, elbow: tag.elbow ?? 'auto' } },
+        label: 'move the room tag out on an elbow leader',
+      }
+    }
+    if (tag.leader || tag.elbow !== undefined) {
+      const { elbow: _dropElbow, ...rest } = tag
+      return {
+        command: { type: 'update_drawing_item', itemId: item.id, points: [head], tag: { ...rest, leader: false } },
+        label: 'move the room tag back inside',
+      }
+    }
+    return plain
+  }
   const target = tagTarget(model, view, tag)
   if (!target || paperDistance(view, head, target) <= TAG_AWAY_MM) return plain
   if (tagHasLeader(model, tag) && tag.elbow !== undefined) return plain

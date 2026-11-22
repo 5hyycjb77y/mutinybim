@@ -9,12 +9,16 @@ import {
   buildViewPickIndex,
   describeModelDelta,
   drawPartSymbol,
+  editableLinePlacement,
+  hostLineOf,
   isWallFaceMountable,
+  joinedEndFollowers,
   modelToPaperPoint,
   nearestWallFace,
   paperToDrawing,
   planAutoPartMarks,
   viewLevelElements,
+  viewModelLevel,
   type AutoPartMarkHit,
   type ModelState,
   type PartInstance,
@@ -24,6 +28,9 @@ import {
   type ViewOnPaper,
   type ViewPickIndex,
 } from '@permitzip/bim-kernel'
+import { DRAFTING_GRID_MM, snapPoint, type Snap } from '../architecture/tools/snap'
+import { endDragHint, endDropCommand } from '../architecture/WallEndGrips'
+import { isSelectableUnderLocks, useSelectionLocks } from '../selection-locks'
 import {
   circuitHomeRunNear,
   circuitHomeRunsOnPaper,
@@ -176,6 +183,7 @@ function points(poly: readonly Vec2[], offset: Vec2 = { x: 0, y: 0 }): string {
 export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, onPicked }: Props) {
   const [cache] = useState(() => new PickIndexCache())
   const index = useMemo(() => cache.get(model, view.view), [cache, model, view.view])
+  const locks = useSelectionLocks()
   const [hover, setHover] = useState<readonly string[] | null>(null)
   const [hoverJoin, setHoverJoin] = useState<CircuitJoinOnPaper | null>(null)
   const [hoverHomeRun, setHoverHomeRun] = useState<{ readonly homeRun: CircuitHomeRunOnPaper; readonly part: HomeRunHitPart } | null>(null)
@@ -183,6 +191,9 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const [hoverSwitchLabel, setHoverSwitchLabel] = useState<CircuitSwitchLegLabelOnPaper | null>(null)
   const [wireMenu, setWireMenu] = useState<WireContextMenu | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
+  const [wallEndDrag, setWallEndDrag] = useState<{ readonly wallId: string; readonly end: 'start' | 'end'; readonly at: Vec2; readonly snap: Snap | null; readonly disjoin: boolean } | null>(null)
+  const overlapRef = useRef<{ stack: string[]; idx: number }>({ stack: [], idx: 0 })
+  const pickIdsAt = (p: Vec2): string[] => idsAt(index, view, p, paperMmPerPx).filter((id) => isSelectableUnderLocks(model.elements[id], locks))
   /** Split or Route: where the tool would act under the pointer (a tick on the duct, or the next route point). */
   const [toolMark, setToolMark] = useState<{ readonly paper: Vec2; readonly label: string } | null>(null)
   const r = view.paperRect
@@ -341,21 +352,39 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       }
       if (e.key === 'Tab' && hover && !drag) {
         e.preventDefault()
-        bridge.hint(bridge.tab(e.shiftKey ? -1 : 1))
-        setHover(bridge.highlighted())
+        const ov = overlapRef.current
+        if (ov.stack.length > 1) {
+          const step = e.shiftKey ? -1 : 1
+          const nextIdx = (ov.idx + step + ov.stack.length) % ov.stack.length
+          ov.idx = nextIdx
+          const id = ov.stack[nextIdx] ?? null
+          const el = id ? model.elements[id] : undefined
+          const label = el ? ('name' in el && typeof el.name === 'string' && el.name ? el.name : 'mark' in el && typeof el.mark === 'string' && el.mark ? el.mark : el.kind.replace(/_/g, ' ')) : ''
+          bridge.hover(id)
+          bridge.hint(`Tab (${nextIdx + 1}/${ov.stack.length}): ${label} — click to select, Tab for next`)
+          setHover(id ? [id] : null)
+        } else {
+          bridge.hint(bridge.tab(e.shiftKey ? -1 : 1))
+          setHover(bridge.highlighted())
+        }
       } else if (routing && e.key === 'Enter') {
         e.preventDefault()
         e.stopPropagation()
         bridge.hint(bridge.tools.finishRoute())
         setToolMark(null)
       } else if (e.key === 'Escape' && !e.defaultPrevented) {
-        const step = drawingEscapeStep({ tool: bridge.tool, dragging: drag !== null, routeInProgress: routing && bridge.tools.routeLastPoint() !== null })
+        const step = drawingEscapeStep({ tool: bridge.tool, dragging: drag !== null || wallEndDrag !== null, routeInProgress: routing && bridge.tools.routeLastPoint() !== null })
         if (step === null) return
         e.stopPropagation()
-        if (step === 'cancel-drag' && drag) {
-          setDrag(null)
-          if (drag.kind === 'run') bridge.runDrag.end(false)
-          bridge.hint(drag.kind === 'run' ? 'Drag cancelled; nothing changed.' : 'Move cancelled; nothing changed.')
+        if (step === 'cancel-drag' && (drag || wallEndDrag)) {
+          if (wallEndDrag) {
+            setWallEndDrag(null)
+            bridge.hint('Wall end drag cancelled; nothing changed.')
+          } else if (drag) {
+            setDrag(null)
+            if (drag.kind === 'run') bridge.runDrag.end(false)
+            bridge.hint(drag.kind === 'run' ? 'Drag cancelled; nothing changed.' : 'Move cancelled; nothing changed.')
+          }
         } else if (step === 'cancel-route' && bridge.tools.cancelRoute()) {
           bridge.hint('Route cancelled; nothing was saved. Click to start another, or Esc again to stop routing.')
         } else if (bridge.stopTool) {
@@ -424,13 +453,19 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     }
     setHoverMark(null)
     setHoverSwitchLabel(null)
-    const id = idsAt(index, view, p, paperMmPerPx)[0] ?? null
+    const stack = pickIdsAt(p)
+    const prev = overlapRef.current
+    const sameStack = stack.length === prev.stack.length && stack.every((id, i) => prev.stack[i] === id)
+    const idx = sameStack ? Math.min(prev.idx, Math.max(0, stack.length - 1)) : 0
+    overlapRef.current = { stack, idx }
+    const id = stack[idx] ?? null
+    const tabNote = stack.length > 1 ? ` · Tab cycles ${stack.length} overlapping` : ''
     if (isForegroundModelEl(id)) {
       const hint = bridge.hover(id)
       setHoverJoin(null)
       setHoverHomeRun(null)
-      bridge.hint(hint)
-      setHover(bridge.highlighted() ?? (id ? [id] : null))
+      bridge.hint(hint ? `${hint}${tabNote}` : tabNote ? `Tab cycles ${stack.length} overlapping elements` : null)
+      setHover(sameStack && idx > 0 && id ? [id] : (bridge.highlighted() ?? (id ? [id] : null)))
       return
     }
     // Wires and home-run shafts draw in front of rooms, grids, and crossed walls, so check them before background picks.
@@ -457,8 +492,8 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     const hint = bridge.hover(id)
     setHoverHomeRun(null)
     setHoverJoin(null)
-    bridge.hint(hint)
-    setHover(bridge.highlighted() ?? (id ? [id] : null))
+    bridge.hint(hint ? `${hint}${tabNote}` : tabNote ? `Tab cycles ${stack.length} overlapping elements` : null)
+    setHover(sameStack && idx > 0 && id ? [id] : (bridge.highlighted() ?? (id ? [id] : null)))
   }
 
   /** The straight piece and model point a Split click would cut at. */
@@ -567,7 +602,13 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         return
       }
     }
-    const id = routing || splitting || shiftBox ? null : (idsAt(index, view, p, paperMmPerPx)[0] ?? null)
+    const stack = routing || splitting || shiftBox ? [] : pickIdsAt(p)
+    const ov = overlapRef.current
+    const sameStack = stack.length === ov.stack.length && stack.every((x, i) => ov.stack[i] === x)
+    const id = stack[sameStack ? Math.min(ov.idx, Math.max(0, stack.length - 1)) : 0] ?? null
+    const hitKind = id ? model.elements[id]?.kind : undefined
+    // Background rooms/spaces never block dragging a box-select on empty floor.
+    const isAreaBg = hitKind === 'room' || hitKind === 'space'
     // 2. When no foreground device/run is under the pointer, check home-run shaft & circuit/switch-leg wire spans
     //    (wins over background rooms, grids, and walls the wire crosses!).
     if (tool === 'select' && !shiftBox && !isForegroundModelEl(id)) {
@@ -592,8 +633,8 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         return
       }
     }
-    // Nothing under a Select press: a drag is a window or crossing box, a click deselects (the box's short-drag case).
-    const boxing = shiftBox || (tool === 'select' && id === null)
+    // Nothing under a Select press (or only a background room/space): drag makes a box, short click selects/deselects.
+    const boxing = shiftBox || (tool === 'select' && (id === null || isAreaBg))
     e.currentTarget.setPointerCapture(e.pointerId)
     if (routing || splitting) {
       setDrag({ kind: 'press', from: p, id: null })
@@ -853,12 +894,13 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     if (d.kind === 'box') {
       if (Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < CLICK_PX * paperMmPerPx) {
         bridge.hint(null)
-        const id = idsAt(index, view, d.a, paperMmPerPx)[0] ?? null
+        const id = pickIdsAt(d.a)[0] ?? null
         if (id === null && bridge.claimEmptyClick?.()) return
         bridge.select(id)
         return
       }
-      const { ids, mode } = idsInBox(index, view, d.a, d.b)
+      const { ids: rawIds, mode } = idsInBox(index, view, d.a, d.b)
+      const ids = rawIds.filter((id) => isSelectableUnderLocks(model.elements[id], locks))
       bridge.hint(bridge.selectBox(ids, mode))
       if (ids.length > 0) onPicked?.()
       return
@@ -1424,6 +1466,108 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       {bridge.canEdit && bridge.plus && !drag && !routing && (
         <DrawingPlusSpots model={model} view={view} selectedIds={bridge.selectedIds} serverFeatures={bridge.serverFeatures ?? []} paperMmPerPx={paperMmPerPx} onPick={bridge.plus} hint={bridge.hint} />
       )}
+      {(() => {
+        // Printed-plan Revit-style wall end grips when 1 editable wall is selected on a floor plan.
+        if (!bridge.canEdit || drag || routing || splitting || view.view.viewType !== 'floor_plan' || bridge.selectedIds.length !== 1) return null
+        const wid = bridge.selectedIds[0]
+        const el = wid ? model.elements[wid] : undefined
+        if (!el || el.kind !== 'wall') return null
+        const level = viewModelLevel(model, view.view.props?.level, view.view.props?.levelElevationMm)
+        const pLine = editableLinePlacement(el, model.elements)
+        const line = hostLineOf(el, model.elements)
+        if (!level || !pLine || !line || pLine.levelId !== level.id) return null
+        const wallObj = { id: el.id, start: line.start, end: line.end }
+        const startPaper = modelToPaperPoint(view, { x: line.start.x, y: line.start.y, z: 0 })
+        const endPaper = modelToPaperPoint(view, { x: line.end.x, y: line.end.y, z: 0 })
+        const gripR = Math.max(1.2, 5.5 * paperMmPerPx)
+        const aimEnd = (end: 'start' | 'end', e: React.PointerEvent<SVGCircleElement>) => {
+          const pp = paperOf(e)
+          if (!pp) return null
+          const m = view.mapping.toModel(paperToDrawing(view, pp))
+          if (!m) return null
+          const fixed = end === 'start' ? line.end : line.start
+          const partners = e.altKey
+            ? []
+            : joinedEndFollowers(model.elements, el.id, end).filter((fid) => {
+                const other = model.elements[fid]
+                const ol = other ? hostLineOf(other, model.elements) : null
+                const pt = end === 'start' ? line.start : line.end
+                return ol !== null && ((ol.start.x === pt.x && ol.start.y === pt.y) || (ol.end.x === pt.x && ol.end.y === pt.y))
+              })
+          const snap = snapPoint({ model, levelId: level.id, raw: { x: m.x, y: m.y }, toleranceMm: snapTolerance, corners: [fixed], gridMm: DRAFTING_GRID_MM, ignoreIds: [el.id, ...partners] })
+          return { wallId: el.id, end, at: snap.point, snap, disjoin: e.altKey }
+        }
+        const previewPaper = wallEndDrag ? modelToPaperPoint(view, { x: wallEndDrag.at.x, y: wallEndDrag.at.y, z: 0 }) : null
+        const fixedPaper = wallEndDrag ? (wallEndDrag.end === 'start' ? endPaper : startPaper) : null
+        return (
+          <g data-testid="drawing-wall-end-grips" data-wall={el.id}>
+            {fixedPaper && previewPaper && (
+              <line x1={fixedPaper.x} y1={fixedPaper.y} x2={previewPaper.x} y2={previewPaper.y} stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" pointerEvents="none" />
+            )}
+            {(['start', 'end'] as const).map((end) => {
+              const gp = end === 'start' ? startPaper : endPaper
+              return (
+                <circle
+                  key={end}
+                  cx={gp.x}
+                  cy={gp.y}
+                  r={gripR}
+                  fill="var(--mutiny-background)"
+                  stroke={PRIMARY}
+                  strokeWidth={Math.max(0.35, 1.8 * paperMmPerPx)}
+                  style={{ cursor: 'grab' }}
+                  data-testid="drawing-wall-end-grip"
+                  data-end={end}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return
+                    e.stopPropagation()
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    const next = aimEnd(end, e)
+                    if (next) {
+                      setWallEndDrag(next)
+                      const len = Math.hypot(next.at.x - (end === 'start' ? line.end.x : line.start.x), next.at.y - (end === 'start' ? line.end.y : line.start.y))
+                      bridge.hint(endDragHint(model.elements, el.id, end, next.snap, len, next.disjoin))
+                    }
+                  }}
+                  onPointerMove={(e) => {
+                    if (!wallEndDrag) return
+                    e.stopPropagation()
+                    const next = aimEnd(wallEndDrag.end, e)
+                    if (next) {
+                      setWallEndDrag(next)
+                      const len = Math.hypot(next.at.x - (wallEndDrag.end === 'start' ? line.end.x : line.start.x), next.at.y - (wallEndDrag.end === 'start' ? line.end.y : line.start.y))
+                      bridge.hint(endDragHint(model.elements, el.id, wallEndDrag.end, next.snap, len, next.disjoin))
+                    }
+                  }}
+                  onPointerUp={(e) => {
+                    if (!wallEndDrag) return
+                    e.stopPropagation()
+                    const d = wallEndDrag
+                    setWallEndDrag(null)
+                    bridge.hint(null)
+                    const cmd = endDropCommand(wallObj, d.end, d.at, d.disjoin)
+                    if (typeof cmd === 'string') return
+                    const err = bridge.submit(cmd, d.disjoin ? "disjoin and move the wall's end" : "move the wall's end")
+                    if (err) toast.error(err)
+                  }}
+                  onPointerCancel={(e) => {
+                    if (!wallEndDrag) return
+                    e.stopPropagation()
+                    setWallEndDrag(null)
+                    bridge.hint(null)
+                  }}
+                  onLostPointerCapture={() => {
+                    if (!wallEndDrag) return
+                    setWallEndDrag(null)
+                    bridge.hint(null)
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )
+            })}
+          </g>
+        )
+      })()}
       {gripId && gripAnswer && gripAt && (
         <Suspense fallback={null}>
           <PlanConnectGrip

@@ -37,6 +37,7 @@ import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { buildSampleMarketGas } from "../../bim-kernel/__tests__/fixtures/sample-market-gas";
 import { createEditorDemo, type EditorDemo } from "../../bim-editor/demo/server";
 import { createElectricalDemoModel } from "./electrical-demo";
+import { createArchOverhaulDemoModel } from "./arch-overhaul-demo";
 import { enlargedPlansDemoModel } from "./enlarged-plans-demo";
 
 // The kernel carries no trade: gas, plumbing and air systems are first-party add-ons, installed before any model is built.
@@ -74,8 +75,10 @@ function openIssueModel(): ModelState {
 const sampleMarketGasModel = (): ModelState => buildSampleMarketGas();
 
 const startingModel =
-  process.env.BIM_DEV_MODEL === "electrical-plan"
-    ? createElectricalDemoModel("electrical-plan-demo")
+  process.env.BIM_DEV_MODEL === "arch-overhaul"
+    ? createArchOverhaulDemoModel("arch-overhaul-demo")
+    : process.env.BIM_DEV_MODEL === "electrical-plan"
+      ? createElectricalDemoModel("electrical-plan-demo")
     : process.env.BIM_DEV_MODEL === "site-7301"
       ? createPlacedDemoModel("site-7301", SITE_7301_ORIGIN)
       : process.env.BIM_DEV_MODEL === "open-issue"

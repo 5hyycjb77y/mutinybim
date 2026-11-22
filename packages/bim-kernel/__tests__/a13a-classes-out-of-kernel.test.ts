@@ -47,7 +47,7 @@ describe("a13a classes out of kernel", () => {
       const bare = { ...wall, classId: undefined, classSource: undefined };
       expect(builtinClassOf(bare)).toBe("arch.wall");
     }
-    expect(ARCHITECTURE_PACK.contributions.map((c) => c.pointId)).toEqual(["kernel.class", "kernel.parameter_set", "kernel.rating_kind", "kernel.class_plan_graphics", "kernel.element_kind", "kernel.field_provider", "kernel.ifc_relation", "kernel.ifc_import_rule", "kernel.library_rows", "kernel.class_solids", "kernel.linked_plan_display", "kernel.tag_style_preset", "kernel.starter_element_type", "kernel.surface_face"]);
+    expect(ARCHITECTURE_PACK.contributions.map((c) => c.pointId)).toEqual(["kernel.class", "kernel.parameter_set", "kernel.rating_kind", "kernel.class_plan_graphics", "kernel.element_kind", "kernel.field_provider", "kernel.ifc_relation", "kernel.ifc_import_rule", "kernel.library_rows", "kernel.class_solids", "kernel.linked_plan_display", "kernel.tag_style_preset", "kernel.starter_element_type", "kernel.surface_face", "kernel.material"]);
   });
 
   it("wall, door and floor types carry parameters with their IFC homes", () => {

@@ -44,8 +44,8 @@ export function calloutHead(model: Pick<ModelState, "elements" | "connections">,
 }
 
 /** Paper mm — NCS / Revit 1/2" Ø callout & section bubble (12.7 mm), 7/16" Ø elevation bubble (11 mm). */
-const HEAD_RADIUS_MM = 6.35;
-const ELEV_RADIUS_MM = 5.5;
+export const HEAD_RADIUS_MM = 6.35;
+export const ELEV_RADIUS_MM = 5.5;
 const HEAD_TEXT_MM = 2.1;
 const NAME_TEXT_MM = 2.0;
 const CALLOUT_CORNER_MM = 2.5;
@@ -202,12 +202,29 @@ function clipSegmentToRect(a: Vec2, b: Vec2, r: ModelClipBounds): { a: Vec2; b: 
   };
 }
 
+/** Effective annotative start & end points of a section mark (applying independent `headExtMm` / `tailExtMm` extensions). */
+export function sectionMarkEndpoints(cut: NonNullable<ViewElement["props"]>["section"]): { readonly start: Vec2; readonly end: Vec2 } | null {
+  if (!cut) return null;
+  const dx = cut.end.x - cut.start.x;
+  const dy = cut.end.y - cut.start.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-3) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const headExt = cut.headExtMm ?? 0;
+  const tailExt = cut.tailExtMm ?? 0;
+  return {
+    start: { x: cut.start.x - ux * headExt, y: cut.start.y - uy * headExt },
+    end: { x: cut.end.x + ux * tailExt, y: cut.end.y + uy * tailExt },
+  };
+}
+
 /**
- * Draw a live Revit/NCS section cut mark on a plan: dashed cut line, solid
- * black 45° tangent pointer head with white-masked split bubble reading live
- * detail#/sheet# at start, and solid black tail flag at end. When `clipBounds`
- * is provided, clips the cut line to the crop region and suppresses endpoints
- * that fall outside the crop.
+ * Draw a live Revit/NCS section cut mark on a plan: dashed cut line (or split
+ * head/tail stubs when `splitGap` is set), solid black 45° tangent pointer head
+ * with white-masked split bubble reading live detail#/sheet# at start, and
+ * solid black tail flag at end. When `clipBounds` is provided, clips the cut
+ * line to the crop region and suppresses endpoints outside that region.
  */
 export function drawSectionMark(
   model: Pick<ModelState, "elements" | "connections">,
@@ -217,13 +234,14 @@ export function drawSectionMark(
   clipBounds?: ModelClipBounds,
 ): boolean {
   const cut = view.props?.section;
-  if (!cut) return false;
-  let drawStart = cut.start;
-  let drawEnd = cut.end;
+  const endpoints = sectionMarkEndpoints(cut);
+  if (!cut || !endpoints) return false;
+  let drawStart = endpoints.start;
+  let drawEnd = endpoints.end;
   let showHead = true;
   let showTail = true;
   if (clipBounds) {
-    const clipped = clipSegmentToRect(cut.start, cut.end, clipBounds);
+    const clipped = clipSegmentToRect(endpoints.start, endpoints.end, clipBounds);
     if (!clipped) return false;
     drawStart = clipped.a;
     drawEnd = clipped.b;
@@ -252,7 +270,14 @@ export function drawSectionMark(
   const tailLen = 5.5;
   const leadIn = 2.5;
   const cutEnd = showTail && len > leadIn + tailWidth ? { x: p1.x - ax.x * leadIn, y: p1.y - ax.y * leadIn } : p1;
-  prims.push({ kind: "line", a: p0, b: cutEnd, pen: "medium", dash: SECTION_LINE_DASH });
+  if (cut.splitGap && showHead && showTail && len > 28) {
+    // Revit split/broken section line: crisp head & tail stubs leaving the middle of the plan uncluttered.
+    const stub = Math.min(14, len * 0.22);
+    prims.push({ kind: "line", a: p0, b: { x: p0.x + ax.x * stub, y: p0.y + ax.y * stub }, pen: "medium", dash: SECTION_LINE_DASH });
+    prims.push({ kind: "line", a: { x: cutEnd.x - ax.x * stub, y: cutEnd.y - ax.y * stub }, b: cutEnd, pen: "medium", dash: SECTION_LINE_DASH });
+  } else {
+    prims.push({ kind: "line", a: p0, b: cutEnd, pen: "medium", dash: SECTION_LINE_DASH });
+  }
   if (showTail && len > leadIn + tailWidth) {
     prims.push({ kind: "line", a: cutEnd, b: p1, pen: "medium" });
   }
@@ -283,6 +308,28 @@ export function drawSectionMark(
   return true;
 }
 
+/** Paper-mm center of an elevation marker's split bubble (single source of truth for drawing and interactive link hitboxes). */
+export function elevationMarkCenter(
+  cut: NonNullable<ViewElement["props"]>["section"],
+  toPaper: (p: Vec2) => Vec2,
+): { readonly head: Vec2; readonly look: Vec2; readonly midModel: Vec2 } | null {
+  if (!cut) return null;
+  const midModel = { x: (cut.start.x + cut.end.x) / 2, y: (cut.start.y + cut.end.y) / 2 };
+  const modelDx = cut.end.x - cut.start.x;
+  const modelDy = cut.end.y - cut.start.y;
+  const modelLen = Math.hypot(modelDx, modelDy);
+  if (modelLen < 1e-3) return null;
+  const lookModel = { x: -(modelDy / modelLen) * cut.direction, y: (modelDx / modelLen) * cut.direction };
+  const pMid = toPaper(midModel);
+  const pLook = toPaper({ x: midModel.x + lookModel.x * 1000, y: midModel.y + lookModel.y * 1000 });
+  const lx = pLook.x - pMid.x;
+  const ly = pLook.y - pMid.y;
+  const lLen = Math.hypot(lx, ly) || 1;
+  const look = { x: lx / lLen, y: ly / lLen };
+  const head = { x: pMid.x - look.x * (ELEV_RADIUS_MM * Math.SQRT2), y: pMid.y - look.y * (ELEV_RADIUS_MM * Math.SQRT2) };
+  return { head, look, midModel };
+}
+
 /**
  * Draw a live Revit/NCS elevation marker on a plan: solid black 90° tangent
  * pointer aimed along the look direction with a white-masked split bubble
@@ -295,28 +342,12 @@ export function drawElevationMark(
   prims: Primitive[],
   clipBounds?: ModelClipBounds,
 ): boolean {
-  const cut = view.props?.section;
-  if (!cut) return false;
-  const midModel = { x: (cut.start.x + cut.end.x) / 2, y: (cut.start.y + cut.end.y) / 2 };
-  if (clipBounds && !pointInRect(midModel, clipBounds)) return false;
-  const modelDx = cut.end.x - cut.start.x;
-  const modelDy = cut.end.y - cut.start.y;
-  const modelLen = Math.hypot(modelDx, modelDy);
-  if (modelLen < 1e-3) return false;
-  const lookModel = { x: -(modelDy / modelLen) * cut.direction, y: (modelDx / modelLen) * cut.direction };
-  const pMid = toPaper(midModel);
-  const pLook = toPaper({ x: midModel.x + lookModel.x * 1000, y: midModel.y + lookModel.y * 1000 });
-  const lx = pLook.x - pMid.x;
-  const ly = pLook.y - pMid.y;
-  const lLen = Math.hypot(lx, ly) || 1;
-  const look = { x: lx / lLen, y: ly / lLen };
-
-  const r = ELEV_RADIUS_MM;
-  // Place bubble centered behind the view plane so the pointer apex touches the view plane midpoint.
-  const head = { x: pMid.x - look.x * (r * Math.SQRT2), y: pMid.y - look.y * (r * Math.SQRT2) };
+  const geo = elevationMarkCenter(view.props?.section, toPaper);
+  if (!geo) return false;
+  if (clipBounds && !pointInRect(geo.midModel, clipBounds)) return false;
   const live = calloutHead(model, { viewId: view.id });
-  drawTangentPointer(head, r, look, prims);
-  drawSplitBubble(head, r, live, prims);
+  drawTangentPointer(geo.head, ELEV_RADIUS_MM, geo.look, prims);
+  drawSplitBubble(geo.head, ELEV_RADIUS_MM, live, prims);
   return true;
 }
 
@@ -415,6 +446,112 @@ export function referencingSheet(model: Pick<ModelState, "elements" | "connectio
     }
   }
   return fallback;
+}
+
+/** Paper-mm layout of a sheet viewport's title block (single source of truth for rendering, moving, resizing rule, and clicking back-reference bubbles). */
+export interface ViewportTitleLayout {
+  readonly left: number;
+  readonly titleY: number;
+  readonly bubbleCenter: Vec2;
+  readonly textX: number;
+  readonly ruleStartX: number;
+  readonly ruleEndX: number;
+  readonly ruleY: number;
+  readonly hitRect: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+}
+
+export function viewportTitleLayout(
+  frame: { readonly center: Vec2; readonly size: Vec2 },
+  viewport: { readonly titleOffsetMm?: Vec2; readonly titleRuleMm?: number },
+  viewName: string,
+  hasBackRef: boolean,
+): ViewportTitleLayout {
+  const ox = viewport.titleOffsetMm?.x ?? 0;
+  const oy = viewport.titleOffsetMm?.y ?? 0;
+  const left = frame.center.x - frame.size.x / 2 + ox;
+  const titleY = frame.center.y + frame.size.y / 2 + 8 + oy;
+  const ruleY = titleY + 1.5;
+  const defaultRuleLen = Math.min(frame.size.x, 120);
+  const bubbleCenter = { x: left + HEAD_RADIUS_MM, y: ruleY };
+  const textX = hasBackRef ? left + HEAD_RADIUS_MM * 2 + 2.5 : left;
+  const ruleStartX = hasBackRef ? left + HEAD_RADIUS_MM * 2 : left;
+  const autoRuleEnd = hasBackRef ? Math.max(left + defaultRuleLen, textX + Math.max(viewName.length * 2.2, 48)) : Math.max(left + defaultRuleLen, left + Math.max((viewName.length + 3) * 2.2, 48));
+  const ruleEndX = viewport.titleRuleMm !== undefined ? ruleStartX + Math.max(20, viewport.titleRuleMm) : autoRuleEnd;
+  const hitTop = hasBackRef ? ruleY - HEAD_RADIUS_MM - 1 : titleY - 4.5;
+  const hitBot = hasBackRef ? ruleY + HEAD_RADIUS_MM + 1 : titleY + 7.5;
+  return {
+    left,
+    titleY,
+    bubbleCenter,
+    textX,
+    ruleStartX,
+    ruleEndX,
+    ruleY,
+    hitRect: { x: left - 1.5, y: hitTop, w: Math.max(24, ruleEndX - left + 3), h: hitBot - hitTop },
+  };
+}
+
+/** Paper-mm center of a sheet viewport's back-referenced title bubble (single source of truth for sheet rendering and click navigation). */
+export function viewTitleBubbleCenter(
+  frame: { readonly center: Vec2; readonly size: Vec2 },
+  titleOffsetMm?: Vec2,
+): Vec2 {
+  const left = frame.center.x - frame.size.x / 2 + (titleOffsetMm?.x ?? 0);
+  const titleY = frame.center.y + frame.size.y / 2 + 8 + (titleOffsetMm?.y ?? 0);
+  return { x: left + HEAD_RADIUS_MM, y: titleY + 1.5 };
+}
+
+/** Paper-mm geometry for a structural grid line and its Revit circular end bubbles (single source of truth for plan rendering and bubble drag grips). */
+export const GRID_BUBBLE_RADIUS_MM = 4.2;
+
+export interface GridBubbleGeometry {
+  readonly pA: Vec2;
+  readonly pB: Vec2;
+  readonly bubbleA: Vec2;
+  readonly bubbleB: Vec2;
+  readonly hasBubbleB: boolean;
+  readonly radius: number;
+}
+
+export function gridBubbleEndpoints(
+  start: Vec2,
+  end: Vec2,
+  scale: number,
+  boundsMin: Vec2,
+  boundsMax: Vec2,
+  toPaper: (p: Vec2) => Vec2,
+): GridBubbleGeometry | null {
+  const gdx = end.x - start.x;
+  const gdy = end.y - start.y;
+  const glen = Math.hypot(gdx, gdy);
+  if (glen < 1) return null;
+  const ux = gdx / glen;
+  const uy = gdy / glen;
+  const ext = 7 * scale;
+  const pad = 22 * scale;
+  const gA = { x: start.x - ux * ext, y: start.y - uy * ext };
+  const gB = { x: end.x + ux * ext, y: end.y + uy * ext };
+  const clipped = clipSegmentToRect(gA, gB, {
+    min: { x: boundsMin.x - pad, y: boundsMin.y - pad },
+    max: { x: boundsMax.x + pad, y: boundsMax.y + pad },
+  });
+  if (!clipped) return null;
+  const pA = toPaper(clipped.a);
+  const pB = toPaper(clipped.b);
+  const pdx = pB.x - pA.x;
+  const pdy = pB.y - pA.y;
+  const plen = Math.hypot(pdx, pdy) || 1;
+  const pax = pdx / plen;
+  const pay = pdy / plen;
+  const r = GRID_BUBBLE_RADIUS_MM;
+  return {
+    pA,
+    pB,
+    bubbleA: { x: pA.x - pax * r, y: pA.y - pay * r },
+    bubbleB: { x: pB.x + pax * r, y: pB.y + pay * r },
+    hasBubbleB: plen > 65,
+    radius: r,
+  };
 }
 
 /**

@@ -241,3 +241,5 @@ export * from "./elements/starter-types";
 // Nov 7 follow-ups: drag one end of a wall (or any joinable line); the lines joined at that end follow.
 export { lineEndCommandSchemas, isLineEndCommand, type LineEndCommand } from "./joins/end-commands";
 export { joinedEndFollowers, carryJoinedEndsOfReshape } from "./joins/carry";
+// Shared material definitions (`kernel.material` v1): 2D plan/section poché and 3D appearance.
+export * from "./materials";

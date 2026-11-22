@@ -6,7 +6,7 @@ import type { SheetTitle } from '../../contracts/building-model/sheet-title'
 import { toast } from 'sonner'
 import { escapeLeavesField, leftFieldHint } from '../escape-step'
 import { ChevronDown, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
-import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, canonicalJson, enlargedPlanCommands, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, resolveNote, textBlockToSvg, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
+import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutHead, canonicalJson, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, referencingSheet, resolveNote, sectionMarkEndpoints, textBlockToSvg, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
 import { distributionEquipment } from '@permitzip/bim-pack-electrical'
 import type { Presence } from '@permitzip/bim-sync'
 import { NOTE_LOCK_REFRESH_MS, PresenceClock, editingNoteActivity, lockMessage, noteLocks, type NoteLock } from '@permitzip/bim-sync/note-locks'
@@ -141,6 +141,8 @@ interface Props {
   readonly blockedReason: string
   readonly submit: SubmitCommand
   readonly onOpenView: (viewId: string) => void
+  /** Jump directly to a sheet (e.g. clicking a section marker `1 / A-201` in paper space opens sheet A-201). */
+  readonly onOpenSheet?: (sheetId: string) => void
   readonly onEditSheet?: () => void
   /** Right-hand properties for a detail view (scale etc.), rendered under the selection panel. */
   readonly viewProperties?: React.ReactNode
@@ -262,7 +264,7 @@ interface PlacedFrame {
 }
 
 /** Sheet editor and detail-view drafting canvas: the printed drawing underneath, interaction on top. */
-export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReason, submit, onOpenView, onEditSheet, viewProperties, tool: controlledTool, onToolChange, onToolsAvailable, backgrounds, printedPreview = false, people, selfActorId, onActivity, draft: sharedDraft, modelEdit, onActiveViewChange, onOpenTagStyles, viewportProperties, sheetImages = null, focusItem = null, placing = null, onPlaced, onPlacingCancel, spaces = null, ceilings = null, questions = null, blockFreshness, onCreateSimilar, onAddView, onPlanPointer }: Props) {
+export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReason, submit, onOpenView, onOpenSheet, onEditSheet, viewProperties, tool: controlledTool, onToolChange, onToolsAvailable, backgrounds, printedPreview = false, people, selfActorId, onActivity, draft: sharedDraft, modelEdit, onActiveViewChange, onOpenTagStyles, viewportProperties, sheetImages = null, focusItem = null, placing = null, onPlaced, onPlacingCancel, spaces = null, ceilings = null, questions = null, blockFreshness, onCreateSimilar, onAddView, onPlanPointer }: Props) {
   const overlayRef = useRef<SVGSVGElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const paperRef = useRef<HTMLDivElement | null>(null)
@@ -996,6 +998,11 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     if (d.kind === 'grip') {
       const item = items.find((i) => i.id === d.id)
       if (!item) return
+      if (d.grip.kind === 'tag-head' && item.tag) {
+        const moved = tagElbows.moveCommand(item, toStored(d.to))
+        send(moved.command, moved.label)
+        return
+      }
       const command = gripCommand({ model, view: annotatedView, item, grip: d.grip, to: d.to, snap: d.grip.kind === 'dim-point' ? nearestSnap(snaps, d.to, snapReach) : null, toPaper: toPaperPoint, toStored, items, ownerId, idPrefix: newId('grip') })
       if (typeof command === 'string') toast(command)
       else if (command) send(command, d.grip.kind === 'frame-corner' ? `resize ${item.figure?.kind === 'image' ? 'picture' : 'chart'}` : d.grip.kind === 'tag-head' ? 'move the tag' : d.grip.kind.startsWith('leader') ? 'move the leader' : d.grip.kind === 'detail-end' ? 'drag the end' : 'change the dimension')
@@ -1558,6 +1565,26 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                     </rect>
                   )
                 })}
+              {tool === 'select' && !noteEdit && !placing && !tracing && (
+                <SectionMarkerLinks
+                  model={model}
+                  views={
+                    target.kind === 'sheet'
+                      ? active
+                        ? [{ view: active.view, frame: active.frame, viewport: active.viewport }]
+                        : placed.map((entry) => ({ view: entry.view, frame: entry.frame, viewport: entry.viewport }))
+                      : modelView
+                        ? [{ view: modelView.view, frame: modelView.frame }]
+                        : []
+                  }
+                  isSheet={target.kind === 'sheet' && !active}
+                  canEdit={canEdit}
+                  paperOf={paperOf}
+                  submit={submit}
+                  onOpenView={onOpenView}
+                  onOpenSheet={onOpenSheet}
+                />
+              )}
               {boundary && (
                 <g data-testid="boundary-sketch">
                   {(() => {
@@ -2313,4 +2340,901 @@ function resizeFrame(start: NoteFrame, edge: NoteEdge, d: Vec2): NoteFrame {
   }
   const height = Math.max(NOTE_LIMITS.minHeightMm, Math.round(((start.height ?? start.contentHeight) + local.y) * 10) / 10)
   return { ...start, height }
+}
+
+/**
+ * Revit-style paper-space section, grid & level datum controls:
+ * - Section head bubble (`1 / A-201`): click to jump straight to its sheet (or view), or drag along the section line to stretch the head independently of the cut range!
+ * - Section tail flag: drag along the section line to stretch the tail independently of the cut range!
+ * - Section center break button: click to split / rejoin the dashed section line across the plan!
+ * - Structural grid bubbles: drag either end along the grid axis to pull bubbles cleanly outside the crop box!
+ * - Section/elevation level datum margins: drag left/right handles to pull level targets out cleanly into the sheet margin!
+ */
+function SectionMarkerLinks({
+  model,
+  views,
+  isSheet = false,
+  canEdit,
+  paperOf,
+  submit,
+  onOpenView,
+  onOpenSheet,
+}: {
+  readonly model: ModelState
+  readonly views: readonly { readonly view: ViewElement; readonly frame: ViewFrame; readonly viewport?: Viewport }[]
+  readonly isSheet?: boolean
+  readonly canEdit: boolean
+  readonly paperOf: (e: React.PointerEvent<SVGElement>) => Vec2 | null
+  readonly submit: SubmitCommand
+  readonly onOpenView: (viewId: string) => void
+  readonly onOpenSheet?: (sheetId: string) => void
+}) {
+  const [hovered, setHovered] = useState<string | null>(null)
+  const [drag, setDrag] = useState<{
+    readonly kind: 'sec-head' | 'sec-tail' | 'sec-line' | 'grid-start' | 'grid-end' | 'grid-line' | 'level-left' | 'level-right' | 'vp-title' | 'vp-rule'
+    readonly id: string
+    readonly pointerId: number
+    readonly originPaper: Vec2
+    readonly curPaper: Vec2
+    readonly moved: boolean
+    readonly altKey: boolean
+    readonly frame: ViewFrame
+    readonly view: ViewElement
+  } | null>(null)
+
+  const sections = useMemo(() => {
+    const index = documentIndex(model)
+    const out: Array<{
+      readonly key: string
+      readonly refView: ViewElement
+      readonly frame: ViewFrame
+      readonly p0: Vec2
+      readonly p1: Vec2
+      readonly head: Vec2
+      readonly radius: number
+      readonly mid: Vec2
+      readonly ax: Vec2
+      readonly perp: Vec2
+      readonly label: string
+      readonly sheetId: string | null
+    }> = []
+    for (const { view, frame } of views) {
+      if (view.viewType !== 'floor_plan' && view.viewType !== 'ceiling_plan') continue
+      for (const refView of planReferenceViews(model, view)) {
+        const cut = refView.props?.section
+        const ep = sectionMarkEndpoints(cut)
+        if (!cut || !ep) continue
+        const p0 = modelToPaper(frame, ep.start)
+        const p1 = modelToPaper(frame, ep.end)
+        const dx = p1.x - p0.x
+        const dy = p1.y - p0.y
+        const len = Math.hypot(dx, dy)
+        if (len < 1e-3) continue
+        const ax = { x: dx / len, y: dy / len }
+        const perp = { x: -ax.y, y: ax.x }
+        const elevGeo = refView.viewType === 'elevation' ? elevationMarkCenter(cut, (pt) => modelToPaper(frame, pt)) : null
+        const head = refView.viewType === 'section' ? { x: p0.x - ax.x * HEAD_RADIUS_MM, y: p0.y - ax.y * HEAD_RADIUS_MM } : (elevGeo?.head ?? { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 })
+        const radius = refView.viewType === 'section' ? HEAD_RADIUS_MM + 0.5 : ELEV_RADIUS_MM + 0.5
+        const vp = index.viewportByView.get(refView.id)
+        const sheet = vp ? model.elements[vp.sheetId] : undefined
+        const sheetId = sheet?.kind === 'sheet' && !sheet.deleted ? sheet.id : null
+        const sheetNum = sheet?.kind === 'sheet' && !sheet.deleted ? sheet.number : null
+        const dragHint = refView.viewType === 'section' ? ' · drag to extend head' : ''
+        out.push({
+          key: `${view.id}:${refView.id}`,
+          refView,
+          frame,
+          p0,
+          p1,
+          head,
+          radius,
+          mid: { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 },
+          ax,
+          perp,
+          sheetId,
+          label: sheetNum ? `Click to open Sheet ${sheetNum} — ${refView.name}${dragHint}` : `Click to open ${refView.name}${dragHint}`,
+        })
+      }
+    }
+    return out
+  }, [model, views])
+
+  /** Live callout bubbles (`shape === 'callout'`) inside every visible view: single-click the head bubble to jump to the target sheet/view. */
+  const calloutHeads = useMemo(() => {
+    const index = documentIndex(model)
+    const out: Array<{
+      readonly key: string
+      readonly head: Vec2
+      readonly targetViewId: string
+      readonly sheetId: string | null
+      readonly label: string
+    }> = []
+    for (const { view, frame } of views) {
+      for (const item of index.itemsByOwner.get(view.id) ?? []) {
+        if (item.deleted || item.shape !== 'callout' || !item.callout || !item.points[2]) continue
+        const target = model.elements[item.callout.viewId]
+        if (!target || target.kind !== 'view' || target.deleted) continue
+        const live = calloutHead(model, item.callout)
+        const head = modelToPaper(frame, item.points[2])
+        out.push({
+          key: `callout:${view.id}:${item.id}`,
+          head,
+          targetViewId: target.id,
+          sheetId: live.sheetId,
+          label: live.sheetId ? `Click to open Sheet ${live.bottom} — ${target.name}` : `Click to open ${target.name}`,
+        })
+      }
+    }
+    return out
+  }, [model, views])
+
+  /** Sheet viewport titles: movable on sheet, resizable horizontal rule end, and clickable back-reference bubble (`1 / A-101`). */
+  const viewportTitles = useMemo(() => {
+    if (!isSheet) return []
+    const out: Array<{
+      readonly key: string
+      readonly viewport: Viewport
+      readonly view: ViewElement
+      readonly frame: ViewFrame
+      readonly layout: ReturnType<typeof viewportTitleLayout>
+      readonly backRef: ReturnType<typeof referencingSheet>
+      readonly backLabel: string | null
+    }> = []
+    for (const { view, frame, viewport } of views) {
+      if (!viewport || view.viewType === 'schedule') continue
+      const backRef = referencingSheet(model, view)
+      const layout = viewportTitleLayout(frame, viewport, view.name, !!backRef)
+      const srcView = backRef ? model.elements[backRef.sourceViewId] : undefined
+      const srcName = srcView?.kind === 'view' ? ` — ${srcView.name}` : ''
+      out.push({
+        key: `vptitle:${viewport.id}`,
+        viewport,
+        view,
+        frame,
+        layout,
+        backRef,
+        backLabel: backRef ? `Click to return to Sheet ${backRef.sheetNumber}${srcName} · drag title to move` : null,
+      })
+    }
+    return out
+  }, [isSheet, model, views])
+
+  /** Structural column grids with exact kernel bubble positions (`gridBubbleEndpoints`) for aligned dragging & lateral relocation. */
+  const grids = useMemo(() => {
+    const out: Array<{
+      readonly key: string
+      readonly id: string
+      readonly label: string
+      readonly levelId: string
+      readonly frame: ViewFrame
+      readonly view: ViewElement
+      readonly pA: Vec2
+      readonly pB: Vec2
+      readonly bubbleA: Vec2
+      readonly bubbleB: Vec2
+      readonly hasBubbleB: boolean
+      readonly radius: number
+      readonly start: Vec2
+      readonly end: Vec2
+    }> = []
+    const allGrids = elementsOfKind(model.elements, 'grid')
+    if (allGrids.length === 0) return out
+    const firstLevel = elementsOfKind(model.elements, 'level')[0]?.id ?? 'L1'
+    for (const { view, frame } of views) {
+      if (view.viewType !== 'floor_plan' && view.viewType !== 'ceiling_plan') continue
+      const win = frame.windowSize ?? frame.size
+      const halfW = (win.x * frame.scale) / 2
+      const halfH = (win.y * frame.scale) / 2
+      const bMin = { x: frame.modelCenter.x - halfW, y: frame.modelCenter.y - halfH }
+      const bMax = { x: frame.modelCenter.x + halfW, y: frame.modelCenter.y + halfH }
+      for (const g of allGrids) {
+        const geo = gridBubbleEndpoints(g.start, g.end, frame.scale, bMin, bMax, (pt) => modelToPaper(frame, pt))
+        if (!geo) continue
+        const levelId = g.placement?.kind === 'line' ? g.placement.levelId : firstLevel
+        out.push({
+          key: `${view.id}:${g.id}`,
+          id: g.id,
+          label: g.label,
+          levelId,
+          frame,
+          view,
+          pA: geo.pA,
+          pB: geo.pB,
+          bubbleA: geo.bubbleA,
+          bubbleB: geo.bubbleB,
+          hasBubbleB: geo.hasBubbleB,
+          radius: geo.radius,
+          start: g.start,
+          end: g.end,
+        })
+      }
+    }
+    return out
+  }, [model, views])
+
+  const levelViews = useMemo(
+    () =>
+      views
+        .filter(({ view }) => view.viewType === 'section' || view.viewType === 'elevation')
+        .map(({ view, frame }) => {
+          const leftEdge = frame.center.x - frame.size.x / 2
+          const rightEdge = frame.center.x + frame.size.x / 2
+          const leftExt = view.props?.levelLeftExtMm ?? 0
+          const rightX = view.props?.levelRightExtMm !== undefined ? rightEdge + view.props.levelRightExtMm + 2.6 : Math.max(leftEdge + 25, rightEdge - 24) + 2.6
+          return {
+            view,
+            frame,
+            leftX: leftEdge - leftExt,
+            rightX,
+            topY: frame.center.y - frame.size.y / 2,
+            botY: frame.center.y + frame.size.y / 2,
+            midY: frame.center.y,
+          }
+        }),
+    [views],
+  )
+
+  if (sections.length === 0 && calloutHeads.length === 0 && viewportTitles.length === 0 && grids.length === 0 && levelViews.length === 0) return null
+
+  return (
+    <g data-testid="section-marker-links">
+      {/* Section & elevation marks: click head to open sheet, drag head/tail along axis, drag shaft laterally to move cut plane, click center to split/join */}
+      {sections.map((s) => {
+        const cut = s.refView.props?.section
+        if (!cut) return null
+        const draggingHead = drag?.kind === 'sec-head' && drag.id === s.refView.id
+        const draggingTail = drag?.kind === 'sec-tail' && drag.id === s.refView.id
+        const draggingLine = drag?.kind === 'sec-line' && drag.id === s.refView.id
+        const isActive = hovered === s.key || draggingHead || draggingTail || draggingLine
+        const axisDelta = drag && (draggingHead || draggingTail) ? (drag.curPaper.x - drag.originPaper.x) * s.ax.x + (drag.curPaper.y - drag.originPaper.y) * s.ax.y : 0
+        const perpDelta = drag && draggingLine ? (drag.curPaper.x - drag.originPaper.x) * s.perp.x + (drag.curPaper.y - drag.originPaper.y) * s.perp.y : 0
+        const headCx = s.head.x + (draggingHead ? s.ax.x * axisDelta : 0) + (draggingLine ? s.perp.x * perpDelta : 0)
+        const headCy = s.head.y + (draggingHead ? s.ax.y * axisDelta : 0) + (draggingLine ? s.perp.y * perpDelta : 0)
+        const p0x = s.p0.x + (draggingHead ? s.ax.x * axisDelta : 0) + (draggingLine ? s.perp.x * perpDelta : 0)
+        const p0y = s.p0.y + (draggingHead ? s.ax.y * axisDelta : 0) + (draggingLine ? s.perp.y * perpDelta : 0)
+        const tailCx = s.p1.x + (draggingTail ? s.ax.x * axisDelta : 0) + (draggingLine ? s.perp.x * perpDelta : 0)
+        const tailCy = s.p1.y + (draggingTail ? s.ax.y * axisDelta : 0) + (draggingLine ? s.perp.y * perpDelta : 0)
+        return (
+          <g key={s.key} onPointerEnter={() => setHovered(s.key)} onPointerLeave={() => setHovered((cur) => (cur === s.key ? null : cur))}>
+            {/* Live Revit blue rubberband preview while dragging head, tail, or cut line */}
+            {(draggingHead || draggingTail || draggingLine) && (
+              <g className="pointer-events-none">
+                <line x1={p0x} y1={p0y} x2={tailCx} y2={tailCy} stroke={PRIMARY} strokeWidth={0.65} strokeDasharray="3 1.5" />
+                <circle cx={headCx} cy={headCy} r={HEAD_RADIUS_MM} fill={PRIMARY} fillOpacity={0.12} stroke={PRIMARY} strokeWidth={0.65} />
+              </g>
+            )}
+
+            {/* Section cut line shaft: hover illuminates all Revit controls; drag laterally to move section cut plane */}
+            {canEdit && s.refView.viewType === 'section' && (
+              <line
+                x1={s.p0.x}
+                y1={s.p0.y}
+                x2={s.p1.x}
+                y2={s.p1.y}
+                stroke={isActive ? PRIMARY : 'transparent'}
+                strokeOpacity={isActive ? 0.35 : 0}
+                strokeWidth={3.8}
+                className="cursor-move"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'sec-line', id: s.refView.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: s.frame, view: s.refView })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'sec-line' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                  setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.2 })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'sec-line' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const deltaP = (drag.curPaper.x - drag.originPaper.x) * s.perp.x + (drag.curPaper.y - drag.originPaper.y) * s.perp.y
+                  setDrag(null)
+                  if (!wasMoved) return
+                  const m0 = paperToModel(s.frame, drag.originPaper)
+                  const m1 = paperToModel(s.frame, { x: drag.originPaper.x + s.perp.x * deltaP, y: drag.originPaper.y + s.perp.y * deltaP })
+                  const dxM = Math.round(m1.x - m0.x)
+                  const dyM = Math.round(m1.y - m0.y)
+                  if (Math.hypot(dxM, dyM) < 20) return
+                  submit(
+                    {
+                      type: 'set_view_crop',
+                      viewId: s.refView.id,
+                      section: { ...cut, start: { x: cut.start.x + dxM, y: cut.start.y + dyM }, end: { x: cut.end.x + dxM, y: cut.end.y + dyM } },
+                    },
+                    `Move ${s.refView.name} cut line`,
+                  )
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>{`Drag ${s.refView.name} cut line to relocate section plane`}</title>
+              </line>
+            )}
+
+            {/* Head bubble: click jumps to sheet, drag along axis adjusts headExtMm independently */}
+            <circle
+              cx={headCx}
+              cy={headCy}
+              r={s.radius}
+              className="cursor-pointer transition-colors"
+              fill={isActive ? PRIMARY : 'transparent'}
+              fillOpacity={isActive ? 0.14 : 0}
+              stroke={isActive ? PRIMARY : 'transparent'}
+              strokeWidth={0.75}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                e.stopPropagation()
+                const pt = paperOf(e)
+                if (!pt || !canEdit || s.refView.viewType !== 'section') {
+                  if (s.sheetId && onOpenSheet) onOpenSheet(s.sheetId)
+                  else onOpenView(s.refView.id)
+                  return
+                }
+                e.currentTarget.setPointerCapture(e.pointerId)
+                setDrag({ kind: 'sec-head', id: s.refView.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: s.frame, view: s.refView })
+              }}
+              onPointerMove={(e) => {
+                if (!drag || drag.kind !== 'sec-head' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                const pt = paperOf(e)
+                if (!pt) return
+                const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.8 })
+              }}
+              onPointerUp={(e) => {
+                if (!drag || drag.kind !== 'sec-head' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                e.stopPropagation()
+                const wasMoved = drag.moved
+                const proj = (drag.curPaper.x - drag.originPaper.x) * s.ax.x + (drag.curPaper.y - drag.originPaper.y) * s.ax.y
+                setDrag(null)
+                if (!wasMoved) {
+                  if (s.sheetId && onOpenSheet) onOpenSheet(s.sheetId)
+                  else onOpenView(s.refView.id)
+                  return
+                }
+                const nextHeadExt = Math.round((cut.headExtMm ?? 0) - proj * s.frame.scale)
+                submit({ type: 'set_view_crop', viewId: s.refView.id, section: { ...cut, headExtMm: nextHeadExt } }, 'Extend section head')
+              }}
+              onLostPointerCapture={() => setDrag(null)}
+            >
+              <title>{s.label}</title>
+            </circle>
+
+            {/* Tail grip: hollow blue Revit dot on hover, drag along axis to extend tail independently of cut range */}
+            {canEdit && s.refView.viewType === 'section' && (
+              <circle
+                cx={tailCx}
+                cy={tailCy}
+                r={isActive ? 2.4 : 3.8}
+                className="cursor-ew-resize transition-all"
+                fill={isActive ? '#ffffff' : 'transparent'}
+                stroke={isActive ? PRIMARY : 'transparent'}
+                strokeWidth={0.75}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'sec-tail', id: s.refView.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: s.frame, view: s.refView })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'sec-tail' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                  setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.2 })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'sec-tail' || drag.id !== s.refView.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const proj = (drag.curPaper.x - drag.originPaper.x) * s.ax.x + (drag.curPaper.y - drag.originPaper.y) * s.ax.y
+                  setDrag(null)
+                  if (!wasMoved) return
+                  const nextTailExt = Math.round((cut.tailExtMm ?? 0) + proj * s.frame.scale)
+                  submit({ type: 'set_view_crop', viewId: s.refView.id, section: { ...cut, tailExtMm: nextTailExt } }, 'Extend section tail')
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>Drag to extend section tail independently of cut range</title>
+              </circle>
+            )}
+
+            {/* Center Revit break/join glyph: visible when hovering section line; click toggles splitGap */}
+            {canEdit && s.refView.viewType === 'section' && (
+              <g
+                className="cursor-pointer"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  submit(
+                    { type: 'set_view_crop', viewId: s.refView.id, section: { ...cut, splitGap: !cut.splitGap } },
+                    cut.splitGap ? 'Join section line' : 'Split section line',
+                  )
+                }}
+              >
+                <circle cx={s.mid.x} cy={s.mid.y} r={3.2} fill={isActive ? '#ffffff' : 'transparent'} stroke={isActive ? PRIMARY : 'transparent'} strokeWidth={0.6} />
+                {isActive && (
+                  <path
+                    d={`M ${s.mid.x - 1.6} ${s.mid.y - 0.8} L ${s.mid.x - 0.5} ${s.mid.y + 1.0} L ${s.mid.x + 0.5} ${s.mid.y - 1.0} L ${s.mid.x + 1.6} ${s.mid.y + 0.8}`}
+                    fill="none"
+                    stroke={PRIMARY}
+                    strokeWidth={0.55}
+                    className="pointer-events-none"
+                  />
+                )}
+                <title>{cut.splitGap ? 'Click to rejoin section cut line' : 'Click to split section line in the middle (Revit break)'}</title>
+              </g>
+            )}
+          </g>
+        )
+      })}
+
+      {/* Clickable callout head bubbles (`shape === 'callout'`) -> jump directly to enlarged plan / detail sheet */}
+      {calloutHeads.map((c) => (
+        <circle
+          key={c.key}
+          cx={c.head.x}
+          cy={c.head.y}
+          r={HEAD_RADIUS_MM + 0.5}
+          data-testid="callout-head-link"
+          className="cursor-pointer fill-transparent stroke-transparent hover:fill-primary/15 hover:stroke-primary/80 transition-colors"
+          strokeWidth={0.7}
+          onPointerDown={(e) => {
+            if (e.button !== 0 || e.shiftKey) return
+            e.stopPropagation()
+            if (c.sheetId && onOpenSheet) onOpenSheet(c.sheetId)
+            else onOpenView(c.targetViewId)
+          }}
+        >
+          <title>{c.label}</title>
+        </circle>
+      ))}
+
+      {/* Revit sheet viewport titles: drag title block to move anywhere on sheet, drag right-end blue dot to resize title line, click back-ref bubble to jump back */}
+      {viewportTitles.map((vt) => {
+        const draggingTitle = drag?.kind === 'vp-title' && drag.id === vt.viewport.id
+        const draggingRule = drag?.kind === 'vp-rule' && drag.id === vt.viewport.id
+        const isActive = hovered === vt.key || draggingTitle || draggingRule
+        const dx = draggingTitle && drag ? drag.curPaper.x - drag.originPaper.x : 0
+        const dy = draggingTitle && drag ? drag.curPaper.y - drag.originPaper.y : 0
+        const ruleDx = draggingRule && drag ? drag.curPaper.x - drag.originPaper.x : 0
+        const { hitRect, bubbleCenter, ruleStartX, ruleEndX, ruleY } = vt.layout
+        const curRuleEndX = Math.max(ruleStartX + 20, ruleEndX + ruleDx)
+        return (
+          <g key={vt.key} onPointerEnter={() => setHovered(vt.key)} onPointerLeave={() => setHovered((cur) => (cur === vt.key ? null : cur))}>
+            {/* Live ghost outline while dragging viewport title */}
+            {draggingTitle && (
+              <rect
+                x={hitRect.x + dx}
+                y={hitRect.y + dy}
+                width={hitRect.w}
+                height={hitRect.h}
+                rx={1.5}
+                fill={PRIMARY}
+                fillOpacity={0.1}
+                stroke={PRIMARY}
+                strokeWidth={0.6}
+                strokeDasharray="2.5 1.5"
+                className="pointer-events-none"
+              />
+            )}
+            {/* Live rubberband title rule while dragging right-end handle */}
+            {draggingRule && (
+              <line x1={ruleStartX} y1={ruleY} x2={curRuleEndX} y2={ruleY} stroke={PRIMARY} strokeWidth={0.85} className="pointer-events-none" />
+            )}
+
+            {/* Draggable viewport title block */}
+            {canEdit && (
+              <rect
+                x={hitRect.x}
+                y={hitRect.y}
+                width={hitRect.w}
+                height={hitRect.h}
+                rx={1.5}
+                data-testid="viewport-title-drag"
+                className="cursor-move transition-colors"
+                fill={isActive ? PRIMARY : 'transparent'}
+                fillOpacity={isActive ? 0.06 : 0}
+                stroke={isActive ? PRIMARY : 'transparent'}
+                strokeOpacity={isActive ? 0.65 : 0}
+                strokeDasharray="2 1.5"
+                strokeWidth={0.5}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'vp-title', id: vt.viewport.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: vt.frame, view: vt.view })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'vp-title' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                  setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.0 })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'vp-title' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const deltaX = drag.curPaper.x - drag.originPaper.x
+                  const deltaY = drag.curPaper.y - drag.originPaper.y
+                  setDrag(null)
+                  if (!wasMoved) return
+                  const curOff = vt.viewport.titleOffsetMm ?? { x: 0, y: 0 }
+                  submit(
+                    { type: 'set_viewport_title', viewportId: vt.viewport.id, titleOffsetMm: { x: Math.round((curOff.x + deltaX) * 10) / 10, y: Math.round((curOff.y + deltaY) * 10) / 10 } },
+                    `Move ${vt.view.name} title`,
+                  )
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>{`Drag to move ${vt.view.name} title on sheet`}</title>
+              </rect>
+            )}
+
+            {/* Back-reference circle (`1 / A-101`): click jumps straight back to referencing sheet; drag moves title */}
+            {vt.backRef && (
+              <circle
+                cx={bubbleCenter.x + dx}
+                cy={bubbleCenter.y + dy}
+                r={HEAD_RADIUS_MM + 0.6}
+                data-testid="view-title-back-link"
+                className="cursor-pointer fill-transparent stroke-transparent hover:fill-primary/15 hover:stroke-primary/80 transition-colors"
+                strokeWidth={0.75}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt || !canEdit) {
+                    if (onOpenSheet) onOpenSheet(vt.backRef!.sheetId)
+                    else onOpenView(vt.backRef!.sourceViewId)
+                    return
+                  }
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'vp-title', id: vt.viewport.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: vt.frame, view: vt.view })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'vp-title' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                  setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.8 })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'vp-title' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const deltaX = drag.curPaper.x - drag.originPaper.x
+                  const deltaY = drag.curPaper.y - drag.originPaper.y
+                  setDrag(null)
+                  if (!wasMoved) {
+                    if (onOpenSheet) onOpenSheet(vt.backRef!.sheetId)
+                    else onOpenView(vt.backRef!.sourceViewId)
+                    return
+                  }
+                  const curOff = vt.viewport.titleOffsetMm ?? { x: 0, y: 0 }
+                  submit(
+                    { type: 'set_viewport_title', viewportId: vt.viewport.id, titleOffsetMm: { x: Math.round((curOff.x + deltaX) * 10) / 10, y: Math.round((curOff.y + deltaY) * 10) / 10 } },
+                    `Move ${vt.view.name} title`,
+                  )
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>{vt.backLabel ?? 'Click to return to referencing sheet'}</title>
+              </circle>
+            )}
+
+            {/* Right-end hollow blue Revit dot: drag horizontally to shorten or lengthen the title underline */}
+            {canEdit && (
+              <circle
+                cx={curRuleEndX}
+                cy={ruleY + dy}
+                r={isActive ? 2.2 : 3.2}
+                data-testid="viewport-title-rule-grip"
+                className="cursor-ew-resize transition-all"
+                fill={isActive ? '#ffffff' : 'transparent'}
+                stroke={isActive ? PRIMARY : 'transparent'}
+                strokeWidth={0.75}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'vp-rule', id: vt.viewport.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: vt.frame, view: vt.view })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'vp-rule' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  setDrag({ ...drag, curPaper: pt, moved: true })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'vp-rule' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const deltaX = drag.curPaper.x - drag.originPaper.x
+                  setDrag(null)
+                  if (!wasMoved || Math.abs(deltaX) < 0.5) return
+                  const nextLen = Math.max(20, Math.min(600, Math.round((ruleEndX - ruleStartX + deltaX) * 10) / 10))
+                  submit({ type: 'set_viewport_title', viewportId: vt.viewport.id, titleRuleMm: nextLen }, `Resize ${vt.view.name} title line`)
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>Drag to lengthen or shorten viewport title line</title>
+              </circle>
+            )}
+          </g>
+        )
+      })}
+
+      {/* Draggable Revit structural grids: drag circular bubble along grid axis (moves aligned parallel grids together; hold Alt for single grid), drag line laterally to relocate grid */}
+      {canEdit &&
+        grids.map((g) => {
+          const draggingStart = drag?.kind === 'grid-start' && drag.id === g.id
+          const draggingEnd = drag?.kind === 'grid-end' && drag.id === g.id
+          const draggingLine = drag?.kind === 'grid-line' && drag.id === g.id
+          const isActive = hovered === g.key || draggingStart || draggingEnd || draggingLine
+          const pdx = g.pB.x - g.pA.x
+          const pdy = g.pB.y - g.pA.y
+          const plen = Math.hypot(pdx, pdy) || 1
+          const pax = pdx / plen
+          const pay = pdy / plen
+          const pnx = -pay
+          const pny = pax
+          const axisDelta = drag && (draggingStart || draggingEnd) ? (drag.curPaper.x - drag.originPaper.x) * pax + (drag.curPaper.y - drag.originPaper.y) * pay : 0
+          const perpDelta = drag && draggingLine ? (drag.curPaper.x - drag.originPaper.x) * pnx + (drag.curPaper.y - drag.originPaper.y) * pny : 0
+          const bAx = g.bubbleA.x + (draggingStart ? pax * axisDelta : 0) + (draggingLine ? pnx * perpDelta : 0)
+          const bAy = g.bubbleA.y + (draggingStart ? pay * axisDelta : 0) + (draggingLine ? pny * perpDelta : 0)
+          const bBx = g.bubbleB.x + (draggingEnd ? pax * axisDelta : 0) + (draggingLine ? pnx * perpDelta : 0)
+          const bBy = g.bubbleB.y + (draggingEnd ? pay * axisDelta : 0) + (draggingLine ? pny * perpDelta : 0)
+          const lineAx = g.pA.x + (draggingStart ? pax * axisDelta : 0) + (draggingLine ? pnx * perpDelta : 0)
+          const lineAy = g.pA.y + (draggingStart ? pay * axisDelta : 0) + (draggingLine ? pny * perpDelta : 0)
+          const lineBx = g.pB.x + (draggingEnd ? pax * axisDelta : 0) + (draggingLine ? pnx * perpDelta : 0)
+          const lineBy = g.pB.y + (draggingEnd ? pay * axisDelta : 0) + (draggingLine ? pny * perpDelta : 0)
+          return (
+            <g key={g.key} onPointerEnter={() => setHovered(g.key)} onPointerLeave={() => setHovered((cur) => (cur === g.key ? null : cur))}>
+              {/* Live blue preview while dragging grid bubble or shifting grid line */}
+              {(draggingStart || draggingEnd || draggingLine) && (
+                <g className="pointer-events-none">
+                  <line x1={lineAx} y1={lineAy} x2={lineBx} y2={lineBy} stroke={PRIMARY} strokeWidth={0.65} strokeDasharray="3 1.5" />
+                  <circle cx={bAx} cy={bAy} r={g.radius} fill={PRIMARY} fillOpacity={0.14} stroke={PRIMARY} strokeWidth={0.65} />
+                  {g.hasBubbleB && <circle cx={bBx} cy={bBy} r={g.radius} fill={PRIMARY} fillOpacity={0.14} stroke={PRIMARY} strokeWidth={0.65} />}
+                </g>
+              )}
+
+              {/* Grid line shaft: drag laterally perpendicular to grid to move grid line */}
+              <line
+                x1={g.pA.x}
+                y1={g.pA.y}
+                x2={g.pB.x}
+                y2={g.pB.y}
+                stroke={isActive ? PRIMARY : 'transparent'}
+                strokeOpacity={isActive ? 0.3 : 0}
+                strokeWidth={3.0}
+                className="cursor-move"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.stopPropagation()
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  setDrag({ kind: 'grid-line', id: g.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: g.frame, view: g.view })
+                }}
+                onPointerMove={(e) => {
+                  if (!drag || drag.kind !== 'grid-line' || drag.id !== g.id || e.pointerId !== drag.pointerId) return
+                  const pt = paperOf(e)
+                  if (!pt) return
+                  const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                  setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.2 })
+                }}
+                onPointerUp={(e) => {
+                  if (!drag || drag.kind !== 'grid-line' || drag.id !== g.id || e.pointerId !== drag.pointerId) return
+                  e.stopPropagation()
+                  const wasMoved = drag.moved
+                  const deltaP = (drag.curPaper.x - drag.originPaper.x) * pnx + (drag.curPaper.y - drag.originPaper.y) * pny
+                  setDrag(null)
+                  if (!wasMoved) return
+                  const m0 = paperToModel(g.frame, drag.originPaper)
+                  const m1 = paperToModel(g.frame, { x: drag.originPaper.x + pnx * deltaP, y: drag.originPaper.y + pny * deltaP })
+                  const dxM = Math.round(m1.x - m0.x)
+                  const dyM = Math.round(m1.y - m0.y)
+                  if (Math.hypot(dxM, dyM) < 20) return
+                  submit(
+                    {
+                      type: 'set_element_placement',
+                      elementId: g.id,
+                      placement: {
+                        kind: 'line',
+                        levelId: g.levelId,
+                        start: { x: g.start.x + dxM, y: g.start.y + dyM },
+                        end: { x: g.end.x + dxM, y: g.end.y + dyM },
+                        startOffsetMm: 0,
+                        endOffsetMm: 0,
+                        lateral: 'center',
+                        vertical: 'bottom',
+                      },
+                    },
+                    `Move Grid ${g.label}`,
+                  )
+                }}
+                onLostPointerCapture={() => setDrag(null)}
+              >
+                <title>{`Drag Grid ${g.label} sideways to relocate`}</title>
+              </line>
+
+              {/* Grid end bubbles: drag along grid axis to stretch/shrink bubble extent (aligned parallel grids move together; hold Alt for single grid) */}
+              {(['grid-start', ...(g.hasBubbleB ? (['grid-end'] as const) : [])] as const).map((endKind) => {
+                const cx = endKind === 'grid-start' ? bAx : bBx
+                const cy = endKind === 'grid-start' ? bAy : bBy
+                return (
+                  <circle
+                    key={endKind}
+                    cx={cx}
+                    cy={cy}
+                    r={g.radius + 0.6}
+                    data-testid={`grid-bubble-${g.label}-${endKind}`}
+                    className="cursor-grab active:cursor-grabbing transition-colors"
+                    fill={isActive ? PRIMARY : 'transparent'}
+                    fillOpacity={isActive ? 0.14 : 0}
+                    stroke={isActive ? PRIMARY : 'transparent'}
+                    strokeWidth={0.75}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      const pt = paperOf(e)
+                      if (!pt) return
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                      setDrag({ kind: endKind, id: g.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: g.frame, view: g.view })
+                    }}
+                    onPointerMove={(e) => {
+                      if (!drag || drag.kind !== endKind || drag.id !== g.id || e.pointerId !== drag.pointerId) return
+                      const pt = paperOf(e)
+                      if (!pt) return
+                      setDrag({ ...drag, curPaper: pt, moved: true, altKey: e.altKey })
+                    }}
+                    onPointerUp={(e) => {
+                      if (!drag || drag.kind !== endKind || drag.id !== g.id || e.pointerId !== drag.pointerId) return
+                      e.stopPropagation()
+                      const wasMoved = drag.moved
+                      const singleOnly = e.altKey || drag.altKey
+                      const deltaA = (drag.curPaper.x - drag.originPaper.x) * pax + (drag.curPaper.y - drag.originPaper.y) * pay
+                      setDrag(null)
+                      if (!wasMoved || Math.abs(deltaA) < 0.5) return
+                      const m0 = paperToModel(g.frame, drag.originPaper)
+                      const m1 = paperToModel(g.frame, { x: drag.originPaper.x + pax * deltaA, y: drag.originPaper.y + pay * deltaA })
+                      const gdx = g.end.x - g.start.x
+                      const gdy = g.end.y - g.start.y
+                      const glen = Math.hypot(gdx, gdy) || 1
+                      const ux = gdx / glen
+                      const uy = gdy / glen
+                      const deltaM = Math.round((m1.x - m0.x) * ux + (m1.y - m0.y) * uy)
+                      if (Math.abs(deltaM) < 20) return
+                      const refPt = endKind === 'grid-start' ? g.start : g.end
+                      const refAlong = refPt.x * ux + refPt.y * uy
+                      // Revit 3D aligned grid lock: extend all parallel grids sharing this aligned endpoint together (hold Alt to unlock just this grid).
+                      const peers = singleOnly
+                        ? [g]
+                        : grids.filter((o) => {
+                            if (o.view.id !== g.view.id) return false
+                            const odx = o.end.x - o.start.x
+                            const ody = o.end.y - o.start.y
+                            const olen = Math.hypot(odx, ody) || 1
+                            const dot = (odx / olen) * ux + (ody / olen) * uy
+                            if (Math.abs(dot) < 0.995) return false
+                            const oPt = endKind === 'grid-start' ? (dot > 0 ? o.start : o.end) : dot > 0 ? o.end : o.start
+                            return Math.abs(oPt.x * ux + oPt.y * uy - refAlong) <= 60
+                          })
+                      const steps = peers
+                        .map((o) => {
+                          const odx = o.end.x - o.start.x
+                          const ody = o.end.y - o.start.y
+                          const olen = Math.hypot(odx, ody) || 1
+                          const dot = (odx / olen) * ux + (ody / olen) * uy
+                          const moveStart = endKind === 'grid-start' ? dot > 0 : dot < 0
+                          const nextStart = moveStart ? { x: Math.round(o.start.x + ux * deltaM), y: Math.round(o.start.y + uy * deltaM) } : o.start
+                          const nextEnd = !moveStart ? { x: Math.round(o.end.x + ux * deltaM), y: Math.round(o.end.y + uy * deltaM) } : o.end
+                          if (Math.hypot(nextEnd.x - nextStart.x, nextEnd.y - nextStart.y) < 300) return null
+                          return {
+                            type: 'set_element_placement' as const,
+                            elementId: o.id,
+                            placement: { kind: 'line' as const, levelId: o.levelId, start: nextStart, end: nextEnd, startOffsetMm: 0, endOffsetMm: 0, lateral: 'center' as const, vertical: 'bottom' as const },
+                          }
+                        })
+                        .filter((step): step is NonNullable<typeof step> => step !== null)
+                      if (steps.length === 1) submit(steps[0]!, `Adjust Grid ${g.label}`)
+                      else if (steps.length > 1) submit({ type: 'batch_edits', label: `Adjust aligned grids (${g.label})`, commands: steps }, `Adjust aligned grids`)
+                    }}
+                    onLostPointerCapture={() => setDrag(null)}
+                  >
+                    <title>{`Drag Grid ${g.label} bubble along grid to extend/shorten (moves aligned grids; hold Alt for single grid)`}</title>
+                  </circle>
+                )
+              })}
+            </g>
+          )
+        })}
+
+      {/* Draggable Revit level datum left/right margin grips on section & elevation views */}
+      {canEdit &&
+        levelViews.map((lv) => (
+          <g key={`lvl:${lv.view.id}`}>
+            {(['level-left', 'level-right'] as const).map((side) => {
+              const key = `lvl:${lv.view.id}:${side}`
+              const activeDrag = drag?.kind === side && drag.id === lv.view.id
+              const isActive = hovered === key || activeDrag
+              const baseX = side === 'level-left' ? lv.leftX : lv.rightX
+              const x = activeDrag ? baseX + (drag.curPaper.x - drag.originPaper.x) : baseX
+              return (
+                <g key={side} onPointerEnter={() => setHovered(key)} onPointerLeave={() => setHovered((cur) => (cur === key ? null : cur))}>
+                  {isActive && (
+                    <line
+                      x1={x}
+                      y1={lv.topY}
+                      x2={x}
+                      y2={lv.botY}
+                      stroke={PRIMARY}
+                      strokeWidth={0.55}
+                      strokeDasharray="2.5 1.5"
+                      className="pointer-events-none"
+                    />
+                  )}
+                  {/* Wide vertical hit strip along the entire level margin so you can grab ANY level head on the left or right */}
+                  <rect
+                    x={x - 3.5}
+                    y={lv.topY}
+                    width={7}
+                    height={Math.max(10, lv.botY - lv.topY)}
+                    fill="transparent"
+                    className="cursor-ew-resize"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      const pt = paperOf(e)
+                      if (!pt) return
+                      e.currentTarget.setPointerCapture(e.pointerId)
+                      setDrag({ kind: side, id: lv.view.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: lv.frame, view: lv.view })
+                    }}
+                    onPointerMove={(e) => {
+                      if (!drag || drag.kind !== side || drag.id !== lv.view.id || e.pointerId !== drag.pointerId) return
+                      const pt = paperOf(e)
+                      if (!pt) return
+                      setDrag({ ...drag, curPaper: pt, moved: true })
+                    }}
+                    onPointerUp={(e) => {
+                      if (!drag || drag.kind !== side || drag.id !== lv.view.id || e.pointerId !== drag.pointerId) return
+                      e.stopPropagation()
+                      const deltaX = drag.curPaper.x - drag.originPaper.x
+                      const wasMoved = drag.moved && Math.abs(deltaX) > 0.5
+                      setDrag(null)
+                      if (!wasMoved) return
+                      if (side === 'level-left') {
+                        const next = Math.max(-20, Math.min(100, Math.round((lv.view.props?.levelLeftExtMm ?? 0) - deltaX)))
+                        submit({ type: 'set_view_crop', viewId: lv.view.id, levelLeftExtMm: next }, 'Extend level lines left')
+                      } else {
+                        const next = Math.max(-20, Math.min(100, Math.round((lv.view.props?.levelRightExtMm ?? -24) + deltaX)))
+                        submit({ type: 'set_view_crop', viewId: lv.view.id, levelRightExtMm: next }, 'Extend level lines right')
+                      }
+                    }}
+                    onLostPointerCapture={() => setDrag(null)}
+                  >
+                    <title>{side === 'level-left' ? 'Drag horizontally to extend level lines past left crop' : 'Drag horizontally to extend level datum heads past right crop'}</title>
+                  </rect>
+                  {isActive && <circle cx={x} cy={lv.midY} r={2.2} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.75} className="pointer-events-none" />}
+                </g>
+              )
+            })}
+          </g>
+        ))}
+    </g>
+  )
 }

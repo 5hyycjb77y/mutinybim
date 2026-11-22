@@ -451,6 +451,40 @@ function moveElements(model: ModelState, command: Extract<PartCommand, { type: "
         carryConnectedRuns(runs, el, finalDelta);
         break;
       }
+      case "opening": {
+        // When its host wall is moving in the same drag, the opening rides along automatically.
+        if (ids.includes(asElementId(el.hostId))) break;
+        const host = reader.get(asElementId(el.hostId));
+        if (host.kind !== "wall") refuse("wrong_kind", `${label(el)}'s host isn't a wall`, [id]);
+        const dx = host.end.x - host.start.x;
+        const dy = host.end.y - host.start.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-6) break;
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
+        const along = d.x * ux + d.y * uy;
+        const across = d.x * nx + d.y * ny;
+        const margin = Math.min(el.width / 2 + 50, len / 2);
+        const nextOffset = round(Math.max(margin, Math.min(len - margin, el.offset + along)));
+        const nextPos = roundVec({ x: host.start.x + ux * nextOffset, y: host.start.y + uy * nextOffset });
+        const flipSide = Math.abs(across) > host.thickness * 1.1 && Math.abs(across) > Math.abs(along) * 1.5;
+        const currentSide = el.values?.["host.side"] === -1 ? -1 : 1;
+        const nextSide: 1 | -1 = flipSide ? (currentSide === -1 ? 1 : -1) : currentSide;
+        const nextOpening = {
+          ...el,
+          offset: nextOffset,
+          position: nextPos,
+          ...(flipSide ? { values: { ...(el.values ?? {}), "host.side": nextSide } } : {}),
+        };
+        p.set(nextOpening);
+        // Mark the host wall touched so its opening void and plan poché re-derive cleanly.
+        p.touched.add(asElementId(el.hostId));
+        authored.push({ elementId: id, field: "offset", value: nextOffset });
+        if (flipSide) authored.push({ elementId: id, field: "values.host.side", value: nextSide });
+        break;
+      }
       case "component":
         p.set({ ...el, position: roundVec({ x: el.position.x + d.x, y: el.position.y + d.y }) });
         break;

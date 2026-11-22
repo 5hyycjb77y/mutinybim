@@ -1,5 +1,5 @@
 import { hostLineOf, hostVoidRow, type BimElement, type ClassSolidPart, type ClassSolidsRow, type KindSolidContext, type Vec2 } from "@permitzip/bim-kernel";
-import { DOOR_OPERATION_KEY } from "./graphics";
+import { DOOR_OPERATION_KEY, WINDOW_PARTITIONING_KEY } from "./graphics";
 import { valueOf } from "./values";
 
 /**
@@ -107,7 +107,43 @@ export const DOOR_BODY: ClassSolidsRow = {
     const s0 = h.a + FRAME_FACE_MM;
     const s1 = h.b - FRAME_FACE_MM;
     const top = h.hi - FRAME_FACE_MM;
-    if (op.startsWith("DOUBLE_")) {
+    if (op.includes("SLIDING")) {
+      // Glazed sliding door leaves: framed stiles/rails + clear vision glass
+      const mid = (s0 + s1) / 2;
+      const stile = 60;
+      for (const [a, b, off] of [
+        [s0, mid + 20, -LEAF_MM * 0.45],
+        [mid - 20, s1, LEAF_MM * 0.45],
+      ] as const) {
+        const l0 = off - LEAF_MM / 2;
+        const l1 = off + LEAF_MM / 2;
+        out.push(box(h, a, a + stile, l0, l1, h.lo, top));
+        out.push(box(h, b - stile, b, l0, l1, h.lo, top));
+        out.push(box(h, a + stile, b - stile, l0, l1, h.lo, h.lo + 120));
+        out.push(box(h, a + stile, b - stile, l0, l1, top - stile, top));
+        if (b - a > 2 * stile + 20 && top - h.lo > 200) {
+          out.push(box(h, a + stile, b - stile, off - GLASS_MM / 2, off + GLASS_MM / 2, h.lo + 120, top - stile, "glazing"));
+        }
+      }
+    } else if (op === "ROLLINGUP") {
+      // Ribbed sectional overhead / garage door with horizontal panel rails and top vision lites
+      const panels = 4;
+      const panelH = (top - h.lo) / panels;
+      for (let i = 0; i < panels; i++) {
+        const z0 = h.lo + i * panelH;
+        const z1 = z0 + panelH - 6;
+        if (i === panels - 1 && panelH > 300) {
+          const stile = 120;
+          out.push(box(h, s0, s0 + stile, d0, d1, z0, z1));
+          out.push(box(h, s1 - stile, s1, d0, d1, z0, z1));
+          out.push(box(h, s0 + stile, s1 - stile, d0, d1, z0, z0 + 70));
+          out.push(box(h, s0 + stile, s1 - stile, d0, d1, z1 - 70, z1));
+          out.push(box(h, s0 + stile, s1 - stile, (d0 + d1) / 2 - GLASS_MM / 2, (d0 + d1) / 2 + GLASS_MM / 2, z0 + 70, z1 - 70, "glazing"));
+        } else {
+          out.push(box(h, s0, s1, d0, d1, z0, z1));
+        }
+      }
+    } else if (op.startsWith("DOUBLE_")) {
       const mid = (s0 + s1) / 2;
       out.push(box(h, s0, mid - LEAF_GAP_MM / 2, d0, d1, h.lo, top));
       out.push(box(h, mid + LEAF_GAP_MM / 2, s1, d0, d1, h.lo, top));
@@ -120,7 +156,7 @@ export const DOOR_BODY: ClassSolidsRow = {
 
 export const WINDOW_BODY: ClassSolidsRow = {
   classId: "arch.window",
-  label: "Window frame, sill and glass",
+  label: "Window frame, sill, mullions and glass",
   solids(el, ctx) {
     const h = holeOf(el, ctx);
     if (!h) return null;
@@ -132,7 +168,37 @@ export const WINDOW_BODY: ClassSolidsRow = {
     const d = h.frameMm / 2;
     const f = FRAME_FACE_MM;
     out.push(box(h, h.a + f, h.b - f, -d, d, sillTop, sillTop + f));
-    if (h.hi - f > sillTop + f) out.push(box(h, h.a + f, h.b - f, -GLASS_MM / 2, GLASS_MM / 2, sillTop + f, h.hi - f, "glazing"));
+    const zBot = sillTop + f;
+    const zTop = h.hi - f;
+    const s0 = h.a + f;
+    const s1 = h.b - f;
+    if (zTop > zBot) {
+      const part = String(valueOf(el, ctx.elements, WINDOW_PARTITIONING_KEY) ?? "SINGLE_PANEL");
+      const mul = 36;
+      const mulD = Math.min(d, 38);
+      if (part === "DOUBLE_PANEL_VERTICAL" || part === "TRIPLE_PANEL_VERTICAL") {
+        const count = part === "TRIPLE_PANEL_VERTICAL" ? 3 : 2;
+        for (let i = 1; i < count; i++) {
+          const m = s0 + ((s1 - s0) * i) / count;
+          out.push(box(h, m - mul / 2, m + mul / 2, -mulD, mulD, zBot, zTop));
+        }
+        out.push(box(h, s0, s1, -GLASS_MM / 2, GLASS_MM / 2, zBot, zTop, "glazing"));
+      } else if (part === "DOUBLE_PANEL_HORIZONTAL") {
+        // Classic double-hung window: horizontal meeting rail + slightly offset upper/lower glazing panes
+        const zMid = (zBot + zTop) / 2;
+        out.push(box(h, s0, s1, -mulD, mulD, zMid - mul / 2, zMid + mul / 2));
+        out.push(box(h, s0, s1, -GLASS_MM / 2 - 12, GLASS_MM / 2 - 12, zBot, zMid - mul / 2, "glazing"));
+        out.push(box(h, s0, s1, -GLASS_MM / 2 + 12, GLASS_MM / 2 + 12, zMid + mul / 2, zTop, "glazing"));
+      } else if (part === "TRIPLE_PANEL_TOP" || part === "TRIPLE_PANEL_BOTTOM") {
+        const zBar = part === "TRIPLE_PANEL_TOP" ? zBot + (zTop - zBot) * 0.72 : zBot + (zTop - zBot) * 0.28;
+        const sMid = (s0 + s1) / 2;
+        out.push(box(h, s0, s1, -mulD, mulD, zBar - mul / 2, zBar + mul / 2));
+        out.push(box(h, sMid - mul / 2, sMid + mul / 2, -mulD, mulD, part === "TRIPLE_PANEL_TOP" ? zBot : zBar, part === "TRIPLE_PANEL_TOP" ? zBar : zTop));
+        out.push(box(h, s0, s1, -GLASS_MM / 2, GLASS_MM / 2, zBot, zTop, "glazing"));
+      } else {
+        out.push(box(h, s0, s1, -GLASS_MM / 2, GLASS_MM / 2, zBot, zTop, "glazing"));
+      }
+    }
     return out;
   },
 };

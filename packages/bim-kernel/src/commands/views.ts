@@ -105,6 +105,9 @@ const sectionSchema = z.object({
   end: vec2,
   direction: z.union([z.literal(1), z.literal(-1)]),
   depthMm: z.number().positive().max(300000),
+  headExtMm: z.number().finite().min(-50000).max(50000).optional(),
+  tailExtMm: z.number().finite().min(-50000).max(50000).optional(),
+  splitGap: z.boolean().optional(),
 });
 
 
@@ -256,6 +259,8 @@ const viewPropsPatchObject = z
     showCropBox: z.boolean(),
     annotationCrop: z.boolean(),
     annotationCropOffsetMm: z.number().finite().min(0).max(100),
+    levelLeftExtMm: z.number().finite().min(-20).max(120),
+    levelRightExtMm: z.number().finite().min(-20).max(120),
     phaseId: id,
     phaseFilterId: id,
     groupDisplay: z.record(id, z.enum(["show", "halftone", "hide"])),
@@ -329,7 +334,7 @@ const documentRecord = z.discriminatedUnion("kind", [
     viewIds: z.array(id).max(500),
     props: z.object({ titleBlock: z.enum(TITLE_BLOCK_TYPES).optional(), titleBlockRow: titleBlockRowSchema.optional(), fields: fields.optional(), revisions: revisionsSchema.optional() }).optional(),
   }),
-  z.object({ ...base, kind: z.literal("viewport"), sheetId: id, viewId: id, center: vec2, size: vec2, scale, northArrow: z.boolean().optional() }),
+  z.object({ ...base, kind: z.literal("viewport"), sheetId: id, viewId: id, center: vec2, size: vec2, scale, northArrow: z.boolean().optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
   z.object({
     ...base,
     kind: z.literal("drawing_item"),
@@ -393,6 +398,9 @@ export const viewCommandSchemas = [
     showCropBox: z.boolean().optional(),
     annotationCrop: z.boolean().optional(),
     annotationCropOffsetMm: z.number().finite().min(0).max(100).optional(),
+    levelLeftExtMm: z.number().finite().min(-20).max(120).optional(),
+    levelRightExtMm: z.number().finite().min(-20).max(120).optional(),
+    section: sectionSchema.optional(),
     /** Sections only: how far beyond the cut line the section sees, mm. */
     farClipMm: z.number().positive().max(300000).optional(),
     /** Placed on a sheet: keep the viewport's centre where it is instead of moving it so the model stays put on paper. */
@@ -422,13 +430,15 @@ export const viewCommandSchemas = [
     revisions: revisionsSchema.optional(),
   }),
   z.object({ type: z.literal("delete_sheet"), sheetId: id }),
-  z.object({ type: z.literal("place_viewport"), viewportId: id, sheetId: id, viewId: id, center: vec2, scale: scale.optional() }),
+  z.object({ type: z.literal("place_viewport"), viewportId: id, sheetId: id, viewId: id, center: vec2, scale: scale.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
   z.object({ type: z.literal("move_viewport"), viewportId: id, center: vec2 }),
   /** Drag the frame's edges: the view's crop box follows at the viewport's scale. `center` moves the frame too (one edge dragged). */
   z.object({ type: z.literal("resize_viewport"), viewportId: id, size: vec2, center: vec2.optional() }),
   z.object({ type: z.literal("set_viewport_scale"), viewportId: id, scale }),
   /** Show or hide the viewport's north arrow (it turns itself to true north). */
   z.object({ type: z.literal("set_viewport_north_arrow"), viewportId: id, show: z.boolean() }),
+  /** Move a placed viewport's title block on its sheet and/or adjust its horizontal title rule length (Revit viewport title grips). */
+  z.object({ type: z.literal("set_viewport_title"), viewportId: id, titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).nullable().optional() }),
   z.object({ type: z.literal("remove_viewport"), viewportId: id }),
   z.object({
     type: z.literal("add_drawing_item"),
@@ -1275,7 +1285,7 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         if (command.farClipMm !== undefined && view.viewType !== "section" && view.viewType !== "elevation") fail("Only sections and elevations have a far clip depth.", [view.id]);
         const items = viewContentItems(model, view);
         let props: ViewProps = view.props ?? {};
-        const setProp = <K extends "cropView" | "showCropBox" | "annotationCrop" | "annotationCropOffsetMm">(key: K, value: ViewProps[K] | undefined) => {
+        const setProp = <K extends "cropView" | "showCropBox" | "annotationCrop" | "annotationCropOffsetMm" | "levelLeftExtMm" | "levelRightExtMm">(key: K, value: ViewProps[K] | undefined) => {
           if (value === undefined) return;
           props = { ...props, [key]: value };
           authored.push({ elementId: view.id, field: F.prop(key), value: canonicalJson(value) });
@@ -1284,6 +1294,12 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         setProp("showCropBox", command.showCropBox);
         setProp("annotationCrop", command.annotationCrop);
         setProp("annotationCropOffsetMm", command.annotationCropOffsetMm);
+        setProp("levelLeftExtMm", command.levelLeftExtMm);
+        setProp("levelRightExtMm", command.levelRightExtMm);
+        if (command.section !== undefined) {
+          props = { ...props, section: command.section };
+          authored.push({ elementId: view.id, field: F.prop("section"), value: canonicalJson(props.section) });
+        }
         if (command.farClipMm !== undefined && props.section) {
           props = { ...props, section: { ...props.section, depthMm: round(command.farClipMm) } };
           authored.push({ elementId: view.id, field: F.prop("section"), value: canonicalJson(props.section) });
@@ -1409,6 +1425,8 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           center: roundVec(command.center),
           size: framePaperSize(model, view, viewWindowIn(model, view), s),
           scale: s,
+          ...(command.titleOffsetMm ? { titleOffsetMm: roundVec(command.titleOffsetMm) } : {}),
+          ...(command.titleRuleMm !== undefined ? { titleRuleMm: round(command.titleRuleMm) } : {}),
           partition: sheet.partition,
         };
         checkViewport(sheet, vp);
@@ -1468,6 +1486,28 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         const vp = live(reader, command.viewportId, "viewport", "The viewport");
         write({ ...vp, northArrow: command.show });
         authored.push({ elementId: vp.id, field: F.northArrow, value: String(command.show) });
+        break;
+      }
+      case "set_viewport_title": {
+        const vp = live(reader, command.viewportId, "viewport", "The viewport");
+        let next = vp;
+        if (command.titleOffsetMm !== undefined) {
+          const titleOffsetMm = roundVec(command.titleOffsetMm);
+          next = { ...next, titleOffsetMm };
+          authored.push({ elementId: vp.id, field: F.titleOffsetMm, value: canonicalJson(titleOffsetMm) });
+        }
+        if (command.titleRuleMm !== undefined) {
+          if (command.titleRuleMm === null) {
+            const { titleRuleMm: _drop, ...rest } = next;
+            next = rest;
+            authored.push({ elementId: vp.id, field: F.titleRuleMm, value: "null" });
+          } else {
+            const titleRuleMm = round(command.titleRuleMm);
+            next = { ...next, titleRuleMm };
+            authored.push({ elementId: vp.id, field: F.titleRuleMm, value: canonicalJson(titleRuleMm) });
+          }
+        }
+        write(next);
         break;
       }
       case "remove_viewport": {

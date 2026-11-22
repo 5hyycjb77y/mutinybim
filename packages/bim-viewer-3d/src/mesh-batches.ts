@@ -10,6 +10,7 @@ import type { RenderGroup, Solid } from "./native-geometry";
 export interface MeshBatch {
   readonly key: string;
   readonly group: RenderGroup;
+  readonly materialId?: string;
   /** World scene metres (no offset to apply). */
   readonly positions: Float32Array;
   readonly indices: Uint32Array;
@@ -80,7 +81,7 @@ export function batchMeshSolids(solids: readonly Solid[], keyOf: (s: Solid) => s
       v += p.length / 3;
       t += idx.length / 3;
     }
-    batches.push({ key, group: first.group, positions, indices, owners, triangleOwner });
+    batches.push({ key, group: first.group, ...(first.materialId ? { materialId: first.materialId } : {}), positions, indices, owners, triangleOwner });
   }
   return { batches, rest };
 }

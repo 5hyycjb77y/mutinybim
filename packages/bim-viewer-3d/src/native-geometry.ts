@@ -40,7 +40,7 @@ import {
   type RunFitting,
   type RunPoint,
   type RunSegment,
-  elementEntries, elementValues,
+  elementEntries, elementTypeValue, elementValues, elementsOfKind,
   levelOf as kernelLevelOf,
   KNOWN_COMPONENT_CATEGORIES,
   asCeiling,
@@ -51,6 +51,8 @@ import {
   activeClassRegistry,
   classSolidsOf,
   hasClassSolids,
+  materialOf,
+  resolveElementMaterial,
   type ClassSolidPart,
   type KindSolidShape,
   type Vec2,
@@ -101,6 +103,8 @@ export interface Solid {
   readonly mesh?: { readonly positions: Float32Array; readonly indices: Uint32Array };
   /** 0xRRGGBB: the run's system colour, over the group's (pipe and duct runs on a system). */
   readonly tint?: number;
+  /** Registered `kernel.material` id for PBR color, roughness, metalness and procedural texture. */
+  readonly materialId?: string;
 }
 
 export interface ElevationRules {
@@ -180,7 +184,21 @@ const PART_GROUP: Readonly<Record<PartCategory, RenderGroup>> = {
  */
 export function partSolids(part: PartInstance, type: PartTypeElement, levelElevationMm: number): Solid[] {
   const group = PART_GROUP[type.definition.category];
-  const base = { elementId: part.id, version: part.version, group };
+  // Check Schema-1/Schema-2 feature material names so scripted parts inherit real materials automatically.
+  let featureMaterialId: string | undefined;
+  const defModel = type.definition.model;
+  if (defModel && "features" in defModel && Array.isArray(defModel.features)) {
+    for (const f of defModel.features) {
+      if (f && typeof f === "object" && "material" in f && typeof f.material === "string") {
+        const resolved = materialOf(f.material);
+        if (resolved) {
+          featureMaterialId = resolved.id;
+          break;
+        }
+      }
+    }
+  }
+  const base = { elementId: part.id, version: part.version, group, ...(featureMaterialId ? { materialId: featureMaterialId } : {}) };
   // Until the geometry engine has loaded, a modeled part draws as its features' bounding boxes (below); the session says so and redraws once it is ready.
   if (type.definition.model && partGeometryReady()) {
     return [modeledPartSolid(part, type, levelElevationMm, base), ...primitiveSolids(part, placedIntakePrimitives(type, part), levelElevationMm, base)];
@@ -395,6 +413,14 @@ export function insulationSolids(el: RunSegment | RunFitting, levelElevationMm: 
 }
 
 export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVATIONS, model?: ModelState): Solid[] {
+  const raw = rawElementSolids(el, rules, model);
+  if (!model || raw.length === 0) return raw;
+  const mat = resolveElementMaterial(model, el);
+  if (!mat) return raw;
+  return raw.map((s) => (s.group === "glazing" || s.materialId ? s : { ...s, materialId: mat.id }));
+}
+
+function rawElementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVATIONS, model?: ModelState): Solid[] {
   const floor = floorOf(el, rules, model);
   if (el.kind === "run_segment" || el.kind === "run_fitting") {
     const style = model && el.domain !== "conduit" ? styleOfSystemId(model.elements, el.systemId) : null;
@@ -492,11 +518,84 @@ export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_EL
       const dy = el.end.y - el.start.y;
       const len = Math.hypot(dx, dy);
       if (len === 0) return [];
+      // Architectural storefront / curtain wall: 3D dark-bronze mullions, transoms & recessed sky-reflective glazing.
+      const rawWallFn = model ? elementTypeValue(model.elements, el, "architecture.wall_function") : el.values?.["architecture.wall_function"];
+      const wallFn = typeof rawWallFn === "string" ? rawWallFn : undefined;
+      if (wallFn === "CURTAIN") {
+        const ux = dx / len;
+        const uy = dy / len;
+        const nx = -uy;
+        const ny = ux;
+        const pt = (s: number, d: number): Vec2 => ({ x: el.start.x + ux * s + nx * d, y: el.start.y + uy * s + ny * d });
+        const boxBlock = (s0: number, s1: number, d0: number, d1: number, z0: number, z1: number): PrismBlock => ({
+          outline: [pt(s0, d0), pt(s1, d0), pt(s1, d1), pt(s0, d1)],
+          z0,
+          z1,
+        });
+        const halfD = Math.max(el.thickness / 2, 55);
+        const mulW = 55;
+        const h = el.height;
+        const zBot = floor;
+        const zTop = floor + h;
+        const frameBlocks: PrismBlock[] = [
+          // Bottom sill track & top head track
+          boxBlock(0, len, -halfD, halfD, zBot, zBot + 70),
+          boxBlock(0, len, -halfD, halfD, zTop - 70, zTop),
+        ];
+        // Horizontal transom rail at 2400 mm (8'-0") when wall is tall enough
+        if (h > 2700) {
+          frameBlocks.push(boxBlock(0, len, -halfD, halfD, zBot + 2400 - 30, zBot + 2400 + 30));
+        }
+        // Rhythmic vertical mullions every ~1200 mm (4'-0")
+        const bays = Math.max(1, Math.round(len / 1200));
+        for (let k = 0; k <= bays; k++) {
+          const s = (len * k) / bays;
+          const s0 = Math.max(0, s - mulW / 2);
+          const s1 = Math.min(len, s + mulW / 2);
+          frameBlocks.push(boxBlock(s0, s1, -halfD, halfD, zBot, zTop));
+        }
+        const out: Solid[] = [];
+        const rawMulMat = model ? elementTypeValue(model.elements, el, "architecture.mullion_material") : el.values?.["architecture.mullion_material"];
+        const mullionMat = typeof rawMulMat === "string" ? rawMulMat : "architecture.bronze_mullion";
+        const frameSolid = prismsSolid(el.id, el.version, "filler", frameBlocks);
+        if (frameSolid) out.push({ ...frameSolid, materialId: mullionMat });
+        // Recessed continuous glazing pane inside the bronze mullion grid
+        const glassSolid = prismsSolid(el.id, el.version, "glazing", [boxBlock(mulW / 2, len - mulW / 2, -9, 9, zBot + 70, zTop - 70)]);
+        if (glassSolid) out.push(glassSolid);
+        return out;
+      }
       // A wall something joins or is hosted in is the kernel's body, the one sections draw: its ends joined
       // (clean corners, no overlap) and cut round its doors and windows. The viewer batches those per level.
       // A wall nothing joins or cuts stays an instanced box, so a large model draws in few batches.
+      // Interior walls whose top meets an overhead level slab stop cleanly at the slab underside (so they never z-fight finished floors above).
+      const profile = wallBodyProfile(el);
+      let effectiveHeight = el.height;
+      if (model && (!profile || profile.length < 2)) {
+        const nextZ = nextLevelAboveMm(model, floor);
+        if (nextZ !== null && Math.abs(floor + el.height - nextZ) <= 25) {
+          const inset = Math.max(el.thickness / 2 + 5, 50);
+          for (const slab of elementsOfKind(model.elements, "slab")) {
+            if (Math.abs(floorOf(slab, rules, model) - nextZ) > 50 || slab.outline.length < 3) continue;
+            const xs = slab.outline.map((q) => q.x);
+            const ys = slab.outline.map((q) => q.y);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+            const minY = Math.min(...ys);
+            const maxY = Math.max(...ys);
+            // Strictly interior wall (both endpoints & midpoint inset inside slab footprint) stops at slab underside.
+            const mx = (el.start.x + el.end.x) / 2;
+            const my = (el.start.y + el.end.y) / 2;
+            const strictlyInside =
+              mx > minX + inset && mx < maxX - inset && my > minY + inset && my < maxY - inset;
+            if (strictlyInside) {
+              effectiveHeight = Math.max(300, el.height - slab.thickness);
+              break;
+            }
+          }
+        }
+      }
       // A wall whose top or base follows a surface is drawn from its body profile (sloped under a pitched roof).
-      const blocks = model ? hostSolidBlocks(model.elements, el, el.height, wallBodyProfile(el)) : null;
+      const blocks = model ? hostSolidBlocks(model.elements, el, effectiveHeight, profile) : null;
       if (blocks) {
         const solid = prismsSolid(el.id, el.version, "wall", blocks.map((b) => ({ outline: b.outline, z0: floor + b.z0, z1: floor + b.z1, ...(b.tilt0 ? { tilt0: b.tilt0 } : {}), ...(b.tilt1 ? { tilt1: b.tilt1 } : {}) })));
         return solid ? [solid] : [];
@@ -506,8 +605,8 @@ export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_EL
           ...base,
           group: "wall",
           shape: "box",
-          center: kernelToScene((el.start.x + el.end.x) / 2, (el.start.y + el.end.y) / 2, floor + el.height / 2),
-          size: [len * MM, el.height * MM, el.thickness * MM],
+          center: kernelToScene((el.start.x + el.end.x) / 2, (el.start.y + el.end.y) / 2, floor + effectiveHeight / 2),
+          size: [len * MM, effectiveHeight * MM, el.thickness * MM],
           yaw: planAngleToSceneYaw(dx, dy),
         },
       ];
@@ -516,6 +615,17 @@ export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_EL
       const xs = el.outline.map((p) => p.x);
       const ys = el.outline.map((p) => p.y);
       if (xs.length === 0) return [];
+      const holes = el.placement?.kind === "area" && el.placement.holes ? el.placement.holes.filter((h) => h.length >= 3) : [];
+      if (holes.length > 0) {
+        const pieces = splitOutlineAroundHoles(el.outline, holes);
+        const solid = prismsSolid(
+          el.id,
+          el.version,
+          "slab",
+          pieces.map((outline) => ({ outline, z0: floor - el.thickness, z1: floor })),
+        );
+        return solid ? [solid] : [];
+      }
       // Any outline but a plain rectangle is drawn as drawn (an L, a skewed corner), not as its bounding box.
       if (!isAxisRectangle(el.outline)) {
         const solid = prismsSolid(el.id, el.version, "slab", [{ outline: el.outline, z0: floor - el.thickness, z1: floor }]);
@@ -536,17 +646,43 @@ export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_EL
         },
       ];
     }
-    case "column":
+    case "column": {
+      const nextZ = nextLevelAboveMm(model, floor);
+      let colH = nextZ !== null && nextZ > floor ? nextZ - floor : rules.floorToFloorMm;
+      if (el.placement?.kind === "point" && model) {
+        const p = el.placement as { readonly topLevelId?: string; readonly topOffsetMm?: number; readonly heightMm?: number };
+        if (typeof p.topLevelId === "string") {
+          const topLvl = model.elements[p.topLevelId];
+          if (topLvl?.kind === "level" && topLvl.elevationMm > floor) colH = topLvl.elevationMm - floor + (p.topOffsetMm ?? 0);
+        } else if (typeof p.heightMm === "number" && p.heightMm > 0) {
+          colH = p.heightMm;
+        }
+      }
+      const rawHeight = (el as { readonly height?: number }).height;
+      if (typeof rawHeight === "number" && rawHeight > 0) colH = rawHeight;
+      // Stop cleanly at the underside of an overhead slab on the top level so columns never poke through a roof or floor deck.
+      if (model && nextZ !== null && Math.abs(floor + colH - nextZ) < 50) {
+        for (const slab of elementsOfKind(model.elements, "slab")) {
+          if (Math.abs(floorOf(slab, rules, model) - nextZ) > 50) continue;
+          const xs = slab.outline.map((q) => q.x);
+          const ys = slab.outline.map((q) => q.y);
+          if (xs.length >= 3 && el.position.x >= Math.min(...xs) && el.position.x <= Math.max(...xs) && el.position.y >= Math.min(...ys) && el.position.y <= Math.max(...ys)) {
+            colH = Math.max(300, colH - slab.thickness);
+            break;
+          }
+        }
+      }
       return [
         {
           ...base,
           group: "structure",
           shape: "box",
-          center: kernelToScene(el.position.x, el.position.y, floor + rules.floorToFloorMm / 2),
-          size: [el.size.x * MM, rules.floorToFloorMm * MM, el.size.y * MM],
+          center: kernelToScene(el.position.x, el.position.y, floor + colH / 2),
+          size: [el.size.x * MM, colH * MM, el.size.y * MM],
           yaw: 0,
         },
       ];
+    }
     case "beam": {
       const dx = el.end.x - el.start.x;
       const dy = el.end.y - el.start.y;
@@ -609,17 +745,301 @@ export function elementSolids(el: BimElement, rules: ElevationRules = DEFAULT_EL
       const c = asCeiling(el);
       const level = c ? model?.elements[c.levelId] : undefined;
       if (!c) return [];
-      const z = (level?.kind === "level" ? level.elevationMm : floor) + c.heightMm;
-      const solid = prismsSolid(el.id, el.version, "slab", [{ outline: c.outline, z0: z, z1: z + CEILING_THICKNESS_MM }]);
+      const baseZ = level?.kind === "level" ? level.elevationMm : floor;
+      const z = baseZ + c.heightMm;
+      const pieces = c.holes && c.holes.length > 0 ? splitOutlineAroundHoles(c.outline, c.holes) : [c.outline];
+      const blocks: PrismBlock[] = pieces.map((outline) => ({ outline, z0: z, z1: z + CEILING_THICKNESS_MM }));
+      // Architectural soffit ceiling (`form: "soffit"`): close the drop edge vertically up to the underside of structure above.
+      if (c.form === "soffit" && c.outline.length >= 3) {
+        const nextLevelZ = nextLevelAboveMm(model, baseZ) ?? baseZ + rules.floorToFloorMm;
+        const cx = c.outline.reduce((s, p) => s + p.x, 0) / c.outline.length;
+        const cy = c.outline.reduce((s, p) => s + p.y, 0) / c.outline.length;
+        const undersideZ = overheadSlabUndersideMm(model, rules, cx, cy, nextLevelZ);
+        const skirtTop = Math.max(z + CEILING_THICKNESS_MM, undersideZ);
+        const skirtThick = 75;
+        for (let i = 0; i < c.outline.length; i++) {
+          const a = c.outline[i]!;
+          const b = c.outline[(i + 1) % c.outline.length]!;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 10) continue;
+          const nx = (-dy / len) * (skirtThick / 2);
+          const ny = (dx / len) * (skirtThick / 2);
+          blocks.push({
+            outline: [
+              { x: a.x + nx, y: a.y + ny },
+              { x: b.x + nx, y: b.y + ny },
+              { x: b.x - nx, y: b.y - ny },
+              { x: a.x - nx, y: a.y - ny },
+            ],
+            z0: z,
+            z1: skirtTop,
+          });
+        }
+      }
+      const solid = prismsSolid(el.id, el.version, "slab", blocks);
       return solid ? [solid] : [];
     }
     default: {
       // An add-on kind with a body (a stair, a roof, another firm's kind) draws the body its row gives.
       const face = model ? kindRowOf(el.kind)?.solid : undefined;
       const shape = face && model ? face(el, { elements: model.elements, floorMm: floor }) : null;
-      return shape ? kindShapeSolids(el, shape) : [];
+      const solids = shape ? kindShapeSolids(el, shape) : [];
+      // Add architectural 3D handrails & posts for stairs purely in the viewer (keeps kernel 1:1 step count for IFC round-trips).
+      if (String(el.kind) === "architecture.stair" && model && solids.length > 0) {
+        const rails = stairHandrailSolid(el, floor, model);
+        if (rails) solids.push(rails);
+      }
+      return solids;
     }
   }
+}
+
+/** Find the elevation of the lowest level strictly above `zMm`, or null. */
+function nextLevelAboveMm(model: ModelState | undefined, zMm: number): number | null {
+  if (!model) return null;
+  let best: number | null = null;
+  for (const lvl of elementsOfKind(model.elements, "level")) {
+    if (lvl.elevationMm > zMm && (best === null || lvl.elevationMm < best)) best = lvl.elevationMm;
+  }
+  return best;
+}
+
+/** Underside elevation of any overhead slab on `topLevelZ` covering `(x, y)` (so columns & soffits stop flush below finished floors). */
+function overheadSlabUndersideMm(model: ModelState | undefined, rules: ElevationRules, x: number, y: number, topLevelZ: number): number {
+  if (!model) return topLevelZ;
+  let underside = topLevelZ;
+  for (const slab of elementsOfKind(model.elements, "slab")) {
+    if (Math.abs(floorOf(slab, rules, model) - topLevelZ) > 50) continue;
+    const xs = slab.outline.map((q) => q.x);
+    const ys = slab.outline.map((q) => q.y);
+    if (xs.length >= 3 && x >= Math.min(...xs) && x <= Math.max(...xs) && y >= Math.min(...ys) && y <= Math.max(...ys)) {
+      underside = Math.min(underside, topLevelZ - slab.thickness);
+    }
+  }
+  return underside;
+}
+
+/** Clip a convex/simple polygon to `axis` between `lo` and `hi` (for 3D slab & ceiling stairwell cutouts). */
+function clipAxis(poly: readonly Vec2[], axis: "x" | "y", lo: number, hi: number): Vec2[] {
+  const half = (pts: readonly Vec2[], keep: (p: Vec2) => number): Vec2[] => {
+    const out: Vec2[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i]!;
+      const b = pts[(i + 1) % pts.length]!;
+      const da = keep(a);
+      const db = keep(b);
+      if (da >= 0) out.push(a);
+      if ((da >= 0) !== (db >= 0) && Math.abs(da - db) > 1e-9) {
+        const t = da / (da - db);
+        out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+      }
+    }
+    return out;
+  };
+  return half(half(poly, (p) => p[axis] - lo), (p) => hi - p[axis]);
+}
+
+function polyArea2(poly: readonly Vec2[]): number {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % poly.length]!;
+    s += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(s) / 2;
+}
+
+/** Split an area polygon into non-overlapping blocks around interior rectangular/polygonal holes (stairwells, atriums). */
+function splitOutlineAroundHoles(outline: readonly Vec2[], holes: readonly (readonly Vec2[])[]): Vec2[][] {
+  if (holes.length === 0) return [[...outline]];
+  const boxes = holes
+    .map((h) => ({
+      x0: Math.min(...h.map((p) => p.x)),
+      x1: Math.max(...h.map((p) => p.x)),
+      y0: Math.min(...h.map((p) => p.y)),
+      y1: Math.max(...h.map((p) => p.y)),
+    }))
+    .sort((a, b) => a.x0 - b.x0);
+  const cuts = [...new Set(boxes.flatMap((b) => [b.x0, b.x1]))].sort((a, b) => a - b);
+  const xs = [-Infinity, ...cuts, Infinity];
+  const out: Vec2[][] = [];
+  for (let i = 0; i < xs.length - 1; i++) {
+    const lo = xs[i]!;
+    const hi = xs[i + 1]!;
+    const strip = clipAxis(outline, "x", lo, hi);
+    if (polyArea2(strip) < 10) continue;
+    const mid = Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : Number.isFinite(lo) ? lo + 1 : hi - 1;
+    const inside = boxes.filter((b) => b.x0 < mid && b.x1 > mid).sort((a, b) => a.y0 - b.y0);
+    let y = -Infinity;
+    for (const b of inside) {
+      const piece = clipAxis(strip, "y", y, b.y0);
+      if (polyArea2(piece) > 10) out.push(piece);
+      y = Math.max(y, b.y1);
+    }
+    const last = clipAxis(strip, "y", y, Infinity);
+    if (polyArea2(last) > 10) out.push(last);
+  }
+  return out.length > 0 ? out : [[...outline]];
+}
+
+/** Architectural 3D guardrails & newel posts along all flights and open landing edges of straight, L-shape, and U-shape stairs. */
+function stairHandrailSolid(el: BimElement, floor: number, model: ModelState): Solid | null {
+  const r = el as unknown as {
+    readonly start?: Vec2;
+    readonly end?: Vec2;
+    readonly widthMm?: number;
+    readonly levelId?: string;
+    readonly topLevelId?: string;
+    readonly risers?: number;
+    readonly form?: string;
+    readonly turn?: string;
+    readonly landingDepthMm?: number;
+    readonly wellGapMm?: number;
+    readonly values?: Readonly<Record<string, unknown>>;
+  };
+  if (!r.start || !r.end || typeof r.widthMm !== "number") return null;
+  const dx = r.end.x - r.start.x;
+  const dy = r.end.y - r.start.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 100) return null;
+  const baseLvl = typeof r.levelId === "string" ? model.elements[r.levelId] : undefined;
+  const z0 = baseLvl?.kind === "level" ? baseLvl.elevationMm : floor;
+  const topLvl = typeof r.topLevelId === "string" ? model.elements[r.topLevelId] : undefined;
+  const zTop = topLvl?.kind === "level" ? topLvl.elevationMm : nextLevelAboveMm(model, z0);
+  if (zTop === null || zTop <= z0) return null;
+
+  const rise = zTop - z0;
+  const w = r.widthMm;
+  const halfW = w / 2;
+  const u: Vec2 = { x: dx / dist, y: dy / dist };
+  const nL: Vec2 = { x: -u.y, y: u.x };
+  const rawForm = (typeof r.values?.["architecture.stair_form"] === "string" ? String(r.values["architecture.stair_form"]) : typeof r.form === "string" ? r.form : "straight").toLowerCase();
+  const rawTurn = (typeof r.values?.["architecture.stair_turn"] === "string" ? String(r.values["architecture.stair_turn"]) : typeof r.turn === "string" ? r.turn : "right").toLowerCase();
+  const landingDepthMm = typeof r.values?.["architecture.landing_depth_mm"] === "number" ? Number(r.values["architecture.landing_depth_mm"]) : typeof r.landingDepthMm === "number" ? r.landingDepthMm : undefined;
+  const wellGapMm = typeof r.values?.["architecture.well_gap_mm"] === "number" ? Number(r.values["architecture.well_gap_mm"]) : typeof r.wellGapMm === "number" ? r.wellGapMm : 150;
+  const turnSign = rawTurn === "left" ? 1 : -1;
+  const nT: Vec2 = { x: nL.x * turnSign, y: nL.y * turnSign };
+  const add = (p: Vec2, v: Vec2, k = 1): Vec2 => ({ x: p.x + v.x * k, y: p.y + v.y * k });
+
+  const risers = typeof r.risers === "number" && r.risers >= 2 ? Math.round(r.risers) : Math.max(2, Math.ceil(rise / 180));
+  const flights: Array<{ start: Vec2; u: Vec2; n: Vec2; run: number; z0: number; z1: number }> = [];
+  const railEdges: Array<{ a: Vec2; b: Vec2; z: number }> = [];
+
+  if (rawForm === "straight" && !(landingDepthMm && landingDepthMm > 0)) {
+    flights.push({ start: r.start, u, n: nL, run: dist, z0, z1: zTop });
+  } else {
+    const r1 = Math.max(2, Math.ceil(risers / 2));
+    const r2 = Math.max(2, risers - r1);
+    const t1 = Math.max(1, r1 - 1);
+    const t2 = Math.max(1, r2 - 1);
+    const riserMm = rise / (r1 + r2);
+    const zMid = z0 + r1 * riserMm;
+    const landingD = Math.max(landingDepthMm ?? Math.max(w, 1120), w);
+    if (rawForm === "straight") {
+      const treadMm = Math.max(280, (Math.max(dist, (t1 + t2) * 280 + landingD) - landingD) / (t1 + t2));
+      const run1 = t1 * treadMm;
+      const run2 = t2 * treadMm;
+      const f1End = add(r.start, u, run1);
+      const f2Start = add(f1End, u, landingD);
+      flights.push({ start: r.start, u, n: nL, run: run1, z0, z1: zMid });
+      flights.push({ start: f2Start, u, n: nL, run: run2, z0: zMid, z1: zTop });
+      railEdges.push({ a: add(f1End, nL, halfW), b: add(f2Start, nL, halfW), z: zMid });
+      railEdges.push({ a: add(f1End, nL, -halfW), b: add(f2Start, nL, -halfW), z: zMid });
+    } else if (rawForm === "l_shape") {
+      const treadMm = Math.max(280, Math.min(330, dist / t1));
+      const run1 = t1 * treadMm;
+      const run2 = t2 * treadMm;
+      const f1End = add(r.start, u, run1);
+      const cA = add(f1End, nT, -halfW);
+      const cB = add(f1End, nT, halfW);
+      const cC = add(cB, u, landingD);
+      const cD = add(cA, u, landingD);
+      const u2 = nT;
+      const n2: Vec2 = { x: -u2.y, y: u2.x };
+      const f2Start = add(add(f1End, u, landingD / 2), nT, halfW);
+      flights.push({ start: r.start, u, n: nL, run: run1, z0, z1: zMid });
+      flights.push({ start: f2Start, u: u2, n: n2, run: run2, z0: zMid, z1: zTop });
+      railEdges.push({ a: cC, b: cD, z: zMid }, { a: cD, b: cA, z: zMid });
+    } else {
+      // u_shape 180° switchback
+      const treadMm = Math.max(280, Math.min(330, dist / t1));
+      const run1 = t1 * treadMm;
+      const run2 = t2 * treadMm;
+      const f1End = add(r.start, u, run1);
+      const wellGap = Math.max(0, wellGapMm);
+      const cA = add(f1End, nT, -halfW);
+      const cB = add(f1End, nT, halfW + wellGap + w);
+      const cC = add(cB, u, landingD);
+      const cD = add(cA, u, landingD);
+      const u2: Vec2 = { x: -u.x, y: -u.y };
+      const n2: Vec2 = { x: -u2.y, y: u2.x };
+      const f2Start = add(f1End, nT, w + wellGap);
+      flights.push({ start: r.start, u, n: nL, run: run1, z0, z1: zMid });
+      flights.push({ start: f2Start, u: u2, n: n2, run: run2, z0: zMid, z1: zTop });
+      railEdges.push({ a: cB, b: cC, z: zMid }, { a: cC, b: cD, z: zMid }, { a: cD, b: cA, z: zMid });
+      if (wellGap > 20) railEdges.push({ a: add(f1End, nT, halfW), b: add(f1End, nT, halfW + wellGap), z: zMid });
+    }
+  }
+
+  const railH = 915; // 36" code handrail height
+  const barHalf = 18;
+  const blocks: PrismBlock[] = [];
+
+  for (const f of flights) {
+    const fRise = f.z1 - f.z0;
+    const pitch = fRise / Math.max(1, f.run);
+    const tilt = { at: f.start, rise: { x: f.u.x * pitch, y: f.u.y * pitch } };
+    const railW = Math.min(36 / Math.max(1, halfW), 0.09);
+    const at = (d: number, side: number): Vec2 => ({
+      x: f.start.x + f.u.x * d + f.n.x * halfW * side,
+      y: f.start.y + f.u.y * d + f.n.y * halfW * side,
+    });
+    for (const side of [-1, 1] as const) {
+      const sOut = side;
+      const sIn = side * (1 - railW * 2);
+      blocks.push({ outline: [at(0, sOut), at(f.run, sOut), at(f.run, sIn), at(0, sIn)], z0: f.z0 + railH - 42, z1: f.z0 + railH, tilt0: tilt, tilt1: tilt });
+      blocks.push({ outline: [at(0, sOut), at(f.run, sOut), at(f.run, sIn), at(0, sIn)], z0: f.z0 + railH * 0.52 - 16, z1: f.z0 + railH * 0.52 + 16, tilt0: tilt, tilt1: tilt });
+      const posts = Math.max(3, Math.round(f.run / 1100) + 1);
+      for (let i = 0; i < posts; i++) {
+        const frac = i / (posts - 1);
+        const d0 = Math.max(0, frac * f.run - barHalf);
+        const d1 = Math.min(f.run, d0 + barHalf * 2);
+        const baseZ = f.z0 + frac * fRise;
+        blocks.push({ outline: [at(d0, sOut), at(d1, sOut), at(d1, sIn), at(d0, sIn)], z0: Math.max(f.z0, baseZ - 20), z1: baseZ + railH - 36 });
+      }
+    }
+  }
+
+  for (const edge of railEdges) {
+    const ex = edge.b.x - edge.a.x;
+    const ey = edge.b.y - edge.a.y;
+    const elen = Math.hypot(ex, ey);
+    if (elen < 40) continue;
+    const eux = ex / elen;
+    const euy = ey / elen;
+    const enx = -euy * barHalf;
+    const eny = eux * barHalf;
+    const rect = (d0: number, d1: number): Vec2[] => [
+      { x: edge.a.x + eux * d0 + enx, y: edge.a.y + euy * d0 + eny },
+      { x: edge.a.x + eux * d1 + enx, y: edge.a.y + euy * d1 + eny },
+      { x: edge.a.x + eux * d1 - enx, y: edge.a.y + euy * d1 - eny },
+      { x: edge.a.x + eux * d0 - enx, y: edge.a.y + euy * d0 - eny },
+    ];
+    blocks.push({ outline: rect(0, elen), z0: edge.z + railH - 42, z1: edge.z + railH });
+    blocks.push({ outline: rect(0, elen), z0: edge.z + railH * 0.52 - 16, z1: edge.z + railH * 0.52 + 16 });
+    const posts = Math.max(2, Math.round(elen / 1100) + 1);
+    for (let i = 0; i < posts; i++) {
+      const d = (i / (posts - 1)) * elen;
+      const d0 = Math.max(0, d - barHalf);
+      const d1 = Math.min(elen, d0 + barHalf * 2);
+      blocks.push({ outline: rect(d0, d1), z0: edge.z - 20, z1: edge.z + railH - 36 });
+    }
+  }
+
+  const solid = prismsSolid(el.id, el.version, "filler", blocks);
+  return solid ? { ...solid, materialId: "architecture.bronze_mullion" } : null;
 }
 
 /** A ceiling's board, drawn up from its height. */

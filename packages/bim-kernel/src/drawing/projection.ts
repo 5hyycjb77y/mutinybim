@@ -349,7 +349,97 @@ export function projectSolid(solid: ElementSolid, proj: Projector): ProjectedSol
     if (c) centerline.push({ a: c[0], b: c[1], owner: solid.owner, piece: -1 });
     if (Number.isFinite(hi) && (pa.near - hi) * (pb.near - hi) <= 0 && pa.near !== pb.near) centerCuts.push(lerp(pa, pb, (hi - pa.near) / (pb.near - pa.near)));
   }
-  return { solid, faces, edges, cuts, cutFills, cutOutlines, centerline, centerCuts, nearest, farthest };
+  const cleanedEdges = solid.role !== "mep" && solid.pieces.length > 1 ? removeCoplanarPieceSeams(edges) : edges;
+  return { solid, faces, edges: cleanedEdges, cuts, cutFills, cutOutlines, centerline, centerCuts, nearest, farthest };
+}
+
+/**
+ * Remove internal seam edges shared between adjacent coplanar pieces of a single
+ * multi-piece building element (e.g. wall piers beside window header & sill blocks)
+ * via 1D interval XOR along shared collinear lines at matching depth.
+ */
+function removeCoplanarPieceSeams(edges: readonly ProjEdge[]): ProjEdge[] {
+  if (edges.length < 2) return [...edges];
+  interface Group {
+    readonly dirU: number;
+    readonly dirV: number;
+    readonly originU: number;
+    readonly originV: number;
+    readonly items: { readonly edge: ProjEdge; readonly t0: number; readonly t1: number; readonly n0: number; readonly n1: number }[];
+  }
+  const groups = new Map<string, Group>();
+  const passthrough: ProjEdge[] = [];
+  for (const e of edges) {
+    const du = e.b.u - e.a.u;
+    const dv = e.b.v - e.a.v;
+    const len = Math.hypot(du, dv);
+    if (len < 1e-3) continue;
+    let ux = du / len;
+    let uv = dv / len;
+    // Canonicalize line direction into upper half-plane so opposite segments share the exact same bucket.
+    if (ux < -1e-6 || (Math.abs(ux) <= 1e-6 && uv < 0)) {
+      ux = -ux;
+      uv = -uv;
+    }
+    const nx = -uv;
+    const ny = ux;
+    const perp = e.a.u * nx + e.a.v * ny;
+    const nearAvg = (e.a.near + e.b.near) / 2;
+    const nearSlope = (e.b.near - e.a.near) / len;
+    // Only XOR edges lying at constant depth along the view plane (faces parallel to the section/elevation plane).
+    if (Math.abs(nearSlope) > 0.02) {
+      passthrough.push(e);
+      continue;
+    }
+    const angKey = Math.round(Math.atan2(uv, ux) * 200);
+    const perpKey = Math.round(perp / 2);
+    const nearKey = Math.round(nearAvg / 4);
+    const key = `${e.facing ?? "x"}|${angKey}|${perpKey}|${nearKey}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { dirU: ux, dirV: uv, originU: nx * perp, originV: ny * perp, items: [] };
+      groups.set(key, g);
+    }
+    const ta = e.a.u * ux + e.a.v * uv;
+    const tb = e.b.u * ux + e.b.v * uv;
+    if (ta <= tb) g.items.push({ edge: e, t0: ta, t1: tb, n0: e.a.near, n1: e.b.near });
+    else g.items.push({ edge: e, t0: tb, t1: ta, n0: e.b.near, n1: e.a.near });
+  }
+  const out: ProjEdge[] = [...passthrough];
+  for (const g of groups.values()) {
+    const pieces = new Set(g.items.map((x) => x.edge.piece));
+    if (pieces.size < 2) {
+      for (const x of g.items) out.push(x.edge);
+      continue;
+    }
+    // 1D XOR across piece intervals: even overlap count cancels internal coplanar block seams; odd count keeps true exterior/opening edges.
+    const cuts: number[] = [];
+    for (const x of g.items) cuts.push(x.t0, x.t1);
+    cuts.sort((a, b) => a - b);
+    const uniq: number[] = [];
+    for (const c of cuts) if (uniq.length === 0 || c - (uniq[uniq.length - 1] ?? 0) > 1.0) uniq.push(c);
+    for (let i = 0; i + 1 < uniq.length; i++) {
+      const a = uniq[i] as number;
+      const b = uniq[i + 1] as number;
+      if (b - a < 1.5) continue;
+      const mid = (a + b) / 2;
+      const covering = g.items.filter((x) => x.t0 <= mid && x.t1 >= mid);
+      // Distinct pieces sharing this sub-segment cancel out; odd distinct-piece count survives!
+      const covPieces = new Set(covering.map((x) => x.edge.piece));
+      if (covPieces.size % 2 === 1) {
+        const rep = covering[0]!;
+        const span = Math.max(1e-6, rep.t1 - rep.t0);
+        const nearA = rep.n0 + ((a - rep.t0) / span) * (rep.n1 - rep.n0);
+        const nearB = rep.n0 + ((b - rep.t0) / span) * (rep.n1 - rep.n0);
+        out.push({
+          ...rep.edge,
+          a: { u: g.originU + g.dirU * a, v: g.originV + g.dirV * a, near: nearA },
+          b: { u: g.originU + g.dirU * b, v: g.originV + g.dirV * b, near: nearB },
+        });
+      }
+    }
+  }
+  return out;
 }
 
 /** A triangle mesh's front faces, sharp and silhouette edges, and section cut. */

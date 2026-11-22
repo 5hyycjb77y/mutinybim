@@ -1,4 +1,6 @@
+import { convert } from "@permitzip/bim-units";
 import { KNOWN_MATERIAL_LAYER_FUNCTIONS, type BimElement, type MaterialLayer, type MaterialLayerSet } from "../types";
+import { materialOf } from "../materials";
 import { isCoreElement } from "./feature";
 import { elementTypeValue } from "./types";
 
@@ -52,4 +54,55 @@ export function layerSetOf(elements: Readonly<Record<string, BimElement>>, el: B
     if (isCoreElement(type)) ref = type.values?.[MATERIAL_LAYER_SET_KEY];
   }
   return typeof ref === "string" ? (catalogue.get(ref) ?? null) : null;
+}
+
+/** ISO 6946 / ASHRAE steady-state thermal summary for a layered building-envelope assembly. */
+export interface AssemblyThermalSummary {
+  readonly totalThicknessMm: number;
+  /** Total thermal resistance including indoor (0.13) and outdoor (0.04) air films, m²·K/W. */
+  readonly rSiM2KPerW: number;
+  /** Imperial R-value, hr·ft²·°F/Btu. */
+  readonly rImperial: number;
+  /** Overall thermal transmittance U-value, W/(m²·K). */
+  readonly uValueWPerM2K: number;
+  /** Imperial U-factor, Btu/(hr·ft²·°F). */
+  readonly uValueImperial: number;
+  /** Layer material ids missing thermal conductivity data. */
+  readonly missingThermalMaterials: readonly string[];
+}
+
+const R_SI_INTERIOR = 0.13;
+const R_SE_EXTERIOR = 0.04;
+
+/** Compute steady-state R-value and U-value of a material layer set from registered `kernel.material` conductivities, converting via `@permitzip/bim-units` (`thermal_resistance_area`). */
+export function assemblyThermalSummary(
+  set: MaterialLayerSet,
+  opts?: { readonly includeAirFilms?: boolean },
+): AssemblyThermalSummary {
+  const includeFilms = opts?.includeAirFilms ?? true;
+  let rSi = includeFilms ? R_SI_INTERIOR + R_SE_EXTERIOR : 0;
+  let totalThicknessMm = 0;
+  const missingThermalMaterials: string[] = [];
+  for (const layer of set.layers) {
+    totalThicknessMm += layer.thicknessMm;
+    if (layer.thicknessMm <= 0) continue;
+    const mat = materialOf(layer.materialId);
+    const k = mat?.thermalConductivityWPerMK;
+    if (typeof k === "number" && k > 0) {
+      rSi += (layer.thicknessMm / 1000) / k;
+    } else {
+      missingThermalMaterials.push(layer.materialId);
+    }
+  }
+  const rImp = convert(rSi, "m2.K/W", "h.ft2.degF/Btu");
+  const uSi = rSi > 0 ? 1 / rSi : 0;
+  const uImp = rImp > 0 ? 1 / rImp : 0;
+  return {
+    totalThicknessMm,
+    rSiM2KPerW: Math.round(rSi * 1000) / 1000,
+    rImperial: Math.round(rImp * 100) / 100,
+    uValueWPerM2K: Math.round(uSi * 1000) / 1000,
+    uValueImperial: Math.round(uImp * 1000) / 1000,
+    missingThermalMaterials,
+  };
 }

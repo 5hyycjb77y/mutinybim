@@ -13,7 +13,10 @@ export { ROOM_BOUNDING_INSTANCE_KEY as ROOM_BOUNDING_KEY } from "@permitzip/bim-
 
 export const SMOKE_BARRIER_KEY = "architecture.smoke_barrier";
 
-const WALL_FUNCTIONS = ["STANDARD", "PARTITIONING", "PLUMBINGWALL", "SHEAR", "PARAPET", "MOVABLE", "SOLIDWALL", "ELEMENTEDWALL", "POLYGONAL", "RETAININGWALL", "WAVEWALL", "USERDEFINED", "NOTDEFINED"];
+const WALL_FUNCTIONS = ["STANDARD", "PARTITIONING", "PLUMBINGWALL", "SHEAR", "PARAPET", "CURTAIN", "MOVABLE", "SOLIDWALL", "ELEMENTEDWALL", "POLYGONAL", "RETAININGWALL", "WAVEWALL", "USERDEFINED", "NOTDEFINED"];
+const ROOF_FORMS = ["FLAT", "SHED", "GABLE", "HIP"];
+const STAIR_FORMS = ["STRAIGHT", "L_SHAPE", "U_SHAPE"];
+const STAIR_TURNS = ["LEFT", "RIGHT"];
 const DOOR_OPERATIONS = [
   "SINGLE_SWING_LEFT",
   "SINGLE_SWING_RIGHT",
@@ -53,5 +56,11 @@ export const ARCHITECTURE_PARAMETER_SET: PackParameterSet = {
     { key: "architecture.frame_depth", label: "Frame depth", classes: ["arch.door", "arch.window"], valueType: "quantity", kind: "length", unit: "mm", group: "Dimensions", description: "How deep the frame is across the wall; blank: as deep as the wall." },
     { key: "architecture.window_partitioning", label: "Partitioning", classes: ["arch.window"], valueType: "choice", choices: WINDOW_PARTITIONING, group: "Identity", ifc: { pset: OWN_PSET, property: "PartitioningType" } },
     { key: "architecture.slab_function", label: "Floor function", classes: ["arch.slab"], valueType: "choice", choices: SLAB_FUNCTIONS, group: "Identity", description: "A floor, a roof, a landing or a base slab; its IFC slab type.", ifc: { pset: OWN_PSET, property: "SlabFunction" } },
+    { key: "architecture.roof_form", label: "Roof form", classes: ["arch.roof"], valueType: "choice", choices: ROOF_FORMS, group: "Identity", description: "Flat, single-slope shed, pitched gable, or four-slope hip roof.", ifc: { pset: OWN_PSET, property: "RoofForm" } },
+    { key: "architecture.stair_form", label: "Stair form", classes: ["arch.stair"], valueType: "choice", choices: STAIR_FORMS, group: "Identity", description: "Straight run, 90° L-shape quarter-turn with landing, or 180° U-shape switchback with mid-landing.", ifc: { pset: OWN_PSET, property: "StairForm" } },
+    { key: "architecture.stair_turn", label: "Stair turn direction", classes: ["arch.stair"], valueType: "choice", choices: STAIR_TURNS, group: "Identity", description: "Turn direction at the mid-landing when climbing (left or right).", ifc: { pset: OWN_PSET, property: "StairTurn" } },
+    { key: "architecture.thermal_transmittance", label: "Thermal transmittance (U-value)", classes: ["arch.wall", "arch.door", "arch.window", "arch.slab", "arch.roof"], valueType: "text", group: "Envelope", description: "Overall U-value in W/(m²·K) for building envelope heat-loss calculations.", ifc: { pset: "Pset_WallCommon", property: "ThermalTransmittance" } },
+    { key: "architecture.r_value", label: "Thermal resistance (R-value)", classes: ["arch.wall", "arch.slab", "arch.roof", "arch.ceiling"], valueType: "quantity", kind: "thermal_resistance_area", unit: "m2.K/W", group: "Envelope", description: "Assembly thermal insulance (R-value), formatted in h·ft²·°F/Btu or m²·K/W by the active unit profile.", ifc: { pset: OWN_PSET, property: "RValue" } },
+    { key: "architecture.shgc", label: "Solar heat gain (SHGC)", classes: ["arch.window", "arch.door"], valueType: "text", group: "Envelope", description: "Solar heat gain coefficient in (0, 1] for glazing assemblies.", ifc: { pset: "Pset_GlazingProperties", property: "SolarHeatGainTransmittance" } },
   ],
 };

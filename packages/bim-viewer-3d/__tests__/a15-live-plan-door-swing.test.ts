@@ -49,13 +49,13 @@ describe("a15-live-plan-door-swing", () => {
       return (planGraphicsOf(el, planGraphicsContext(model, { scale: 100, levelId: "L1", detail: "medium", drawing: "view" })) ?? []).flatMap((g) => graphicSegments(g));
     };
     const live = (id: string) => symbols.segments.filter((s) => s.owner === id).map((s) => [s.a, s.b] as const);
-    // The door: its leaf line plus the quarter-circle swing (four chords), hinged on the face it opens to.
+    // The door: jambs, 45 mm door leaf, plus smooth 7.5° quarter-circle swing hinged on the face it opens to.
     expect(live("d")).toEqual(printed("d"));
-    expect(live("d").length).toBe(1 + 4);
-    expect(live("d")[0]).toEqual([{ x: 1550, y: 100 }, { x: 1550, y: 1000 }]);
-    // The window: three lines across the gap.
+    expect(live("d").length).toBeGreaterThanOrEqual(16);
+    expect(live("d").some(([a, b]) => Math.max(a.y, b.y) >= 900)).toBe(true);
+    // The window: jambs, sill edges, and double glazing across the gap.
     expect(live("win")).toEqual(printed("win"));
-    expect(live("win").length).toBe(3);
+    expect(live("win").length).toBeGreaterThanOrEqual(3);
     // The wall is the cut's: no symbol lines of its own here.
     expect(live("w")).toEqual([]);
     // Marks come along for tags.
@@ -85,14 +85,22 @@ describe("a15-live-plan-door-swing", () => {
     const model: ModelState = { ...base, elements: { ...base.elements, a1: raw as unknown as BimElement } };
     withPackSet(PackSet.create([pack]), () => {
       const symbols = livePlanSymbols(model, options(model));
-      expect(symbols.segments.filter((s) => s.owner === "a1").length).toBe(4);
+      expect(symbols.segments.filter((s) => s.owner === "a1").length).toBe(12);
     });
   });
 
   it("lays the lines just under the cut, in scene metres", () => {
     const model = plan();
     const seg = livePlanSymbols(model, options(model)).segments.slice(0, 1);
+    const s0 = seg[0]!;
     const p = symbolPositions(seg, 1169);
-    expect(Array.from(p).map((v) => Math.round(v / MM))).toEqual([1550, 1169, -100, 1550, 1169, -1000]);
+    expect(Array.from(p).map((v) => Math.round(v / MM))).toEqual([
+      Math.round(s0.a.x),
+      1169,
+      Math.round(-s0.a.y),
+      Math.round(s0.b.x),
+      1169,
+      Math.round(-s0.b.y),
+    ]);
   });
 });

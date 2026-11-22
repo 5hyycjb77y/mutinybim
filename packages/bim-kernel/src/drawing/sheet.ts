@@ -8,7 +8,7 @@ import type { BimElement, ElementId, ModelState, Vec2 } from "../types";
 import { headlineKindValue, storedField } from "../kinds";
 import { elementKindTable } from "../registry/element-kind-point";
 import type { PlanGraphic } from "../registry/kind-row-faces";
-import { dashOf, graphicSegments, penOf, planGraphicsContext, planGraphicsOf } from "./plan-graphics";
+import { dashOf, fillHexToGrey, graphicSegments, penOf, planGraphicsContext, planGraphicsOf } from "./plan-graphics";
 import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, partPlanOutline } from "./runs";
 
 /** Paper-space drawing primitives, in millimetres, origin top-left, y down. */
@@ -479,6 +479,9 @@ function drawSheetGraphics(el: BimElement, graphics: readonly PlanGraphic[], vie
       case "line":
       case "polyline":
       case "arc": {
+        if (g.form === "polyline" && g.closed && g.fill && g.points.length >= 3) {
+          prims.push({ kind: "fill", points: g.points.map(toPaper), grey: fillHexToGrey(g.fill) });
+        }
         const pen = penOf(g.pen);
         const dash = dashOf(g.dash);
         for (const [a, b] of graphicSegments(g)) prims.push({ kind: "line", a: toPaper(a), b: toPaper(b), pen, dash });

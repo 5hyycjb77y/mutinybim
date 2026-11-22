@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
+  elementsOfKind,
   isCalibrated,
   modelToPaperPoint,
   spaceLabel,
@@ -253,6 +254,17 @@ export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel
     else setCorners((c) => [...c, at.point])
   }
 
+  // Spaces that already have a movable tag on this view suppress the fallback centroid label.
+  const taggedSpaceIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const el of elementsOfKind(model.elements, 'drawing_item')) {
+      if (!el.deleted && el.ownerId === view.view.id && el.shape === 'tag' && el.tag?.elementId) {
+        ids.add(el.tag.elementId)
+      }
+    }
+    return ids
+  }, [model.elements, view.view.id])
+
   // Clicks land anywhere over the drawing being traced, not just inside the crop.
   const tracedCorners = traceOver && isCalibrated(traceOver) && tracePage.state === 'ready' ? underlayCorners(traceOver.calibration, tracePage.value.width, tracePage.value.height).map(toPaper) : []
   const r = traceHitRect(view.paperRect, tracedCorners, TRACE_HIT_MARGIN_MM)
@@ -275,9 +287,11 @@ export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel
             {polys.map((poly, i) => (
               <polygon key={i} points={poly.map((p) => { const q = toPaper(p); return `${q.x},${q.y}` }).join(' ')} fill={SPACE_FILL} stroke={PRIMARY} strokeWidth={selected ? 0.5 : 0.25} strokeDasharray={selected ? undefined : '1.2 0.6'} />
             ))}
-            <text x={c.x} y={c.y} fontSize={2.2} textAnchor="middle" fill="currentColor">
-              {spaceLabel(s)}
-            </text>
+            {!taggedSpaceIds.has(s.id) ? (
+              <text x={c.x} y={c.y} fontSize={2.2} textAnchor="middle" fill="currentColor">
+                {spaceLabel(s)}
+              </text>
+            ) : null}
           </g>
         )
       })}

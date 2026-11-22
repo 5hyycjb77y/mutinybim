@@ -1,6 +1,6 @@
 'use client'
 
-import { boundsRooms, elementsOfKind, elementValueSource, ROOM_BOUNDING_INSTANCE_KEY, starterElementTypes, type BimElement, type ElementTypeElement, type ModelState, type ParamValue } from '@permitzip/bim-kernel'
+import { allMaterials, boundsRooms, elementsOfKind, elementValueSource, MATERIAL_ID_KEY, resolveElementMaterial, ROOM_BOUNDING_INSTANCE_KEY, starterElementTypes, type BimElement, type ElementTypeElement, type ModelState, type ParamValue } from '@permitzip/bim-kernel'
 import { formatRating, ratingKindRow, ratingOf, ratingSourceOf } from '@permitzip/bim-kernel/rated-routes'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Badge } from '../../ui/badge'
@@ -18,7 +18,9 @@ import { WallBaseField, WallTopField } from './WallTopField'
 import { OpeningSillField } from './OpeningSillField'
 
 const TYPED_KINDS: ReadonlySet<string> = new Set(['wall', 'opening', 'slab', 'ceiling', 'column'])
+const ARCH_ADDON_KINDS: ReadonlySet<string> = new Set(['architecture.roof', 'architecture.stair'])
 const NO_TYPE = '__none__'
+const NO_MATERIAL = '__default_material__'
 const NEW_TYPE = '__new__'
 const DUPLICATE_TYPE = '__duplicate__'
 const FIRE = 'fire_resistance'
@@ -54,7 +56,11 @@ type Props = {
 export function ArchitectureProperties({ model, selectedIds, submit, editBlocked, notify, tiesStored = true, surfacesStored = true }: Props): ReactNode {
   const [making, setMaking] = useState<NewTypeRequest | null>(null)
   const el = model && selectedIds.length === 1 ? model.elements[selectedIds[0] ?? ''] : undefined
-  if (!model || !el || !TYPED_KINDS.has(el.kind)) return null
+  if (!model || !el) return null
+  if (ARCH_ADDON_KINDS.has(el.kind)) {
+    return <ArchAddonInspector model={model} el={el} submit={submit} editBlocked={editBlocked} notify={notify} />
+  }
+  if (!TYPED_KINDS.has(el.kind)) return null
   const types = elementsOfKind(model.elements, 'element_type').filter((t) => !t.forKinds || t.forKinds.includes(el.kind))
   // Starter types the add-ons ship that the model doesn't have yet: picking one adds it with the change.
   const variant = el.kind === 'opening' ? el.openingType : undefined
@@ -122,6 +128,7 @@ export function ArchitectureProperties({ model, selectedIds, submit, editBlocked
       </Field>
       {el.kind === 'wall' ? <WallTopField key={`top-${el.id}`} model={model} el={el} submit={submit} editBlocked={editBlocked} notify={notify} tiesStored={tiesStored} surfacesStored={surfacesStored} /> : null}
       {el.kind === 'wall' ? <WallBaseField key={`base-${el.id}`} model={model} el={el} submit={submit} editBlocked={editBlocked} notify={notify} surfacesStored={surfacesStored} /> : null}
+      <MaterialField key={`mat-${el.id}`} model={model} el={el} what={what} submit={submit} editBlocked={editBlocked} notify={notify} />
       <FireRatingField key={el.id} model={model} el={el} type={ownType} what={what} submit={submit} editBlocked={editBlocked} notify={notify} />
       {bounding !== null ? (
         <Field orientation="horizontal">
@@ -298,5 +305,145 @@ function DoorFlips({ model, el, submit, editBlocked, notify }: { readonly model:
       </div>
       <FieldDescription>{editBlocked ?? hingeWhy ?? 'Hinge: the jamb it hangs on. Swing: the side of the wall it opens to.'}</FieldDescription>
     </Field>
+  )
+}
+
+/** Material selector for walls, slabs, ceilings, columns, and openings — overrides the type's material on this instance. */
+function MaterialField({ model, el, what, submit, editBlocked, notify }: { readonly model: ModelState; readonly el: BimElement; readonly what: string; readonly submit: SubmitCommand; readonly editBlocked: string | null; readonly notify: Props['notify'] }): ReactNode {
+  const materials = allMaterials()
+  if (materials.length === 0) return null
+  const active = resolveElementMaterial(model, el)
+  const own = (el as { readonly values?: Readonly<Record<string, unknown>> }).values?.[MATERIAL_ID_KEY]
+  const currentId = typeof own === 'string' ? own : NO_MATERIAL
+  const blocked = editBlocked !== null
+  return (
+    <Field data-testid="architecture-material">
+      <FieldLabel htmlFor="architecture-material">Material</FieldLabel>
+      <Select
+        value={currentId}
+        disabled={blocked}
+        onValueChange={(v) => {
+          const err = submit(
+            { type: 'set_element_values', elementIds: [el.id], values: { [MATERIAL_ID_KEY]: v === NO_MATERIAL ? null : v } },
+            `Change ${what} material`,
+          )
+          if (err) notify(err, 'error')
+        }}
+      >
+        <SelectTrigger id="architecture-material" aria-label={`The ${what}'s material`}>
+          <SelectValue placeholder={active ? `${active.name} (default)` : 'Default material'} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NO_MATERIAL}>{active ? `Type default (${active.name})` : 'Type default'}</SelectItem>
+          <SelectSeparator />
+          {materials.map((m) => (
+            <SelectItem key={m.id} value={m.id}>
+              {m.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {el.kind === 'ceiling' ? (
+        <FieldDescription>
+          Form: <strong className="capitalize">{((el as { readonly form?: string }).form ?? 'flat').replace(/_/g, ' ')}</strong> — switch between ACT ceiling tile, painted gypsum, or wood slats above.
+        </FieldDescription>
+      ) : null}
+    </Field>
+  )
+}
+
+/** Readout, live material picker & guidance for architectural add-on kinds (`architecture.roof`, `architecture.stair`). */
+function ArchAddonInspector({ model, el, submit, editBlocked, notify }: { readonly model: ModelState; readonly el: BimElement; readonly submit: SubmitCommand; readonly editBlocked: string | null; readonly notify: Props['notify'] }): ReactNode {
+  if (String(el.kind) === 'architecture.roof') {
+    const r = el as unknown as { readonly form?: string; readonly slopeRise?: number; readonly thicknessMm?: number; readonly baseOffsetMm?: number }
+    const form = r.form ?? ((r.slopeRise ?? 0) > 0 ? 'shed' : 'flat')
+    const pitch = typeof r.slopeRise === 'number' && r.slopeRise > 0 ? `${Math.round(r.slopeRise * 120) / 10} in 12` : 'Flat (0 in 12)'
+    return (
+      <FieldGroup data-testid="architecture-roof-properties">
+        <Field orientation="horizontal">
+          <FieldLabel>Roof form</FieldLabel>
+          <Badge variant="outline" className="capitalize">{form}</Badge>
+        </Field>
+        <Field orientation="horizontal">
+          <FieldLabel>Pitch</FieldLabel>
+          <Badge variant="outline">{pitch}</Badge>
+        </Field>
+        <MaterialField key={`mat-${el.id}`} model={model} el={el} what="roof" submit={submit} editBlocked={editBlocked} notify={notify} />
+        <FieldDescription>
+          To trim exterior walls cleanly to this roof&apos;s underside, select any wall and set <strong>Wall top → Roof</strong>.
+        </FieldDescription>
+      </FieldGroup>
+    )
+  }
+  const s = el as unknown as {
+    readonly start?: { x: number; y: number }
+    readonly end?: { x: number; y: number }
+    readonly widthMm?: number
+    readonly form?: string
+    readonly turn?: string
+    readonly values?: Readonly<Record<string, unknown>>
+  }
+  const runMm = s.start && s.end ? Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y) : 0
+  const currentForm = String(s.values?.['architecture.stair_form'] ?? s.form ?? 'straight').toLowerCase()
+  const currentTurn = String(s.values?.['architecture.stair_turn'] ?? s.turn ?? 'right').toLowerCase()
+  const blocked = editBlocked !== null
+  return (
+    <FieldGroup data-testid="architecture-stair-properties">
+      <Field>
+        <FieldLabel htmlFor="architecture-stair-form">Configuration</FieldLabel>
+        <Select
+          value={currentForm}
+          disabled={blocked}
+          onValueChange={(v) => {
+            const err = submit({ type: 'set_element_values', elementIds: [el.id], values: { 'architecture.stair_form': v } }, 'Change stair configuration')
+            if (err) notify(err, 'error')
+          }}
+        >
+          <SelectTrigger id="architecture-stair-form" aria-label="Stair configuration">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="straight">Straight run</SelectItem>
+            <SelectItem value="l_shape">L-Shape (90° turn + landing)</SelectItem>
+            <SelectItem value="u_shape">U-Shape (180° switchback + landing)</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      {currentForm !== 'straight' ? (
+        <Field>
+          <FieldLabel htmlFor="architecture-stair-turn">Turn direction</FieldLabel>
+          <Select
+            value={currentTurn}
+            disabled={blocked}
+            onValueChange={(v) => {
+              const err = submit({ type: 'set_element_values', elementIds: [el.id], values: { 'architecture.stair_turn': v } }, 'Change stair turn direction')
+              if (err) notify(err, 'error')
+            }}
+          >
+            <SelectTrigger id="architecture-stair-turn" aria-label="Stair turn direction">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="right">Right (clockwise)</SelectItem>
+              <SelectItem value="left">Left (counter-clockwise)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
+      <Field orientation="horizontal">
+        <FieldLabel>Flight span</FieldLabel>
+        <Badge variant="outline">{(runMm / 304.8).toFixed(1)} ft</Badge>
+      </Field>
+      {typeof s.widthMm === 'number' ? (
+        <Field orientation="horizontal">
+          <FieldLabel>Clear width</FieldLabel>
+          <Badge variant="outline">{(s.widthMm / 304.8).toFixed(1)} ft</Badge>
+        </Field>
+      ) : null}
+      <MaterialField key={`mat-${el.id}`} model={model} el={el} what="stair" submit={submit} editBlocked={editBlocked} notify={notify} />
+      <FieldDescription>
+        IBC/IRC code-compliant stair (min 11&quot; treads, waisted 3D steps + steel guardrails, intermediate landing platforms, AIA cut-break plan graphics).
+      </FieldDescription>
+    </FieldGroup>
   )
 }

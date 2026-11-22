@@ -38,8 +38,20 @@ export function planGraphicsOf(el: BimElement, ctx: PlanGraphicsContext): readon
 }
 
 /** A plan pen as a drawing pen; `cut` is the heavy cut line unless the view names one. */
-export function penOf(pen: PlanPen, cut: Pen = "heavy"): Pen {
+export function penOf(pen: PlanPen | "none", cut: Pen = "heavy"): Pen {
+  if (pen === "none") return "thin";
   return pen === "cut" ? cut : pen;
+}
+
+/** Convert a #rrggbb fill string into a paper greyscale value in [0, 1] (0 = black, 1 = white). */
+export function fillHexToGrey(fill: string): number {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(fill.trim());
+  if (!m) return 0.85;
+  const rgb = parseInt(m[1]!, 16);
+  const r = (rgb >> 16) & 0xff;
+  const g = (rgb >> 8) & 0xff;
+  const b = rgb & 0xff;
+  return Math.max(0, Math.min(1, (0.299 * r + 0.587 * g + 0.114 * b) / 255));
 }
 
 const isPattern = (name: string): name is LinePattern => Object.prototype.hasOwnProperty.call(PATTERN_DASH, name);
@@ -51,9 +63,9 @@ export function dashOf(name: string | undefined): number[] | undefined {
   return dash ? [...dash] : undefined;
 }
 
-const ARC_STEP_DEG = 22.5;
+const ARC_STEP_DEG = 7.5;
 
-/** An arc as the chord points plans draw it with (one chord per 22.5°, at least one). */
+/** An arc as the chord points plans draw it with (one chord per 7.5°, at least one). */
 export function arcPoints(g: Extract<PlanGraphic, { readonly form: "arc" }>): Vec2[] {
   const steps = Math.max(1, Math.ceil(Math.abs(g.sweepDeg) / ARC_STEP_DEG));
   const out: Vec2[] = [];
@@ -82,6 +94,7 @@ export function graphicSegments(g: PlanGraphic): Array<readonly [Vec2, Vec2]> {
     case "line":
       return [[g.a, g.b]];
     case "polyline": {
+      if (g.pen === "none") return [];
       const out: Array<readonly [Vec2, Vec2]> = [];
       const n = g.points.length;
       const last = g.closed && n > 2 ? n : n - 1;

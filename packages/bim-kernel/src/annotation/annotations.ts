@@ -1,4 +1,5 @@
 import { elementsOfKind } from "../store";
+import { modelLevels, viewModelLevel } from "../levels";
 import { z } from "zod";
 import { emForCapHeight, textWidth } from "./text-layout";
 import { sizeLabel } from "../routing/rules";
@@ -247,20 +248,173 @@ function floorOutlineOf(model: Pick<ModelState, "elements">, el: BimElement): re
   return best;
 }
 
+/** Vertical `[z0, z1]` span (mm) of a room or space: its floor elevation up to its ceiling height or the next level above. */
+function areaElevationSpan(model: Pick<ModelState, "elements">, el: BimElement): { readonly z0: number; readonly z1: number } | null {
+  if (el.kind !== "room" && el.kind !== "space") return null;
+  let z0 = 0;
+  if (el.kind === "space" && el.levelId) {
+    z0 = levelZ(model, el.levelId);
+  } else {
+    const lvl = viewModelLevel(model, el.partition?.level);
+    z0 = lvl ? lvl.elevationMm : 0;
+  }
+  const statedHeight = el.kind === "space" && typeof el.ceilingHeightMm === "number" && el.ceilingHeightMm > 0 ? el.ceilingHeightMm : null;
+  if (statedHeight !== null) return { z0, z1: z0 + statedHeight };
+  let nextZ: number | null = null;
+  for (const lvl of modelLevels(model)) {
+    if (lvl.elevationMm > z0 + 100 && (nextZ === null || lvl.elevationMm < nextZ)) nextZ = lvl.elevationMm;
+  }
+  return { z0, z1: nextZ ?? z0 + 3000 };
+}
+
+/** 1D intervals `[u0, u1]` where the section cut ray `cutStart..cutEnd` slices across a closed 2D floor polygon. */
+function slicePolygonAlongCut(poly: readonly Vec2[], cutStart: Vec2, cutEnd: Vec2): Array<readonly [number, number]> {
+  const dx = cutEnd.x - cutStart.x;
+  const dy = cutEnd.y - cutStart.y;
+  const cutLen = Math.hypot(dx, dy);
+  if (cutLen < 1e-3 || poly.length < 3) return [];
+  const ux = dx / cutLen;
+  const uy = dy / cutLen;
+  const nx = -uy;
+  const ny = ux;
+  const hits: number[] = [];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[j]!;
+    const b = poly[i]!;
+    const da = (a.x - cutStart.x) * nx + (a.y - cutStart.y) * ny;
+    const db = (b.x - cutStart.x) * nx + (b.y - cutStart.y) * ny;
+    if ((da <= 0 && db > 0) || (db <= 0 && da > 0)) {
+      const t = da / (da - db);
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
+      hits.push((px - cutStart.x) * ux + (py - cutStart.y) * uy);
+    }
+  }
+  hits.sort((a, b) => a - b);
+  const out: Array<readonly [number, number]> = [];
+  for (let i = 0; i + 1 < hits.length; i += 2) {
+    const u0 = Math.max(0, hits[i]!);
+    const u1 = Math.min(cutLen, hits[i + 1]!);
+    if (u1 - u0 > 50) out.push([u0, u1]);
+  }
+  return out;
+}
+
+/**
+ * 2D outlines of a room or space in `view`'s own drawing coordinates:
+ * - Floor plans & RCPs: its 2D floor polygon(s) in plan mm.
+ * - Building sections: exact sliced room rectangles `(u0..u1, z0..z1)` where the section cut passes through the room.
+ * - Elevations: projected room rectangles within the view depth `0..depthMm`.
+ */
+export function hostAreaOutlinesInView(
+  model: Pick<ModelState, "elements">,
+  view: ViewElement | null | undefined,
+  el: BimElement,
+): ReadonlyArray<readonly Vec2[]> {
+  if (el.kind !== "room" && el.kind !== "space") return [];
+  const floorPolys: ReadonlyArray<readonly Vec2[]> = el.kind === "room" ? (el.outline.length >= 3 ? [el.outline] : []) : spaceOutlines(model.elements, el).filter((o) => o.length >= 3);
+  if (floorPolys.length === 0) return [];
+  const cut = view?.props?.section;
+  if (!view || (view.viewType !== "section" && view.viewType !== "elevation") || !cut) return floorPolys;
+  const span = areaElevationSpan(model, el);
+  if (!span) return [];
+  const out: Vec2[][] = [];
+  for (const poly of floorPolys) {
+    const slices = slicePolygonAlongCut(poly, cut.start, cut.end);
+    for (const [u0, u1] of slices) {
+      out.push([
+        { x: u0, y: span.z0 },
+        { x: u1, y: span.z0 },
+        { x: u1, y: span.z1 },
+        { x: u0, y: span.z1 },
+      ]);
+    }
+    if (slices.length === 0 && view.viewType === "elevation") {
+      const dx = cut.end.x - cut.start.x;
+      const dy = cut.end.y - cut.start.y;
+      const cutLen = Math.hypot(dx, dy);
+      if (cutLen < 1e-3) continue;
+      const ux = dx / cutLen;
+      const uy = dy / cutLen;
+      const lx = -uy * cut.direction;
+      const ly = ux * cut.direction;
+      let minU = Infinity;
+      let maxU = -Infinity;
+      let minD = Infinity;
+      let maxD = -Infinity;
+      for (const q of poly) {
+        const u = (q.x - cut.start.x) * ux + (q.y - cut.start.y) * uy;
+        const d = (q.x - cut.start.x) * lx + (q.y - cut.start.y) * ly;
+        if (u < minU) minU = u;
+        if (u > maxU) maxU = u;
+        if (d < minD) minD = d;
+        if (d > maxD) maxD = d;
+      }
+      if (maxD >= -50 && minD <= cut.depthMm + 50) {
+        const u0 = Math.max(0, minU);
+        const u1 = Math.min(cutLen, maxU);
+        if (u1 - u0 > 50) {
+          out.push([
+            { x: u0, y: span.z0 },
+            { x: u1, y: span.z0 },
+            { x: u1, y: span.z1 },
+            { x: u0, y: span.z1 },
+          ]);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function pointInPoly(pt: Vec2, poly: readonly Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!;
+    const b = poly[j]!;
+    const crosses = (a.y > pt.y) !== (b.y > pt.y) && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+/** True when `pt` lies inside the room or space's area in `view` (plan polygon or section cut rectangle); null when not an area host. */
+export function isPointInsideHostArea(model: Pick<ModelState, "elements">, elementId: string, pt: Vec2, view?: ViewElement | null): boolean | null {
+  const el = model.elements[elementId];
+  if (!el || ("deleted" in el && el.deleted)) return null;
+  if (el.kind !== "room" && el.kind !== "space") return null;
+  const polys = hostAreaOutlinesInView(model, view, el);
+  if (polys.length === 0) return false;
+  return polys.some((poly) => poly.length >= 3 && pointInPoly(pt, poly));
+}
+
 /** An element's insertion point (3D), when it is placed at one. */
 function pointOf(model: Pick<ModelState, "elements">, el: BimElement): Point3 | null {
   switch (el.kind) {
     case "part":
       return { ...el.position, z: levelZ(model, el.levelId) + el.offsetMm };
-    case "column":
-      return { ...el.position, z: UNELEVATED_Z_MM };
+    case "column": {
+      const colLvl = el.placement?.kind === "point" ? levelZ(model, el.placement.levelId) : (viewModelLevel(model, el.partition?.level)?.elevationMm ?? 0);
+      return { ...el.position, z: colLvl + 1500 };
+    }
+    case "opening": {
+      const host = model.elements[el.hostId];
+      const hostZ =
+        host?.kind === "wall" && host.placement?.kind === "line"
+          ? levelZ(model, host.placement.levelId)
+          : (viewModelLevel(model, host?.partition?.level ?? el.partition?.level)?.elevationMm ?? 0);
+      const rawSill = (el as unknown as { readonly values?: Readonly<Record<string, unknown>> }).values?.["opening.sill_mm"];
+      const sillMm = typeof rawSill === "number" ? rawSill : el.openingType === "window" ? 915 : 0;
+      return { ...el.position, z: hostZ + sillMm + el.height / 2 };
+    }
     case "run_fitting":
       return el.position;
     case "room":
     case "space": {
       const outline = floorOutlineOf(model, el);
       const at = outline ? outlineCentroid(outline) : null;
-      return at ? { ...at, z: el.kind === "space" && el.levelId ? levelZ(model, el.levelId) : 0 } : null;
+      const span = areaElevationSpan(model, el);
+      return at && span ? { ...at, z: (span.z0 + span.z1) / 2 } : null;
     }
     default: {
       const at = addOnMarkedPoint(el);
@@ -315,13 +469,30 @@ export function anchorInView(model: Pick<ModelState, "elements">, view: ViewElem
     if (ref.anchor === "end") return pts[pts.length - 1] ?? null;
     return pts[ref.index ?? 0] ?? null;
   }
-  const p = modelAnchor(model, ref);
-  if (!p) return null;
   const cut = view?.props?.section;
   if ((view?.viewType === "section" || view?.viewType === "elevation") && cut) {
+    // Rooms and spaces anchor dead-center inside their actual visible section/elevation cut slice (null when uncut).
+    if (el && (el.kind === "room" || el.kind === "space") && !("deleted" in el && el.deleted)) {
+      const slices = hostAreaOutlinesInView(model, view, el);
+      if (slices.length === 0) return null;
+      let best = slices[0]!;
+      let bestArea = -1;
+      for (const s of slices) {
+        const area = outlineAreaMm2(s);
+        if (area > bestArea) {
+          best = s;
+          bestArea = area;
+        }
+      }
+      return outlineCentroid(best);
+    }
+    const p = modelAnchor(model, ref);
+    if (!p) return null;
     const q = sectionProjector(cut.start, cut.end, cut.direction, cut.depthMm).project(p);
     return { x: q.u, y: q.v };
   }
+  const p = modelAnchor(model, ref);
+  if (!p) return null;
   return { x: p.x, y: p.y };
 }
 

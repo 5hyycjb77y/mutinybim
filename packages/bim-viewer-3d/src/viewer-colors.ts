@@ -51,12 +51,12 @@ export class ViewerPalette {
   readonly planBackground = new THREE.Color();
   readonly pickHighlight = new THREE.Color();
   readonly axes: readonly [THREE.Color, THREE.Color, THREE.Color] = [new THREE.Color(), new THREE.Color(), new THREE.Color()];
-  readonly selected = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1 });
+  readonly selected = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   /** A selected group (run, branch, system, box selection), drawn over the model. */
-  readonly groupSelected = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-  readonly hover = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  readonly groupSelected = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  readonly hover = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.65, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
   readonly provisional = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.1, transparent: true, opacity: 0.85 });
-  readonly edge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 });
+  readonly edge = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.28 });
   /** The selected object's edges: opaque, and drawn in every visual style. */
   readonly selectedEdge = new THREE.LineBasicMaterial();
   private current: ViewerColors = DEFAULT_VIEWER_COLORS;

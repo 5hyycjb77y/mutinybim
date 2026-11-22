@@ -45,37 +45,43 @@ function chain() {
 }
 
 describe("a13a create wall chain", () => {
-  it("four clicks make four walls sharing ends that butt at every corner, and the outlines close with no overlap", () => {
+  it("four clicks make four walls sharing ends that miter cleanly at every corner, and the outlines close with no overlap", () => {
     const m = chain();
     for (const [id, prev, next] of [["w-1", "w-4", "w-2"], ["w-2", "w-1", "w-3"], ["w-3", "w-2", "w-4"], ["w-4", "w-3", "w-1"]] as const) {
       const [start, end] = cleanups(m.head, id);
-      expect([start?.style, start?.with]).toEqual(["butt", [prev]]);
-      expect([end?.style, end?.with]).toEqual(["butt", [next]]);
+      expect([start?.style, start?.with]).toEqual(["miter", [prev]]);
+      expect([end?.style, end?.with]).toEqual(["miter", [next]]);
     }
-    // Outer edge 6.2 x 4.2 m, inner 5.8 x 3.8 m: the four bodies tile the ring exactly.
+    // Outer edge 6.2 x 4.2 m, inner 5.8 x 3.8 m: the four mitered bodies tile the ring exactly.
     const total = ["w-1", "w-2", "w-3", "w-4"].reduce((s, id) => s + area(lineJoinsOf(m.head.elements, id)?.outline ?? []), 0);
     expect(total).toBeCloseTo(6200 * 4200 - 5800 * 3800, 3);
-    // w-1 outranks w-2 (same thickness, lower id): it runs to the outer corner, w-2 stops at its inner face.
-    expect(lineJoinsOf(m.head.elements, "w-1")?.faces).toMatchObject({ endLeft: 6100, endRight: 6100 });
-    expect(lineJoinsOf(m.head.elements, "w-2")?.faces).toMatchObject({ startLeft: 100, startRight: 100 });
+    // Mitered corners: inner face meets inner face, outer face meets outer face.
+    expect(lineJoinsOf(m.head.elements, "w-1")?.faces).toMatchObject({ endLeft: 5900, endRight: 6100 });
+    expect(lineJoinsOf(m.head.elements, "w-2")?.faces).toMatchObject({ startLeft: 100, startRight: -100 });
   });
 
-  it("the plan draws both faces of each wall with no end line at a clean corner", () => {
+  it("the plan draws poché and both faces of each wall with no end line at a clean corner", () => {
     const m = chain();
     const g = lineJoinPlanGraphics(element(m.head, "w-1"), ctx(m.head)) as readonly PlanGraphic[];
     expect(g.filter((x) => x.form === "line")).toHaveLength(2);
+    expect(g.filter((x) => x.form === "polyline" && x.fill)).toHaveLength(1);
     const lone = twoLevels();
     lone.ok({ type: "create_element", elementId: "solo", kind: "wall", levelId: "L1", placement: { kind: "line", start: { x: 0, y: 0 }, end: { x: 3000, y: 0 } } });
-    expect(lineJoinPlanGraphics(element(lone.head, "solo"), ctx(lone.head))).toBeNull();
+    const soloG = lineJoinPlanGraphics(element(lone.head, "solo"), ctx(lone.head)) as readonly PlanGraphic[];
+    expect(soloG.filter((x) => x.form === "line")).toHaveLength(4);
+    expect(soloG.filter((x) => x.form === "polyline" && x.fill)).toHaveLength(1);
   });
 
-  it("a wall ending on another's face tees into it; the through wall is untouched", () => {
+  it("a wall ending on another's face tees into it and breaks the through wall's met face in plan", () => {
     const m = chain();
     m.ok({ type: "create_element", elementId: "t", kind: "wall", levelId: "L1", size: { thicknessMm: 100 }, placement: { kind: "line", start: { x: 3000, y: 0 }, end: { x: 3000, y: 2000 } } });
     const [start, end] = cleanups(m.head, "t");
     expect([start?.style, start?.with, end?.style]).toEqual(["tee", ["w-1"], "free"]);
     expect(lineJoinsOf(m.head.elements, "t")?.faces).toMatchObject({ startLeft: 100, startRight: 100 });
-    expect(cleanups(m.head, "w-1").map((c) => c.style)).toEqual(["butt", "butt"]);
+    expect(cleanups(m.head, "w-1").map((c) => c.style)).toEqual(["miter", "miter"]);
+    // The inner (left) face of w-1 breaks into 2 segments around the 100 mm tee wall, while the outer face stays continuous (3 lines total).
+    const w1G = lineJoinPlanGraphics(element(m.head, "w-1"), ctx(m.head)) as readonly PlanGraphic[];
+    expect(w1G.filter((x) => x.form === "line")).toHaveLength(3);
   });
 
   it("Disallow join leaves both ends at that corner free", () => {
@@ -83,7 +89,7 @@ describe("a13a create wall chain", () => {
     m.ok({ type: "set_element_values", elementIds: ["w-4"], values: { "join.disallow_end": true } });
     expect(cleanups(m.head, "w-4")[1]?.style).toBe("free");
     expect(cleanups(m.head, "w-1")[0]?.style).toBe("free");
-    expect(cleanups(m.head, "w-2")[0]?.style).toBe("butt");
+    expect(cleanups(m.head, "w-2")[0]?.style).toBe("miter");
   });
 
   it("an edit re-joins from the carried index: moving one wall away frees exactly its neighbours' ends, same as a fresh build", () => {
@@ -93,8 +99,8 @@ describe("a13a create wall chain", () => {
     const carried = (id: string) => lineJoinsOf(m.head.elements, id)?.cleanups.map((c) => c.style);
     const fresh = elementsFromRows(elementValues(m.head.elements));
     const rebuilt = (id: string) => lineJoinsOf(fresh, id)?.cleanups.map((c) => c.style);
-    expect(carried("w-2")).toEqual(["butt", "free"]);
-    expect(carried("w-4")).toEqual(["free", "butt"]);
+    expect(carried("w-2")).toEqual(["miter", "free"]);
+    expect(carried("w-4")).toEqual(["free", "miter"]);
     expect(carried("w-3")).toEqual(["free", "free"]);
     for (const id of ["w-1", "w-2", "w-3", "w-4"]) expect(carried(id)).toEqual(rebuilt(id));
   });
@@ -104,10 +110,10 @@ describe("a13a create wall chain", () => {
     m.ok({ type: "create_element", elementId: "t", kind: "wall", levelId: "L1", size: { thicknessMm: 100 }, placement: { kind: "line", start: { x: 3000, y: 0 }, end: { x: 3000, y: 2000 } } });
     m.ok({ type: "move_wall", wallId: "w-1", delta: { x: 0, y: -10 } });
     expect(cleanups(m.head, "w-1").map((c) => [c.style, c.with])).toEqual([
-      ["butt", ["w-4"]],
-      ["butt", ["w-2"]],
+      ["miter", ["w-4"]],
+      ["miter", ["w-2"]],
     ]);
-    expect(cleanups(m.head, "w-2")[0]?.style).toBe("butt");
+    expect(cleanups(m.head, "w-2")[0]?.style).toBe("miter");
     expect(cleanups(m.head, "t")[0]?.style).toBe("tee");
     // Round 16: the corner neighbour and the tee follow the moved wall 10 mm down (joins/carry.ts),
     // so they stop on its faces exactly where they did before the move, and no gap opens.
@@ -116,7 +122,7 @@ describe("a13a create wall chain", () => {
     expect(w2.kind === "wall" ? w2.start : null).toEqual({ x: 6000, y: -10 });
     expect(t.kind === "wall" ? t.start : null).toEqual({ x: 3000, y: -10 });
     expect(lineJoinsOf(m.head.elements, "w-2")?.faces.startLeft).toBeCloseTo(100, 6);
-    expect(lineJoinsOf(m.head.elements, "w-2")?.faces.startRight).toBeCloseTo(100, 6);
+    expect(lineJoinsOf(m.head.elements, "w-2")?.faces.startRight).toBeCloseTo(-100, 6);
     expect(lineJoinsOf(m.head.elements, "t")?.faces.startLeft).toBeCloseTo(100, 6);
     expect(lineJoinsOf(m.head.elements, "t")?.faces.startRight).toBeCloseTo(100, 6);
   });

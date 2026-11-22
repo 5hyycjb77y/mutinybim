@@ -187,6 +187,7 @@ export function searchReference(query: string, limit = 8): readonly ReferenceHit
 const KIT_PRELUDE = `/** A quantity with its kind; build one with units.* (stored in SI). */
 export interface Measure { readonly kind: string; readonly value: number }
 export interface PlanPoint { readonly x: Measure; readonly y: Measure }
+export interface SheetPoint { readonly x: Measure; readonly y: Measure }
 export type Dim = number | { param: string; scale?: number; add?: number } | { formula: string };
 export type Length = Measure | Dim;
 export type Face = "top" | "bottom" | "front" | "back" | "left" | "right";
@@ -223,7 +224,7 @@ export interface ScheduleFilter { readonly path: string; readonly op: "equals" |
 export interface ScheduleRow { readonly key: string; readonly element: string; readonly cells: Readonly<Record<string, number | string | boolean | null>> }
 export interface ScheduleRows { readonly name: string; readonly columns: readonly { readonly id: string; readonly heading: string; readonly valueType: string; readonly quantityKind?: string }[]; readonly rows: readonly ScheduleRow[]; readonly totals: Readonly<Record<string, number | null>>; readonly totalRows: number }
 export interface ScheduleClassFields { readonly id: string; readonly label: string; readonly fields: readonly { readonly path: string; readonly label: string; readonly valueType: string; readonly kind?: string; readonly unit?: string; readonly totals?: string }[]; readonly relationships: readonly { readonly id: string; readonly label: string; readonly to: string }[] }
-export type AutoTagCategory = "duct" | "pipe" | "air_terminal" | "equipment" | "fixture" | "part";
+export type AutoTagCategory = "duct" | "pipe" | "air_terminal" | "equipment" | "fixture" | "part" | "room" | "space" | "opening";
 /** A piece of equipment in a one-line you describe: kind ("utility", "switchboard", "panelboard", "transformer"…), name, ratings, what it feeds. */
 export interface OneLineNode { readonly id: string; readonly kind: string; readonly name: string; readonly ratings?: readonly string[]; readonly main?: { readonly device: string; readonly label?: string }; readonly feeder?: Readonly<Record<string, string | number | undefined>>; readonly children?: readonly OneLineNode[]; readonly placeholder?: boolean }
 /** A surface found over or under a point: its elevation (mm) and height above the floor. */
@@ -264,12 +265,20 @@ export interface RouteSpec {
 }
 export interface RouteHandle { readonly prefix: string; segment(n: number): string }
 export type TopSurface = "structure above" | "ceiling" | "roof";
-export type WallTop = { level: string; offset?: Measure } | TopSurface | { to: TopSurface; offset?: Measure };
+export type WallTop = { level: string; offset?: Measure } | TopSurface | { to: TopSurface; elementId?: string; offset?: Measure };
 export type WallBase = { offset: Measure } | "slab below" | { to: "slab below"; offset?: Measure };
-export interface ChainSpec { level: string; points: readonly PlanPoint[]; closed?: boolean; typeId?: string; thickness?: Measure; height?: Measure; top?: WallTop; base?: WallBase; topLevel?: string; topOffset?: Measure; values?: Record<string, string | number | boolean>; label?: string; id?: string }
-export interface WallSpec { level: string; from: PlanPoint; to: PlanPoint; typeId?: string; thickness?: Measure; height?: Measure; top?: WallTop; base?: WallBase; topLevel?: string; topOffset?: Measure; values?: Record<string, string | number | boolean>; label?: string; id?: string }
+export interface ChainSpec { level: string; points: readonly PlanPoint[]; closed?: boolean; typeId?: string; thickness?: Measure; height?: Measure; top?: WallTop; base?: WallBase; topLevel?: string; topOffset?: Measure; material?: string; values?: Record<string, string | number | boolean>; label?: string; id?: string }
+export interface WallSpec { level: string; from: PlanPoint; to: PlanPoint; typeId?: string; thickness?: Measure; height?: Measure; top?: WallTop; base?: WallBase; topLevel?: string; topOffset?: Measure; material?: string; values?: Record<string, string | number | boolean>; label?: string; id?: string }
+export interface AssemblyThermalSummary {
+  readonly totalThicknessMm: number;
+  readonly rSiM2KPerW: number;
+  readonly rImperial: number;
+  readonly uValueWPerM2K: number;
+  readonly uValueImperial: number;
+  readonly missingThermalMaterials: readonly string[];
+}
 export interface ChainHandle { readonly prefix: string; element(n: number): string }
-export interface OpeningSpec { wall: string; along: Measure; width?: Measure; height?: Measure; sill?: Measure; side?: 1 | -1; typeId?: string; mark?: string; values?: Record<string, string | number | boolean>; id?: string }
+export interface OpeningSpec { wall: string; along: Measure; width?: Measure; height?: Measure; sill?: Measure; side?: 1 | -1; typeId?: string; mark?: string; material?: string; values?: Record<string, string | number | boolean>; id?: string }
 export interface PlacedPart { readonly id: string; connector(connectorId: string): RouteEnd }
 export type SystemLinePattern = "solid" | "dashed" | "dotted" | "dash_dot" | "dash_dot_dot" | "dash_dot_dot_dot" | "long_dash";
 export type SystemLineWeight = "thin" | "medium" | "wide" | "heavy";
@@ -280,11 +289,18 @@ export interface CategoryOverrideSpec {
   detailLevel?: "coarse" | "medium" | "fine";
   singleLineBelow?: Measure;
 }
-export interface CropBoxSpec { from?: PlanPoint; to?: PlanPoint; cropView?: boolean; showCropBox?: boolean; depth?: Measure }
+export interface CropBoxSpec {
+  from?: PlanPoint; to?: PlanPoint;
+  cropView?: boolean; showCropBox?: boolean;
+  annotationCrop?: boolean; annotationCropOffsetMm?: number;
+  depth?: Measure;
+  levelLeftExtMm?: number; levelRightExtMm?: number;
+  headExt?: Measure; tailExt?: Measure; splitGap?: boolean;
+}
 export interface PlanViewSpec {
   level: string; name: string; discipline?: string; scale?: number; cutHeight?: Measure;
   detailLevel?: "coarse" | "medium" | "fine";
-  visualStyle?: "wireframe" | "hidden_line" | "shaded" | "consistent_colors";
+  visualStyle?: "wireframe" | "hidden_line" | "shaded" | "shaded_edges";
   showLineCodes?: boolean;
   hide?: string[];
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
@@ -294,13 +310,19 @@ export interface PlanViewSpec {
 export interface ViewChanges {
   discipline?: string | null; scale?: number; cutHeight?: Measure;
   detailLevel?: "coarse" | "medium" | "fine";
-  visualStyle?: "wireframe" | "hidden_line" | "shaded" | "consistent_colors";
+  visualStyle?: "wireframe" | "hidden_line" | "shaded" | "shaded_edges";
   showLineCodes?: boolean;
   hide?: string[];
   /** Replaces the view's category override map; pass {} to clear all overrides. */
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
 }
-export interface VerticalViewSpec { name: string; from: PlanPoint; to: PlanPoint; direction?: 1 | -1; depth?: Measure; scale?: number; level?: string; discipline?: string; id?: string }
+export interface VerticalViewSpec {
+  name: string; from: PlanPoint; to: PlanPoint; direction?: 1 | -1; depth?: Measure;
+  crop?: { from: PlanPoint; to: PlanPoint };
+  headExt?: Measure; tailExt?: Measure; splitGap?: boolean;
+  levelLeftExtMm?: number; levelRightExtMm?: number;
+  level?: string; discipline?: string; scale?: number; hide?: string[]; id?: string;
+}
 export interface EnlargedPlanSpec { parent: string; name: string; from: PlanPoint; to: PlanPoint; scale?: number; label?: string; head?: PlanPoint; discipline?: string; cutHeight?: Measure; id?: string; calloutId?: string }
 export interface CalloutRefSpec { view: string; target: string; from: PlanPoint; to: PlanPoint; head?: PlanPoint; label?: string; id?: string }
 `;

@@ -22,18 +22,22 @@ export function wallEnds(model: ModelState, id: string | undefined, levelId: str
 }
 
 /** What the hint says while an end grip is held: what follows and how to stop. */
-export function endDragHint(elements: Readonly<Record<string, BimElement>>, wallId: string, end: End, snap: Snap | null, lengthMm: number | null): string {
+export function endDragHint(elements: Readonly<Record<string, BimElement>>, wallId: string, end: End, snap: Snap | null, lengthMm: number | null, disjoin = false): string {
   const n = joinedEndFollowers(elements, wallId, end).length
-  const follows = n === 0 ? 'Nothing is joined at this end' : `${n} joined ${n === 1 ? 'wall follows' : 'walls follow'}`
+  const follows = disjoin
+    ? 'Disjoined (Alt held)'
+    : n === 0
+      ? 'Nothing is joined at this end'
+      : `${n} joined ${n === 1 ? 'wall follows' : 'walls follow'} (hold Alt to disjoin)`
   const length = lengthMm === null ? '' : ` · ${feetInches(lengthMm)} long`
   return `Drag the wall's end${length} · ${follows}${snap && snap.kind !== 'grid' ? ` · ${snap.label}` : ''} · Esc cancels`
 }
 
 /** The command a drop makes, or why there is none, in words. */
-export function endDropCommand(wall: { readonly id: string; readonly start: Vec2; readonly end: Vec2 }, end: End, to: Vec2): Command | string {
+export function endDropCommand(wall: { readonly id: string; readonly start: Vec2; readonly end: Vec2 }, end: End, to: Vec2, disjoin = false): Command | string {
   const from = end === 'start' ? wall.start : wall.end
   if (from.x === to.x && from.y === to.y) return 'The end is where it was; nothing moved.'
-  return { type: 'move_line_end', elementId: wall.id, end, to }
+  return { type: 'move_line_end', elementId: wall.id, end, to, ...(disjoin ? { disjoin: true } : {}) }
 }
 
 interface Props {
@@ -51,6 +55,7 @@ interface Drag {
   readonly end: End
   readonly at: Vec2 | null
   readonly snap: Snap | null
+  readonly disjoin: boolean
 }
 
 /**
@@ -97,33 +102,35 @@ export function WallEndGrips({ model, levelId, wall, toScreen, pickPlanPointAt, 
   }, [drag])
 
   const fixedOf = (end: End): Vec2 => (end === 'start' ? wall.end : wall.start)
-  const aim = (end: End, clientX: number, clientY: number): Drag => {
+  const aim = (end: End, clientX: number, clientY: number, disjoin: boolean): Drag => {
     const raw = pickPlanPointAt(clientX, clientY)
-    if (!raw) return { end, at: null, snap: null }
+    if (!raw) return { end, at: null, snap: null, disjoin }
     const beside = pickPlanPointAt(clientX + SNAP_PX, clientY)
     const toleranceMm = beside ? Math.hypot(beside.x - raw.x, beside.y - raw.y) : 300
     // The walls at a corner with this end move with it: snapping to their old end would snap back.
-    const partners = joinedEndFollowers(model.elements, wall.id, end).filter((id) => {
-      const other = model.elements[id]
-      const l = other ? hostLineOf(other, model.elements) : null
-      const p = end === 'start' ? wall.start : wall.end
-      return l !== null && ((l.start.x === p.x && l.start.y === p.y) || (l.end.x === p.x && l.end.y === p.y))
-    })
+    const partners = disjoin
+      ? []
+      : joinedEndFollowers(model.elements, wall.id, end).filter((id) => {
+          const other = model.elements[id]
+          const l = other ? hostLineOf(other, model.elements) : null
+          const p = end === 'start' ? wall.start : wall.end
+          return l !== null && ((l.start.x === p.x && l.start.y === p.y) || (l.end.x === p.x && l.end.y === p.y))
+        })
     const snap = snapPoint({ model, levelId, raw, toleranceMm, corners: [fixedOf(end)], gridMm: DRAFTING_GRID_MM, ignoreIds: [wall.id, ...partners] })
-    return { end, at: snap.point, snap }
+    return { end, at: snap.point, snap, disjoin }
   }
 
   const down = (end: End) => (e: ReactPointerEvent<SVGCircleElement>) => {
     if (e.button !== 0) return
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
-    setDrag(aim(end, e.clientX, e.clientY))
+    setDrag(aim(end, e.clientX, e.clientY, e.altKey))
   }
   const move = (e: ReactPointerEvent<SVGCircleElement>) => {
     const d = dragRef.current
     if (!d) return
     e.stopPropagation()
-    setDrag(aim(d.end, e.clientX, e.clientY))
+    setDrag(aim(d.end, e.clientX, e.clientY, e.altKey))
   }
   const up = (e: ReactPointerEvent<SVGCircleElement>) => {
     const d = dragRef.current
@@ -134,9 +141,9 @@ export function WallEndGrips({ model, levelId, wall, toScreen, pickPlanPointAt, 
       notify("That is off the plan; the wall's end stayed where it was.", 'info')
       return
     }
-    const command = endDropCommand(wall, d.end, d.at)
+    const command = endDropCommand(wall, d.end, d.at, d.disjoin)
     if (typeof command === 'string') return
-    const err = submit(command, "Move the wall's end")
+    const err = submit(command, d.disjoin ? "Disjoin and move the wall's end" : "Move the wall's end")
     if (err) {
       console.error('[WallEndGrips] moving a wall end was refused', { wallId: wall.id, end: d.end, err })
       notify(err, 'error')
@@ -179,7 +186,7 @@ export function WallEndGrips({ model, levelId, wall, toScreen, pickPlanPointAt, 
           )
         })}
       </svg>
-      {shown ? <ToolHintBar text={endDragHint(model.elements, wall.id, shown, drag?.snap ?? null, lengthMm)} tone="info" testId="architecture-end-hint" className={hintClassName} /> : null}
+      {shown ? <ToolHintBar text={endDragHint(model.elements, wall.id, shown, drag?.snap ?? null, lengthMm, drag?.disjoin ?? false)} tone="info" testId="architecture-end-hint" className={hintClassName} /> : null}
     </>
   )
 }

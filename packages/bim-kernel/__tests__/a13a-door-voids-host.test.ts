@@ -75,8 +75,13 @@ describe("a13a door voids host", () => {
     ]);
     expect(measuredValue(m.head.elements, W, "qto.area_net")).toBeCloseTo(18 - 1.44, 6);
     m.ok({ type: "set_element_values", elementIds: ["win"], values: { "opening.sill_mm": 1500 } });
-    // Above the cut: no gap, nothing joined, so the plan draws the wall as it always has.
-    expect(lineJoinPlanGraphics(element(m.head, W), ctx(m.head))).toBeNull();
+    // Above the cut: no gap in plan (continuous wall faces from 0..6000 with no jamb breaks at 2400/3600).
+    const unbroken = (lineJoinPlanGraphics(element(m.head, W), ctx(m.head)) ?? []).filter((g): g is Extract<PlanGraphic, { form: "line" }> => g.form === "line");
+    expect(unbroken.filter((l) => l.a.y === l.b.y).map((l) => [l.a.x, l.b.x, l.a.y])).toEqual([
+      [0, 6000, 100],
+      [0, 6000, -100],
+    ]);
+    expect(unbroken.filter((l) => l.a.x === l.b.x).map((l) => l.a.x)).toEqual([0, 6000]);
   });
 
   it("undo of the door puts the wall back whole", () => {

@@ -61,7 +61,7 @@ import { CLASS_SOLIDS_POINT, classSolidsRowProblems } from "@permitzip/bim-kerne
 import { STARTER_ELEMENT_TYPE_POINT, starterElementTypeRowProblems } from "@permitzip/bim-kernel";
 import { LINKED_PLAN_DISPLAY_POINT, linkedPlanDisplayRowProblems } from "@permitzip/bim-kernel";
 import { LINKED_REFERENCE_POINT, linkedReferenceRowProblems } from "@permitzip/bim-kernel";
-import { SURFACE_FACE_POINT, surfaceFaceRowProblems } from "@permitzip/bim-kernel";
+import { SURFACE_FACE_POINT, surfaceFaceRowProblems, MATERIAL_POINT, materialRowProblems } from "@permitzip/bim-kernel";
 import { BOUNDING_ELEMENT_POINT, CONNECTION_FIELD_POINT, CONNECTOR_FACE_POINT, DATUM_POINT, GRAVITY_OUTFALL_POINT, HOST_VOID_POINT, IFC_RELATION_POINT, LINE_JOIN_POINT, boundingElementRowProblems, connectionFieldRowProblems, connectorFaceRowProblems, datumRowProblems, gravityOutfallRowProblems, hostVoidRowProblems, ifcRelationRowProblems, lineJoinRowProblems } from "@permitzip/bim-kernel";
 import { DESIGN_LIMIT_DEFAULT_POINT, DESIGN_LIMIT_MEASURE_POINT, designLimitMeasureProblems, designLimitProblems } from "@permitzip/bim-kernel/policy";
 import { INTAKE_COLUMN_POINT, intakeColumnRowProblems } from "@permitzip/bim-kernel/intake";
@@ -423,6 +423,8 @@ export const KNOWN_POINTS: readonly KnownPoint[] = [
   known(LINKED_REFERENCE_POINT, (items) => linkedReferenceRowProblems(items), null),
   // Wall tops and bases bound to surfaces: the faces a kind offers (slab, ceiling, an add-on's roof).
   known(SURFACE_FACE_POINT, (items) => surfaceFaceRowProblems(items), null),
+  // Shared materials (`kernel.material` v1): 2D cut/surface poché and 3D appearance.
+  known(MATERIAL_POINT, (items) => materialRowProblems(items), null),
 ];
 
 export function knownPoint(id: string, declared: readonly KnownPoint[] = []): KnownPoint | null {

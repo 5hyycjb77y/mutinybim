@@ -33,7 +33,7 @@ function twoStoreys(): Log {
   return m;
 }
 
-const fills = (prims: readonly Primitive[]) => prims.filter((p): p is Extract<Primitive, { kind: "fill" }> => p.kind === "fill");
+const fills = (prims: readonly Primitive[]) => prims.filter((p): p is Extract<Primitive, { kind: "fill" }> => p.kind === "fill" && p.grey > 0 && p.grey < 1);
 
 describe("a section draws every level's walls and slabs at their own height", () => {
   it("the cut shading reaches from the Level 1 slab's underside to the roof slab's top", () => {

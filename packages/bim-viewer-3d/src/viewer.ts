@@ -15,6 +15,8 @@ import { ifcPlacementToScene, kernelToScene, MM, sceneToKernel, toColumnMajor, t
 import { robustCore } from "./framing";
 import { DEFAULT_ELEVATIONS, modelSolids, routeJoinSolids, type ElevationRules, type RenderGroup, type Solid } from "./native-geometry";
 import { batchMeshSolids, batchOwnerAt, type MeshBatch } from "./mesh-batches";
+import { buildStudioEnvironment, cleanEdgesGeometry, ensureBoxUVs, inflateAlongNormals, proceduralMaterialMaps } from "./procedural-textures";
+import { materialOf, parseHexColor, type MaterialPattern } from "@permitzip/bim-kernel";
 import { readReferenceItem, type ReferenceItemProperties } from "./item-properties";
 import { nearestTurn, type Orientation, type PlanRectMm } from "./orientation";
 import { screenBoxes, type ScreenRect } from "./box-select";
@@ -111,8 +113,8 @@ const GROUP_STYLE: Record<RenderGroup, { color: number; roughness: number; metal
   furnishing: { color: 0xb59a7a, roughness: 0.85, metalness: 0 },
   insulation: { color: 0xe8d9a8, roughness: 0.95, metalness: 0, opacity: 0.35 },
   mounting_plane: { color: 0x8fb3d9, roughness: 0.9, metalness: 0, opacity: 0.25 },
-  filler: { color: 0x8a6f52, roughness: 0.7, metalness: 0.05 },
-  glazing: { color: 0x9fc8e8, roughness: 0.1, metalness: 0.1, opacity: 0.3 },
+  filler: { color: 0x3c3a37, roughness: 0.42, metalness: 0.32 },
+  glazing: { color: 0x7ba9c4, roughness: 0.06, metalness: 0.28, opacity: 0.36 },
 };
 
 /** Plan symbols sit this far under the cut, so the cut never clips them. */
@@ -233,6 +235,9 @@ export class ModelViewer3D {
   private readonly ortho: THREE.OrthographicCamera;
   /** The 3D view's parallel camera (plan keeps its own straight-down one). */
   private readonly orthoView: THREE.OrthographicCamera;
+  private sunLight: THREE.DirectionalLight | null = null;
+  private shadowsEnabled = true;
+  private renderQuality: "draft" | "standard" | "high" = "standard";
   private projection: Projection = "perspective";
   /** Where the 3D view was looking when plan took over (a projection switch in plan frames about it). */
   private readonly last3dTarget = new THREE.Vector3();
@@ -259,6 +264,7 @@ export class ModelViewer3D {
   private readonly ghostRoot = new THREE.Group();
   /** Hover pre-highlight and group selection, over the model; never picked. */
   private readonly highlightRoot = new THREE.Group();
+  private groundShadowPlane: THREE.Mesh | null = null;
   /** While routing: the face the route would join (an open end, a tap location). Over the model; never picked. */
   private readonly joinRoot = new THREE.Group();
   private readonly groupRoot = new THREE.Group();
@@ -340,11 +346,14 @@ export class ModelViewer3D {
     this.origin = buildArrows(this.palette.axes);
     this.cropOutline = new CropBoxOutline(this.palette.css("selectionOutline"));
     this.overlayScene.add(this.cropOutline.object);
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance", logarithmicDepthBuffer: true });
+    // Standard hardware 24-bit depth buffer (logarithmicDepthBuffer writes gl_FragDepth, which disables hardware gl.polygonOffset and early-Z culling).
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.localClippingEnabled = false;
     // Counted per frame, across the model pass and the crop box outline pass.
     this.renderer.info.autoReset = false;
@@ -353,18 +362,46 @@ export class ModelViewer3D {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = this.palette.background;
-    // Low ambient + a strong key light so walls, floors and roof planes read as different surfaces.
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x7d8794, 0.95));
-    const sun = new THREE.DirectionalLight(0xfff6ea, 2.3);
+    const env = buildStudioEnvironment(this.renderer);
+    if (env) {
+      this.scene.environment = env;
+      this.scene.environmentIntensity = 0.65;
+    }
+    // Low ambient + a strong key light with soft shadows so walls, openings and floors read with real depth.
+    this.scene.add(new THREE.HemisphereLight(0xf6f8fc, 0x7d8794, 0.85));
+    const sun = new THREE.DirectionalLight(0xfff6ea, 2.2);
     sun.position.set(60, 100, 35);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 300;
+    const sc = 45;
+    sun.shadow.camera.left = -sc;
+    sun.shadow.camera.right = sc;
+    sun.shadow.camera.top = sc;
+    sun.shadow.camera.bottom = -sc;
+    sun.shadow.bias = -0.0002;
+    sun.shadow.normalBias = 0.04;
+    this.sunLight = sun;
     this.scene.add(sun);
-    const fill = new THREE.DirectionalLight(0xdfe8ff, 0.45);
+    const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5);
     fill.position.set(-50, 30, -40);
     this.scene.add(fill);
+    // Subtle matte architectural ground shadow catcher positioned below the lowest slab (FrontSide only, never visible from underneath).
+    const groundShadow = new THREE.Mesh(
+      new THREE.PlaneGeometry(400, 400),
+      new THREE.ShadowMaterial({ opacity: 0.14, side: THREE.FrontSide }),
+    );
+    groundShadow.rotation.x = -Math.PI / 2;
+    groundShadow.position.y = -0.3;
+    groundShadow.receiveShadow = true;
+    groundShadow.name = "architectural-ground-shadow";
+    this.groundShadowPlane = groundShadow;
+    this.scene.add(groundShadow);
     this.scene.add(this.referenceRoot, this.nativeRoot, this.markerRoot, this.ghostRoot, this.groupRoot, this.highlightRoot, this.joinRoot, this.planSymbolRoot, this.selectedRoot, this.origin);
 
     const { width, height } = this.size();
-    this.perspective = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
+    this.perspective = new THREE.PerspectiveCamera(45, width / height, 0.15, 3000);
     this.perspective.position.set(40, 30, 40);
     this.ortho = new THREE.OrthographicCamera(-50, 50, 50, -50, -1000, 1000);
     // A parallel view has no "behind the eye": the near plane sits far back so orbiting close never clips the model.
@@ -722,6 +759,15 @@ export class ModelViewer3D {
 
     const solids = modelSolids(view, this.elevations, levels ?? undefined);
     this.lastSolids = solids;
+    // Keep the ground shadow catcher cleanly below the lowest foundation slab in any model.
+    if (this.groundShadowPlane && solids.length > 0) {
+      let lowestY = Infinity;
+      for (const s of solids) {
+        const y = s.center[1] - s.size[1] / 2;
+        if (y < lowestY) lowestY = y;
+      }
+      if (Number.isFinite(lowestY)) this.groundShadowPlane.position.y = lowestY - 0.015;
+    }
     this.solidsById = new Map();
     for (const s of solids) {
       const list = this.solidsById.get(s.elementId);
@@ -737,12 +783,12 @@ export class ModelViewer3D {
     const skip = (s: Solid) => this.hiddenGroups.has(s.group) || this.hiddenElements.has(s.elementId);
     const materialFor = (s: Solid) => {
       const tone = tones.get(s.elementId);
-      return tone ? this.toneMaterial(s.group, tone, s.tint) : this.material(s.group, s.tint);
+      return tone ? this.toneMaterial(s.group, tone, s.tint) : this.material(s.group, s.tint, s.materialId);
     };
 
-    // Joined walls draw as one mesh per level and category; a selected, provisional or toned wall draws alone.
+    // Joined walls draw as one mesh per level, category and material; a selected, provisional or toned wall draws alone.
     const selectedId = this.selected?.source === "native" ? this.selected.elementId : null;
-    const { batches, rest } = batchMeshSolids(solids, (s) => (s.group === "wall" && s.tint === undefined && s.elementId !== selectedId && !provisional.has(s.elementId) && !tones.has(s.elementId) && !skip(s) ? `${view.elements[s.elementId]?.partition?.level ?? ""}:${s.group}` : null));
+    const { batches, rest } = batchMeshSolids(solids, (s) => (s.group === "wall" && s.tint === undefined && s.elementId !== selectedId && !provisional.has(s.elementId) && !tones.has(s.elementId) && !skip(s) ? `${view.elements[s.elementId]?.partition?.level ?? ""}:${s.group}:${s.materialId ?? ""}` : null));
     for (const b of batches) this.drawBatch(b);
 
     if (rest.length > INSTANCE_THRESHOLD) {
@@ -917,10 +963,16 @@ export class ModelViewer3D {
       if (this.hiddenElements.has(id)) continue;
       for (const s of this.solidsById.get(id) ?? []) {
         if (this.hiddenGroups.has(s.group)) continue;
-        const geometry = solidGeometry(s);
+        const rawGeo = solidGeometry(s);
+        // Push overlay geometry 2.2 mm outward along face normals so hover/selection never z-fights with batched meshes.
+        const geometry = inflateAlongNormals(rawGeo, 0.0022);
+        rawGeo.dispose();
         const mesh = new THREE.Mesh(geometry, material);
         placeSolid(mesh, s);
-        if (material === this.palette.groupSelected) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 30), this.palette.selectedEdge));
+        mesh.renderOrder = 2;
+        if (material === this.palette.groupSelected || material === this.palette.selected) {
+          mesh.add(new THREE.LineSegments(cleanEdgesGeometry(geometry, 30), this.palette.selectedEdge));
+        }
         root.add(mesh);
       }
     }
@@ -973,14 +1025,38 @@ export class ModelViewer3D {
     else this.hiddenGroups.add(group);
   }
 
-  /** One material per group, and per system colour within it (so instancing still batches each colour). */
-  private material(group: RenderGroup, tint?: number): THREE.MeshStandardMaterial {
-    const key = `${group}:${tint ?? ""}`;
+  /** One material per group, system colour, and registered material id (so instancing & wall batching still share materials). */
+  private material(group: RenderGroup, tint?: number, materialId?: string): THREE.MeshStandardMaterial {
+    const key = `${group}:${tint ?? ""}:${materialId ?? ""}`;
     let entry = this.materials.get(key);
     if (!entry) {
       const style = GROUP_STYLE[group];
-      const seeThrough = style.opacity !== undefined ? { transparent: true, opacity: style.opacity, depthWrite: false } : {};
-      entry = { group, material: new THREE.MeshStandardMaterial({ color: tint ?? style.color, roughness: style.roughness, metalness: style.metalness, ...seeThrough }), ...(tint !== undefined ? { tint } : {}) };
+      const matDef = materialId ? materialOf(materialId) : null;
+      const matColor = matDef ? (parseHexColor(matDef.color) ?? style.color) : style.color;
+      const color = tint ?? matColor;
+      const roughness = matDef?.roughness ?? style.roughness;
+      const metalness = matDef?.metalness ?? style.metalness;
+      const opacity = matDef?.opacity ?? style.opacity;
+      const seeThrough = opacity !== undefined && opacity < 1 ? { transparent: true, opacity, depthWrite: false } : {};
+      const defaultPattern: MaterialPattern | undefined =
+        group === "wall" ? "gypsum" : group === "slab" ? "concrete" : group === "filler" ? "wood" : undefined;
+      const pattern = matDef?.pattern ?? defaultPattern;
+      const colorHex = `#${color.toString(16).padStart(6, "0")}`;
+      const maps = pattern && opacity === undefined ? proceduralMaterialMaps(pattern, colorHex) : null;
+      const mat = new THREE.MeshStandardMaterial({
+        color: maps ? 0xffffff : color,
+        roughness,
+        metalness,
+        ...(maps ? { map: maps.map, bumpMap: maps.bumpMap, bumpScale: maps.bumpScale } : {}),
+        // Push coplanar slab edges and roof/column faces subtly behind exterior wall cladding so flush wall-to-slab/parapet joints never z-fight.
+        ...(group === "slab"
+          ? { polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }
+          : group === "structure"
+            ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }
+            : {}),
+        ...seeThrough,
+      });
+      entry = { group, material: mat, ...(tint !== undefined ? { tint } : matDef ? { tint: color } : {}) };
       this.styleMaterial(entry);
       this.materials.set(key, entry);
     }
@@ -1032,7 +1108,7 @@ export class ModelViewer3D {
   private styleMaterial(entry: { group: RenderGroup; tint?: number; material: THREE.MeshStandardMaterial }) {
     const m = entry.material;
     m.wireframe = this.visualStyle === "wireframe";
-    m.color.set(this.visualStyle === "hidden_line" ? 0xffffff : (entry.tint ?? GROUP_STYLE[entry.group].color));
+    m.color.set(this.visualStyle === "hidden_line" || m.map ? 0xffffff : (entry.tint ?? GROUP_STYLE[entry.group].color));
     m.needsUpdate = true;
   }
 
@@ -1051,14 +1127,17 @@ export class ModelViewer3D {
 
   private drawSolid(s: Solid, material: THREE.Material, outline: boolean, dashedEdges = false) {
     const geometry = solidGeometry(s);
+    ensureBoxUVs(geometry);
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = s.group !== "glazing" && s.group !== "mounting_plane";
+    mesh.receiveShadow = true;
     placeSolid(mesh, s);
     mesh.userData.elementId = s.elementId;
     if (dashedEdges) {
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 30), this.dashedEdgeMaterial());
+      const edges = new THREE.LineSegments(cleanEdgesGeometry(geometry, 30), this.dashedEdgeMaterial());
       edges.computeLineDistances();
       mesh.add(edges);
-    } else if (outline) mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 30), material === this.palette.selected ? this.palette.selectedEdge : this.palette.edge));
+    } else if (outline) mesh.add(new THREE.LineSegments(cleanEdgesGeometry(geometry, 30), material === this.palette.selected ? this.palette.selectedEdge : this.palette.edge));
     this.nativeRoot.add(mesh);
     this.nativeEntries.push({ object: mesh, elementId: s.elementId });
   }
@@ -1069,9 +1148,12 @@ export class ModelViewer3D {
     geometry.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
     geometry.setIndex(new THREE.BufferAttribute(b.indices, 1));
     geometry.computeVertexNormals();
-    const mesh = new THREE.Mesh(geometry, this.material(b.group));
+    ensureBoxUVs(geometry);
+    const mesh = new THREE.Mesh(geometry, this.material(b.group, undefined, b.materialId));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.userData.group = b.group;
-    mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 30), this.palette.edge));
+    mesh.add(new THREE.LineSegments(cleanEdgesGeometry(geometry, 30), this.palette.edge));
     this.nativeRoot.add(mesh);
     const first = b.owners[0];
     if (first !== undefined) this.nativeEntries.push({ object: mesh, elementId: first, batch: b });
@@ -1136,8 +1218,12 @@ export class ModelViewer3D {
     if (mode === "plan") {
       this.last3dTarget.copy(target);
       const work = this.authoredBox();
-      const cutM = cutElevationMm !== undefined ? cutElevationMm * MM : work.isEmpty() ? 1.2 : work.max.y + 0.3;
+      // Default Live Plan cut sits 1.5 m above the lowest authored floor (clips roofs & upper-level slabs out of the floor plan).
+      const defaultCutM = work.isEmpty() ? 1.5 : work.min.y + 1.5;
+      const cutM = cutElevationMm !== undefined ? cutElevationMm * MM : defaultCutM;
       this.cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), cutM);
+      if (this.sunLight) this.sunLight.castShadow = false;
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = false;
       this.scene.background = this.palette.planBackground;
       void this.setPlanCategoriesVisible(false);
       this.ortho.position.set(target.x, 200, target.z);
@@ -1153,6 +1239,8 @@ export class ModelViewer3D {
       this.carryControlState(enabled);
     } else {
       this.cutPlane = null;
+      if (this.sunLight) this.sunLight.castShadow = this.shadowsEnabled;
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = this.shadowsEnabled;
       this.scene.background = this.palette.background;
       void this.setPlanCategoriesVisible(true);
       const camera = this.camera3d();
@@ -1328,7 +1416,57 @@ export class ModelViewer3D {
   resetPlanCut() {
     if (this.mode !== "plan" || !this.cutPlane) return;
     const work = this.authoredBox();
-    this.setPlanCut((work.isEmpty() ? 1.2 : work.max.y + 0.3) / MM);
+    this.setPlanCut((work.isEmpty() ? 1.5 : work.min.y + 1.5) / MM);
+  }
+
+  /** Set the 3D directional sun angle in degrees (`azimuthDeg`: 0 = East, 90 = South, 180 = West; `elevationDeg`: 5..85). */
+  setSun(azimuthDeg: number, elevationDeg: number) {
+    if (!this.sunLight) return;
+    const az = (azimuthDeg * Math.PI) / 180;
+    const el = (Math.max(5, Math.min(85, elevationDeg)) * Math.PI) / 180;
+    const dist = 120;
+    const horiz = Math.cos(el) * dist;
+    this.sunLight.position.set(Math.cos(az) * horiz, Math.sin(el) * dist, Math.sin(az) * horiz);
+  }
+
+  /** Turn 3D sun shadows on or off (always off in 2D plan mode so floor plans stay crisp). */
+  setShadows(enabled: boolean) {
+    this.shadowsEnabled = enabled;
+    const active = this.mode === "3d" && enabled;
+    if (this.sunLight) this.sunLight.castShadow = active;
+    if (this.groundShadowPlane) this.groundShadowPlane.visible = active;
+  }
+
+  /** Switch 3D visual rendering quality (`draft` = fast matte, `standard` = balanced PBR + shadows, `high` = crisp 4K shadow map + rich studio exposure). */
+  setRenderQuality(quality: "draft" | "standard" | "high") {
+    this.renderQuality = quality;
+    if (quality === "draft") {
+      this.renderer.toneMappingExposure = 1.0;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
+      if (this.sunLight) this.sunLight.castShadow = false;
+    } else if (quality === "high") {
+      this.renderer.toneMappingExposure = 1.12;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      if (this.sunLight) {
+        this.sunLight.shadow.mapSize.set(4096, 4096);
+        this.sunLight.shadow.map?.dispose();
+        this.sunLight.shadow.map = null;
+        this.sunLight.castShadow = this.mode === "3d" && this.shadowsEnabled;
+      }
+    } else {
+      this.renderer.toneMappingExposure = 1.05;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      if (this.sunLight) {
+        this.sunLight.shadow.mapSize.set(2048, 2048);
+        this.sunLight.shadow.map?.dispose();
+        this.sunLight.shadow.map = null;
+        this.sunLight.castShadow = this.mode === "3d" && this.shadowsEnabled;
+      }
+    }
+  }
+
+  getRenderQuality(): "draft" | "standard" | "high" {
+    return this.renderQuality;
   }
 
   setPlanCut(elevationMm: number) {
@@ -1467,7 +1605,8 @@ export class ModelViewer3D {
    */
   setCropBox(box: CropBox3d | null, opts: { readonly crop: boolean; readonly show: boolean } = { crop: true, show: true }) {
     this.cropBox = box;
-    this.cropBoxPlanes = box && opts.crop ? cropBoxScenePlanes(box) : [];
+    // 3 mm outward render epsilon prevents GPU clipping-plane z-shredding on model faces lying flush on the crop box boundary.
+    this.cropBoxPlanes = box && opts.crop ? cropBoxScenePlanes(box, 3) : [];
     this.cropOutline.set(box && opts.show ? box : null);
     this.applyClipping();
     for (const listener of this.cameraListeners) listener();

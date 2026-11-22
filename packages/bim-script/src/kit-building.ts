@@ -1,7 +1,10 @@
 import {
   BOUNDING_ELEMENT_POINT,
+  MATERIAL_ID_KEY,
   OPENING_SILL_KEY,
+  allMaterials,
   asElementId,
+  assemblyThermalSummary,
   builtinPartType,
   nearestWallFace,
   planLevelSync,
@@ -9,8 +12,10 @@ import {
   wallFaceFrame,
   wallFaceSideToward,
   wallStationOf,
+  type AssemblyThermalSummary,
   type Command,
   type LevelSyncPlan,
+  type MaterialLayer,
   type PartHost,
   type SurfacesAtResult,
   type SyncStorey,
@@ -84,7 +89,7 @@ export type TopSurface = "structure above" | "ceiling" | "roof";
  * ceiling, a roof, sloped with it), optionally offset. Its height then
  * follows it.
  */
-export type WallTop = { readonly level: string; readonly offset?: Measure } | TopSurface | { readonly to: TopSurface; readonly offset?: Measure };
+export type WallTop = { readonly level: string; readonly offset?: Measure } | TopSurface | { readonly to: TopSurface; readonly elementId?: string; readonly offset?: Measure };
 
 /** Where a wall's base is: on its level raised by an offset, or on the top of the slab under it ("slab below"), optionally offset. */
 export type WallBase = { readonly offset: Measure } | "slab below" | { readonly to: "slab below"; readonly offset?: Measure };
@@ -107,6 +112,8 @@ export interface ChainSpec {
   readonly topLevel?: string;
   /** With `topLevel`: how far above (negative: below) that level the top stops. */
   readonly topOffset?: Measure;
+  /** Optional registered material id (from `building.materials()`), stored as `values["material.id"]`. */
+  readonly material?: string;
   readonly values?: Values;
   readonly label?: string;
   /** Ids start with this; absent: a fresh id from the run's seed. */
@@ -123,7 +130,13 @@ function boundsOf(ctx: ScriptContext, spec: ChainSpec): Pick<CreateElements, "to
   else if (top && "level" in top) {
     out.topLevelId = levelOf(ctx, top.level, "The top level");
     if (top.offset) out.topOffsetMm = mm(top.offset, "Top offset");
-  } else if (top) out.topSurface = { to: SURFACE_TO[top.to], ...(top.offset ? { offsetMm: mm(top.offset, "Top offset") } : {}) };
+  } else if (top) {
+    out.topSurface = {
+      to: SURFACE_TO[top.to],
+      ...(top.elementId ? { elementId: top.elementId } : {}),
+      ...(top.offset ? { offsetMm: mm(top.offset, "Top offset") } : {}),
+    };
+  }
   const base = spec.base;
   if (base === "slab below") out.baseSurface = { to: "floor" };
   else if (base && "to" in base) out.baseSurface = { to: "floor", ...(base.offset ? { offsetMm: mm(base.offset, "Base offset") } : {}) };
@@ -136,6 +149,7 @@ function chain(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {
   if (spec.top !== undefined && spec.topLevel !== undefined) throw new Error("Give a wall either top or topLevel, not both.");
   if ((spec.top !== undefined || spec.topLevel !== undefined) && spec.height !== undefined) throw new Error("Give a wall either a height or a top, not both.");
   const size = sizeMm({ thickness: spec.thickness, height: spec.height });
+  const mergedValues = spec.material || spec.values ? { ...(spec.values ?? {}), ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}) } : undefined;
   const command: CreateElements = {
     type: "create_elements",
     idPrefix: spec.id ?? ctx.id(kind),
@@ -146,7 +160,7 @@ function chain(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {
     ...(spec.typeId ? { typeId: spec.typeId } : {}),
     ...(size ? { size } : {}),
     ...boundsOf(ctx, spec),
-    ...(spec.values ? { values: spec.values } : {}),
+    ...(mergedValues ? { values: mergedValues } : {}),
     ...(spec.label ? { label: spec.label } : {}),
   };
   ctx.edit(command);
@@ -172,12 +186,22 @@ export interface OpeningSpec {
   readonly side?: 1 | -1;
   readonly typeId?: string;
   readonly mark?: string;
+  /** Optional registered material id (from `building.materials()`), stored as `values["material.id"]`. */
+  readonly material?: string;
   readonly values?: Values;
   readonly id?: string;
 }
 
 function opening(ctx: ScriptContext, openingType: string, spec: OpeningSpec): string {
   const size = sizeMm({ width: spec.width, height: spec.height });
+  const mergedValues =
+    spec.values || spec.sill || spec.material
+      ? {
+          ...(spec.values ?? {}),
+          ...(spec.sill ? { [OPENING_SILL_KEY]: mm(spec.sill, "Sill height") } : {}),
+          ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+        }
+      : undefined;
   const command: CreateHosted = {
     type: "create_hosted",
     elementId: spec.id ?? ctx.id(openingType),
@@ -188,7 +212,7 @@ function opening(ctx: ScriptContext, openingType: string, spec: OpeningSpec): st
     side: spec.side ?? 1,
     ...(spec.typeId ? { typeId: spec.typeId } : {}),
     ...(spec.mark ? { mark: spec.mark } : {}),
-    ...(spec.values || spec.sill ? { values: { ...(spec.values ?? {}), ...(spec.sill ? { [OPENING_SILL_KEY]: mm(spec.sill, "Sill height") } : {}) } } : {}),
+    ...(mergedValues ? { values: mergedValues } : {}),
     ...(size ? { size } : {}),
   };
   ctx.edit(command);
@@ -254,8 +278,12 @@ export interface CeilingSpec {
   readonly slope?: { readonly directionDeg: number; readonly pitch: number };
   /** Where `height` is measured on a sloped ceiling. */
   readonly reference?: PlanPoint;
+  /** Ceiling form: flat (drop/ACT), sloped, floating acoustic cloud, soffit, or open_to_structure. */
+  readonly form?: "flat" | "sloped" | "cloud" | "soffit" | "open_to_structure";
   /** A ceiling type the model has (what it is made of: an acoustic tile, gypsum board). */
   readonly typeId?: string;
+  /** Registered material id (from `building.materials()`), e.g. `"architecture.act_ceiling"` or `"architecture.gypsum_partition"`. */
+  readonly material?: string;
   readonly id?: string;
 }
 
@@ -353,22 +381,231 @@ export const building = {
     const { from, to, ...rest } = spec;
     return chain(ctx, "wall", { ...rest, points: [from, to] }).element(1);
   },
-  /** A floor slab with this outline; returns its id. */
-  floor(ctx: ScriptContext, spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base">): string {
+  /** A floor slab with this outline (and optional stairwell/atrium `holes`); returns its id. */
+  floor(
+    ctx: ScriptContext,
+    spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base"> & {
+      readonly holes?: readonly (readonly PlanPoint[])[];
+    },
+  ): string {
     const size = sizeMm({ thickness: spec.thickness });
+    const mergedValues = spec.material || spec.values ? { ...(spec.values ?? {}), ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}) } : undefined;
     const command: CreateElement = {
       type: "create_element",
       elementId: spec.id ?? ctx.id("slab"),
       levelId: levelOf(ctx, spec.level),
       kind: "slab",
-      placement: { kind: "area", outline: spec.points.map((p, i) => planMm(p, `Outline point ${i + 1}`)) },
+      placement: {
+        kind: "area",
+        outline: spec.points.map((p, i) => planMm(p, `Outline point ${i + 1}`)),
+        ...(spec.holes ? { holes: spec.holes.map((h, i) => h.map((p, j) => planMm(p, `Slab hole ${i + 1} corner ${j + 1}`))) } : {}),
+      },
       ...(spec.typeId ? { typeId: spec.typeId } : {}),
       ...(size ? { size } : {}),
-      ...(spec.values ? { values: spec.values } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
       ...(spec.label ? { label: spec.label } : {}),
     };
     ctx.edit(command);
     return command.elementId;
+  },
+  /** A flat, single-slope shed, two-slope gable, or four-slope hip roof (`architecture.roof`); returns its id. */
+  roof(
+    ctx: ScriptContext,
+    spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base"> & {
+      readonly form?: "flat" | "shed" | "gable" | "hip";
+      readonly slopeRise?: number;
+      readonly slopeDirectionDeg?: number;
+      readonly baseOffset?: Measure;
+    },
+  ): string {
+    const size = sizeMm({ thickness: spec.thickness });
+    const mergedValues =
+      spec.material || spec.values || spec.form || spec.slopeRise !== undefined || spec.slopeDirectionDeg !== undefined || spec.baseOffset !== undefined
+        ? {
+            ...(spec.values ?? {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+            ...(spec.form ? { "architecture.roof_form": spec.form.toLowerCase() } : {}),
+            ...(spec.slopeRise !== undefined ? { "architecture.slope_rise": spec.slopeRise } : {}),
+            ...(spec.slopeDirectionDeg !== undefined ? { "architecture.slope_direction_deg": spec.slopeDirectionDeg } : {}),
+            ...(spec.baseOffset !== undefined ? { "architecture.base_offset_mm": mm(spec.baseOffset, "Roof base offset") } : {}),
+          }
+        : undefined;
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("roof"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "architecture.roof",
+      placement: { kind: "area", outline: spec.points.map((p, i) => planMm(p, `Outline point ${i + 1}`)) },
+      ...(spec.typeId ? { typeId: spec.typeId } : {}),
+      ...(size ? { size } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
+      ...(spec.label ? { label: spec.label } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A stair (`architecture.stair`) climbing from `from` to `to` — supports straight runs, 90° L-shape, and 180° U-shape switchbacks with landings; returns its id. */
+  stair(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly from: PlanPoint;
+      readonly to: PlanPoint;
+      readonly width?: Measure;
+      readonly topLevel?: string;
+      readonly risers?: number;
+      readonly form?: "straight" | "l_shape" | "u_shape";
+      readonly turn?: "left" | "right";
+      readonly landingDepth?: Measure;
+      readonly wellGap?: Measure;
+      readonly material?: string;
+      readonly id?: string;
+    },
+  ): string {
+    const size = sizeMm({ width: spec.width });
+    const landingDepthMm = spec.landingDepth !== undefined ? mm(spec.landingDepth, "Stair landing depth") : undefined;
+    const wellGapMm = spec.wellGap !== undefined ? mm(spec.wellGap, "Stair well gap") : undefined;
+    const mergedValues =
+      spec.topLevel || spec.risers !== undefined || spec.form || spec.turn || landingDepthMm !== undefined || wellGapMm !== undefined || spec.material
+        ? {
+            ...(spec.topLevel ? { "architecture.top_level": levelOf(ctx, spec.topLevel) } : {}),
+            ...(spec.risers !== undefined ? { "architecture.risers": spec.risers } : {}),
+            ...(spec.form ? { "architecture.stair_form": spec.form.toLowerCase() } : {}),
+            ...(spec.turn ? { "architecture.stair_turn": spec.turn.toLowerCase() } : {}),
+            ...(landingDepthMm !== undefined ? { "architecture.landing_depth_mm": landingDepthMm } : {}),
+            ...(wellGapMm !== undefined ? { "architecture.well_gap_mm": wellGapMm } : {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+          }
+        : undefined;
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("stair"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "architecture.stair",
+      placement: { kind: "line", start: planMm(spec.from, "Stair foot"), end: planMm(spec.to, "Stair top") },
+      ...(size ? { size } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A structural column grid line (`grid`, e.g. `1`, `A`) shown as a vertical 3D datum across every plan, RCP, and building section; returns its id. */
+  grid(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly from: PlanPoint;
+      readonly to: PlanPoint;
+      readonly label?: string;
+      readonly id?: string;
+    },
+  ): string {
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("grid"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "grid",
+      placement: { kind: "line", start: planMm(spec.from, "Grid start"), end: planMm(spec.to, "Grid end") },
+      ...(spec.label ? { label: spec.label } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A structural or architectural column at a plan point; returns its id. */
+  column(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly at: PlanPoint;
+      readonly width?: Measure;
+      readonly depth?: Measure;
+      readonly height?: Measure;
+      readonly topLevel?: string;
+      readonly material?: string;
+      readonly id?: string;
+    },
+  ): string {
+    const size = sizeMm({ width: spec.width, depth: spec.depth, height: spec.height });
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("col"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "column",
+      placement: { kind: "point", position: planMm(spec.at, "Column point") },
+      ...(size ? { size } : {}),
+      ...(spec.topLevel ? { topLevelId: levelOf(ctx, spec.topLevel) } : {}),
+      ...(spec.material ? { values: { [MATERIAL_ID_KEY]: spec.material } } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A glazed architectural storefront / curtain wall from `from` to `to`; returns its id. */
+  curtainWall(ctx: ScriptContext, spec: WallSpec & { readonly mullionMaterial?: string }): string {
+    const { from, to, values, material, mullionMaterial, ...rest } = spec;
+    return chain(ctx, "wall", {
+      ...rest,
+      points: [from, to],
+      material: material ?? "architecture.curtain_wall_glass",
+      values: {
+        ...(values ?? {}),
+        "architecture.wall_function": "CURTAIN",
+        ...(mullionMaterial ? { "architecture.mullion_material": mullionMaterial } : {}),
+      },
+    }).element(1);
+  },
+  /** Move a wall by a plan delta, carrying joined walls and collinear slab/ceiling/roof edges unless `disjoin: true`. */
+  moveWall(ctx: ScriptContext, wallId: string, delta: PlanPoint, opts?: { readonly disjoin?: boolean }): void {
+    ctx.edit({ type: "move_wall", wallId, delta: planMm(delta, "Delta"), ...(opts?.disjoin ? { disjoin: true } : {}) });
+  },
+  /** Slide a hosted door or window along its host wall by a plan delta (without moving the host wall). */
+  moveOpening(ctx: ScriptContext, openingId: string, delta: PlanPoint): void {
+    ctx.edit({ type: "move_elements", ids: [openingId], delta: planMm(delta, "Opening delta") });
+  },
+  /** Stretch or move one end of a wall (or any joinable line) to `to`, carrying joined ends unless `disjoin: true`. */
+  moveWallEnd(ctx: ScriptContext, wallId: string, end: "start" | "end", to: PlanPoint, opts?: { readonly disjoin?: boolean }): void {
+    ctx.edit({ type: "move_line_end", elementId: wallId, end, to: planMm(to, "Wall end"), ...(opts?.disjoin ? { disjoin: true } : {}) });
+  },
+  /** Every material registered in the active add-ons (`kernel.material`), including visual and building-envelope thermal properties. */
+  materials(): readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly category?: string;
+    readonly color: string;
+    readonly pattern?: string;
+    readonly thermalConductivityWPerMK?: number;
+    readonly densityKgPerM3?: number;
+    readonly shgc?: number;
+  }[] {
+    return allMaterials().map((m) => ({
+      id: m.id,
+      name: m.name,
+      ...(m.category ? { category: m.category } : {}),
+      color: m.color,
+      ...(m.pattern ? { pattern: m.pattern } : {}),
+      ...(m.thermalConductivityWPerMK !== undefined ? { thermalConductivityWPerMK: m.thermalConductivityWPerMK } : {}),
+      ...(m.densityKgPerM3 !== undefined ? { densityKgPerM3: m.densityKgPerM3 } : {}),
+      ...(m.shgc !== undefined ? { shgc: m.shgc } : {}),
+    }));
+  },
+  /** Compute steady-state ISO 6946 / ASHRAE R-value and U-value of a layered wall/roof/floor assembly from registered materials. */
+  assemblyThermal(layers: readonly { readonly materialId: string; readonly thickness: Measure }[], opts?: { readonly includeAirFilms?: boolean }): AssemblyThermalSummary {
+    const parsed: MaterialLayer[] = layers.map((l, i) => ({ materialId: l.materialId, thicknessMm: mm(l.thickness, `Layer ${i + 1} thickness`) }));
+    return assemblyThermalSummary({ id: "script-assembly", layers: parsed }, opts);
+  },
+  /** Assign a registered material id (`building.materials()`) to one or more elements. */
+  setMaterial(ctx: ScriptContext, elementIds: string | readonly string[], materialId: string): void {
+    const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
+    ctx.edit({ type: "set_element_values", elementIds: ids, values: { [MATERIAL_ID_KEY]: materialId } });
+  },
+  /** Pin / lock elements so interactive selection and drags leave them alone. */
+  lock(ctx: ScriptContext, elementIds: string | readonly string[], reason = "Pinned by script"): void {
+    const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
+    ctx.edit({ type: "lock_elements", elementIds: ids, state: "existing", reason });
+  },
+  /** Unpin / unlock previously locked elements. */
+  unlock(ctx: ScriptContext, elementIds: string | readonly string[]): void {
+    const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
+    ctx.edit({ type: "unlock_elements", elementIds: ids });
   },
   /** Any kind the registry draws on a line (a beam, a grid line, a pack's own kind), by its id. */
   elements(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {
@@ -406,12 +643,16 @@ export const building = {
       outline: spec.outline.map((p, i) => planMm(p, `Ceiling corner ${i + 1}`)),
       heightMm: mm(spec.height, "Ceiling height"),
       ...(spec.space ? { spaceId: spec.space } : {}),
+      ...(spec.form ? { form: spec.form } : {}),
       ...(spec.holes ? { holes: spec.holes.map((h, i) => h.map((p, j) => planMm(p, `Hole ${i + 1} corner ${j + 1}`))) } : {}),
       ...(spec.slope ? { slope: spec.slope } : {}),
       ...(spec.reference ? { reference: planMm(spec.reference, "Height reference") } : {}),
       ...(spec.typeId ? { typeId: spec.typeId } : {}),
     };
     ctx.edit({ type: "create_ceiling", ceilings: [ceiling] });
+    if (spec.material) {
+      ctx.edit({ type: "set_element_values", elementIds: [ceilingId], values: { [MATERIAL_ID_KEY]: spec.material } });
+    }
     return ceilingId;
   },
 };

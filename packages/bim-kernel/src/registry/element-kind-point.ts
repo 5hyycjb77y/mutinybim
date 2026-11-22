@@ -4,7 +4,7 @@ import { defineExtensionPoint } from "../packs/contract";
 import { activePackSet } from "../packs/scope";
 import type { PackSet } from "../packs/set";
 import type { BimElement, ConnectorEnd, ElementId, ModelSettings, Vec2 } from "../types";
-import { kindRowFaceProblems, type KindPickShapeFace, type KindPlanGraphicsFace, type KindCreateFace, type KindSolidFace, type KindSymbolFace, type KindTagTextFace } from "./kind-row-faces";
+import { kindRowFaceProblems, type KindPickShapeFace, type KindPlanGraphicsFace, type KindSectionGraphicsFace, type KindCreateFace, type KindSolidFace, type KindSymbolFace, type KindTagTextFace } from "./kind-row-faces";
 
 /**
  * Element kinds an add-on owns (contract 1.7.0, `kernel.element_kind` v1).
@@ -189,6 +189,10 @@ export interface ElementKindItem {
   readonly pickShape?: KindPickShapeFace;
   /** Contract 1.11.0: plan graphics for one record (registry/kind-row-faces.ts). */
   readonly planGraphics?: KindPlanGraphicsFace;
+  /** Optional custom 2D section/elevation graphics in `(u, z)` coordinates; when returned non-null, replaces projected solid linework in sections. */
+  readonly sectionGraphics?: KindSectionGraphicsFace;
+  /** True for vertical-circulation / multi-story kinds that span from their base level to an upper level (`topLevelId` or the next level above) and should appear on that upper level's floor plan. */
+  readonly spansLevels?: boolean;
   /** Contract 1.11.0: its body for sections, 3D views and plan hiding (registry/kind-row-faces.ts). */
   readonly solid?: KindSolidFace;
   /** Contract 1.11.0: how `create_element` draws one record (registry/kind-row-faces.ts). Absent: it isn't drawn by command. */
