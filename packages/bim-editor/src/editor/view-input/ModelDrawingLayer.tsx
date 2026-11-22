@@ -3,6 +3,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
+import { Button } from '../../ui/button'
 import {
   asElementId,
   buildViewPickIndex,
@@ -1221,9 +1222,11 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                 <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
                   {wireMenu.join.kind === 'switch_leg' ? wireMenu.join.name : `Circuit ${wireMenu.join.name}`}
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                   onClick={() => {
                     const at = view.mapping.toModel(paperToDrawing(view, wireMenu.paper))
                     setWireMenu(null)
@@ -1242,11 +1245,13 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                   }}
                 >
                   Insert spline vertex here
-                </button>
+                </Button>
                 {wireMenu.join.waypointsModel.length > 0 && (
-                  <button
+                  <Button
                     type="button"
-                    className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                     onClick={() => {
                       const j = wireMenu.join
                       const p = wireMenu.paper
@@ -1269,11 +1274,13 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                     }}
                   >
                     Remove nearest vertex
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button
                   type="button"
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                   onClick={() => {
                     const j = wireMenu.join
                     setWireMenu(null)
@@ -1285,11 +1292,13 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                   }}
                 >
                   Flip arc side
-                </button>
+                </Button>
                 {(wireMenu.join.waypointsModel.length > 0 || wireMenu.join.flipped) && (
-                  <button
+                  <Button
                     type="button"
-                    className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-destructive hover:bg-accent"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal text-destructive hover:text-destructive"
                     onClick={() => {
                       const j = wireMenu.join
                       setWireMenu(null)
@@ -1305,16 +1314,18 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                     }}
                   >
                     Reset wire to automatic
-                  </button>
+                  </Button>
                 )}
               </>
             ) : wireMenu.kind === 'switch_label' ? (
               <>
                 <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Switch leg &ldquo;{wireMenu.label.text}&rdquo;</div>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   disabled={!wireMenu.label.custom}
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                   onClick={() => {
                     const sw = wireMenu.label
                     setWireMenu(null)
@@ -1326,15 +1337,17 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                   }}
                 >
                   Reset switch-leg letter position
-                </button>
+                </Button>
               </>
             ) : (
               <>
                 <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Home run {wireMenu.homeRun.name}</div>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   disabled={!wireMenu.homeRun.hasCustom}
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                   onClick={() => {
                     const hr = wireMenu.homeRun
                     setWireMenu(null)
@@ -1346,7 +1359,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                   }}
                 >
                   Reset home run to automatic
-                </button>
+                </Button>
                 {(() => {
                   const hr = wireMenu.homeRun
                   const currentGroup = view.view.props?.circuitGraphics?.hints?.[hr.linkId]?.mwbcGroup
@@ -1357,9 +1370,11 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                       .filter(([, h]) => h.mwbcGroup === currentGroup)
                       .map(([id]) => id)
                     return (
-                      <button
+                      <Button
                         type="button"
-                        className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                         onClick={() => {
                           setWireMenu(null)
                           const refused = bridge.submit(
@@ -1370,7 +1385,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                         }}
                       >
                         Split MWBC shared-neutral home run
-                      </button>
+                      </Button>
                     )
                   }
                   if (!panelId) return null
@@ -1382,9 +1397,11 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                   if (peers.length === 0) return null
                   const peer = peers[0]!
                   return (
-                    <button
+                    <Button
                       type="button"
-                      className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
                       onClick={() => {
                         setWireMenu(null)
                         const groupId = `mwbc-${[hr.linkId, peer.linkId].sort().join('-')}`
@@ -1396,7 +1413,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                       }}
                     >
                       Combine as MWBC with {peer.name}
-                    </button>
+                    </Button>
                   )
                 })()}
               </>

@@ -371,13 +371,14 @@ export function EditControlsDialog({
     const rm = partRoom(model, part)
     const em = isLightingPart(model, part) ? currentEmergencyMode(model, part) : 'none'
     return (
-      <button
+      <Button
         key={part.id}
         type="button"
+        variant="ghost"
         onClick={() => toggleMember(part.id)}
-        className={`flex w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors ${
+        className={`flex h-auto w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs font-normal transition-colors ${
           inZone
-            ? 'border-primary/60 bg-primary/10 text-foreground'
+            ? 'border-primary/60 bg-primary/10 text-foreground hover:bg-primary/15'
             : 'border-border/60 bg-background hover:bg-muted/50 text-muted-foreground'
         }`}
         data-testid={`controls-member-${part.id}`}
@@ -408,7 +409,7 @@ export function EditControlsDialog({
         >
           {inZone ? <Check className="size-3" /> : null}
         </span>
-      </button>
+      </Button>
     )
   }
 

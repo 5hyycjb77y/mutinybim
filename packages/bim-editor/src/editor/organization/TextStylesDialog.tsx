@@ -143,19 +143,20 @@ export function TextStylesDialog({ model, canEdit, blockedReason, submit, onClos
             </div>
             <div className="flex flex-col gap-1">
               {styles.map((s) => (
-                <button
+                <Button
                   key={s.id}
                   type="button"
+                  variant="ghost"
                   onClick={() => selectStyle(s.id)}
-                  className={`flex flex-col items-start rounded-md border px-2.5 py-2 text-left text-xs transition-colors ${
-                    current?.id === s.id ? 'border-primary bg-primary/10 text-foreground' : 'border-border hover:bg-muted/60 text-muted-foreground'
+                  className={`flex h-auto w-full flex-col items-start justify-start gap-0.5 rounded-md border px-2.5 py-2 text-left text-xs font-normal transition-colors ${
+                    current?.id === s.id ? 'border-primary bg-primary/10 text-foreground hover:bg-primary/15' : 'border-border hover:bg-muted/60 text-muted-foreground'
                   }`}
                 >
                   <span className="font-medium text-foreground">{s.entry.name}</span>
                   <span>
                     {s.entry.textSizeMm} mm · {s.entry.background === 'opaque' ? 'Opaque' : 'Transparent'}
                   </span>
-                </button>
+                </Button>
               ))}
             </div>
           </div>
