@@ -3739,25 +3739,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             <ToolHintBar text={toolHint} tone={toolHint === refusal ? 'warning' : 'info'} style={propertiesOpen ? { right: propertiesWidth + 24 } : undefined} />
           )}
           {showDrawing && <TrackpadHint />}
-          {!scheduleGridOpen && (
-            <SelectionLocksBar
-              viewer={viewer}
-              is3d={!showDrawing && !planOpen}
-              hasSelection={selectedIds.length > 0}
-              selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}
-              canEdit={canEdit}
-              onTogglePin={() => {
-                if (!model || selectedIds.length === 0) return
-                const allLocked = selectedIds.every((id) => lockOf(model.elements[id]) !== null)
-                submitWithUndo(
-                  allLocked
-                    ? { type: 'unlock_elements', elementIds: [...selectedIds] }
-                    : { type: 'lock_elements', elementIds: [...selectedIds], state: 'existing', reason: 'Pinned by user' },
-                  allLocked ? 'Unpin selection' : 'Pin selection',
-                )
-              }}
-            />
-          )}
           {viewer && !showDrawing && !scheduleGridOpen && <OrbitPointMarker viewer={viewer} enabled={!planOpen} />}
           {viewer && !showDrawing && !scheduleGridOpen && <ZoomThroughNotice viewer={viewer} />}
           {backSheet && !showDrawing && !drawingSection && (
@@ -3971,9 +3952,30 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           )}
         </div>
       </div>
-      <ModelFromStore store={modelStore} zones={ORGANIZATION_ZONES}>
-        {(shown) => <OrganizationStatusBar model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} onRefused={(message) => toast.error(message)} />}
-      </ModelFromStore>
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-t bg-background px-3 text-xs">
+        <ModelFromStore store={modelStore} zones={ORGANIZATION_ZONES}>
+          {(shown) => <OrganizationStatusBar model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} onRefused={(message) => toast.error(message)} />}
+        </ModelFromStore>
+        {!scheduleGridOpen && (
+          <SelectionLocksBar
+            viewer={viewer}
+            is3d={!showDrawing && !planOpen}
+            hasSelection={selectedIds.length > 0}
+            selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}
+            canEdit={canEdit}
+            onTogglePin={() => {
+              if (!model || selectedIds.length === 0) return
+              const allLocked = selectedIds.every((id) => lockOf(model.elements[id]) !== null)
+              submitWithUndo(
+                allLocked
+                  ? { type: 'unlock_elements', elementIds: [...selectedIds] }
+                  : { type: 'lock_elements', elementIds: [...selectedIds], state: 'existing', reason: 'Pinned by user' },
+                allLocked ? 'Unpin selection' : 'Pin selection',
+              )
+            }}
+          />
+        )}
+      </div>
       {organizationDialog !== null && (
         <ModelFromStore store={modelStore}>
           {(shown) =>

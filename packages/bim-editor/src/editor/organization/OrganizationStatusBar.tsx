@@ -24,7 +24,7 @@ export function OrganizationStatusBar({ model, canEdit, blockedReason, submit, o
     if (refusal) onRefused(refusal)
   }
   return (
-    <div className="flex h-9 shrink-0 items-center gap-4 border-t bg-background px-3 text-xs" role="status" aria-label="Active group and phase" data-testid="organization-status-bar">
+    <div className="flex items-center gap-4 text-xs" role="status" aria-label="Active group and phase" data-testid="organization-status-bar">
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="flex items-center gap-1.5">

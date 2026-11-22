@@ -31,7 +31,7 @@ interface Props {
 }
 
 /**
- * Compact Revit-style selection-lock + 3D sun/render-quality strip in the bottom-left viewport corner.
+ * Compact Revit-style selection-lock + 3D sun/render-quality strip docked in the bottom status bar.
  * Uses only `@permitzip/bim-ui` controls and `--mutiny-*` theme tokens.
  */
 export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTogglePin, viewer, is3d = false }: Props): ReactNode {
@@ -56,7 +56,7 @@ export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTo
   const sunPreset = SUN_PRESETS[sunIdx]!
   return (
     <div
-      className="pointer-events-auto absolute bottom-3 left-3 z-20 flex items-center gap-1 rounded-md border bg-background/95 px-1.5 py-1 shadow-sm backdrop-blur-xs"
+      className="ml-auto flex shrink-0 items-center gap-1"
       data-testid="selection-locks-bar"
       role="toolbar"
       aria-label="Selection locks"
