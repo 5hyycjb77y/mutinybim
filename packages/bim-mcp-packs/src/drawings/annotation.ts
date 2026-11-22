@@ -2,7 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   ANCHORS,
-  AUTO_TAG_CATEGORIES,
   DIMENSION_KINDS,
   DIMENSION_UNITS,
   TAG_STYLE_BOXES,
@@ -243,16 +242,18 @@ const styleRef = z.string().min(1).max(200).describe("Tag style id or exact name
 /** Absent, a new tag takes the default style for its element's kind, if one is set. */
 const newTagStyle = styleRef.optional().describe("Tag style id or exact name (bim_list_tag_styles). Absent: the kind's default style, if any.");
 
+const MCP_AUTO_TAG_CATEGORIES = ["duct", "pipe", "air_terminal", "equipment", "fixture", "part"] as const;
+
 const autoTagInput = {
   view: viewRef,
-  categories: z.array(z.enum(AUTO_TAG_CATEGORIES)).min(1).max(AUTO_TAG_CATEGORIES.length).describe("What to tag: duct (sizes), pipe (sizes), air_terminal (mark + CFM), equipment, fixture, part."),
+  categories: z.array(z.enum(MCP_AUTO_TAG_CATEGORIES)).min(1).max(MCP_AUTO_TAG_CATEGORIES.length).describe("What to tag: duct (sizes), pipe (sizes), air_terminal (mark + CFM), equipment, fixture, part."),
   leaders: z.enum(["when_away", "always", "never"]).default("when_away"),
   include_tagged: z.boolean().default(false).describe("Also tag elements that already have a tag in this view."),
   text_height_in: z.number().min(0.06).max(0.25).optional(),
   style: newTagStyle,
 };
 
-type AutoTagArgs = { view: string; categories: Array<(typeof AUTO_TAG_CATEGORIES)[number]>; leaders?: "when_away" | "always" | "never"; include_tagged?: boolean; text_height_in?: number; style?: string };
+type AutoTagArgs = { view: string; categories: Array<(typeof MCP_AUTO_TAG_CATEGORIES)[number]>; leaders?: "when_away" | "always" | "never"; include_tagged?: boolean; text_height_in?: number; style?: string };
 
 
 /** A tag style's id from its id or name; null when there is none. */

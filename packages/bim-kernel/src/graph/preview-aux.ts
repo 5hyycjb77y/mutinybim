@@ -8,7 +8,7 @@ import type { DeterminationElement, RequirementStateElement } from "./types";
 type Elements = Readonly<Record<string, BimElement>>;
 
 const NO_ELEMENTS: Elements = Object.freeze({});
-const RECORD_KINDS: ReadonlySet<string> = new Set(["determination", "ceiling", "requirement_state"]);
+const RECORD_KINDS: ReadonlySet<string> = new Set(["determination", "requirement_state"]);
 
 /**
  * The graph's input indexes for a preview record (a proposed edit or a
@@ -17,14 +17,17 @@ const RECORD_KINDS: ReadonlySet<string> = new Set(["determination", "ceiling", "
  * the touched ids, so every read the touched ids can't affect goes to the
  * head's indexes; the few that can are answered for the preview alone.
  *
- * Built with an empty record so the base constructor scans nothing. When the
- * edit touches a determination, ceiling or requirement state (rare: a code
- * study edit), those three small indexes are built for the preview in full.
+ * Built with an empty record so the base constructor scans nothing. Ceiling
+ * edits (including wall moves that carry adjacent ceiling boundaries) overlay
+ * the head's ceiling index in O(touched) without scanning determinations. When
+ * the edit touches a determination or requirement state (rare: a code study
+ * edit), those indexes are built for the preview in full.
  */
 export class PreviewAux extends GraphAux {
   private readonly own: GraphAux | null;
   private readonly touched: ReadonlySet<string>;
   private readonly spaceTouched: boolean;
+  private readonly ceilingTouched: readonly string[];
   private readonly locatedTouched: readonly string[];
   private readonly bySpace = new Map<string, Map<ElementId, readonly ElementId[]>>();
 
@@ -41,6 +44,7 @@ export class PreviewAux extends GraphAux {
     const recordTouched = changed.some((id) => RECORD_KINDS.has(before[id]?.kind ?? "") || RECORD_KINDS.has(after[id]?.kind ?? ""));
     this.own = recordTouched ? new GraphAux(after) : null;
     this.spaceTouched = changed.some((id) => before[id]?.kind === "space" || after[id]?.kind === "space");
+    this.ceilingTouched = changed.filter((id) => before[id]?.kind === "ceiling" || after[id]?.kind === "ceiling");
     this.locatedTouched = changed.filter((id) => isLocatedKind(before[id]) || isLocatedKind(after[id]));
   }
 
@@ -57,7 +61,14 @@ export class PreviewAux extends GraphAux {
   }
 
   override ceilingsOf(spaceId: ElementId): Ceiling[] {
-    return (this.own ?? this.base).ceilingsOf(spaceId);
+    if (this.own) return this.own.ceilingsOf(spaceId);
+    if (this.ceilingTouched.length === 0) return this.base.ceilingsOf(spaceId);
+    const out = this.base.ceilingsOf(spaceId).filter((c) => !this.touched.has(c.id));
+    for (const id of this.ceilingTouched) {
+      const el = this.elements[id];
+      if (el?.kind === "ceiling" && el.spaceId === spaceId) out.push(el);
+    }
+    return out;
   }
 
   override stateOf(requirementId: string): RequirementStateElement | null {

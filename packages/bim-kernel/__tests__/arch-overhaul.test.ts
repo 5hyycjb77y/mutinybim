@@ -585,5 +585,19 @@ describe("architectural overhaul", () => {
     const m4After: ModelState = { ...m4, elements: Object.fromEntries(Object.entries(m4.elements).filter(([id]) => id !== "rm-1")) };
     const idx2 = buildViewPickIndex(m4After, v1, idx1, ["rm-1"]);
     expect(pickAt(idx2, { x: 2000, y: 2000 }, 50)).not.toContain(sp1.id);
+
+    // 5. Boundary carry requires positive longitudinal overlap: a neighboring slab/ceiling touching only at a wall corner vertex stays intact
+    const m5 = runAll([
+      { type: "create_level", levelId: "L1", name: "Level 1", elevationMm: 0 },
+      { type: "create_element", elementId: "w-mid", kind: "wall", levelId: "L1", size: { thicknessMm: 150 }, placement: { kind: "line", start: { x: 4000, y: 4000 }, end: { x: 4000, y: 8000 } } },
+      { type: "create_element", elementId: "slab-border", kind: "slab", levelId: "L1", size: { thicknessMm: 200 }, placement: { kind: "area", outline: [{ x: 4000, y: 4000 }, { x: 8000, y: 4000 }, { x: 8000, y: 8000 }, { x: 4000, y: 8000 }] } },
+      { type: "create_element", elementId: "slab-corner-only", kind: "slab", levelId: "L1", size: { thicknessMm: 200 }, placement: { kind: "area", outline: [{ x: 4000, y: 0 }, { x: 8000, y: 0 }, { x: 8000, y: 4000 }, { x: 4000, y: 4000 }] } },
+      { type: "move_elements", ids: ["w-mid"], delta: { x: 500, y: 0 } },
+    ]);
+    const borderSlab = m5.elements["slab-border"];
+    const cornerSlab = m5.elements["slab-corner-only"];
+    if (borderSlab?.kind !== "slab" || cornerSlab?.kind !== "slab") throw new Error("expected slabs");
+    expect(Math.min(...borderSlab.outline.map((p) => p.x))).toBe(4500);
+    expect(Math.min(...cornerSlab.outline.map((p) => p.x))).toBe(4000);
   });
 });

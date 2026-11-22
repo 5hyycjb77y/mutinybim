@@ -32,12 +32,13 @@ import { forEachPartitionMember, partitionMembers } from "../partition";
 import { displayContextOf, displayResolver, resolveTextStyle, type DisplayResolver } from "../organization/model";
 import { clipSegment } from "../reference";
 import { applyReferenceDisplay, resolveReferenceDisplay } from "../reference-display";
-import { elementValues, elementsOfKind } from "../store";
+import { elementValues, elementsOfKind, recordsOfKinds } from "../store";
 import { DEFAULT_PARTITION, type BimElement, type ModelState, type Sheet, type Vec2, type ViewElement } from "../types";
 import { FaceIndex, cellFor, isoProjector, planProjector, projectSolid, sectionProjector, splitHidden, type Face, type ProjEdge, type ProjectedSolid, type Projector } from "./projection";
 import { dashOf, fillHexToGrey, graphicSegments, penOf, planGraphicsContext, planGraphicsOf } from "./plan-graphics";
 import { resolveElementMaterial } from "../materials";
 import { kindRowOf, storedField } from "../kinds";
+import { elementKindTable } from "../registry/element-kind-point";
 import { isKernelElementKind } from "../registry/element-kinds";
 import type { PlanGraphic, SectionGraphic, SectionGraphicsContext } from "../registry/kind-row-faces";
 import {
@@ -343,31 +344,34 @@ function levelElements(model: ModelState, view: ViewElement): BimElement[] {
   const names = viewLevelNames(model, view.props?.level, view.props?.levelElevationMm);
   if (!names) return elementValues(model.elements);
   const own = partitionMembers(model, (p) => names.has(p.level));
-  // Structural grids are vertical 3D datum planes that appear on every floor plan and RCP.
+  // Structural grids are vertical 3D datum planes that appear on every floor plan and RCP;
+  // floor plans also include level-spanning elements (`KindRow.spansLevels`) from the level below.
   if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan") {
-    const seen = new Set(own.map((e) => e.id));
-    for (const g of elementsOfKind(model.elements, "grid")) {
-      if (!seen.has(g.id)) {
-        own.push(g);
-        seen.add(g.id);
+    const grids = elementsOfKind(model.elements, "grid");
+    const spanningKinds = view.viewType === "floor_plan" ? elementKindTable().kinds.filter((k) => kindRowOf(k)?.spansLevels) : [];
+    const spanning = spanningKinds.length > 0 ? recordsOfKinds(model.elements, spanningKinds) : [];
+    if (grids.length > 0 || spanning.length > 0) {
+      const seen = new Set(own.map((e) => e.id));
+      for (const g of grids) {
+        if (!seen.has(g.id)) {
+          own.push(g);
+          seen.add(g.id);
+        }
       }
-    }
-    // On floor plans, also include vertical-circulation / level-spanning elements (declared via `KindRow.spansLevels`) from the level below whose top lands on this level.
-    if (view.viewType === "floor_plan") {
-      const viewLvl = viewModelLevel(model, view.props?.level);
-      if (viewLvl) {
-        const allLevels = modelLevels(model).sort((a, b) => a.elevationMm - b.elevationMm);
-        const idx = allLevels.findIndex((l) => l.id === viewLvl.id);
-        const below = idx > 0 ? allLevels[idx - 1] : undefined;
-        for (const el of elementValues(model.elements)) {
-          if (seen.has(el.id)) continue;
-          const row = kindRowOf(el.kind);
-          if (!row?.spansLevels) continue;
-          const r = el as unknown as { readonly levelId?: string; readonly topLevelId?: string };
-          const landsHere = r.topLevelId === viewLvl.id || (!r.topLevelId && below && r.levelId === below.id);
-          if (landsHere) {
-            own.push(el);
-            seen.add(el.id);
+      if (spanning.length > 0) {
+        const viewLvl = viewModelLevel(model, view.props?.level);
+        if (viewLvl) {
+          const allLevels = modelLevels(model).sort((a, b) => a.elevationMm - b.elevationMm);
+          const idx = allLevels.findIndex((l) => l.id === viewLvl.id);
+          const below = idx > 0 ? allLevels[idx - 1] : undefined;
+          for (const el of spanning) {
+            if (seen.has(el.id)) continue;
+            const r = el as unknown as { readonly levelId?: string; readonly topLevelId?: string };
+            const landsHere = r.topLevelId === viewLvl.id || (!r.topLevelId && below && r.levelId === below.id);
+            if (landsHere) {
+              own.push(el);
+              seen.add(el.id);
+            }
           }
         }
       }
@@ -765,16 +769,23 @@ function drawPlan(
     }
     return startIdx;
   };
-  const rawCandidates = others.length === 0 ? own : [...own, ...others];
-  // Architectural plan draw order: slabs & ceilings first, then walls & columns (so wall poché masks slab/ceiling centerlines), then openings/stairs, then grids/annotations.
-  const drawLayer = (kind: string): number => {
-    if (kind === "slab" || kind === "ceiling") return 0;
-    if (kind === "wall" || kind === "column") return 1;
-    if (kind === "opening") return 2;
-    if (kind === "grid") return 4;
-    return 3;
+  // Filter to the view window first and bucket by architectural draw layer in O(N) without sorting off-screen elements:
+  // 0: slabs & ceilings, 1: walls & columns (poché masks slab/ceiling centerlines), 2: openings, 3: everything else, 4: grids.
+  const layerBuckets: [BimElement[], BimElement[], BimElement[], BimElement[], BimElement[]] = [[], [], [], [], []];
+  const pushLayered = (list: readonly BimElement[]) => {
+    for (const el of list) {
+      if (!nearWindow(p, el)) continue;
+      const k = el.kind;
+      const bucket = k === "slab" || k === "ceiling" ? 0 : k === "wall" || k === "column" ? 1 : k === "opening" ? 2 : k === "grid" ? 4 : 3;
+      layerBuckets[bucket].push(el);
+    }
   };
-  const candidates = [...rawCandidates].sort((a, b) => drawLayer(a.kind) - drawLayer(b.kind));
+  pushLayered(own);
+  if (others.length > 0) pushLayered(others);
+  const candidates =
+    layerBuckets[0].length + layerBuckets[1].length + layerBuckets[2].length + layerBuckets[4].length === 0
+      ? layerBuckets[3]
+      : [...layerBuckets[0], ...layerBuckets[1], ...layerBuckets[2], ...layerBuckets[3], ...layerBuckets[4]];
   // Only pre-seed the spatial collision index when at least one visible part will place an automatic mark or clearance label.
   const hasPartLabels = candidates.some((el) => {
     if (el.kind !== "part") return false;
@@ -786,7 +797,6 @@ function drawPlan(
     seedPartLabelObstacles(model, view, p, frame, display, shownAs, candidates, takenPartBoxes, symScale);
   }
   for (const el of candidates) {
-    if (!nearWindow(p, el)) continue;
     if (leftOutOfDisciplineView(view, el)) continue;
     const look = elementLook(model, view, el);
     if (!look.visible) continue;
