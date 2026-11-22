@@ -513,14 +513,14 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "building.materials",
     summary: "List every material registered in the active add-ons (`kernel.material`), with visual and building-envelope thermal properties.",
     signature: "materials(): readonly { readonly id: string; readonly name: string; readonly category?: string; readonly color: string; readonly pattern?: string; readonly thermalConductivityWPerMK?: number; readonly densityKgPerM3?: number; readonly shgc?: number }[]",
-    example: layout(`    const mats = building.materials();\n    if (mats.length === 0) throw new Error("expected architectural materials");\n    ctx.report({ count: mats.length });`),
+    example: layout(`    const mats = building.materials();\n    if (mats.length === 0) throw new Error("expected architectural materials");\n    ctx.report("Materials", { count: mats.length });`),
     topics: ["material", "color", "texture", "poche", "thermal", "envelope", "architecture"],
   },
   {
     name: "building.assemblyThermal",
     summary: "Compute steady-state ISO 6946 / ASHRAE R-value and U-value of a layered wall/roof/floor assembly from registered `kernel.material` conductivities.",
     signature: "assemblyThermal(layers: readonly { readonly materialId: string; readonly thickness: Measure }[], opts?: { readonly includeAirFilms?: boolean }): AssemblyThermalSummary",
-    example: layout(`    const env = building.assemblyThermal([{ materialId: "architecture.brick_red", thickness: units.in(4) }, { materialId: "architecture.batt_insulation", thickness: units.in(5.5) }, { materialId: "architecture.gypsum_partition", thickness: units.in(0.625) }]);\n    if (env.rImperial <= 0) throw new Error("expected positive R-value");\n    ctx.report({ rImperial: env.rImperial });`),
+    example: layout(`    const env = building.assemblyThermal([{ materialId: "architecture.brick_red", thickness: units.in(4) }, { materialId: "architecture.batt_insulation", thickness: units.in(5.5) }, { materialId: "architecture.gypsum_partition", thickness: units.in(0.625) }]);\n    if (env.rImperial <= 0) throw new Error("expected positive R-value");\n    ctx.report("Thermal", { rImperial: env.rImperial });`),
     topics: ["envelope", "thermal", "r-value", "u-value", "insulation", "energy", "architecture"],
   },
   {
