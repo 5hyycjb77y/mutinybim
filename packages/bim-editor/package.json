@@ -599,7 +599,12 @@
     "./editor/views-sheets/ViewPropertiesPanel": "./src/editor/views-sheets/ViewPropertiesPanel.tsx",
     "./editor/views-sheets/ViewsSheetsDialogs": "./src/editor/views-sheets/ViewsSheetsDialogs.tsx",
     "./editor/views-sheets/ViewsSheetsPanel": "./src/editor/views-sheets/ViewsSheetsPanel.tsx",
-    "./editor/ZoomThroughNotice": "./src/editor/ZoomThroughNotice.tsx"
+    "./editor/ZoomThroughNotice": "./src/editor/ZoomThroughNotice.tsx",
+    "./editor/SelectionLocksBar": "./src/editor/SelectionLocksBar.tsx",
+    "./editor/selection-locks": "./src/editor/selection-locks.ts",
+    "./editor/electrical/EditControlsDialog": "./src/editor/electrical/EditControlsDialog.tsx",
+    "./editor/electrical/WireContextMenu": "./src/editor/electrical/WireContextMenu.tsx",
+    "./editor/organization/TextStylesDialog": "./src/editor/organization/TextStylesDialog.tsx"
   },
   "scripts": {
     "type-check": "tsc -p ../tsconfig.bim.json"
