@@ -1,9 +1,7 @@
 'use client'
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
-import { Button } from '../../ui/button'
 import {
   asElementId,
   buildViewPickIndex,
@@ -32,23 +30,23 @@ import { DRAFTING_GRID_MM, snapPoint, type Snap } from '../architecture/tools/sn
 import { endDragHint, endDropCommand } from '../architecture/WallEndGrips'
 import { isSelectableUnderLocks, useSelectionLocks } from '../selection-locks'
 import {
-  circuitHomeRunNear,
-  circuitHomeRunsOnPaper,
-  circuitJoinNear,
-  circuitJoinsOnPaper,
-  circuitSwitchLegLabelNear,
-  circuitSwitchLegLabelsOnPaper,
+  WireContextMenu,
   previewWireCurve,
-  withCircuitFlipArc,
-  withCircuitHomeRun,
-  withCircuitMwbcGroup,
-  withCircuitWaypoints,
-  withSwitchLegLabelOffset,
-  type CircuitHomeRunOnPaper,
-  type CircuitJoinOnPaper,
-  type CircuitSwitchLegLabelOnPaper,
-  type HomeRunHitPart,
-} from '@permitzip/bim-pack-electrical'
+  submitSwitchLabelOffset,
+  submitWireHomeRun,
+  submitWireWaypoints,
+  wireHomeRunNear,
+  wireHomeRunsOnPaper,
+  wireJoinNear,
+  wireJoinsOnPaper,
+  wireSwitchLabelNear,
+  wireSwitchLabelsOnPaper,
+  type WireHomeRunHitPart,
+  type WireHomeRunOnPaper,
+  type WireJoinOnPaper,
+  type WireMenuState,
+  type WireSwitchLabelOnPaper,
+} from '../electrical/WireContextMenu'
 import { parseLength } from '../views-sheets/draft/draft-input'
 import { clipOf, copiedHint, currentClip, pasteCommand, pasteIds, rememberClip, typingIn } from '../views-sheets/draft/copy-paste'
 import type { ModelEditBridge } from './bridge'
@@ -112,21 +110,16 @@ type Drag =
   | { readonly kind: 'press'; readonly from: Vec2; readonly id: string | null }
   | { readonly kind: 'move'; readonly from: Vec2; readonly to: Vec2; readonly ids: readonly string[]; readonly free: boolean }
   | { readonly kind: 'box'; readonly a: Vec2; readonly b: Vec2 }
-  /** A circuit or switch-leg wire (or one of its spline vertices) dragged to reshape it. */
-  | { readonly kind: 'bend'; readonly from: Vec2; readonly to: Vec2; readonly join: CircuitJoinOnPaper; readonly vertexIndex: number | null }
-  /** A circuit home run arrow tip, shaft curve, or label dragged to reposition it while staying anchored to its host device. */
-  | { readonly kind: 'homerun'; readonly from: Vec2; readonly to: Vec2; readonly homeRun: CircuitHomeRunOnPaper; readonly part: HomeRunHitPart }
+  /** A plan wire (or one of its spline vertices) dragged to reshape it. */
+  | { readonly kind: 'bend'; readonly from: Vec2; readonly to: Vec2; readonly join: WireJoinOnPaper; readonly vertexIndex: number | null }
+  /** A home run arrow tip, shaft curve, or label dragged to reposition it while staying anchored to its host device. */
+  | { readonly kind: 'homerun'; readonly from: Vec2; readonly to: Vec2; readonly homeRun: WireHomeRunOnPaper; readonly part: WireHomeRunHitPart }
   /** An automatic device mark dragged to reposition it (promotes into a movable masked tag with auto-leader when pulled away). */
   | { readonly kind: 'mark'; readonly from: Vec2; readonly to: Vec2; readonly mark: AutoPartMarkHit }
   /** A lowercase switch-leg designation ("a", "b") dragged to reposition it relative to its device. */
-  | { readonly kind: 'switch_label'; readonly from: Vec2; readonly to: Vec2; readonly label: CircuitSwitchLegLabelOnPaper }
+  | { readonly kind: 'switch_label'; readonly from: Vec2; readonly to: Vec2; readonly label: WireSwitchLabelOnPaper }
   /** A routed piece, end or elbow, dragged through the session's `drag_run` (as in 3D). */
   | { readonly kind: 'run'; readonly from: Vec2; readonly to: Vec2; readonly hint: string | null; readonly exclude: ReadonlySet<string>; readonly typed: string; readonly snap: SnapHit | null }
-
-type WireContextMenu =
-  | { readonly kind: 'join'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly join: CircuitJoinOnPaper }
-  | { readonly kind: 'homerun'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly homeRun: CircuitHomeRunOnPaper }
-  | { readonly kind: 'switch_label'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly label: CircuitSwitchLegLabelOnPaper }
 
 /** Insert `pt` into `existing` waypoints at the position closest along the segment `a -> ... -> b`. */
 function insertWaypointOrdered(a: Vec2, b: Vec2, existing: readonly Vec2[], pt: Vec2): Vec2[] {
@@ -185,11 +178,11 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const index = useMemo(() => cache.get(model, view.view), [cache, model, view.view])
   const locks = useSelectionLocks()
   const [hover, setHover] = useState<readonly string[] | null>(null)
-  const [hoverJoin, setHoverJoin] = useState<CircuitJoinOnPaper | null>(null)
-  const [hoverHomeRun, setHoverHomeRun] = useState<{ readonly homeRun: CircuitHomeRunOnPaper; readonly part: HomeRunHitPart } | null>(null)
+  const [hoverJoin, setHoverJoin] = useState<WireJoinOnPaper | null>(null)
+  const [hoverHomeRun, setHoverHomeRun] = useState<{ readonly homeRun: WireHomeRunOnPaper; readonly part: WireHomeRunHitPart } | null>(null)
   const [hoverMark, setHoverMark] = useState<AutoPartMarkHit | null>(null)
-  const [hoverSwitchLabel, setHoverSwitchLabel] = useState<CircuitSwitchLegLabelOnPaper | null>(null)
-  const [wireMenu, setWireMenu] = useState<WireContextMenu | null>(null)
+  const [hoverSwitchLabel, setHoverSwitchLabel] = useState<WireSwitchLabelOnPaper | null>(null)
+  const [wireMenu, setWireMenu] = useState<WireMenuState | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [wallEndDrag, setWallEndDrag] = useState<{ readonly wallId: string; readonly end: 'start' | 'end'; readonly at: Vec2; readonly snap: Snap | null; readonly disjoin: boolean } | null>(null)
   const overlapRef = useRef<{ stack: string[]; idx: number }>({ stack: [], idx: 0 })
@@ -210,19 +203,19 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     return shown
   }, [isPlanView, model, view.view])
   // Circuit & switch-leg spans on paper (plans only): drag to bend/reshape, right-click to add/remove spline vertices.
-  const circuitJoins = useMemo(() => {
+  const wireJoins = useMemo(() => {
     if (!isPlanView) return []
-    return circuitJoinsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+    return wireJoinsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
   }, [isPlanView, model, shownPlanParts, view])
   // Home runs on paper (plans only): drag arrow tip, curve shaft, or label.
-  const circuitHomeRuns = useMemo(() => {
+  const wireHomeRuns = useMemo(() => {
     if (!isPlanView) return []
-    return circuitHomeRunsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+    return wireHomeRunsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
   }, [isPlanView, model, shownPlanParts, view])
   // Switch-leg designations ("a", "b") on paper (plans only): drag any letter to reposition it relative to its device.
   const switchLegLabels = useMemo(() => {
     if (!isPlanView) return []
-    return circuitSwitchLegLabelsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+    return wireSwitchLabelsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
   }, [isPlanView, model, shownPlanParts, view])
   // Untagged device marks on paper (plans only): drag any mark directly to turn it into a movable tag.
   const autoMarks = useMemo(
@@ -230,9 +223,9 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     [isPlanView, model, view],
   )
   const wireTolMm = Math.max(1.2, 7 * paperMmPerPx)
-  const joinAt = (p: Vec2) => circuitJoinNear(circuitJoins, p, wireTolMm)
-  const homeRunAt = (p: Vec2) => circuitHomeRunNear(circuitHomeRuns, p, wireTolMm)
-  const switchLabelAt = (p: Vec2) => circuitSwitchLegLabelNear(switchLegLabels, p, Math.max(1.8, 7 * paperMmPerPx))
+  const joinAt = (p: Vec2) => wireJoinNear(wireJoins, p, wireTolMm)
+  const homeRunAt = (p: Vec2) => wireHomeRunNear(wireHomeRuns, p, wireTolMm)
+  const switchLabelAt = (p: Vec2) => wireSwitchLabelNear(switchLegLabels, p, Math.max(1.8, 7 * paperMmPerPx))
   /** Model elements that take click/hover priority over drawn wires (devices, runs, fittings, openings, columns). Wires win over rooms, grids, and walls they cross. */
   const isForegroundModelEl = (elId: string | null): boolean => {
     if (!elId) return false
@@ -246,7 +239,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     }
     return null
   }
-  const vertexNearJoin = (join: CircuitJoinOnPaper, p: Vec2): number | null => {
+  const vertexNearJoin = (join: WireJoinOnPaper, p: Vec2): number | null => {
     const tol = Math.max(1.8, 8 * paperMmPerPx)
     let best = -1
     let bestD = tol
@@ -259,8 +252,8 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     })
     return best >= 0 ? best : null
   }
-  const vertexHitAnyJoin = (p: Vec2): { readonly join: CircuitJoinOnPaper; readonly vertexIndex: number } | null => {
-    for (const join of circuitJoins) {
+  const vertexHitAnyJoin = (p: Vec2): { readonly join: WireJoinOnPaper; readonly vertexIndex: number } | null => {
+    for (const join of wireJoins) {
       const idx = vertexNearJoin(join, p)
       if (idx !== null) return { join, vertexIndex: idx }
     }
@@ -797,10 +790,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         })
         nextWaypoints = d.join.waypointsModel.map((wp, i) => (i === closest ? nextPt : wp))
       }
-      const refused = bridge.submit(
-        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, d.join.linkId, d.join.a, d.join.b, nextWaypoints) } },
-        'reshape wire',
-      )
+      const refused = submitWireWaypoints(bridge, view, d.join, nextWaypoints)
       bridge.hint(refused ?? 'Wire reshaped. Right-click the wire to add/remove spline vertices, flip arc, or reset.')
       if (refused) toast.error(refused)
       return
@@ -812,18 +802,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         bridge.hint(view.mapping.modelReason)
         return
       }
-      const existing = view.view.props?.circuitGraphics?.hints?.[d.homeRun.linkId]?.homeRun ?? {}
-      const anchor = d.homeRun.anchorModel
-      const nextHr =
-        d.part === 'tip'
-          ? { ...existing, memberId: d.homeRun.memberId, tipOffset: { x: at.x - anchor.x, y: at.y - anchor.y } }
-          : d.part === 'label'
-            ? { ...existing, memberId: d.homeRun.memberId, labelOffset: { x: at.x - d.homeRun.tipModel.x, y: at.y - d.homeRun.tipModel.y } }
-            : { ...existing, memberId: d.homeRun.memberId, bendOffset: { x: at.x - anchor.x, y: at.y - anchor.y } }
-      const refused = bridge.submit(
-        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitHomeRun(view.view, d.homeRun.linkId, nextHr) } },
-        d.part === 'tip' ? 'move home run arrow' : d.part === 'label' ? 'move home run label' : 'curve home run arrow',
-      )
+      const refused = submitWireHomeRun(bridge, view, d.homeRun, d.part, at)
       bridge.hint(refused ?? 'Home run updated (it still follows the device when moved). Right-click to reset.')
       if (refused) toast.error(refused)
       return
@@ -840,10 +819,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         return
       }
       const offset = { x: at.x - d.label.memberAnchorModel.x, y: at.y - d.label.memberAnchorModel.y }
-      const refused = bridge.submit(
-        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withSwitchLegLabelOffset(view.view, d.label.hintKey, d.label.memberId, offset) } },
-        `move switch-leg letter "${d.label.text}"`,
-      )
+      const refused = submitSwitchLabelOffset(bridge, view, d.label, offset)
       bridge.hint(refused ?? `Moved switch-leg letter "${d.label.text}". Right-click it to reset.`)
       if (refused) toast.error(refused)
       return
@@ -922,7 +898,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const routeTicks = routing && runStrokes.length > 0 ? routeTicksAcross((bridge.tools.routeTicks?.() ?? []).map((q) => modelToPaperPoint(view, q)), runStrokes, TICK_HALF_MM) : []
   const moveDelta: RunPoint | null = drag?.kind === 'move' ? dragToModel(view, drag.from, drag.to, drag.free) : null
   const moveOffset = drag?.kind === 'move' ? paperOffsetFor(view, drag.from, drag.to, drag.free) : null
-  // Live wall-face snap & rotated symbol preview when dragging a single wall-mountable part (switch, receptacle, panelboard, etc.) near a wall.
+  // Live wall-face snap & rotated symbol preview when dragging a single wall-mountable part near a wall.
   const moveWallPreview = useMemo(() => {
     if (drag?.kind !== 'move' || drag.free || !isPlanView || !moveDelta || drag.ids.length !== 1) return null
     const id = drag.ids[0]
@@ -1250,219 +1226,17 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       >
         <title>{`${view.view.name}: click to select, drag devices by their symbol, drag any mark to reposition as a tag, drag wires or home run tips/labels to reshape, right-click wires for spline vertices.`}</title>
       </rect>
-      {wireMenu &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            style={{ position: 'fixed', left: wireMenu.clientX, top: wireMenu.clientY, zIndex: 70 }}
-            className="min-w-48 rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-md"
-            onPointerDown={(ev) => ev.stopPropagation()}
-            data-testid="wire-context-menu"
-          >
-            {wireMenu.kind === 'join' ? (
-              <>
-                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                  {wireMenu.join.kind === 'switch_leg' ? wireMenu.join.name : `Circuit ${wireMenu.join.name}`}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                  onClick={() => {
-                    const at = view.mapping.toModel(paperToDrawing(view, wireMenu.paper))
-                    setWireMenu(null)
-                    if (!at) return
-                    const aEl = model.elements[wireMenu.join.a]
-                    const bEl = model.elements[wireMenu.join.b]
-                    const aPos = aEl?.kind === 'part' ? aEl.position : { x: at.x, y: at.y }
-                    const bPos = bEl?.kind === 'part' ? bEl.position : { x: at.x, y: at.y }
-                    const nextWps = insertWaypointOrdered(aPos, bPos, wireMenu.join.waypointsModel, { x: at.x, y: at.y })
-                    const refused = bridge.submit(
-                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, wireMenu.join.linkId, wireMenu.join.a, wireMenu.join.b, nextWps) } },
-                      'insert spline vertex on wire',
-                    )
-                    if (refused) toast.error(refused)
-                    else bridge.hint(`Inserted spline vertex (${nextWps.length} total). Drag vertices to shape, or right-click to add/remove.`)
-                  }}
-                >
-                  Insert spline vertex here
-                </Button>
-                {wireMenu.join.waypointsModel.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                    onClick={() => {
-                      const j = wireMenu.join
-                      const p = wireMenu.paper
-                      setWireMenu(null)
-                      let closest = 0
-                      let bestD = Infinity
-                      j.waypointsPaper.forEach((wp, i) => {
-                        const d = Math.hypot(p.x - wp.x, p.y - wp.y)
-                        if (d < bestD) {
-                          bestD = d
-                          closest = i
-                        }
-                      })
-                      const nextWps = j.waypointsModel.filter((_, i) => i !== closest)
-                      const refused = bridge.submit(
-                        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, j.linkId, j.a, j.b, nextWps.length > 0 ? nextWps : null) } },
-                        'remove spline vertex',
-                      )
-                      if (refused) toast.error(refused)
-                    }}
-                  >
-                    Remove nearest vertex
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                  onClick={() => {
-                    const j = wireMenu.join
-                    setWireMenu(null)
-                    const refused = bridge.submit(
-                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitFlipArc(view.view, j.linkId, j.a, j.b) } },
-                      'flip wire arc side',
-                    )
-                    if (refused) toast.error(refused)
-                  }}
-                >
-                  Flip arc side
-                </Button>
-                {(wireMenu.join.waypointsModel.length > 0 || wireMenu.join.flipped) && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal text-destructive hover:text-destructive"
-                    onClick={() => {
-                      const j = wireMenu.join
-                      setWireMenu(null)
-                      const cleared = withCircuitFlipArc(
-                        { ...view.view, props: { ...(view.view.props ?? {}), circuitGraphics: withCircuitWaypoints(view.view, j.linkId, j.a, j.b, null) } },
-                        j.linkId,
-                        j.a,
-                        j.b,
-                        false,
-                      )
-                      const refused = bridge.submit({ type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: cleared } }, 'reset wire shape')
-                      if (refused) toast.error(refused)
-                    }}
-                  >
-                    Reset wire to automatic
-                  </Button>
-                )}
-              </>
-            ) : wireMenu.kind === 'switch_label' ? (
-              <>
-                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Switch leg &ldquo;{wireMenu.label.text}&rdquo;</div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!wireMenu.label.custom}
-                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                  onClick={() => {
-                    const sw = wireMenu.label
-                    setWireMenu(null)
-                    const refused = bridge.submit(
-                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withSwitchLegLabelOffset(view.view, sw.hintKey, sw.memberId, null) } },
-                      `reset switch-leg letter "${sw.text}"`,
-                    )
-                    if (refused) toast.error(refused)
-                  }}
-                >
-                  Reset switch-leg letter position
-                </Button>
-              </>
-            ) : (
-              <>
-                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Home run {wireMenu.homeRun.name}</div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!wireMenu.homeRun.hasCustom}
-                  className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                  onClick={() => {
-                    const hr = wireMenu.homeRun
-                    setWireMenu(null)
-                    const refused = bridge.submit(
-                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitHomeRun(view.view, hr.linkId, null) } },
-                      'reset home run to automatic',
-                    )
-                    if (refused) toast.error(refused)
-                  }}
-                >
-                  Reset home run to automatic
-                </Button>
-                {(() => {
-                  const hr = wireMenu.homeRun
-                  const currentGroup = view.view.props?.circuitGraphics?.hints?.[hr.linkId]?.mwbcGroup
-                  const thisLink = model.elements[hr.linkId]
-                  const panelId = thisLink?.kind === 'service_link' ? thisLink.source.elementId : null
-                  if (currentGroup) {
-                    const members = Object.entries(view.view.props?.circuitGraphics?.hints ?? {})
-                      .filter(([, h]) => h.mwbcGroup === currentGroup)
-                      .map(([id]) => id)
-                    return (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                        onClick={() => {
-                          setWireMenu(null)
-                          const refused = bridge.submit(
-                            { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitMwbcGroup(view.view, members, null) } },
-                            'split MWBC shared-neutral home run',
-                          )
-                          if (refused) toast.error(refused)
-                        }}
-                      >
-                        Split MWBC shared-neutral home run
-                      </Button>
-                    )
-                  }
-                  if (!panelId) return null
-                  const peers = circuitHomeRuns.filter((other) => {
-                    if (other.linkId === hr.linkId) return false
-                    const el = model.elements[other.linkId]
-                    return el?.kind === 'service_link' && el.source.elementId === panelId
-                  })
-                  if (peers.length === 0) return null
-                  const peer = peers[0]!
-                  return (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto w-full justify-start rounded-sm px-2 py-1.5 text-left text-xs font-normal"
-                      onClick={() => {
-                        setWireMenu(null)
-                        const groupId = `mwbc-${[hr.linkId, peer.linkId].sort().join('-')}`
-                        const refused = bridge.submit(
-                          { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitMwbcGroup(view.view, [hr.linkId, peer.linkId], groupId) } },
-                          `combine ${hr.name} & ${peer.name} as MWBC`,
-                        )
-                        if (refused) toast.error(refused)
-                      }}
-                    >
-                      Combine as MWBC with {peer.name}
-                    </Button>
-                  )
-                })()}
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
+      {wireMenu && (
+        <WireContextMenu
+          menu={wireMenu}
+          model={model}
+          view={view}
+          bridge={bridge}
+          homeRuns={wireHomeRuns}
+          insertWaypoint={insertWaypointOrdered}
+          onClose={() => setWireMenu(null)}
+        />
+      )}
       {bridge.canEdit && bridge.plus && !drag && !routing && (
         <DrawingPlusSpots model={model} view={view} selectedIds={bridge.selectedIds} serverFeatures={bridge.serverFeatures ?? []} paperMmPerPx={paperMmPerPx} onPick={bridge.plus} hint={bridge.hint} />
       )}

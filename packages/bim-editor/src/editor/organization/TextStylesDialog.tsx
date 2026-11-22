@@ -24,7 +24,7 @@ import { newId, type SubmitCommand } from '../views-sheets/types'
 
 const ROLE_LABEL: Record<TextStyleRole, string> = {
   part_mark: 'Device & equipment marks (F2-1, GFCI-1)',
-  link_label: 'Circuit home runs & switch-leg letters',
+  link_label: 'Home runs & switch-leg letters',
   tag: 'Tags (when style inherits default)',
   dimension: 'Dimensions',
   note: 'General notes & callouts',

@@ -776,6 +776,27 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["text type", "text style", "font", "opaque background", "text mask", "wipeout", "typography"],
   },
   {
+    name: "documents.setTextStyle",
+    summary: "Updates an existing model-wide Text Type (size, font family, bold/italic/uppercase, opaque background mask, color, or default drawing roles).",
+    signature: "setTextStyle(ctx: ScriptContext, styleId: string, changes: { name?: string; textSizeMm?: number; fontFamily?: string | null; bold?: boolean; italic?: boolean; uppercase?: boolean; background?: \"opaque\" | \"transparent\"; color?: string | null; defaultFor?: readonly TextStyleRole[] }): void",
+    example: layout(`    const ts = documents.textStyle(ctx, { name: "Notes", textSizeMm: 2.4 });\n    documents.setTextStyle(ctx, ts, { bold: true, background: "opaque" });`, "{}"),
+    topics: ["text type", "text style", "edit text style", "font", "opaque background"],
+  },
+  {
+    name: "documents.deleteTextStyle",
+    summary: "Deletes a model-wide Text Type by id.",
+    signature: "deleteTextStyle(ctx: ScriptContext, styleId: string): void",
+    example: layout(`    const ts = documents.textStyle(ctx, { name: "Temp", textSizeMm: 2.4 });\n    documents.deleteTextStyle(ctx, ts);`, "{}"),
+    topics: ["text type", "text style", "delete text style"],
+  },
+  {
+    name: "documents.flipWireArc",
+    summary: "Flips (or explicitly sets) which side an automatic circuit or switch-leg arc bows toward on a plan view.",
+    signature: "flipWireArc(ctx: ScriptContext, viewRef: string, hintKey: string, fromElementId: string, toElementId: string, flipped?: boolean): void",
+    example: layout(`${WALLS}\n${PLAN}\n    documents.flipWireArc(ctx, plan, "ckt-1", "r-1", "r-2", true);`),
+    topics: ["wire arc", "flip wire", "circuit graphics", "arc side"],
+  },
+  {
     name: "documents.setCircuitGraphics",
     summary: "Sets a plan view's circuit and switch-leg drawing style (`showCircuits: false` makes a dedicated controls schematic plan), home runs, switch-leg letters, and ANSI/NECA 100 wire hash marks (`home_runs`, `home_runs_and_switch_legs`, or `all_runs`) while keeping existing wire waypoints and home-run offsets intact.",
     signature: "setCircuitGraphics(ctx: ScriptContext, viewRef: string, settings: CircuitGraphicsSettingsSpec): void",

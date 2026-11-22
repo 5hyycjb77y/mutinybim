@@ -104,9 +104,9 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
           </FieldDescription>
         </Field>
         {([
-          ['showCircuits', 'Branch circuit lines', 'branch circuit lines', 'Draw branch power circuit wires and home runs. Turn off with Switch legs on for a dedicated lighting controls schematic plan.', resolved.showCircuits],
-          ['homeRuns', 'Home runs', 'home runs', 'An arrow and the panel and circuit number (L1-1) on the device nearest the panel. Drag its tip, shaft or label on the plan to adjust.', resolved.homeRuns],
-          ['switchLegs', 'Switch legs & controls', 'switch legs', 'Dashed switch legs (and dash-dot 0-10V / low-voltage control loops) from switches, dimmers and sensors to controlled loads.', resolved.switchLegs],
+          ['showCircuits', 'Branch power lines', 'branch power lines', 'Draw branch power wires and home runs. Turn off with Switch legs on for a dedicated lighting controls schematic plan.', resolved.showCircuits],
+          ['homeRuns', 'Home runs', 'home runs', 'An arrow and the source tag (L1-1) on the device nearest the source. Drag its tip, shaft or label on the plan to adjust.', resolved.homeRuns],
+          ['switchLegs', 'Switch legs & controls', 'switch legs', 'Dashed switch legs (and dash-dot 0-10V / DALI control loops) from switches, dimmers and sensors to controlled loads.', resolved.switchLegs],
           ['switchLegLabels', 'Switch-leg letters (a, b)', 'switch-leg letters', 'Lowercase ANSI/NECA 100 switch-leg designations beside switches and controlled fixtures. Drag any letter on the plan to move it.', resolved.switchLegLabels],
           ['allCopies', 'Show circuiting on all units', 'circuiting on all units', 'Typical units draw their own circuiting. Off: only the original, its home runs marked TYP.', resolved.allCopies],
         ] as const).map(([key, label, what, description, checked]) => (
@@ -166,7 +166,7 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
             ))}
           </ToggleGroup>
           <FieldDescription className="text-xs">
-            {off || (!resolved.homeRuns && !resolved.switchLegs) ? 'Turn home runs or switch legs on first to show conductor hash marks.' : (HASH_MARKS.find((s) => s.value === resolved.hashMarks)?.hint ?? '')}
+            {off || (!resolved.homeRuns && !resolved.switchLegs) ? 'Turn home runs or switch legs on first to show wire hash marks.' : (HASH_MARKS.find((s) => s.value === resolved.hashMarks)?.hint ?? '')}
           </FieldDescription>
         </Field>
         {!off && resolved.hashMarks !== 'off' && (

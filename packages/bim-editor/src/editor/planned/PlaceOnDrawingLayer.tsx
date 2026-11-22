@@ -99,7 +99,7 @@ export function PlaceOnDrawingLayer({ model, view, spec, paperOf, submit, hint, 
     onPlaced(partId)
   }
 
-  // The footprint + live annotative symbol preview on paper so switches, receptacles, and panelboards visibly rotate flush onto walls before clicking.
+  // The footprint + live annotative symbol preview on paper so wall-hosted devices visibly rotate flush onto walls before clicking.
   const outline = useMemo(() => {
     if (!target || !box) return null
     const level = model.elements[target.levelId]
