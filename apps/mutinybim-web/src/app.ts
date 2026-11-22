@@ -202,6 +202,8 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       : createEditorDemo({
           entry: path.join(APP_DIR, "client/entry.tsx"),
           outDir: process.env.MUTINYBIM_WEB_BUILD ?? path.join(config.dataDir, "editor-build"),
+          // The image's sources never change: don't stat every input on each editor request.
+          watchSources: process.env.NODE_ENV !== "production",
           mainModelId: async () => "unused",
           authority: async () => ({ error: "Open the model from My models." }),
         });
