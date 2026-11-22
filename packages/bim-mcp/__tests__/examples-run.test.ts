@@ -31,6 +31,15 @@ describe("examples: every showcase script runs through the core tools", () => {
     for (const f of files) expect(KIT_EXAMPLE_SOURCES[f]).toBe(readFileSync(resolve(DIR, `${f}.ts`), "utf8"));
   });
 
+  // A new model starts with "Level 1" (starterModel, as the tool server and the hosted app make it).
+  // Each example makes a "Level 1" at the same height: it uses the one there rather than making a second,
+  // which the kernel refuses ("There is already a level named Level 1").
+  it.each(KIT_EXAMPLES.map((x) => x.name))("%s also runs on a new model, using the Level 1 it starts with", async (name) => {
+    const { model: m } = await runExample(KIT_EXAMPLE_SOURCES[name] ?? "", { repoRoot: REPO_ROOT, modelId: name, start: "starter" });
+    const named = ofKind(m, "level").filter((l) => field<string>(l, "name") === "Level 1");
+    expect(named.map((l) => l.id)).toEqual(["level-1"]);
+  }, 120_000);
+
   it("small-office: two floors of walls, doors, windows, rooms from the walls, and a plan sheet each", async () => {
     const { model: m, label } = await run("small-office");
     expect(ofKind(m, "level")).toHaveLength(2);

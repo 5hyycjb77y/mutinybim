@@ -588,7 +588,7 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "building.level",
-    summary: "A level at an elevation; returns its id. Every level argument in the kit takes a level's id (this one, or one from ctx.model.levels()); the kit's helpers also take the name of exactly one level the script read (reads.levels: true), and refuse an unknown or shared name with the levels there are.",
+    summary: "A level at an elevation; returns its id. When the script reads the levels (reads.levels: true) and the model already has a level with this name at this elevation, it returns that level's id instead of making a second one (a new model starts with \"Level 1\" at 0). Every level argument in the kit takes a level's id (this one, or one from ctx.model.levels()); the kit's helpers also take the name of exactly one level the script read (reads.levels: true), and refuse an unknown or shared name with the levels there are.",
     signature: "level(ctx: ScriptContext, spec: { name: string; elevation: Measure; id?: string }): string",
     example: layout(`    building.level(ctx, { name: "Level 3", elevation: units.ft(24) });`),
     topics: ["level", "levels", "storey", "floor level", "roof level"],

@@ -24,7 +24,7 @@ import {
 import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
-import { levelOf } from "./levels";
+import { existingLevel, levelOf } from "./levels";
 import { ScriptReadError } from "./slice";
 import { onWorking, onWorkingIfAny } from "./working";
 
@@ -346,9 +346,12 @@ export const building = {
     ctx.edit({ type: "sync_levels", referenceId: spec.reference, storeys: storeysOf(ctx, spec) });
   },
 
-  /** A level at an elevation; returns its id. */
+  /** A level at an elevation; returns its id. A level the script read with this name at this elevation is used as it is (a new model starts with "Level 1"). */
   level(ctx: ScriptContext, spec: LevelSpec): string {
-    const command: CreateLevel = { type: "create_level", levelId: spec.id ?? ctx.id("level"), name: spec.name, elevationMm: mm(spec.elevation, "Elevation") };
+    const elevationMm = mm(spec.elevation, "Elevation");
+    const existing = existingLevel(ctx, spec.name, elevationMm, spec.id);
+    if (existing) return existing;
+    const command: CreateLevel = { type: "create_level", levelId: spec.id ?? ctx.id("level"), name: spec.name, elevationMm };
     ctx.edit(command);
     return command.levelId;
   },

@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { DEFAULT_SETTINGS, elementValues, type ModelState } from "@permitzip/bim-kernel";
 import { scriptReadsSchema } from "@permitzip/bim-library";
+import { starterModel } from "./cli";
 import { createLocalHost, LOCAL_RUNS_WHERE, startInMemoryModelServer } from "./local";
 import { LOCAL_SCHEMAS } from "./schemas";
 import { createBimToolServer } from "./server";
@@ -47,14 +48,19 @@ export function declaredReads(source: string): unknown {
   return parsed.data;
 }
 
-export async function runExample(source: string, options: { readonly repoRoot: string; readonly modelId?: string }): Promise<ExampleRun> {
+/**
+ * `start`: "empty" (the default) is a model with nothing in it; "starter" is
+ * the model a person gets when they make a new one (`starterModel`: one level,
+ * "Level 1"), as the tool server and the hosted app make it.
+ */
+export async function runExample(source: string, options: { readonly repoRoot: string; readonly modelId?: string; readonly start?: "empty" | "starter" }): Promise<ExampleRun> {
   const modelId = options.modelId ?? "example";
   // The kernel carries no trade: duct, pipe and wire are first-party add-ons, installed before any model is decided.
   installFirstPartyAddOns();
   const models = startInMemoryModelServer();
   const client = new Client({ name: "mutinybim-example", version: "1.0.0" });
   try {
-    await models.seed({ modelId, revision: 0 as ModelState["revision"], elements: {}, connections: [], settings: DEFAULT_SETTINGS });
+    await models.seed(options.start === "starter" ? starterModel(modelId) : { modelId, revision: 0 as ModelState["revision"], elements: {}, connections: [], settings: DEFAULT_SETTINGS });
     const host = createLocalHost({ server: models, repoRoot: options.repoRoot, approve: "auto" });
     const server = createBimToolServer({ host, schemas: LOCAL_SCHEMAS, runsWhere: LOCAL_RUNS_WHERE });
     const [a, b] = InMemoryTransport.createLinkedPair();

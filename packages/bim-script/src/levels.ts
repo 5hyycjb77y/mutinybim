@@ -33,6 +33,30 @@ export function levelOf(ctx: ScriptContext, given: string, what = "The level"): 
   throw new ScriptRunError(`${what} "${given}" isn't a level here. A level argument is the level's id, or the name of exactly one level. The levels: ${levelList(levels)}.`);
 }
 
+/**
+ * The level `building.level` would make, if the model already has it: the one
+ * level with this name (case and spaces aside, as `levelOf` matches names) at
+ * this elevation (within 1 mm), and this id when one is given. A new model
+ * starts with "Level 1", so a script that makes "Level 1" at 0 uses it rather
+ * than being refused for a second one. Null when the script didn't read the
+ * levels, or no level matches: `building.level` then makes it, and the kernel
+ * refuses a name that's taken at another elevation, as before.
+ */
+export function existingLevel(ctx: ScriptContext, name: string, elevationMm: number, id?: string): string | null {
+  if (!onWorkingIfAny(ctx, () => true)) return null;
+  let levels: Level[];
+  try {
+    levels = ctx.model.levels().filter((l): l is Level => l.kind === "level");
+  } catch (err) {
+    if (err instanceof ScriptReadError) return null;
+    throw err;
+  }
+  const want = name.trim().toLowerCase();
+  const same = levels.filter((l) => l.name.trim().toLowerCase() === want && Math.abs(l.elevationMm - elevationMm) < 1 && (id === undefined || l.id === id));
+  const [only] = same;
+  return same.length === 1 && only ? only.id : null;
+}
+
 function levelList(levels: readonly Level[]): string {
   if (levels.length === 0) return "none yet (make one with building.level)";
   const shown = levels.slice(0, 12).map((l) => `${l.id} ("${l.name}")`);
