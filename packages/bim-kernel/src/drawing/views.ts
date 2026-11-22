@@ -29,7 +29,7 @@ import { anchorOf } from "../model";
 import { noteDrawing, type TextBlock } from "../annotation/text-note";
 import { figureFrame, figurePrimitives, type SheetImage } from "../annotation/figures";
 import { forEachPartitionMember, partitionMembers } from "../partition";
-import { displayContextOf, displayResolver, type DisplayResolver } from "../organization/model";
+import { displayContextOf, displayResolver, resolveTextStyle, type DisplayResolver } from "../organization/model";
 import { clipSegment } from "../reference";
 import { applyReferenceDisplay, resolveReferenceDisplay } from "../reference-display";
 import { elementValues } from "../store";
@@ -55,7 +55,7 @@ import { drawDimension, drawTag, type AnnotationDrawContext } from "../annotatio
 import { PATTERN_DASH, categoryOf, drawDetailItem } from "../annotation/detailing";
 import type { SheetRevision } from "../documents";
 import type { RunFitting } from "../routing/types";
-import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, partPlanOutline, systemLine } from "./runs";
+import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, partPlanOutline, systemLine, type TextDrawStyle } from "./runs";
 import { INSULATION_DASH, insulationSectionCuts } from "./insulation";
 import { insulationHiddenInView } from "../view-categories";
 import { elementCategoryChain, elementLook, elementViewCategory } from "../categories/element";
@@ -214,6 +214,23 @@ function lineIn(p: Painter, a: Vec2, b: Vec2, pen: Pen, tone: Tone, explicitDash
   p.prims.push(prim);
 }
 
+function circleIn(p: Painter, center: Vec2, radius: number, pen: Pen, tone: Tone, explicitDash?: readonly number[]): void {
+  if (radius <= 0) return;
+  if (center.x + radius < p.min.x || center.x - radius > p.max.x || center.y + radius < p.min.y || center.y - radius > p.max.y) return;
+  const dash = explicitDash ?? p.dash;
+  // When the circle straddles the crop boundary, clip as fine segments so nothing extends past the crop box.
+  if (center.x - radius < p.min.x || center.x + radius > p.max.x || center.y - radius < p.min.y || center.y + radius > p.max.y) {
+    const steps = 28;
+    for (let i = 0; i < steps; i++) {
+      const a0 = (i / steps) * Math.PI * 2;
+      const a1 = ((i + 1) / steps) * Math.PI * 2;
+      lineIn(p, { x: center.x + radius * Math.cos(a0), y: center.y + radius * Math.sin(a0) }, { x: center.x + radius * Math.cos(a1), y: center.y + radius * Math.sin(a1) }, pen, tone, dash);
+    }
+    return;
+  }
+  p.prims.push({ kind: "circle", at: p.toPaper(center), r: radius / p.scale, pen, ...(tone !== "ink" ? { tone } : {}), ...(dash ? { dash } : {}) });
+}
+
 function inside(p: Painter, at: Vec2): boolean {
   return at.x >= p.noteMin.x && at.x <= p.noteMax.x && at.y >= p.noteMin.y && at.y <= p.noteMax.y;
 }
@@ -237,9 +254,22 @@ function rotatedTextFits(p: Painter, at: Vec2, text: string, size: number, model
   return at.x - hx >= p.noteMin.x && at.x + hx <= p.noteMax.x && at.y - hy >= p.noteMin.y && at.y + hy <= p.noteMax.y;
 }
 
-function textIn(p: Painter, at: Vec2, text: string, size: number, anchor: "start" | "middle" | "end", tone: Tone, bold = false): void {
+function textIn(p: Painter, at: Vec2, text: string, size: number, anchor: "start" | "middle" | "end", tone: Tone, boldOrStyle: boolean | TextDrawStyle = false): void {
   if (!textFits(p, at, text, size, anchor)) return;
-  p.prims.push({ kind: "text", at: p.toPaper(at), text, size, anchor, ...(bold ? { bold } : {}), ...(tone !== "ink" ? { tone } : {}) });
+  const st: TextDrawStyle = typeof boldOrStyle === "boolean" ? { bold: boldOrStyle } : boldOrStyle;
+  p.prims.push({
+    kind: "text",
+    at: p.toPaper(at),
+    text,
+    size,
+    anchor,
+    ...(st.bold ? { bold: true } : {}),
+    ...(st.italic ? { italic: true } : {}),
+    ...(st.fontFamily ? { fontFamily: st.fontFamily } : {}),
+    ...(st.mask ? { mask: true } : {}),
+    ...(st.color ? { color: st.color } : {}),
+    ...(tone !== "ink" ? { tone } : {}),
+  });
 }
 
 function polygonIn(p: Painter, points: readonly Vec2[], pen: Pen, tone: Tone, dash?: readonly number[]): void {
@@ -604,6 +634,52 @@ function drawLoadPoints(model: ModelState, hostId: string, line: (a: Vec2, b: Ve
   }
 }
 
+function seedPartLabelObstacles(
+  model: ModelState,
+  view: ViewElement,
+  p: Painter,
+  frame: ViewFrame,
+  display: Display,
+  shownAs: (el: BimElement) => { readonly visible: boolean },
+  candidates: readonly BimElement[],
+  takenPartBoxes: PartLabelIndex,
+  symScale: number,
+  onPart?: (el: PartInstance, look: CategoryLook) => void,
+): void {
+  const wallPad = 0.6 * frame.scale;
+  const partPad = 0.45 * frame.scale;
+  for (const el of candidates) {
+    if (!nearWindow(p, el) || leftOutOfDisciplineView(view, el)) continue;
+    if (el.kind === "wall") {
+      const half = el.thickness / 2 + wallPad;
+      takenPartBoxes.add({
+        min: { x: Math.min(el.start.x, el.end.x) - half, y: Math.min(el.start.y, el.end.y) - half },
+        max: { x: Math.max(el.start.x, el.end.x) + half, y: Math.max(el.start.y, el.end.y) + half },
+      });
+    } else if (el.kind === "part") {
+      const look = elementLook(model, view, el);
+      if (!look.visible || !shownAs(el).visible) continue;
+      // For unmarked paper-only symbols (e.g. hundreds of small schematic devices), use a conservative paper-space bound to avoid a redundant full resolve pass; compute exact bounds for marked or model-sized parts.
+      const t = model.elements[el.typeId];
+      const sym = t?.kind === "part_type" ? t.definition.symbol : undefined;
+      const paperOnly = !el.mark && sym !== undefined && sym.length > 0 && sym.every((s) => s.units === "paper");
+      if (paperOnly) {
+        const r = 5.0 * symScale * frame.scale + partPad;
+        takenPartBoxes.add({ min: { x: el.position.x - r, y: el.position.y - r }, max: { x: el.position.x + r, y: el.position.y + r } });
+      } else {
+        const b = partPlanOutline(model, el, { detail: look.detailLevel ?? display.detail, scale: frame.scale, symbolScale: symScale, planSymbol: look.planSymbol }).bounds;
+        if (b) {
+          takenPartBoxes.add({
+            min: { x: b.min.x - partPad, y: b.min.y - partPad },
+            max: { x: b.max.x + partPad, y: b.max.y + partPad },
+          });
+        }
+      }
+      onPart?.(el, look);
+    }
+  }
+}
+
 function drawPlan(
   model: ModelState,
   view: ViewElement,
@@ -632,6 +708,7 @@ function drawPlan(
     others.push(x.el);
   }
   const own = levelElements(model, view);
+  const symScale = view.props?.symbolScale ?? 1;
   const deferredParts: { readonly el: PartInstance; readonly tone: Tone; readonly planSymbol: boolean | null; readonly detail: DetailLevel; readonly projectionPen: (pen: Pen) => Pen; readonly elementDash: readonly number[] | undefined }[] = [];
   const flushParts = (): number => {
     const startIdx = deferredParts.length > 0 ? p.prims.length : -1;
@@ -640,13 +717,15 @@ function drawPlan(
         model,
         dp.el,
         (a, b, pen, dash) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash),
-        (at, text, size, anchor) => textIn(p, at, text, size, anchor ?? "middle", dp.tone),
+        (at, text, size, anchor, style) => textIn(p, at, text, size, anchor ?? "middle", dp.tone, style),
         dp.planSymbol,
         dp.detail,
         {
           scale: frame.scale,
+          symbolScale: symScale,
           showMark: tagsShown && !taggedHere.has(dp.el.id),
           fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) }),
+          circle: (c, r, pen) => circleIn(p, c, r, dp.projectionPen(pen), dp.tone, dp.elementDash),
           takenBoxes: takenPartBoxes,
         },
       );
@@ -662,37 +741,7 @@ function drawPlan(
     return t?.kind === "part_type" && (t.definition.clearances?.length ?? 0) > 0;
   });
   if (hasPartLabels) {
-    const wallPad = 0.6 * frame.scale;
-    const partPad = 0.45 * frame.scale;
-    for (const el of candidates) {
-      if (!nearWindow(p, el) || leftOutOfDisciplineView(view, el)) continue;
-      if (el.kind === "wall") {
-        const half = el.thickness / 2 + wallPad;
-        takenPartBoxes.add({
-          min: { x: Math.min(el.start.x, el.end.x) - half, y: Math.min(el.start.y, el.end.y) - half },
-          max: { x: Math.max(el.start.x, el.end.x) + half, y: Math.max(el.start.y, el.end.y) + half },
-        });
-      } else if (el.kind === "part") {
-        const look = elementLook(model, view, el);
-        if (!look.visible || !shownAs(el).visible) continue;
-        // For unmarked paper-only symbols (e.g. hundreds of small schematic devices), use a conservative paper-space bound to avoid a redundant full resolve pass; compute exact bounds for marked or model-sized parts.
-        const t = model.elements[el.typeId];
-        const sym = t?.kind === "part_type" ? t.definition.symbol : undefined;
-        const paperOnly = !el.mark && sym !== undefined && sym.length > 0 && sym.every((s) => s.units === "paper");
-        if (paperOnly) {
-          const r = 4.5 * frame.scale + partPad;
-          takenPartBoxes.add({ min: { x: el.position.x - r, y: el.position.y - r }, max: { x: el.position.x + r, y: el.position.y + r } });
-        } else {
-          const b = partPlanOutline(model, el, { detail: look.detailLevel ?? display.detail, scale: frame.scale, planSymbol: look.planSymbol }).bounds;
-          if (b) {
-            takenPartBoxes.add({
-              min: { x: b.min.x - partPad, y: b.min.y - partPad },
-              max: { x: b.max.x + partPad, y: b.max.y + partPad },
-            });
-          }
-        }
-      }
-    }
+    seedPartLabelObstacles(model, view, p, frame, display, shownAs, candidates, takenPartBoxes, symScale);
   }
   for (const el of candidates) {
     if (!nearWindow(p, el)) continue;
@@ -748,9 +797,28 @@ function drawPlan(
         lineIn(p, add(el.position, { x: -half, y: 0 }), add(el.position, { x: half, y: 0 }), "thin", tone);
         break;
       }
-      case "room":
-        textIn(p, centroidOf(el.outline), `${el.name.toUpperCase()} ${el.number}`, 2.5, "middle", tone);
+      case "room": {
+        const rs = resolveTextStyle(model, "space_label");
+        const label = `${el.name} ${el.number}`;
+        textIn(
+          p,
+          centroidOf(el.outline),
+          rs ? (rs.uppercase ? label.toUpperCase() : label) : `${el.name.toUpperCase()} ${el.number}`,
+          rs?.textSizeMm ?? 2.5,
+          "middle",
+          tone,
+          rs
+            ? {
+                bold: rs.bold,
+                italic: rs.italic,
+                fontFamily: rs.fontFamily,
+                mask: rs.mask,
+                color: rs.color,
+              }
+            : false,
+        );
         break;
+      }
       case "grid": {
         lineIn(p, el.start, el.end, "thin", tone, [6, 1.5, 1, 1.5]);
         textIn(p, el.start, el.label, 3.5, "middle", tone, true);
@@ -1001,13 +1069,16 @@ function drawPlanConnections(
   firstPartIdx: number,
 ): void {
   const tagsShown = categoryLook(view, "tags").visible;
+  const symScale = view.props?.symbolScale ?? 1;
   for (const copy of typicalCopiesOf(model, shownParts.values())) {
     const look = elementLook(model, view, copy);
     const tone = lookTone(look, disciplineTone(view, copy));
-    drawPartSymbol(model, copy, (a, b, pen) => lineIn(p, a, b, pen, tone), (at, text, size, anchor) => textIn(p, at, text, size, anchor ?? "middle", tone), look.planSymbol, display.detail, {
+    drawPartSymbol(model, copy, (a, b, pen) => lineIn(p, a, b, pen, tone), (at, text, size, anchor, style) => textIn(p, at, text, size, anchor ?? "middle", tone, style), look.planSymbol, display.detail, {
       scale: p.scale,
+      symbolScale: symScale,
       showMark: tagsShown,
       fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) }),
+      circle: (c, r, pen) => circleIn(p, c, r, pen, tone),
       takenBoxes: takenPartBoxes,
     });
   }
@@ -1546,7 +1617,7 @@ function drawItemsInModel(p: Painter, items: readonly DrawingItem[], model: Mode
 
 /** A drafting item's primitives in a halftoned category. */
 function halftoned(prim: Primitive): Primitive {
-  return prim.kind === "line" || prim.kind === "fill" || prim.kind === "text" ? { ...prim, tone: "halftone" } : prim;
+  return prim.kind === "line" || prim.kind === "circle" || prim.kind === "fill" || prim.kind === "text" ? { ...prim, tone: "halftone" } : prim;
 }
 
 function drawItemInModel(p: Painter, item: DrawingItem, a: Vec2, b: Vec2 | undefined, ctx: AnnotationDrawContext, window: { min: Vec2; max: Vec2 }, model: ModelState): void {
@@ -2010,6 +2081,64 @@ export function titleBlockCodeSlot(paper: Vec2): { readonly left: number; readon
   const w = paper.x < 600 ? 70 : 100;
   const bottom = paper.y - 12.7;
   return { left: paper.x - 12.7 - w / 2, right: paper.x - 12.7 - 2, top: bottom - SHEET_NUMBER_BOX_MM + 1, bottom: bottom - SHEET_NUMBER_TOP_MM };
+}
+
+export interface AutoPartMarkHit {
+  readonly partId: string;
+  readonly text: string;
+  /** Center of the auto-placed mark on paper, mm. */
+  readonly at: Vec2;
+  /** Paper bounding box of the auto-placed mark, mm. */
+  readonly box: { readonly min: Vec2; readonly max: Vec2 };
+  /** Paper point of the part's insertion origin, mm. */
+  readonly partAt: Vec2;
+}
+
+/**
+ * Paper hit boxes for every untagged part's automatic plan mark in `view`.
+ * Mirrors `drawView`'s exact collision-avoiding placement so interactive canvas
+ * drags grab the exact mark the engineer sees and promote it into a movable tag.
+ */
+export function planAutoPartMarks(model: ModelState, view: ViewElement, frame: ViewFrame, toPaperOverride?: (q: Vec2) => Vec2): AutoPartMarkHit[] {
+  if (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan") return [];
+  if (!categoryLook(view, "tags").visible) return [];
+  const taggedHere = new Set((documentIndex(model).itemsByOwner.get(view.id) ?? []).flatMap((i) => (i.tag && !i.deleted ? [i.tag.elementId] : [])));
+  const own = levelElements(model, view);
+  const others = otherLevelReach(model, view).map((x) => x.el);
+  const candidates = others.length === 0 ? own : [...own, ...others];
+  const display = displayOf(model, view);
+  const shownAs = organizationDisplay(model, view);
+  const symScale = view.props?.symbolScale ?? 1;
+  const taken = new PartLabelIndex(frame.scale);
+  const toPaper = toPaperOverride ?? ((q: Vec2): Vec2 => modelToPaper(frame, q));
+  const p = painter([], [], [], frame, view, viewCropAndWindow(model, view).crop, []);
+  const markParts: { readonly el: PartInstance; readonly planSymbol: boolean | null; readonly detail: DetailLevel }[] = [];
+  seedPartLabelObstacles(model, view, p, frame, display, shownAs, candidates, taken, symScale, (el, look) => {
+    if (el.mark && !taggedHere.has(el.id)) markParts.push({ el, planSymbol: look.planSymbol, detail: look.detailLevel ?? display.detail });
+  });
+  const hits: AutoPartMarkHit[] = [];
+  const noop = () => {};
+  for (const dp of markParts) {
+    drawPartSymbol(model, dp.el, noop, noop, dp.planSymbol, dp.detail, {
+      scale: frame.scale,
+      symbolScale: symScale,
+      showMark: true,
+      takenBoxes: taken,
+      onMarkPlaced: (m) => {
+        const at = toPaper(m.at);
+        const halfW = Math.max(m.sizeMm * 0.6, m.text.length * m.sizeMm * 0.36) + 0.5;
+        const halfH = m.sizeMm * 0.65 + 0.4;
+        hits.push({
+          partId: m.partId,
+          text: m.text,
+          at,
+          box: { min: { x: at.x - halfW, y: at.y - halfH }, max: { x: at.x + halfW, y: at.y + halfH } },
+          partAt: toPaper(dp.el.position),
+        });
+      },
+    });
+  }
+  return hits;
 }
 
 function drawTitleBlockFor(prims: Primitive[], sheet: Sheet, paper: Vec2, opts: SheetDrawOptions): void {

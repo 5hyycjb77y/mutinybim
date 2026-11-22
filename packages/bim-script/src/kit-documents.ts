@@ -9,6 +9,7 @@ import {
   buildViewScene,
   builtinFormTemplate,
   detailComponents,
+  diagramKinds,
   enlargedPlanCommands,
   formScheduleKinds,
   isBoundFormKind,
@@ -22,7 +23,6 @@ import {
   type Command,
   type DetailLevel,
   type DiagramHints,
-  type DiagramKind,
   type ModelState,
   type OneLineSpec,
   type ScheduleColumnDef,
@@ -31,6 +31,7 @@ import {
   type ScheduleFilter,
   type ScheduleGroup,
   type ScheduleSort,
+  type StoredDiagramKind,
   type ViewElement,
   type VisualStyle,
 } from "@permitzip/bim-kernel";
@@ -157,10 +158,18 @@ export interface PackSheetSpec {
   readonly gap?: Measure;
 }
 
-/** A one-line (or riser) diagram in a new drafting view: drawn from a distribution you describe, or live from the model. */
+/** A one-line, riser, or pack-contributed live diagram in a new drafting view: drawn from a distribution you describe, or live from the model. */
 export type OneLineDiagramSpec =
   | { readonly name: string; readonly diagram: OneLineSpec; readonly id?: string }
-  | { readonly name: string; readonly live: DiagramKind; readonly hints?: DiagramHints; readonly id?: string };
+  | { readonly name: string; readonly live: StoredDiagramKind; readonly hints?: DiagramHints; readonly id?: string };
+
+/** Any live diagram kind registered by an active pack (e.g. `"one_line"`, `"electrical_riser"`, `"electrical.controls_diagram"`, `"plumbing_riser"`). */
+export interface LiveDiagramSpec {
+  readonly name: string;
+  readonly kind: StoredDiagramKind;
+  readonly hints?: DiagramHints;
+  readonly id?: string;
+}
 
 /** A form schedule (a panel's, a switchboard's, a feeder list): the add-on's built-in form, filled from the model. */
 export interface FormScheduleSpec {
@@ -187,7 +196,49 @@ export interface TagSpec {
   readonly fields?: readonly string[];
   /** A leader line to the element (default yes). */
   readonly leader?: boolean;
+  /** Override the tag style's leader choice for this tag only. */
+  readonly leaderOverride?: boolean;
+  /** Opaque paper-white background mask behind the tag so crossing lines stay broken and readable. */
+  readonly mask?: boolean;
+  /** Optional named tag style id (e.g. `"tst-mark-clean"`). */
+  readonly styleId?: string;
+  /** Leader elbow: `"auto"` for a horizontal shoulder, or an explicit plan bend point. */
+  readonly elbow?: "auto" | { readonly x: Measure; readonly y: Measure };
   readonly id?: string;
+}
+
+type CreateTextStyle = Extract<Command, { type: "create_text_style" }>;
+type UpdateTextStyle = Extract<Command, { type: "update_text_style" }>;
+
+/** A named model Text Type (font family, paper cap height, bold/italic/uppercase, opaque or transparent background, default roles). */
+export type TextStyleSpec = Omit<CreateTextStyle, "type" | "styleId"> & { readonly id?: string };
+/** Changes to a model Text Type. Pass `""` for `fontFamily` or `color` to reset to defaults. */
+export type TextStyleChanges = Omit<UpdateTextStyle, "type" | "styleId">;
+
+/** Plan-level circuit & control wiring display settings (`ViewProps.circuitGraphics`). */
+export interface CircuitGraphicsSettingsSpec {
+  readonly style?: "arcs" | "orthogonal" | "numbers" | "off";
+  /** Draw branch power circuits & home runs. Set `false` with `switchLegs: true` for a dedicated controls schematic plan. */
+  readonly showCircuits?: boolean;
+  readonly homeRuns?: boolean;
+  readonly switchLegs?: boolean;
+  readonly switchLegLabels?: boolean;
+  readonly allCopies?: boolean;
+  readonly hashMarks?: "off" | "hots_neutral" | "hots_neutral_ground";
+  readonly hashMarksOn?: "home_runs" | "home_runs_and_switch_legs" | "all_runs";
+  readonly typLabelsOnce?: boolean;
+}
+
+/** Movable home-run arrow/curve/label offsets in typed length units (relative to the host device so it moves with the device). */
+export interface HomeRunSpec {
+  /** Re-attach the home run to another member device on the circuit. */
+  readonly member?: string;
+  /** Offset from the host device's anchor to the arrow tip (e.g. `{ x: units.ft(-4), y: units.ft(1) }`). */
+  readonly tipOffset?: { readonly x: Measure; readonly y: Measure };
+  /** Optional mid-shaft curve offset from the host device's anchor for a curved home run. */
+  readonly bendOffset?: { readonly x: Measure; readonly y: Measure };
+  /** Optional offset from the arrow tip to reposition the circuit label independently. */
+  readonly labelOffset?: { readonly x: Measure; readonly y: Measure };
 }
 
 export interface DimensionSpec {
@@ -253,6 +304,8 @@ export interface PlanViewSpec {
   readonly visualStyle?: VisualStyle;
   /** Print repeating inline service codes (CW, SAN, G…) inside single-line runs. Absent: on. */
   readonly showLineCodes?: boolean;
+  /** Multiplier for annotative paper-space symbols and `minPaperMm` floors in this plan (0.5–3.0). Absent: 1. */
+  readonly symbolScale?: number;
   /** Categories the view hides. */
   readonly hide?: ViewProps["hiddenCategories"];
   /** Per-category or per-service overrides (`pipe`, `service:sanitary`, `duct`…): detailLevel, singleLineBelow, lineWeights, pattern, halftone, visible. */
@@ -269,6 +322,8 @@ export interface ViewChanges {
   readonly detailLevel?: DetailLevel;
   readonly visualStyle?: VisualStyle;
   readonly showLineCodes?: boolean;
+  /** Multiplier for annotative paper-space symbols and `minPaperMm` floors in this plan (0.5–3.0). */
+  readonly symbolScale?: number;
   readonly hide?: ViewProps["hiddenCategories"];
   /** Replaces the view's per-category and per-service (`"service:<id>"`) graphics overrides map. Pass `{}` to clear all overrides. */
   readonly categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
@@ -373,6 +428,7 @@ function view(ctx: ScriptContext, viewType: CreateView["viewType"], spec: PlanVi
     ...(spec.detailLevel ? { detailLevel: spec.detailLevel } : {}),
     ...(spec.visualStyle ? { visualStyle: spec.visualStyle } : {}),
     ...(spec.showLineCodes !== undefined ? { showLineCodes: spec.showLineCodes } : {}),
+    ...(spec.symbolScale !== undefined ? { symbolScale: spec.symbolScale } : {}),
     ...(spec.hide ? { hiddenCategories: spec.hide } : {}),
     ...(spec.categoryOverrides ? { categoryOverrides: toCategoryOverrides(spec.categoryOverrides) } : {}),
   };
@@ -606,6 +662,7 @@ export const documents = {
         ...(changes.detailLevel !== undefined ? { detailLevel: changes.detailLevel } : {}),
         ...(changes.visualStyle !== undefined ? { visualStyle: changes.visualStyle } : {}),
         ...(changes.showLineCodes !== undefined ? { showLineCodes: changes.showLineCodes } : {}),
+        ...(changes.symbolScale !== undefined ? { symbolScale: changes.symbolScale } : {}),
         ...(changes.hide !== undefined ? { hiddenCategories: changes.hide } : {}),
         ...(changes.categoryOverrides !== undefined ? { categoryOverrides: toCategoryOverrides(changes.categoryOverrides) } : {}),
       },
@@ -709,7 +766,17 @@ export const documents = {
     if (planned.command) ctx.editSteps(planned.command);
     return { moved: planned.layout.moves.length };
   },
-  /** A one-line or riser diagram in a new drafting view; returns the view's id. Put it on a sheet with `documents.place`. */
+  /** Every live diagram kind available from the model's active packs (`"one_line"`, `"electrical_riser"`, `"electrical.controls_diagram"`, `"plumbing_riser"`, …). */
+  diagramKinds(ctx: ScriptContext): readonly { readonly kind: StoredDiagramKind; readonly label: string }[] {
+    return onWorking(ctx, "documents.diagramKinds", () => diagramKinds());
+  },
+  /** A live diagram view derived from the model by any active pack (`documents.diagramKinds(ctx)` lists available kinds). Returns the view's id. */
+  diagram(ctx: ScriptContext, spec: LiveDiagramSpec): string {
+    const viewId = spec.id ?? ctx.id("view");
+    ctx.edit({ type: "create_view", viewId, name: spec.name, viewType: "detail", props: { diagram: { kind: spec.kind, ...(spec.hints ? { hints: spec.hints } : {}) } } });
+    return viewId;
+  },
+  /** A one-line, riser, or live pack diagram in a new drafting view; returns the view's id. Put it on a sheet with `documents.place`. */
   oneLine(ctx: ScriptContext, spec: OneLineDiagramSpec): string {
     const viewId = spec.id ?? ctx.id("view");
     if ("live" in spec) {
@@ -750,13 +817,28 @@ export const documents = {
   /** A tag on one element in a plan view; returns the tag's id. */
   tag(ctx: ScriptContext, spec: TagSpec): string {
     const itemId = spec.id ?? ctx.id("tag");
+    const elbow =
+      spec.elbow === "auto"
+        ? ("auto" as const)
+        : spec.elbow
+          ? { x: mm(spec.elbow.x, "Tag elbow x"), y: mm(spec.elbow.y, "Tag elbow y") }
+          : undefined;
     ctx.edit({
       type: "add_drawing_item",
       itemId,
       ownerId: spec.view,
       shape: "tag",
       points: [{ x: mm(spec.at.x, "Tag x"), y: mm(spec.at.y, "Tag y") }],
-      tag: { elementId: spec.element, template: spec.template ?? (spec.fields ? "fields" : "auto"), leader: spec.leader ?? true, ...(spec.fields ? { fields: [...spec.fields] } : {}) },
+      tag: {
+        elementId: spec.element,
+        template: spec.template ?? (spec.fields ? "fields" : "auto"),
+        leader: spec.leader ?? true,
+        ...(spec.fields ? { fields: [...spec.fields] } : {}),
+        ...(spec.leaderOverride !== undefined ? { leaderOverride: spec.leaderOverride } : {}),
+        ...(spec.mask !== undefined ? { mask: spec.mask } : {}),
+        ...(spec.styleId !== undefined ? { styleId: spec.styleId } : {}),
+        ...(elbow !== undefined ? { elbow } : {}),
+      },
     });
     return itemId;
   },
@@ -783,9 +865,163 @@ export const documents = {
     ctx.edit({ type: "create_tag_style", styleId, ...style });
     return styleId;
   },
-  /** Changes a tag style's look: lines, box, orientation, applies-to or its arrow (`"none"` removes it). */
+  /** Changes a tag style's look: lines, box, orientation, applies-to, mask, textStyleId or its arrow (`"none"` removes it). */
   setTagStyle(ctx: ScriptContext, styleId: string, changes: TagStyleChanges): void {
     ctx.edit({ type: "update_tag_style", styleId, ...changes });
+  },
+  /** Creates a model-wide Text Type (font, cap height on paper, bold/italic/uppercase, opaque or transparent background, default roles); returns its id. */
+  textStyle(ctx: ScriptContext, spec: TextStyleSpec): string {
+    const { id, ...style } = spec;
+    const styleId = id ?? ctx.id("text-style");
+    ctx.edit({ type: "create_text_style", styleId, ...style });
+    return styleId;
+  },
+  /** Updates a model-wide Text Type (updates every mark, circuit label, tag, dimension or room title inheriting it). */
+  setTextStyle(ctx: ScriptContext, styleId: string, changes: TextStyleChanges): void {
+    ctx.edit({ type: "update_text_style", styleId, ...changes });
+  },
+  /** Deletes an unused model-wide Text Type. */
+  deleteTextStyle(ctx: ScriptContext, styleId: string): void {
+    ctx.edit({ type: "delete_text_style", styleId });
+  },
+  /** Configures a plan view's circuit & switch-leg display (style, home runs, switch legs/labels, NECA 100 hash marks & placement) while preserving existing wire/home-run routing hints. */
+  setCircuitGraphics(ctx: ScriptContext, viewRef: string, settings: CircuitGraphicsSettingsSpec): void {
+    const view = onWorking(ctx, "documents.setCircuitGraphics", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = (view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {};
+    const next: Record<string, unknown> = {
+      ...cur,
+      ...(settings.style !== undefined ? { style: settings.style } : {}),
+      ...(settings.showCircuits !== undefined ? { showCircuits: settings.showCircuits } : {}),
+      ...(settings.homeRuns !== undefined ? { homeRuns: settings.homeRuns } : {}),
+      ...(settings.switchLegs !== undefined ? { switchLegs: settings.switchLegs } : {}),
+      ...(settings.switchLegLabels !== undefined ? { switchLegLabels: settings.switchLegLabels } : {}),
+      ...(settings.allCopies !== undefined ? { allCopies: settings.allCopies } : {}),
+      ...(settings.hashMarks !== undefined ? { hashMarks: settings.hashMarks } : {}),
+      ...(settings.hashMarksOn !== undefined ? { hashMarksOn: settings.hashMarksOn } : {}),
+      ...(settings.typLabelsOnce !== undefined ? { typLabelsOnce: settings.typLabelsOnce } : {}),
+    };
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: next } as ViewProps });
+  },
+  /**
+   * Pins multi-vertex spline/orthogonal waypoints on one circuit or switch-leg wire span in a plan view.
+   * Pass 1 point for a custom arc, 2+ points for a smooth Catmull-Rom spline, or `null` / `[]` to reset to automatic routing.
+   */
+  setWirePath(
+    ctx: ScriptContext,
+    viewRef: string,
+    hintKey: string,
+    fromElementId: string,
+    toElementId: string,
+    waypoints: readonly { readonly x: Measure; readonly y: Measure }[] | null,
+  ): void {
+    const view = onWorking(ctx, "documents.setWirePath", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = ((view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {}) as Record<string, unknown>;
+    const hints = { ...((cur.hints as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+    const hint = { ...(hints[hintKey] ?? {}) };
+    const spanKey = fromElementId < toElementId ? `${fromElementId}|${toElementId}` : `${toElementId}|${fromElementId}`;
+    const bends = { ...((hint.bends as Record<string, unknown> | undefined) ?? {}) };
+    delete bends[spanKey];
+    const wps = { ...((hint.waypoints as Record<string, unknown> | undefined) ?? {}) };
+    if (waypoints && waypoints.length > 0) {
+      const mmPts = waypoints.map((pt, i) => ({ x: Math.round(mm(pt.x, `Waypoint ${i + 1} x`)), y: Math.round(mm(pt.y, `Waypoint ${i + 1} y`)) }));
+      wps[spanKey] = fromElementId < toElementId ? mmPts : [...mmPts].reverse();
+    } else {
+      delete wps[spanKey];
+    }
+    const nextHint: Record<string, unknown> = { ...hint };
+    if (Object.keys(bends).length > 0) nextHint.bends = bends;
+    else delete nextHint.bends;
+    if (Object.keys(wps).length > 0) nextHint.waypoints = wps;
+    else delete nextHint.waypoints;
+    if (Object.keys(nextHint).length > 0) hints[hintKey] = nextHint;
+    else delete hints[hintKey];
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: { ...cur, hints } } as ViewProps });
+  },
+  /** Flips (or explicitly sets) the automatic wire arc bulge side on one circuit or switch-leg span. */
+  flipWireArc(ctx: ScriptContext, viewRef: string, hintKey: string, fromElementId: string, toElementId: string, flipped?: boolean): void {
+    const view = onWorking(ctx, "documents.flipWireArc", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = ((view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {}) as Record<string, unknown>;
+    const hints = { ...((cur.hints as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+    const hint = { ...(hints[hintKey] ?? {}) };
+    const spanKey = fromElementId < toElementId ? `${fromElementId}|${toElementId}` : `${toElementId}|${fromElementId}`;
+    const bends = { ...((hint.bends as Record<string, unknown> | undefined) ?? {}) };
+    const wps = { ...((hint.waypoints as Record<string, unknown> | undefined) ?? {}) };
+    delete bends[spanKey];
+    delete wps[spanKey];
+    const flipMap = { ...((hint.flipArc as Record<string, boolean> | undefined) ?? {}) };
+    const next = flipped ?? !flipMap[spanKey];
+    if (next) flipMap[spanKey] = true;
+    else delete flipMap[spanKey];
+    const nextHint: Record<string, unknown> = { ...hint };
+    if (Object.keys(bends).length > 0) nextHint.bends = bends;
+    else delete nextHint.bends;
+    if (Object.keys(wps).length > 0) nextHint.waypoints = wps;
+    else delete nextHint.waypoints;
+    if (Object.keys(flipMap).length > 0) nextHint.flipArc = flipMap;
+    else delete nextHint.flipArc;
+    if (Object.keys(nextHint).length > 0) hints[hintKey] = nextHint;
+    else delete hints[hintKey];
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: { ...cur, hints } } as ViewProps });
+  },
+  /** Aims, resizes, curves, re-attaches, or repositions a circuit's home run arrow & label (relative to its host device so it auto-follows moves). Pass `null` to reset. */
+  setHomeRun(ctx: ScriptContext, viewRef: string, linkId: string, spec: HomeRunSpec | null): void {
+    const view = onWorking(ctx, "documents.setHomeRun", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = ((view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {}) as Record<string, unknown>;
+    const hints = { ...((cur.hints as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+    const hint = { ...(hints[linkId] ?? {}) };
+    if (spec === null) {
+      delete hint.homeRun;
+    } else {
+      const hr: Record<string, unknown> = {};
+      if (spec.member !== undefined) hr.memberId = spec.member;
+      if (spec.tipOffset !== undefined) hr.tipOffset = { x: Math.round(mm(spec.tipOffset.x, "Home run tip offset x")), y: Math.round(mm(spec.tipOffset.y, "Home run tip offset y")) };
+      if (spec.bendOffset !== undefined) hr.bendOffset = { x: Math.round(mm(spec.bendOffset.x, "Home run bend offset x")), y: Math.round(mm(spec.bendOffset.y, "Home run bend offset y")) };
+      if (spec.labelOffset !== undefined) hr.labelOffset = { x: Math.round(mm(spec.labelOffset.x, "Home run label offset x")), y: Math.round(mm(spec.labelOffset.y, "Home run label offset y")) };
+      if (Object.keys(hr).length > 0) hint.homeRun = hr;
+      else delete hint.homeRun;
+    }
+    if (Object.keys(hint).length > 0) hints[linkId] = hint;
+    else delete hints[linkId];
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: { ...cur, hints } } as ViewProps });
+  },
+  /** Repositions (or resets with `null`) a switch-leg designation ("a", "b") relative to its member device in typed length units. */
+  setSwitchLegLabelOffset(
+    ctx: ScriptContext,
+    viewRef: string,
+    hintKey: string,
+    memberId: string,
+    offset: { readonly x: Measure; readonly y: Measure } | null,
+  ): void {
+    const view = onWorking(ctx, "documents.setSwitchLegLabelOffset", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = ((view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {}) as Record<string, unknown>;
+    const hints = { ...((cur.hints as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+    const hint = { ...(hints[hintKey] ?? {}) };
+    const offsets = { ...((hint.memberLabelOffsets as Record<string, unknown> | undefined) ?? {}) };
+    if (offset === null) {
+      delete offsets[memberId];
+    } else {
+      offsets[memberId] = { x: Math.round(mm(offset.x, "Switch-leg label offset x")), y: Math.round(mm(offset.y, "Switch-leg label offset y")) };
+    }
+    if (Object.keys(offsets).length > 0) hint.memberLabelOffsets = offsets;
+    else delete hint.memberLabelOffsets;
+    if (Object.keys(hint).length > 0) hints[hintKey] = hint;
+    else delete hints[hintKey];
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: { ...cur, hints } } as ViewProps });
+  },
+  /** Combines (or splits with `null`) branch circuits on the same panel into a shared-neutral Multi-Wire Branch Circuit (MWBC, NEC 210.4) multi-arrowhead home run. */
+  setMwbcGroup(ctx: ScriptContext, viewRef: string, linkIds: readonly string[], groupName: string | null): void {
+    const view = onWorking(ctx, "documents.setMwbcGroup", (m) => viewIn(m, viewRef, "plan view"));
+    const cur = ((view.props as { readonly circuitGraphics?: Record<string, unknown> } | undefined)?.circuitGraphics ?? {}) as Record<string, unknown>;
+    const hints = { ...((cur.hints as Record<string, Record<string, unknown>> | undefined) ?? {}) };
+    const trimmed = groupName?.trim() || undefined;
+    for (const id of linkIds) {
+      const hint = { ...(hints[id] ?? {}) };
+      if (trimmed) hint.mwbcGroup = trimmed;
+      else delete hint.mwbcGroup;
+      if (Object.keys(hint).length > 0) hints[id] = hint;
+      else delete hints[id];
+    }
+    ctx.edit({ type: "set_view_properties", viewId: view.id, props: { circuitGraphics: { ...cur, hints } } as ViewProps });
   },
   /** Moves an existing tag in a plan view to `at` (and optionally toggles its leader). */
   moveTag(ctx: ScriptContext, tagId: string, at: { readonly x: Measure; readonly y: Measure }, opts?: { readonly leader?: boolean }): void {

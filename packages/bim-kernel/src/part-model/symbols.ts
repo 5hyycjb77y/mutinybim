@@ -36,6 +36,7 @@ export function partSymbolLines(def: PartTypeDefinition, values: Readonly<Record
     }
     const common = {
       ...(symbol.units !== undefined ? { units: symbol.units } : {}),
+      ...(symbol.minPaperMm !== undefined ? { minPaperMm: symbol.minPaperMm } : {}),
       ...(symbol.pen !== undefined ? { pen: symbol.pen } : {}),
     };
     const shapeFill = symbol.filled ? ("solid" as const) : symbol.mask ? ("mask" as const) : undefined;

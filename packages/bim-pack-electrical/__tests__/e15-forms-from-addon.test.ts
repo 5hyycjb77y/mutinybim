@@ -32,8 +32,8 @@ const ZED = definePack({ id: "zz", name: "Zed", version: "1.0.0", kernel: "^1.3.
 
 describe("e15-forms-from-addon", () => {
   it("with every first-party add-on, the kinds are the add-ons' rows, in their order, with their names", () => {
-    expect(formScheduleKinds()).toEqual(["panel", "switchboard", "feeder", "connection_types", "equipment_connections", "gas_equipment", "gas_connections"]);
-    expect(formScheduleKinds().map(formScheduleKindLabel)).toEqual(["Panel schedule", "Switchboard schedule", "Feeder schedule", "Electrical connection type schedule", "Equipment connection schedule", "Gas equipment schedule", "Gas connection schedule"]);
+    expect(formScheduleKinds()).toEqual(["panel", "switchboard", "feeder", "connection_types", "equipment_connections", "lighting_controls", "gas_equipment", "gas_connections"]);
+    expect(formScheduleKinds().map(formScheduleKindLabel)).toEqual(["Panel schedule", "Switchboard schedule", "Feeder schedule", "Electrical connection type schedule", "Equipment connection schedule", "Lighting controls schedule", "Gas equipment schedule", "Gas connection schedule"]);
     expect(formScheduleKinds().filter(isBoundFormKind)).toEqual(["panel", "switchboard"]);
     // Moved verbatim: a schedule made before the move starts from the same template.
     expect(builtinFormTemplate("panel")).toBe(PANEL_TEMPLATE);

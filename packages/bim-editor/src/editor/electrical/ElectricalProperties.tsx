@@ -1,6 +1,6 @@
 'use client'
 
-import { Cable, CircleDot, Unplug, Waypoints } from 'lucide-react'
+import { Cable, CircleDot, ToggleLeft, Unplug, Waypoints } from 'lucide-react'
 import { faultCurrentAt, faultCurrentSummary, electricalConnections, hasPositions, panelSchedule } from '@permitzip/bim-pack-electrical'
 import { type ModelState } from '@permitzip/bim-kernel'
 import { Button } from '../../ui/button'
@@ -22,6 +22,7 @@ export function ElectricalProperties({
   addBlocked,
   onAdd,
   onEdit,
+  onEditControls,
   onPanelView,
   onFeed,
   submit,
@@ -33,6 +34,7 @@ export function ElectricalProperties({
   readonly addBlocked: string | null
   readonly onAdd: () => void
   readonly onEdit: (linkId: string) => void
+  readonly onEditControls?: () => void
   readonly onPanelView: (panelId: string) => void
   readonly onFeed: () => void
   readonly submit: SubmitCommand
@@ -141,6 +143,12 @@ export function ElectricalProperties({
                 </Button>
               </>
             )}
+            {onEditControls && (
+              <Button variant="outline" size="sm" onClick={onEditControls} disabled={editBlocked !== null} title={editBlocked ?? undefined} data-testid="electrical-props-edit-controls">
+                <ToggleLeft data-icon="inline-start" />
+                Edit controls
+              </Button>
+            )}
           </div>
           {addBlocked && <p className="text-xs text-muted-foreground">{addBlocked}</p>}
         </>
@@ -154,10 +162,18 @@ export function ElectricalProperties({
           {target.loads.length} device{target.loads.length === 1 ? '' : 's'} that take power: {circuited === 0 ? 'none on a circuit yet' : `${circuited} on a circuit`}.{target.panels.length > 0 ? ` ${target.panels.length} panel${target.panels.length === 1 ? '' : 's'} in the selection stay as they are.` : ''}
         </p>
         <ConnectionTypePicker model={model} ids={target.loads} submit={submit} editBlocked={editBlocked} onManage={onManageTypes} />
-        <Button size="sm" onClick={onAdd} disabled={addBlocked !== null} title={addBlocked ?? undefined} data-testid="electrical-props-add">
-          <Cable data-icon="inline-start" />
-          {circuited === target.loads.length ? 'Change circuit' : 'Add to circuit'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={onAdd} disabled={addBlocked !== null} title={addBlocked ?? undefined} data-testid="electrical-props-add">
+            <Cable data-icon="inline-start" />
+            {circuited === target.loads.length ? 'Change circuit' : 'Add to circuit'}
+          </Button>
+          {onEditControls && (
+            <Button variant="outline" size="sm" onClick={onEditControls} disabled={editBlocked !== null} title={editBlocked ?? undefined} data-testid="electrical-props-edit-controls">
+              <ToggleLeft data-icon="inline-start" />
+              Edit controls
+            </Button>
+          )}
+        </div>
         {addBlocked && <p className="text-xs text-muted-foreground">{addBlocked}</p>}
       </>
     )

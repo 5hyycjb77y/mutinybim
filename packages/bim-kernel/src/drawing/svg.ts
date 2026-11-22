@@ -51,15 +51,35 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
       parts.push(
         `<rect x="${p.at.x.toFixed(2)}" y="${p.at.y.toFixed(2)}" width="${p.size.x.toFixed(2)}" height="${p.size.y.toFixed(2)}" fill="none" stroke="${ink(p.color) ?? "#000"}" stroke-width="${lineWidthMm(p)}"/>`,
       );
+    } else if (p.kind === "circle") {
+      const dash = p.dash ? ` stroke-dasharray="${p.dash.join(" ")}"` : "";
+      parts.push(
+        `<circle cx="${p.at.x.toFixed(2)}" cy="${p.at.y.toFixed(2)}" r="${p.r.toFixed(3)}" fill="none" stroke="${stroke(p.tone, ink(p.color))}" stroke-width="${lineWidthMm(p)}"${dash}/>`,
+      );
     } else {
       // SVG font-size is the em box; cap height is ~0.72 em for Helvetica (a scene font says its own).
       const face = p.font ? fonts.get(p.font) : undefined;
       const fontSize = (p.size / (face?.capHeight ?? 0.72)).toFixed(2);
-      const family = face ? ` font-family="${esc(face.family)}, Helvetica, Arial, sans-serif"` : "";
+      const family = face
+        ? ` font-family="${esc(face.family)}, Helvetica, Arial, sans-serif"`
+        : p.fontFamily
+          ? ` font-family="${esc(p.fontFamily)}, Helvetica, Arial, sans-serif"`
+          : "";
       const weight = face ? ` font-weight="${face.weight}"` : p.bold ? ' font-weight="bold"' : "";
+      const styleAttr = p.italic ? ' font-style="italic"' : "";
       const fill = p.tone && p.tone !== "ink" ? ` fill="${stroke(p.tone)}"` : ink(p.color) ? ` fill="${ink(p.color)}"` : "";
+      const transform = p.rotate ? ` transform="rotate(${p.rotate.toFixed(2)} ${p.at.x.toFixed(2)} ${p.at.y.toFixed(2)})"` : "";
+      if (p.mask && p.text.length > 0) {
+        const padX = Math.max(0.45, p.size * 0.22);
+        const padY = Math.max(0.32, p.size * 0.16);
+        const w = Math.max(p.size * 0.65, p.text.length * p.size * 0.64) + padX * 2;
+        const h = p.size * 1.24 + padY * 2;
+        const rx = p.anchor === "start" ? p.at.x - padX : p.anchor === "end" ? p.at.x - w + padX : p.at.x - w / 2;
+        const ry = p.at.y - p.size - padY;
+        parts.push(`<rect x="${rx.toFixed(2)}" y="${ry.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#fff" stroke="none"${transform}/>`);
+      }
       parts.push(
-        `<text x="${p.at.x.toFixed(2)}" y="${p.at.y.toFixed(2)}" font-size="${fontSize}" text-anchor="${p.anchor}"${family}${weight}${fill}${p.rotate ? ` transform="rotate(${p.rotate.toFixed(2)} ${p.at.x.toFixed(2)} ${p.at.y.toFixed(2)})"` : ""}>${esc(p.text)}</text>`,
+        `<text x="${p.at.x.toFixed(2)}" y="${p.at.y.toFixed(2)}" font-size="${fontSize}" text-anchor="${p.anchor}"${family}${weight}${styleAttr}${fill}${transform}>${esc(p.text)}</text>`,
       );
     }
   }

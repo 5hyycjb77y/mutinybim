@@ -8,7 +8,7 @@ import { modelToShared, siteOf, formatSharedFt } from "../site";
 import type { DrawingItem } from "../documents";
 import type { Primitive } from "../drawing/sheet";
 import type { BimElement, ModelState, Vec2, ViewElement } from "../types";
-import { organizationOf, type TagLeaderEnd, type TagStyleBox, type TagStyleCategory, type TagStyleUnits } from "../organization/model";
+import { organizationOf, resolveTextStyle, type TagLeaderEnd, type TagStyleBox, type TagStyleCategory, type TagStyleUnits } from "../organization/model";
 import { fieldPaths, fieldText, isRelationshipField } from "../fields/resolver";
 import { fillTemplate, parseFieldTemplate } from "../fields/template";
 import { elbowLeaderPath, elbowLeaderSegments } from "./elbow-leader";
@@ -17,6 +17,7 @@ import { paramNamed } from "../parts";
 import { addOnMarkedPoint, addOnRun, addOnTagCategory, addOnTagText, isAddOnRecord } from "./addon-kinds";
 import { tagFieldAliases } from "./tag-types";
 import { outlineAreaMm2, spaceAreaM2, spaceOutlines } from "../spaces/space-geometry";
+import { partPlanOutline, type PlanOutline } from "../drawing/part-outline";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { linkedAnchorInSection, linkedAnchorItem, linkedAnchorPoint, missingLinkedAnchorWords } from "../reference-geometry/linked-anchors";
 
@@ -865,9 +866,13 @@ function styleOfTag(model: Pick<ModelState, "elements">, spec: TagSpec) {
   return organizationOf({ elements: model.elements, connections: [] }).tagStyleById.get(spec.styleId)?.entry ?? null;
 }
 
-/** The tag's cap height on paper: its style's, else its own, else the default. */
+/** The tag's cap height on paper: its style's Text Type (when named), else its style's size, else its own, else the model's assigned tag Text Type, else 2.4 mm. */
 export function tagTextSizeMm(model: Pick<ModelState, "elements">, spec: TagSpec): number {
-  return styleOfTag(model, spec)?.textSizeMm ?? spec.textSizeMm ?? TAG_TEXT_MM;
+  const style = styleOfTag(model, spec);
+  if (style?.textStyleId) return resolveTextStyle({ elements: model.elements, connections: [] }, "tag", style.textStyleId)?.textSizeMm ?? style.textSizeMm;
+  if (style) return style.textSizeMm;
+  if (spec.textSizeMm !== undefined) return spec.textSizeMm;
+  return resolveTextStyle({ elements: model.elements, connections: [] }, "tag")?.textSizeMm ?? 2.4;
 }
 
 /** Whether the tag draws a leader: its style decides when it has one. */
@@ -993,7 +998,6 @@ export function isGasRun(model: Pick<ModelState, "elements">, el: BimElement): b
   return system?.kind === "mep_system" && system.systemKind === "natural_gas";
 }
 
-const TAG_TEXT_MM = 2.4;
 const TAG_PAD_MM = 1;
 
 /** The words' own width and height on paper before any turn (paper mm). */
@@ -1064,25 +1068,85 @@ export function tagItemBox(model: Pick<ModelState, "elements">, view: ViewElemen
   return tagHeadBox(item.id, tagLines(model, spec) ?? ["?"], toPaper(head), tagTextSizeMm(model, spec), tagRotationDeg(model, view, spec, toPaper), tagShape(model, spec));
 }
 
+/** Outermost crossing of ray `from -> to` with a part's rendered plan symbol outline (model mm); null when none. */
+function symbolRimPoint(outline: readonly PlanOutline[], from: Vec2, to: Vec2): Vec2 | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-6) return null;
+  let best = 0;
+  for (const o of outline) {
+    if (o.kind === "seg") {
+      const ex = o.b.x - o.a.x;
+      const ey = o.b.y - o.a.y;
+      const den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue;
+      const wx = o.a.x - from.x;
+      const wy = o.a.y - from.y;
+      const t = (wx * ey - wy * ex) / den;
+      const u = (wx * dy - wy * dx) / den;
+      if (t > best && t <= 1 && u >= -1e-6 && u <= 1 + 1e-6) best = t;
+    } else {
+      const fx = from.x - o.c.x;
+      const fy = from.y - o.c.y;
+      const b = 2 * (fx * dx + fy * dy);
+      const c = fx * fx + fy * fy - o.r * o.r;
+      const disc = b * b - 4 * len2 * c;
+      if (disc < 0) continue;
+      const root = Math.sqrt(disc);
+      const t1 = (-b - root) / (2 * len2);
+      const t2 = (-b + root) / (2 * len2);
+      if (t1 > best && t1 <= 1) best = t1;
+      if (t2 > best && t2 <= 1) best = t2;
+    }
+  }
+  return best > 0 ? { x: from.x + dx * best, y: from.y + dy * best } : null;
+}
+
 /** The tag's element anchor in the view frame (its centreline middle, or insertion). */
 export function tagTarget(model: Pick<ModelState, "elements">, view: ViewElement | null, spec: TagSpec): Vec2 | null {
   return anchorInView(model, view, { elementId: spec.elementId, anchor: "mid" });
+}
+
+/**
+ * Smart leader attachment point in view-model mm: for a placed part in a plan
+ * view, lands cleanly on the nearest outer rim of the rendered plan symbol
+ * facing `towardModel` (the elbow or tag head) so leaders never cross through
+ * a symbol down to its wall-face insertion point. Falls back to `tagTarget`.
+ */
+export function tagLeaderTarget(model: Pick<ModelState, "elements">, view: ViewElement | null, spec: TagSpec, towardModel?: Vec2): Vec2 | null {
+  const base = tagTarget(model, view, spec);
+  if (!base || !towardModel || !view || (view.viewType !== "floor_plan" && view.viewType !== "ceiling_plan")) return base;
+  const el = model.elements[spec.elementId];
+  if (el?.kind !== "part") return base;
+  const { outline, bounds } = partPlanOutline(model as ModelState, el, {
+    scale: view.props?.scale ?? 48,
+    symbolScale: view.props?.symbolScale ?? 1,
+    detail: view.props?.detailLevel ?? "medium",
+  });
+  if (!bounds || outline.length === 0) return base;
+  const center = { x: (bounds.min.x + bounds.max.x) / 2, y: (bounds.min.y + bounds.max.y) / 2 };
+  return symbolRimPoint(outline, center, towardModel) ?? center;
 }
 
 export function drawTag(ctx: AnnotationDrawContext, item: DrawingItem): AnnotationBox[] {
   const spec = item.tag;
   const head = item.points[0];
   if (!spec || !head) return [];
+  const tagStyle = styleOfTag(ctx.model, spec);
+  const textLook = resolveTextStyle(ctx.model, "tag", tagStyle?.textStyleId);
   const size = tagTextSizeMm(ctx.model, spec);
   const leader = tagHasLeader(ctx.model, spec);
-  const lines = tagLines(ctx.model, spec) ?? ["?"];
+  const rawLines = tagLines(ctx.model, spec) ?? ["?"];
+  const lines = textLook?.uppercase ? rawLines.map((l) => l.toUpperCase()) : rawLines;
   const at = ctx.toPaper(head);
   const rotation = tagRotationDeg(ctx.model, ctx.view, spec, ctx.toPaper);
   const shape = tagShape(ctx.model, spec);
   const box = tagHeadBox(item.id, lines, at, size, rotation, shape);
   const { w, h } = tagHeadSize(lines, size);
+  const masked = spec.mask ?? tagStyle?.mask ?? (textLook ? textLook.mask : false);
   // The mask goes down first so the outline and words print over it and the linework drawn before it is hidden.
-  if (spec.mask) {
+  if (masked) {
     const under = tagOutline(shape === "none" ? "box" : shape, w, h).map((p) => add(at, turn(p, rotation)));
     ctx.prims.push({ kind: "fill", points: under, grey: 1 });
   }
@@ -1093,12 +1157,24 @@ export function drawTag(ctx: AnnotationDrawContext, item: DrawingItem): Annotati
   }
   lines.forEach((line, i) => {
     const local = { x: 0, y: -h / 2 + TAG_PAD_MM / 2 + (i + 1) * (size + 1.2) - 0.6 };
-    ctx.prims.push({ kind: "text", at: add(at, turn(local, rotation)), text: line, size, anchor: "middle", ...(rotation !== 0 ? { rotate: rotation } : {}) });
+    ctx.prims.push({
+      kind: "text",
+      at: add(at, turn(local, rotation)),
+      text: line,
+      size,
+      anchor: "middle",
+      ...(rotation !== 0 ? { rotate: rotation } : {}),
+      ...(textLook?.bold ? { bold: true } : {}),
+      ...(textLook?.italic ? { italic: true } : {}),
+      ...(textLook?.fontFamily ? { fontFamily: textLook.fontFamily } : {}),
+      ...(textLook?.color ? { color: textLook.color } : {}),
+    });
   });
   const arrow = tagArrowDirection(ctx.model, ctx.view, spec, ctx.toPaper);
   if (arrow) for (const [a, b] of tagArrowSegments(add(at, turn({ x: 0, y: h / 2 + TAG_ARROW_GAP_MM }, rotation)), arrow, Math.min(Math.max(w - TAG_PAD_MM * 2, 6), 12))) ctx.prims.push({ kind: "line", a, b, pen: "thin" });
   if (leader) {
-    const target = tagTarget(ctx.model, ctx.view, spec);
+    const toward = spec.elbow !== undefined && spec.elbow !== "auto" ? spec.elbow : head;
+    const target = tagLeaderTarget(ctx.model, ctx.view, spec, toward);
     if (target) {
       const to = ctx.toPaper(target);
       if (spec.elbow !== undefined) {

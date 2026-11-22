@@ -2,6 +2,7 @@ import { pushTo } from "../../collections";
 import { normalizeLevelName } from "../../levels";
 import { loadPointPosition } from "../../load-points/model";
 import { pointInOutline } from "../../propose/perimeter";
+import { partToWorld } from "../../parts";
 import { elementsOfKind } from "../../store";
 import { DEFAULT_PARTITION, type BimElement, type Level, type Room, type Vec2 } from "../../types";
 
@@ -65,7 +66,9 @@ function anchorOf(elements: Elements, el: BimElement): Vec2 | null {
   switch (el.kind) {
     case "part":
       // Not placed yet: no plan point (its room comes from its space hint, through in_space).
-      return el.planned ? null : el.position;
+      if (el.planned) return null;
+      // Wall-face mounted parts sit right on the finish face; probe 50 mm into the room (+Y) so finish-face room boundaries include them cleanly.
+      return el.host?.kind === "wall_face" ? partToWorld(el, { x: 0, y: 50 }) : el.position;
     case "opening":
     case "column":
       return el.position;

@@ -111,6 +111,8 @@ interface Props {
   readonly schedule?: ReactNode
   /** Live diagrams: their own properties (diagrams/DiagramProperties). */
   readonly diagram?: ReactNode
+  /** Open the model's Text Types dialog (font, paper height, opaque/transparent background). */
+  readonly onOpenTextStyles?: () => void
 }
 
 /** The open view's own properties. Each change saves on its own and can be undone. */
@@ -175,7 +177,7 @@ export function useQuickViewProps(view: ViewElement, onRefused: (message: string
   return { view: shown, updating: Object.keys(pending).length > 0, setQuick }
 }
 
-export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submit, references, display, onDisplay, onRename, background, hostLevelId = null, levelName = null, phaseFields, crop3d, schedule, diagram }: Props) {
+export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submit, references, display, onDisplay, onRename, background, hostLevelId = null, levelName = null, phaseFields, crop3d, schedule, diagram, onOpenTextStyles }: Props) {
   const [error, setError] = useState<string | null>(null)
   const quick = useQuickViewProps(saved, setError)
   const view = quick.view
@@ -385,7 +387,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
               <FieldDescription>{props.discipline ? "Other disciplines print in halftone; plans leave out their runs." : 'Every discipline prints in ink.'}</FieldDescription>
             </Field>
             {isPlan && <CircuitGraphicsFields view={view} canEdit={canEdit} disabledHint={disabledHint} set={set} />}
-            <LinesFields view={view} canEdit={canEdit} set={set} setQuick={setQuick}>
+            <LinesFields view={view} canEdit={canEdit} set={set} setQuick={setQuick} onOpenTextStyles={onOpenTextStyles}>
               {references.length > 0 && (
                 <FieldSet data-testid="view-linked-models">
                   <FieldLegend variant="label">Linked models</FieldLegend>
@@ -566,7 +568,7 @@ function BackgroundStatus({ background, onUndo, choice }: { background: Backgrou
  * beyond, and the linked models' look. Always open: it is where a person
  * looks for line weights.
  */
-function LinesFields({ view, canEdit, set, setQuick, children }: { view: ViewElement; canEdit: boolean; set: (patch: ViewPropsPatch, label: string) => void; setQuick: (patch: QuickProps, label: string) => void; children?: ReactNode }) {
+function LinesFields({ view, canEdit, set, setQuick, onOpenTextStyles, children }: { view: ViewElement; canEdit: boolean; set: (patch: ViewPropsPatch, label: string) => void; setQuick: (patch: QuickProps, label: string) => void; onOpenTextStyles?: () => void; children?: ReactNode }) {
   const props = view.props ?? {}
   const style = props.visualStyle ?? 'hidden_line'
   const detail = props.detailLevel ?? 'medium'
@@ -609,15 +611,51 @@ function LinesFields({ view, canEdit, set, setQuick, children }: { view: ViewEle
           <FieldDescription className="text-xs">{DETAIL_HINT[detail]}</FieldDescription>
         </Field>
         {(view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan') && (
-          <Field orientation="horizontal">
-            <Checkbox id="vp-line-codes" checked={props.showLineCodes !== false} disabled={!canEdit} onCheckedChange={(v) => setQuick({ showLineCodes: v === true }, v === true ? 'show inline service codes' : 'hide inline service codes')} />
-            <FieldContent>
-              <FieldLabel htmlFor="vp-line-codes" className="font-normal">
-                Inline service codes
-              </FieldLabel>
-              <FieldDescription className="text-xs">Print repeating system codes (CW, SAN, G…) along single-line schematic runs.</FieldDescription>
-            </FieldContent>
-          </Field>
+          <>
+            <Field>
+              <FieldLabel htmlFor="vp-symbol-scale">Symbol size</FieldLabel>
+              <Select
+                value={String(props.symbolScale ?? 1)}
+                disabled={!canEdit}
+                onValueChange={(v) => {
+                  const n = Number(v)
+                  if (Number.isFinite(n) && n >= 0.5 && n <= 3) set({ symbolScale: n }, 'change the symbol size')
+                }}
+              >
+                <SelectTrigger id="vp-symbol-scale" data-testid="view-symbol-scale" className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="0.75">75% (compact)</SelectItem>
+                    <SelectItem value="1">100% (standard)</SelectItem>
+                    <SelectItem value="1.25">125% (large)</SelectItem>
+                    <SelectItem value="1.5">150% (extra large)</SelectItem>
+                    <SelectItem value="2">200% (presentation)</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription className="text-xs">Scales annotative symbols and minimum paper floors on this plan without moving elements.</FieldDescription>
+            </Field>
+            {onOpenTextStyles && (
+              <Field>
+                <FieldLabel>Text types</FieldLabel>
+                <Button variant="outline" size="sm" className="w-full" onClick={onOpenTextStyles} data-testid="view-open-text-styles">
+                  Edit text types &amp; opaque masks…
+                </Button>
+                <FieldDescription className="text-xs">Unified fonts, paper sizes and white backgrounds for device marks, circuit labels and tags.</FieldDescription>
+              </Field>
+            )}
+            <Field orientation="horizontal">
+              <Checkbox id="vp-line-codes" checked={props.showLineCodes !== false} disabled={!canEdit} onCheckedChange={(v) => setQuick({ showLineCodes: v === true }, v === true ? 'show inline service codes' : 'hide inline service codes')} />
+              <FieldContent>
+                <FieldLabel htmlFor="vp-line-codes" className="font-normal">
+                  Inline service codes
+                </FieldLabel>
+                <FieldDescription className="text-xs">Print repeating system codes (CW, SAN, G…) along single-line schematic runs.</FieldDescription>
+              </FieldContent>
+            </Field>
+          </>
         )}
         <Field orientation="horizontal">
           <Checkbox id="vp-hidden-lines" checked={props.showHiddenLines === true} disabled={!canEdit || style === 'wireframe' || style === 'shaded'} onCheckedChange={(v) => setQuick({ showHiddenLines: v === true }, v === true ? 'show hidden lines' : 'remove hidden lines')} />

@@ -70,7 +70,7 @@ import { UNIT_CODES, type UnitCode } from "../registry/units";
 import { diagramDefinitionSchema } from "../diagrams/definition";
 import { SYSTEM_LINE_PATTERNS } from "../routing/system-graphics";
 import { categoryOverridesWritable } from "../categories/feature";
-import { VIEW_SCHEMATIC_DETAIL_FEATURE } from "../categories/types";
+import { VIEW_SCHEMATIC_DETAIL_FEATURE, VIEW_SYMBOL_SCALE_FEATURE } from "../categories/types";
 import { isRegistryIdShape } from "../ids";
 import { diagramItemsOf } from "../diagrams/evaluate";
 import { diagramKindStoreRefusal } from "../diagrams/kinds";
@@ -242,6 +242,8 @@ const viewPropsPatchObject = z
     linkedMinObjectMm: z.number().finite().min(0).max(3000),
     detailLevel: z.enum(["coarse", "medium", "fine"]),
     showLineCodes: z.boolean(),
+    /** Plans: multiplier for annotative paper-space symbols and `minPaperMm` floors (0.5–3.0). */
+    symbolScale: z.number().finite().min(0.5).max(3),
     visualStyle: z.enum(VISUAL_STYLES),
     showHiddenLines: z.boolean(),
     hiddenLineCategories: z.array(z.enum(VIEW_CATEGORIES)).max(VIEW_CATEGORIES.length),
@@ -818,6 +820,7 @@ function checkProps(viewType: ViewElement["viewType"], props: ViewProps, viewId:
   const isPlan = viewType === "floor_plan" || viewType === "ceiling_plan";
   if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
   if (props.showLineCodes !== undefined && !peerReads(VIEW_SCHEMATIC_DETAIL_FEATURE)) fail("Inline service code settings can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  if (props.symbolScale !== undefined && !peerReads(VIEW_SYMBOL_SCALE_FEATURE)) fail("View symbol scale can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
   if (!isPlan && (props.viewBottomMm !== undefined || props.viewTopMm !== undefined)) fail("Only plans have a top and bottom to what they show. A section's reach is its far clip depth.", [viewId]);
   if (isPlan && props.viewTopMm !== undefined && props.viewTopMm < (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The top of the view must be at or above the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);
   if (isPlan && viewType === "floor_plan" && props.viewBottomMm !== undefined && props.viewBottomMm > (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The bottom of the view must be at or below the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);

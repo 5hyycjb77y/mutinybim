@@ -15,7 +15,7 @@ import type { EditorHostCapabilities, EditorReferencesPort } from '@permitzip/bi
 import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
 import type { RevitElementParameters, RevitParametersResponse, UnplacedElementsResponse, UnplacedElementView } from '../contracts/building-model/revit-parameters-contract'
 import { connectionProblem, editsPausedMessage, operatorMessage, problemForDenied, type ConnectionProblem } from './operator-messages'
-import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, defaultHeightMm, describeElement, feetInches, newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
+import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, WALL_FACE_SNAP_MM, defaultHeightMm, describeElement, feetInches, newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
 import { linkedSnapNear } from './linked-reference/linked-reference-store'
 import { isStarterLevelRace, starterLevelCommand } from './levels/starter-level'
 import { axisBadge, resolveRoutePoint, snapDrag, type AxisLock, type RouteAxis } from './route-axis'
@@ -1241,7 +1241,7 @@ export class ModelSession {
     if (ids === undefined) {
       // `view` is the client's view as of its last view event (never a drag preview).
       const before = this.view
-      const predicted = before && this.kernel ? this.kernel.executeCommand(before, command) : null
+      const predicted = before && this.kernel ? this.decideLikeServer(this.kernel, before, command) : null
       ids = predicted?.ok ? touchedIds(predicted.changedIds, predicted) : null
     }
     this.submittingIds = ids
@@ -1946,7 +1946,7 @@ export class ModelSession {
       this.clearRoutePreview()
       return move
     }
-    const res = kernel.executeCommand(view, move)
+    const res = this.decideLikeServer(kernel, view, move)
     if (!res.ok) {
       d.delta = null
       this.clearRoutePreview()
@@ -2213,7 +2213,14 @@ export class ModelSession {
     }
     if (outcome.status === 'rejected') {
       const notUnderstood = this.notUnderstood.delete(request.idempotencyKey)
-      const kernelWords = outcome.error.code === 'has_dependents' || outcome.error.code === 'undo_refused' || outcome.error.code === 'conflict' || outcome.error.code === 'already_exists' || outcome.error.code === 'in_use' || outcome.error.code === 'locked'
+      const kernelWords =
+        outcome.error.code === 'has_dependents' ||
+        outcome.error.code === 'undo_refused' ||
+        outcome.error.code === 'conflict' ||
+        outcome.error.code === 'already_exists' ||
+        outcome.error.code === 'in_use' ||
+        outcome.error.code === 'locked' ||
+        (outcome.error.code === 'invalid_value' && outcome.error.message.trim().length > 0)
       const message = notUnderstood || kernelWords ? outcome.error.message : operatorMessage(outcome.error.code)
       this.events.onActivity(notUnderstood ? message : `Your change wasn't saved. ${message}`)
       this.events.onRefused?.(message)
@@ -2457,7 +2464,14 @@ export class ModelSession {
       const where = this.planeLocked ? `Work plane locked (L unlocks): ${feetInches(spec.heightMm)} above ${levelName}` : `${this.shiftHeld ? 'Shift' : 'Nothing under the pointer'}: on ${levelName}'s floor plane, ${feetInches(spec.heightMm)} up`
       target = { levelId: spec.levelId, raw, offsetMm: spec.heightMm, where, reference: this.referenceNear(clientX, clientY, raw) }
     }
-    const snapped = snapPoint(target.raw, this.snapTargetsFor(target.levelId, []), target.reference, this.workFrame ?? undefined, this.linkedNear(target.levelId, target.raw))
+    const wallHit =
+      !this.shiftHeld && !target.planeId && this.view && kernel.isWallFaceMountable(spec.definition)
+        ? kernel.nearestWallFace(this.view, target.levelId, target.raw, { maxDistanceMm: WALL_FACE_SNAP_MM })
+        : null
+    const snapped = wallHit
+      ? { point: wallHit.position, kind: 'reference' as const, label: 'wall finish face' }
+      : snapPoint(target.raw, this.snapTargetsFor(target.levelId, []), target.reference, this.workFrame ?? undefined, this.linkedNear(target.levelId, target.raw))
+    const placementRot = wallHit ? wallHit.rotationDeg : spec.rotationDeg
     const type: PartTypeElement = { id: kernel.asElementId(spec.typeId), kind: 'part_type', version: 0, authoredRev: {}, definition: spec.definition }
     const part: PartInstance = {
       id: kernel.asElementId('placement-preview'),
@@ -2468,17 +2482,22 @@ export class ModelSession {
       levelId: kernel.asElementId(target.levelId),
       position: snapped.point,
       offsetMm: target.offsetMm,
-      rotationDeg: spec.rotationDeg,
+      rotationDeg: placementRot,
       mark: '',
       values: {},
+      ...(wallHit ? { host: { kind: 'wall_face' as const, elementId: wallHit.wallId, stationMm: wallHit.stationMm, side: wallHit.side } } : {}),
     }
     this.ghostFor(part, type, this.levelElevation(target.levelId) ?? elevation)
-    const hosted = !target.planeId && onSurface && hit ? hostForPlacement(hit, spec.heightMm, spec.definition.category, (id) => this.view?.elements[id]?.kind === 'slab', (ref) => this.referenceLabels.get(ref) ?? 'Linked model') : null
-    this.pendingPlacement = { position: snapped.point, levelId: target.levelId, offsetMm: target.offsetMm, hosted, ...(target.planeId ? { planeId: target.planeId } : {}) }
-    return `${target.where}${hosted ? `, standing on ${this.hostLabel(hosted.host)}` : ''} (${snapHint(snapped).toLowerCase()}). Click to place, R or Space to rotate, L to lock the work plane, Esc to stop.`
+    const hosted = wallHit
+      ? { host: { kind: 'wall_face' as const, elementId: wallHit.wallId, stationMm: wallHit.stationMm, side: wallHit.side }, curbMm: 0 }
+      : !target.planeId && onSurface && hit
+        ? hostForPlacement(hit, spec.heightMm, spec.definition.category, (id) => this.view?.elements[id]?.kind === 'slab', (ref) => this.referenceLabels.get(ref) ?? 'Linked model')
+        : null
+    this.pendingPlacement = { position: snapped.point, levelId: target.levelId, offsetMm: target.offsetMm, rotationDeg: placementRot, hosted, ...(target.planeId ? { planeId: target.planeId } : {}) }
+    return `${wallHit ? `${target.where}, flush on wall face` : target.where}${!wallHit && hosted ? `, standing on ${this.hostLabel(hosted.host)}` : ''} (${snapHint(snapped).toLowerCase()}). Click to place, R or Space to rotate, L to lock the work plane, Esc to stop.`
   }
 
-  private pendingPlacement: { readonly position: Vec2; readonly levelId: string; readonly offsetMm: number; readonly hosted: ReturnType<typeof hostForPlacement>; readonly planeId?: string } | null = null
+  private pendingPlacement: { readonly position: Vec2; readonly levelId: string; readonly offsetMm: number; readonly rotationDeg?: number; readonly hosted: { readonly host: PartHost; readonly curbMm: number } | null; readonly planeId?: string } | null = null
 
   /**
    * Wait until the surface under this pixel is known, linked models included
@@ -2509,6 +2528,7 @@ export class ModelSession {
     const paused = this.refusePaused()
     if (paused) return paused
     const plannedId = this.plannedPartId
+    const placementRot = at.rotationDeg ?? spec.rotationDeg
     if (plannedId) {
       const refused = this.submit({
         type: 'place_planned_part',
@@ -2516,7 +2536,7 @@ export class ModelSession {
         levelId: at.levelId,
         position: at.position,
         ...(at.planeId ? { planeId: at.planeId } : { offsetMm: at.offsetMm }),
-        rotationDeg: spec.rotationDeg,
+        rotationDeg: placementRot,
         ...(at.hosted ? { host: at.hosted.host, ...(at.hosted.curbMm > 0 ? { curbMm: at.hosted.curbMm } : {}) } : {}),
       })
       // One part, one placement: it is drawn now, so the ghost goes.
@@ -2531,7 +2551,7 @@ export class ModelSession {
       levelId: at.levelId,
       position: at.position,
       ...(at.planeId ? { planeId: at.planeId } : { offsetMm: at.offsetMm }),
-      rotationDeg: spec.rotationDeg,
+      rotationDeg: placementRot,
       ...(at.hosted ? { host: at.hosted.host, ...(at.hosted.curbMm > 0 ? { curbMm: at.hosted.curbMm } : {}) } : {}),
     })
   }
@@ -3938,7 +3958,7 @@ export class ModelSession {
     const client = this.client
     if (!client || !kernel) return "Live editing isn't connected, so changes can't be saved."
     const before = client.view()
-    const predicted = before ? kernel.executeCommand(before, command) : null
+    const predicted = before ? this.decideLikeServer(kernel, before, command) : null
     const res = this.sendToClient(client, command, predicted?.ok ? touchedIds(predicted.changedIds, predicted) : null)
     if (!res.ok) return res.error.message
     if (before && predicted?.ok && isDocumentCommand(kernel, command) && command.type !== 'restore_document_elements') {

@@ -342,7 +342,7 @@ export const ELECTRICAL_PLAN_SYMBOLS: readonly SymbolDef[] = [
       { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
       { kind: "line", from: [-0.6, 0], to: [-0.6, 3.35], pen: "medium", units: "paper" },
       { kind: "line", from: [0.6, 0], to: [0.6, 3.35], pen: "medium", units: "paper" },
-      { kind: "text", at: [3.1, 2.0], text: "GFI", heightMm: 1.5, units: "paper" },
+      { kind: "text", at: [0, 2.0], uprightOffset: [2.05, 0], text: "GFI", heightMm: 1.35, anchor: "start", units: "paper" },
     ],
   },
   {

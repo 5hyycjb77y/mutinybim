@@ -121,6 +121,8 @@ export interface ViewProps extends ViewGraphicsHints {
   readonly detailLevel?: DetailLevel;
   /** Plans: print repeating inline service codes (CW, SAN, G…) inside single-line runs when the service or system defines one. Absent: on. */
   readonly showLineCodes?: boolean;
+  /** Plans: multiplier for annotative paper-space symbols and `minPaperMm` floors in this view (0.5–3.0). Absent: 1. */
+  readonly symbolScale?: number;
   /** Absent: hidden line. */
   readonly visualStyle?: VisualStyle;
   /** Draw edges hidden behind nearer elements dashed, for every category. Absent: off (hidden edges are removed). */

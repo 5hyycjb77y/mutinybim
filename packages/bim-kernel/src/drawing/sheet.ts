@@ -49,6 +49,8 @@ export type Primitive =
       readonly tone?: Tone;
     } & PrimitiveStyle)
   | ({ readonly kind: "rect"; readonly at: Vec2; readonly size: Vec2; readonly pen: Pen } & PrimitiveStyle)
+  /** A true vector circle outline on paper (center `at`, radius `r` paper mm) so circular plan symbols stay crisp at any zoom or print DPI. */
+  | ({ readonly kind: "circle"; readonly at: Vec2; readonly r: number; readonly pen: Pen; readonly dash?: readonly number[]; readonly tone?: Tone } & PrimitiveStyle)
   /** A filled polygon with no outline (section poche, shaded surfaces). `grey`: 0 black, 1 white; a tone lightens it. `color` replaces the grey in colour; a monochrome print uses the grey. */
   | ({ readonly kind: "fill"; readonly points: readonly Vec2[]; readonly grey: number; readonly tone?: Tone } & Pick<PrimitiveStyle, "color">)
   | ({
@@ -59,11 +61,16 @@ export type Primitive =
       readonly size: number;
       readonly anchor: "start" | "middle" | "end";
       readonly bold?: boolean;
+      readonly italic?: boolean;
       readonly tone?: Tone;
       /** Degrees, clockwise on paper, about `at` (a tag turned along its run). Absent: level. */
       readonly rotate?: number;
       /** A font id from the scene's `fonts`. Absent: the standard sheet font. */
       readonly font?: string;
+      /** CSS/standard font family override from a model text style (e.g. `"Helvetica"`, `"Arial"`, `"Courier New"`). */
+      readonly fontFamily?: string;
+      /** Opaque paper-white background mask behind the text so crossing linework stays broken and readable. */
+      readonly mask?: boolean;
     } & Pick<PrimitiveStyle, "color">);
 
 /** A font a scene's text uses besides the standard sheet font: its id, family, weight and the file the writers load. */
@@ -340,11 +347,32 @@ export function buildSheetScene(model: ModelState, def: SheetDefinition): SheetS
         drawRunFitting(model, el, line);
         break;
       case "part":
-        drawPartSymbol(model, el, line, (at, text, size, anchor) => prims.push({ kind: "text", at: toPaper(at), text, size, anchor: anchor ?? "middle" }), null, "medium", {
-          scale: def.scale,
-          fill: (pts, grey) => prims.push({ kind: "fill", points: pts.map(toPaper), grey }),
-          takenBoxes: takenPartBoxes,
-        });
+        drawPartSymbol(
+          model,
+          el,
+          line,
+          (at, text, size, anchor, style) =>
+            prims.push({
+              kind: "text",
+              at: toPaper(at),
+              text,
+              size,
+              anchor: anchor ?? "middle",
+              ...(style?.mask ? { mask: true } : {}),
+              ...(style?.bold ? { bold: true } : {}),
+              ...(style?.italic ? { italic: true } : {}),
+              ...(style?.fontFamily ? { fontFamily: style.fontFamily } : {}),
+              ...(style?.color ? { color: style.color } : {}),
+            }),
+          null,
+          "medium",
+          {
+            scale: def.scale,
+            fill: (pts, grey) => prims.push({ kind: "fill", points: pts.map(toPaper), grey }),
+            circle: (c, r, pen) => prims.push({ kind: "circle", at: toPaper(c), r: r / def.scale, pen }),
+            takenBoxes: takenPartBoxes,
+          },
+        );
         break;
       default:
         break;

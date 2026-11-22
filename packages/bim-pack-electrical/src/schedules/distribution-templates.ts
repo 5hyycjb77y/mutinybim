@@ -131,3 +131,25 @@ export const EQUIPMENT_CONNECTIONS_TEMPLATE: FormTemplate = {
   },
   notes: [],
 };
+
+export const LIGHTING_CONTROLS_TEMPLATE: FormTemplate = {
+  name: "Lighting controls",
+  title: "LIGHTING CONTROLS & SWITCHING SCHEDULE",
+  header: { columns: 1, fields: [] },
+  body: {
+    layout: "rows",
+    columns: [
+      { heading: "ZONE", value: "{zone}", align: "center" },
+      { heading: "ROOM / AREA", value: "{room}", align: "left" },
+      { heading: "CONTROLLERS", value: "{controllers}", align: "left" },
+      { heading: "CONTROLLED LOADS", value: "{loads}", align: "left" },
+      { heading: "PROTOCOL", value: "{protocol}", align: "center" },
+      { heading: "CIRCUIT", value: "{circuit}", align: "center" },
+      { heading: "EM MODE", value: "{emergency_mode}", align: "center" },
+      { heading: "CONTROL SEQUENCE", value: "{sequence}", align: "left" },
+    ],
+  },
+  notes: [
+    { mark: "EM", text: "Emergency fixtures powered by constant-hot egress circuit or UL 924 automatic load control relay." },
+  ],
+};

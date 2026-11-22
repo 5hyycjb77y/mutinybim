@@ -64,7 +64,7 @@ describe("c6e: the Electrical add-on's contents", () => {
     );
     for (const [id, n] of Object.entries(counts)) expect({ id, contributes: n > 0 }).toEqual({ id, contributes: true });
     expect(itemsAt(COMMAND_POINT).map((c) => (c as { type: string }).type)).toEqual(["place_service_layout"]);
-    expect(itemsAt(DIAGRAM_GRAPH_POINT).map((d) => (d as { kind: string }).kind)).toEqual(["one_line", "electrical_riser"]);
+    expect(itemsAt(DIAGRAM_GRAPH_POINT).map((d) => (d as { kind: string }).kind)).toEqual(["one_line", "electrical_riser", "controls_diagram"]);
     expect(itemsAt(CALC_POINT)).toEqual([...ELECTRICAL_CALCS]);
     expect(itemsAt(PREVIEW_CALC_POINT)).toEqual([...PREVIEW_ELECTRICAL_CALCS]);
     expect(itemsAt(AGENT_TOOL_POINT)).toEqual([...ELECTRICAL_AGENT_TOOLS]);

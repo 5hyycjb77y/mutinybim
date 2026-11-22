@@ -65,9 +65,16 @@ export function elbowLeaderPath(head: PaperBox, target: Vec2, elbow?: Vec2, opts
   const start = snapPaper({ x: side === "left" ? head.min.x : head.max.x, y: c.y });
   const end = snapPaper(target);
   if (elbow) {
-    // A hand elbow within half a millimetre of level with the tag snaps level, so the shoulder reads horizontal.
-    const e = snapPaper({ x: elbow.x, y: Math.abs(elbow.y - c.y) < 0.5 ? c.y : elbow.y });
+    // A hand elbow within 1 mm of level with the tag snaps strictly horizontal so the landing reads crisp and square.
+    const e = snapPaper({ x: elbow.x, y: Math.abs(elbow.y - c.y) <= 1.0 ? c.y : elbow.y });
     return { points: [start, e, end], side, elbow: e, handElbow: true };
+  }
+  const halfW = (head.max.x - head.min.x) / 2;
+  const halfH = (head.max.y - head.min.y) / 2;
+  // When placed directly above or below the target with no side offset, attach cleanly to top/bottom center.
+  if (Math.abs(end.x - c.x) <= halfW * 0.55 && Math.abs(end.y - c.y) > halfH + MIN_LEADER_MM) {
+    const vStart = snapPaper({ x: c.x, y: end.y > c.y ? head.max.y : head.min.y });
+    return { points: [vStart, end], side, elbow: null, handElbow: false };
   }
   const shoulder = opts?.shoulderMm ?? SHOULDER_MM;
   const dir = side === "left" ? -1 : 1;

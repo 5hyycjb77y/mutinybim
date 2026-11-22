@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { paperMapping, tagElbowLeader, tagTarget, type DrawingItem, type ModelState, type Vec2, type ViewElement } from '@permitzip/bim-kernel'
+import { paperMapping, tagElbowLeader, tagLeaderTarget, type DrawingItem, type ModelState, type Vec2, type ViewElement } from '@permitzip/bim-kernel'
 import { elbowGripCommand, type TagCommand } from './tag-elbow-commands'
 
 const GRIP_PX = 9
@@ -50,10 +50,20 @@ export function TagElbowGrip({ model, view, item, toPaper, toStored, paperOf, pa
   const { toModel } = paperMapping(view)
   const bend = toPaper(toModel(leader.elbow))
   const start = leader.points[0] ? toPaper(toModel(leader.points[0])) : null
-  const targetModel = tagTarget(model, view, item.tag)
+  const at = drag?.to ?? bend
+  const targetModel = tagLeaderTarget(model, view, item.tag, drag ? toStored(drag.to) : item.tag.elbow !== 'auto' ? item.tag.elbow : item.points[0])
   const target = targetModel ? toPaper(targetModel) : null
   const size = GRIP_PX * paperMmPerPx
-  const at = drag?.to ?? bend
+
+  /** Snap the elbow to a crisp horizontal shoulder from the tag (within 2.5 mm) and vertical drop to the target (within 2 mm); hold Alt for freehand. */
+  const snapElbow = (p: Vec2, freehand: boolean): Vec2 => {
+    if (freehand) return p
+    const hTol = Math.max(2.2, 8 * paperMmPerPx)
+    const vTol = Math.max(1.8, 7 * paperMmPerPx)
+    const y = start && Math.abs(p.y - start.y) <= hTol ? start.y : p.y
+    const x = target && Math.abs(p.x - target.x) <= vTol ? target.x : p.x
+    return { x, y }
+  }
 
   return (
     <g data-testid="tag-elbow-grip-layer">
@@ -68,7 +78,7 @@ export function TagElbowGrip({ model, view, item, toPaper, toStored, paperOf, pa
         strokeWidth={1.5 * paperMmPerPx}
         className={editBlocked ? 'cursor-not-allowed' : 'cursor-move'}
         role="button"
-        aria-label={editBlocked ? `Leader bend (${editBlocked})` : 'Drag to bend the leader; Esc puts it back'}
+        aria-label={editBlocked ? `Leader bend (${editBlocked})` : 'Drag to bend the leader (snaps horizontal/square; Alt for freehand); Esc puts it back'}
         data-testid="tag-elbow-grip"
         onPointerDown={(e) => {
           if (e.button !== 0 || editBlocked) return
@@ -79,12 +89,13 @@ export function TagElbowGrip({ model, view, item, toPaper, toStored, paperOf, pa
         onPointerMove={(e) => {
           if (!drag || e.pointerId !== drag.pointerId) return
           const p = paperOf(e)
-          if (p) setDrag({ pointerId: drag.pointerId, to: p })
+          if (p) setDrag({ pointerId: drag.pointerId, to: snapElbow(p, e.altKey) })
         }}
         onPointerUp={(e) => {
           if (!drag || e.pointerId !== drag.pointerId) return
           e.stopPropagation()
-          const to = paperOf(e) ?? drag.to
+          const raw = paperOf(e)
+          const to = raw ? snapElbow(raw, e.altKey) : drag.to
           setDrag(null)
           const moved = Math.hypot(to.x - bend.x, to.y - bend.y) > 0.2
           const c = moved ? elbowGripCommand(item, toStored(to)) : null
@@ -92,7 +103,7 @@ export function TagElbowGrip({ model, view, item, toPaper, toStored, paperOf, pa
         }}
         onLostPointerCapture={() => setDrag(null)}
       >
-        <title>{editBlocked ?? 'Drag to bend the leader. Right-click › Straighten leader puts it back to automatic.'}</title>
+        <title>{editBlocked ?? 'Drag to bend the leader (snaps horizontal shoulder & square drop; hold Alt for freehand). Right-click › Straighten leader puts it back to automatic.'}</title>
       </rect>
     </g>
   )

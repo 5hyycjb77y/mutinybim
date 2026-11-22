@@ -476,9 +476,7 @@ can be circuited too: everything keeps its id when placed.
    draws it with the utility over the meter. Circuiting devices stays a
    separate step.
 
-Point-to-point fault current is a preview calc (`elec.fault_current_p2p`
-through `bim_run_calc`) only where the deployment turns it on; otherwise use
-the `elec-short-circuit` skill.
+Point-to-point fault current is a preview calc (`elec.fault_current_p2p` through `bim_run_calc`) where enabled; otherwise use `elec-short-circuit`. **Script kit (`bim_run_script`):** wall-face hosting (`equipment.place` `onWall` / `equipment.hostOnWall`, custom `parts.part({ hosting: "wall_face" }).planSymbol(...)`), control zones (`equipment.controlZone` with `protocol`, `emergencyMode`), plan wiring (`documents.setCircuitGraphics` `showCircuits` / `hashMarksOn: "home_runs_and_switch_legs"`, `setMwbcGroup`, `setSwitchLegLabelOffset`, `setWirePath`, `setHomeRun`), `documents.formSchedule({ kind: "lighting_controls", ... })`, and `documents.diagram({ kind: "controls_diagram", ... })` (`documents.diagramKinds`).
 
 <!-- tools: rendered from the catalogue by `npm run build:files`; edit the catalogue, not this list -->
 

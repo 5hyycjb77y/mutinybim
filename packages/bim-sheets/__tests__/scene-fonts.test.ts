@@ -9,6 +9,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { FIRM_FONTS_DIR, nodeSceneFonts } from "../src/pdf";
+import { renderSheetPdfWith } from "../src/pdf-core";
+import type { SheetScene } from "@permitzip/bim-kernel";
 
 const JOST = "/mutinybim/firm/permitzip/fonts/Jost-Bold.ttf";
 
@@ -36,5 +38,43 @@ describe("nodeSceneFonts", () => {
 
   it("names the font when the file is missing", async () => {
     await expect(nodeSceneFonts().load("/mutinybim/firm/permitzip/fonts/Nope.ttf")).rejects.toThrow(/Couldn't read the title block font \/mutinybim\/firm\/permitzip\/fonts\/Nope\.ttf/);
+  });
+
+  it("embeds matching standard PDF faces for Text Type fontFamily and italic while leaving default PDFs Helvetica-only", async () => {
+    const baseScene = (primitives: SheetScene["primitives"]): SheetScene => ({
+      paper: { x: 279.4, y: 215.9 },
+      revision: 1,
+      primitives,
+      details: [],
+      tags: [],
+      dimensions: [],
+      schedule: [],
+    });
+    const meta = { title: "Fonts", modelRevision: 1, snapshotSha256: "0".repeat(64), renderer: "test" };
+
+    const plain = await renderSheetPdfWith(
+      baseScene([{ kind: "text", at: { x: 20, y: 20 }, text: "PLAIN", size: 2.5, anchor: "start" }]),
+      meta,
+      null,
+    );
+    const plainAscii = Buffer.from(plain.bytes).toString("latin1");
+    expect(plainAscii).toContain("/BaseFont /Helvetica");
+    expect(plainAscii).not.toContain("/BaseFont /Courier");
+    expect(plainAscii).not.toContain("/BaseFont /Times");
+    expect(plainAscii).not.toContain("Oblique");
+
+    const styled = await renderSheetPdfWith(
+      baseScene([
+        { kind: "text", at: { x: 20, y: 20 }, text: "MONO ITALIC", size: 2.5, anchor: "start", fontFamily: "Courier New, monospace", italic: true, mask: true },
+        { kind: "text", at: { x: 20, y: 35 }, text: "SERIF BOLD", size: 2.5, anchor: "start", fontFamily: "Times New Roman, serif", bold: true },
+        { kind: "text", at: { x: 20, y: 50 }, text: "SANS ITALIC", size: 2.5, anchor: "start", italic: true },
+      ]),
+      meta,
+      null,
+    );
+    const styledAscii = Buffer.from(styled.bytes).toString("latin1");
+    expect(styledAscii).toContain("/BaseFont /Courier-Oblique");
+    expect(styledAscii).toContain("/BaseFont /Times-Bold");
+    expect(styledAscii).toContain("/BaseFont /Helvetica-Oblique");
   });
 });

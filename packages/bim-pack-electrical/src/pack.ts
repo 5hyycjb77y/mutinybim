@@ -14,6 +14,7 @@ import { TAG_STYLE_PRESET_POINT, BLOCK_DEPENDENCY_POINT, BLOCK_HOP_POINT, SERVIC
 import { distributionOf, electricalConnectorIds } from "./connections/systems";
 import { ELECTRICAL_CATALOG_ROWS, ELECTRICAL_CONNECTION_FIELDS, feederTypeScheduleRecords } from "./catalog";
 import { ONE_LINE_LAYOUT_ROW } from "./diagrams/one-line-layout";
+import { CONTROLS_DIAGRAM_GRAPH, CONTROLS_DIAGRAM_LAYOUT_ROW } from "./diagrams/controls-diagram";
 import { CIRCUIT_GRAPHICS_ROW } from "./annotation/circuit-graphics";
 import { ELECTRICAL_LOAD_SECTION } from "./facets";
 import { electricalSourcesFor } from "./connections/sources";
@@ -198,14 +199,14 @@ export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(LINK_TYPE_CATALOG_POINT, [FEEDER_TYPES]),
   contribute(CATALOG_ENTRY_POINT, ELECTRICAL_CATALOG_ROWS),
   contribute(CONNECTION_FIELD_POINT, ELECTRICAL_CONNECTION_FIELDS),
-  contribute(DIAGRAM_LAYOUT_POINT, [ONE_LINE_LAYOUT_ROW]),
+  contribute(DIAGRAM_LAYOUT_POINT, [ONE_LINE_LAYOUT_ROW, CONTROLS_DIAGRAM_LAYOUT_ROW]),
   contribute(VIEW_GRAPHICS_POINT, [CIRCUIT_GRAPHICS_ROW]),
   contribute(LOAD_SECTION_POINT, [ELECTRICAL_LOAD_SECTION]),
   contribute(SERVICE_POINT, ELECTRICAL_SERVICE_ROWS),
   contribute(SERVICE_LINE_CODE_POINT, ELECTRICAL_SERVICE_LINE_CODES),
   contribute(DESIGN_LIMIT_DEFAULT_POINT, ELECTRICAL_DESIGN_LIMIT_DEFAULTS),
   contribute(FIELD_PROVIDER_POINT, [FIELDS]),
-  contribute(DIAGRAM_GRAPH_POINT, [ONE_LINE, RISER]),
+  contribute(DIAGRAM_GRAPH_POINT, [ONE_LINE, RISER, CONTROLS_DIAGRAM_GRAPH]),
   contribute(SYMBOL_POINT, [...ELECTRICAL_COMPONENTS.map(symbolOfComponent), ...ELECTRICAL_PLAN_SYMBOLS]),
   contribute(BLOCK_HOP_POINT, [SERVICE_HOP_ROW]),
   contribute(BLOCK_DEPENDENCY_POINT, [DISTRIBUTION_DEPS]),

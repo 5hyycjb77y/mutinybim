@@ -5,7 +5,7 @@ import { TrackedReader, requireKind } from "../model";
 import { draftElements } from "../store";
 import { partTypeIssues, type PartTypeDefinition } from "../parts";
 import { clearanceOverrideIssues, clearanceOverrideSchema, clearanceZoneSchema, type ClearanceOverride } from "../part-model/clearance";
-import { MAX_CURB_MM, hostName, hostTopMm, partHostSchema } from "../spatial";
+import { MAX_CURB_MM, hostName, hostTopMm, partHostSchema, wallFaceFrame } from "../spatial";
 import { finish, guard, refuse, type AuthoredWrite, type ExecuteResult } from "../command-core";
 import { RunPropagator, carryConnectedRuns } from "../routing/propagate";
 import { partLabelOf } from "../routing/validate";
@@ -76,6 +76,14 @@ function setPartHost(model: ModelState, command: Extract<SpatialCommand, { type:
     if (!slab) refuse("element_not_found", `There is no slab ${host.elementId}`, [asElementId(host.elementId)]);
     requireKind(slab, "slab");
   }
+  const hostWall =
+    host?.kind === "wall_face"
+      ? (() => {
+          const w = reader.find(asElementId(host.elementId));
+          if (!w) refuse("element_not_found", `There is no wall ${host.elementId}`, [asElementId(host.elementId)]);
+          return requireKind(w, "wall");
+        })()
+      : null;
   const seen = new Set<string>();
   const working = draftElements(model.elements);
   const touched = new Set<ElementId>();
@@ -89,22 +97,41 @@ function setPartHost(model: ModelState, command: Extract<SpatialCommand, { type:
     const part = requireKind(reader.get(asElementId(raw)), "part");
     const curbMm = command.curbMm === undefined ? part.curbMm : command.curbMm === null ? undefined : round(command.curbMm);
     let offsetMm = part.offsetMm;
+    let position = part.position;
+    let rotationDeg = part.rotationDeg;
     if (host && command.seat !== false) {
-      const top = hostTopMm(model, host);
-      if (top === null) refuse("element_not_found", `${hostName(model, host)} isn't there to stand on`, [part.id]);
-      const level = requireKind(reader.get(part.levelId), "level");
-      offsetMm = round(top + (curbMm ?? 0) - level.elevationMm);
+      if (host.kind === "wall_face" && hostWall) {
+        const frame = wallFaceFrame(hostWall, host.stationMm, host.side, host.faceOffsetMm ?? 0);
+        if (frame.rotationDeg !== part.rotationDeg && part.links && Object.keys(part.links).length > 0) {
+          refuse(
+            "anchored_would_move",
+            `${part.mark || part.id} has runs connected to it; disconnect them before turning it onto a different wall orientation`,
+            [part.id, hostWall.id],
+          );
+        }
+        position = frame.position;
+        rotationDeg = frame.rotationDeg;
+      } else {
+        const top = hostTopMm(model, host);
+        if (top === null) refuse("element_not_found", `${hostName(model, host)} isn't there to stand on`, [part.id]);
+        const level = requireKind(reader.get(part.levelId), "level");
+        offsetMm = round(top + (curbMm ?? 0) - level.elevationMm);
+      }
     }
     const { host: _oldHost, curbMm: _oldCurb, ...rest } = part;
-    const next: PartInstance = { ...rest, offsetMm, ...(host ? { host } : {}), ...(curbMm !== undefined && curbMm > 0 ? { curbMm } : {}) };
+    const next: PartInstance = { ...rest, position, rotationDeg, offsetMm, ...(host ? { host } : {}), ...(curbMm !== undefined && curbMm > 0 ? { curbMm } : {}) };
     working[part.id] = next;
     touched.add(part.id);
     authored.push({ elementId: part.id, field: "host", value: canonicalJson(next.host ?? null) + canonicalJson(next.curbMm ?? null) });
+    if (position.x !== part.position.x || position.y !== part.position.y) authored.push({ elementId: part.id, field: "position", value: position });
+    if (rotationDeg !== part.rotationDeg) authored.push({ elementId: part.id, field: "rotationDeg", value: rotationDeg });
     if (offsetMm !== part.offsetMm) authored.push({ elementId: part.id, field: "offsetMm", value: offsetMm });
+    const dx = round(position.x - part.position.x);
+    const dy = round(position.y - part.position.y);
     const dz = round(offsetMm - part.offsetMm);
-    if (dz !== 0 && part.links) {
+    if ((dx !== 0 || dy !== 0 || dz !== 0) && part.links) {
       const before = new Set(touched);
-      carryConnectedRuns(runs, part, { x: 0, y: 0, z: dz }, (link, why) => {
+      carryConnectedRuns(runs, part, { x: dx, y: dy, z: dz }, (link, why) => {
         const stuck = why.elementIds.find((id) => working[id]?.kind === "run_segment" || working[id]?.kind === "run_fitting") ?? link.elementId;
         return refuse(why.code, seatRefusal(working, part, dz, stuck, why.message), [part.id, ...why.elementIds]);
       });

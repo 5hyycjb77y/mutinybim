@@ -1,14 +1,20 @@
 'use client'
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import {
   asElementId,
   buildViewPickIndex,
   describeModelDelta,
+  drawPartSymbol,
+  isWallFaceMountable,
   modelToPaperPoint,
+  nearestWallFace,
   paperToDrawing,
+  planAutoPartMarks,
   viewLevelElements,
+  type AutoPartMarkHit,
   type ModelState,
   type PartInstance,
   type RunPoint,
@@ -17,7 +23,24 @@ import {
   type ViewOnPaper,
   type ViewPickIndex,
 } from '@permitzip/bim-kernel'
-import { circuitJoinNear, circuitJoinsOnPaper, withCircuitBend, type CircuitJoinOnPaper } from '@permitzip/bim-pack-electrical'
+import {
+  circuitHomeRunNear,
+  circuitHomeRunsOnPaper,
+  circuitJoinNear,
+  circuitJoinsOnPaper,
+  circuitSwitchLegLabelNear,
+  circuitSwitchLegLabelsOnPaper,
+  previewWireCurve,
+  withCircuitFlipArc,
+  withCircuitHomeRun,
+  withCircuitMwbcGroup,
+  withCircuitWaypoints,
+  withSwitchLegLabelOffset,
+  type CircuitHomeRunOnPaper,
+  type CircuitJoinOnPaper,
+  type CircuitSwitchLegLabelOnPaper,
+  type HomeRunHitPart,
+} from '@permitzip/bim-pack-electrical'
 import { parseLength } from '../views-sheets/draft/draft-input'
 import { clipOf, copiedHint, currentClip, pasteCommand, pasteIds, rememberClip, typingIn } from '../views-sheets/draft/copy-paste'
 import type { ModelEditBridge } from './bridge'
@@ -81,10 +104,44 @@ type Drag =
   | { readonly kind: 'press'; readonly from: Vec2; readonly id: string | null }
   | { readonly kind: 'move'; readonly from: Vec2; readonly to: Vec2; readonly ids: readonly string[]; readonly free: boolean }
   | { readonly kind: 'box'; readonly a: Vec2; readonly b: Vec2 }
-  /** A circuit line dragged to pin its bend where it is let go (a hint on the view; the line stays derived). */
-  | { readonly kind: 'bend'; readonly from: Vec2; readonly to: Vec2; readonly join: CircuitJoinOnPaper }
+  /** A circuit or switch-leg wire (or one of its spline vertices) dragged to reshape it. */
+  | { readonly kind: 'bend'; readonly from: Vec2; readonly to: Vec2; readonly join: CircuitJoinOnPaper; readonly vertexIndex: number | null }
+  /** A circuit home run arrow tip, shaft curve, or label dragged to reposition it while staying anchored to its host device. */
+  | { readonly kind: 'homerun'; readonly from: Vec2; readonly to: Vec2; readonly homeRun: CircuitHomeRunOnPaper; readonly part: HomeRunHitPart }
+  /** An automatic device mark dragged to reposition it (promotes into a movable masked tag with auto-leader when pulled away). */
+  | { readonly kind: 'mark'; readonly from: Vec2; readonly to: Vec2; readonly mark: AutoPartMarkHit }
+  /** A lowercase switch-leg designation ("a", "b") dragged to reposition it relative to its device. */
+  | { readonly kind: 'switch_label'; readonly from: Vec2; readonly to: Vec2; readonly label: CircuitSwitchLegLabelOnPaper }
   /** A routed piece, end or elbow, dragged through the session's `drag_run` (as in 3D). */
   | { readonly kind: 'run'; readonly from: Vec2; readonly to: Vec2; readonly hint: string | null; readonly exclude: ReadonlySet<string>; readonly typed: string; readonly snap: SnapHit | null }
+
+type WireContextMenu =
+  | { readonly kind: 'join'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly join: CircuitJoinOnPaper }
+  | { readonly kind: 'homerun'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly homeRun: CircuitHomeRunOnPaper }
+  | { readonly kind: 'switch_label'; readonly clientX: number; readonly clientY: number; readonly paper: Vec2; readonly label: CircuitSwitchLegLabelOnPaper }
+
+/** Insert `pt` into `existing` waypoints at the position closest along the segment `a -> ... -> b`. */
+function insertWaypointOrdered(a: Vec2, b: Vec2, existing: readonly Vec2[], pt: Vec2): Vec2[] {
+  const chain = [a, ...existing, b]
+  let bestIdx = 0
+  let bestDist = Infinity
+  for (let i = 0; i + 1 < chain.length; i++) {
+    const p0 = chain[i]!
+    const p1 = chain[i + 1]!
+    const dx = p1.x - p0.x
+    const dy = p1.y - p0.y
+    const l2 = dx * dx + dy * dy
+    const t = l2 < 1e-6 ? 0 : Math.max(0, Math.min(1, ((pt.x - p0.x) * dx + (pt.y - p0.y) * dy) / l2))
+    const d = Math.hypot(pt.x - (p0.x + dx * t), pt.y - (p0.y + dy * t))
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  const out = [...existing]
+  out.splice(bestIdx, 0, pt)
+  return out
+}
 
 interface Props {
   readonly model: ModelState
@@ -119,6 +176,11 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const [cache] = useState(() => new PickIndexCache())
   const index = useMemo(() => cache.get(model, view.view), [cache, model, view.view])
   const [hover, setHover] = useState<readonly string[] | null>(null)
+  const [hoverJoin, setHoverJoin] = useState<CircuitJoinOnPaper | null>(null)
+  const [hoverHomeRun, setHoverHomeRun] = useState<{ readonly homeRun: CircuitHomeRunOnPaper; readonly part: HomeRunHitPart } | null>(null)
+  const [hoverMark, setHoverMark] = useState<AutoPartMarkHit | null>(null)
+  const [hoverSwitchLabel, setHoverSwitchLabel] = useState<CircuitSwitchLegLabelOnPaper | null>(null)
+  const [wireMenu, setWireMenu] = useState<WireContextMenu | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   /** Split or Route: where the tool would act under the pointer (a tick on the duct, or the next route point). */
   const [toolMark, setToolMark] = useState<{ readonly paper: Vec2; readonly label: string } | null>(null)
@@ -128,14 +190,83 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const routing = tool === 'route'
   const splitting = tool === 'split'
   const snapTolerance = toleranceMm(view, paperMmPerPx, SNAP_PX)
-  // Circuit lines on paper, re-derived when the model or view changes (plans only): what a drag can bend.
-  const circuitJoins = useMemo(() => {
-    if (view.view.viewType !== 'floor_plan' && view.view.viewType !== 'ceiling_plan') return []
+  const isPlanView = view.view.viewType === 'floor_plan' || view.view.viewType === 'ceiling_plan'
+  const shownPlanParts = useMemo(() => {
     const shown = new Map<string, PartInstance>()
+    if (!isPlanView) return shown
     for (const el of viewLevelElements(model, view.view)) if (el.kind === 'part') shown.set(el.id, el)
-    return circuitJoinsOnPaper(model, view.view, shown, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
-  }, [model, view])
-  const joinAt = (p: Vec2) => circuitJoinNear(circuitJoins, p, CLICK_PX * paperMmPerPx)
+    return shown
+  }, [isPlanView, model, view.view])
+  // Circuit & switch-leg spans on paper (plans only): drag to bend/reshape, right-click to add/remove spline vertices.
+  const circuitJoins = useMemo(() => {
+    if (!isPlanView) return []
+    return circuitJoinsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+  }, [isPlanView, model, shownPlanParts, view])
+  // Home runs on paper (plans only): drag arrow tip, curve shaft, or label.
+  const circuitHomeRuns = useMemo(() => {
+    if (!isPlanView) return []
+    return circuitHomeRunsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+  }, [isPlanView, model, shownPlanParts, view])
+  // Switch-leg designations ("a", "b") on paper (plans only): drag any letter to reposition it relative to its device.
+  const switchLegLabels = useMemo(() => {
+    if (!isPlanView) return []
+    return circuitSwitchLegLabelsOnPaper(model, view.view, shownPlanParts, view.frame.scale, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 }))
+  }, [isPlanView, model, shownPlanParts, view])
+  // Untagged device marks on paper (plans only): drag any mark directly to turn it into a movable tag.
+  const autoMarks = useMemo(
+    () => (isPlanView ? planAutoPartMarks(model, view.view, view.frame, (q) => modelToPaperPoint(view, { x: q.x, y: q.y, z: 0 })) : []),
+    [isPlanView, model, view],
+  )
+  const wireTolMm = Math.max(1.2, 7 * paperMmPerPx)
+  const joinAt = (p: Vec2) => circuitJoinNear(circuitJoins, p, wireTolMm)
+  const homeRunAt = (p: Vec2) => circuitHomeRunNear(circuitHomeRuns, p, wireTolMm)
+  const switchLabelAt = (p: Vec2) => circuitSwitchLegLabelNear(switchLegLabels, p, Math.max(1.8, 7 * paperMmPerPx))
+  /** Model elements that take click/hover priority over drawn wires (devices, runs, fittings, openings, columns). Wires win over rooms, grids, and walls they cross. */
+  const isForegroundModelEl = (elId: string | null): boolean => {
+    if (!elId) return false
+    const k = model.elements[elId]?.kind
+    return k !== 'room' && k !== 'grid' && k !== 'wall'
+  }
+  const autoMarkAt = (p: Vec2): AutoPartMarkHit | null => {
+    const pad = Math.max(1.0, CLICK_PX * 0.5 * paperMmPerPx)
+    for (const m of autoMarks) {
+      if (p.x >= m.box.min.x - pad && p.x <= m.box.max.x + pad && p.y >= m.box.min.y - pad && p.y <= m.box.max.y + pad) return m
+    }
+    return null
+  }
+  const vertexNearJoin = (join: CircuitJoinOnPaper, p: Vec2): number | null => {
+    const tol = Math.max(1.8, 8 * paperMmPerPx)
+    let best = -1
+    let bestD = tol
+    join.waypointsPaper.forEach((wp, i) => {
+      const d = Math.hypot(p.x - wp.x, p.y - wp.y)
+      if (d <= bestD) {
+        bestD = d
+        best = i
+      }
+    })
+    return best >= 0 ? best : null
+  }
+  const vertexHitAnyJoin = (p: Vec2): { readonly join: CircuitJoinOnPaper; readonly vertexIndex: number } | null => {
+    for (const join of circuitJoins) {
+      const idx = vertexNearJoin(join, p)
+      if (idx !== null) return { join, vertexIndex: idx }
+    }
+    return null
+  }
+  useEffect(() => {
+    if (!wireMenu) return
+    const close = () => setWireMenu(null)
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setWireMenu(null)
+    }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [wireMenu])
 
   const commitTyped = (d: Extract<Drag, { kind: 'run' }>) => {
     const mm = parseLength(d.typed)
@@ -242,10 +373,90 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   })
 
   const hoverAt = (p: Vec2) => {
+    if (tool === 'select') {
+      const vh = vertexHitAnyJoin(p)
+      if (vh) {
+        bridge.hover(null)
+        setHover(null)
+        setHoverHomeRun(null)
+        setHoverMark(null)
+        setHoverJoin(vh.join)
+        bridge.hint(`${vh.join.kind === 'switch_leg' ? vh.join.name : `Circuit ${vh.join.name}`}: drag spline vertex to reshape, right-click to add or remove vertices.`)
+        return
+      }
+      const hr = homeRunAt(p)
+      if (hr && (hr.part === 'tip' || hr.part === 'label')) {
+        bridge.hover(null)
+        setHover(null)
+        setHoverJoin(null)
+        setHoverMark(null)
+        setHoverHomeRun(hr)
+        bridge.hint(
+          hr.part === 'tip'
+            ? `Home run ${hr.homeRun.name}: drag tip to aim or resize arrow; right-click to reset.`
+            : `Home run label ${hr.homeRun.label}: drag to move label; right-click to reset.`,
+        )
+        return
+      }
+      const sw = switchLabelAt(p)
+      if (sw) {
+        bridge.hover(null)
+        setHover(null)
+        setHoverJoin(null)
+        setHoverHomeRun(null)
+        setHoverMark(null)
+        setHoverSwitchLabel(sw)
+        bridge.hint(`Switch leg "${sw.text}": drag to reposition letter; right-click to reset.`)
+        return
+      }
+      const mark = autoMarkAt(p)
+      if (mark) {
+        bridge.hover(null)
+        setHover(null)
+        setHoverJoin(null)
+        setHoverHomeRun(null)
+        setHoverSwitchLabel(null)
+        setHoverMark(mark)
+        bridge.hint(`Mark ${mark.text}: drag to reposition as a movable tag (pull away for a leader).`)
+        return
+      }
+    }
+    setHoverMark(null)
+    setHoverSwitchLabel(null)
     const id = idsAt(index, view, p, paperMmPerPx)[0] ?? null
+    if (isForegroundModelEl(id)) {
+      const hint = bridge.hover(id)
+      setHoverJoin(null)
+      setHoverHomeRun(null)
+      bridge.hint(hint)
+      setHover(bridge.highlighted() ?? (id ? [id] : null))
+      return
+    }
+    // Wires and home-run shafts draw in front of rooms, grids, and crossed walls, so check them before background picks.
+    if (tool === 'select') {
+      const hr = homeRunAt(p)
+      if (hr) {
+        bridge.hover(null)
+        setHoverJoin(null)
+        setHoverHomeRun(hr)
+        bridge.hint(`Home run ${hr.homeRun.name}: drag tip to aim/resize, drag shaft to curve, drag label to move; right-click to reset.`)
+        setHover(null)
+        return
+      }
+      const join = joinAt(p)
+      if (join) {
+        bridge.hover(null)
+        setHoverHomeRun(null)
+        setHoverJoin(join)
+        bridge.hint(`${join.kind === 'switch_leg' ? join.name : `Circuit ${join.name}`}: drag to bend, right-click to insert/remove spline vertices or flip arc.`)
+        setHover(null)
+        return
+      }
+    }
     const hint = bridge.hover(id)
-    const join = id === null && tool === 'select' ? joinAt(p) : null
-    bridge.hint(join ? `Circuit ${join.name}: drag the line to bend it there.` : hint)
+    setHoverHomeRun(null)
+    setHoverJoin(null)
+    bridge.hint(hint)
     setHover(bridge.highlighted() ?? (id ? [id] : null))
   }
 
@@ -307,21 +518,78 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
 
   const onPointerDown = (e: React.PointerEvent<SVGRectElement>) => {
     if (e.button !== 0) return
+    setWireMenu(null)
     const p = paperOf(e)
     if (!p) return
     e.stopPropagation()
     const shiftBox = e.shiftKey || bridge.tool === 'box'
-    const id = routing || splitting || shiftBox ? null : (idsAt(index, view, p, paperMmPerPx)[0] ?? null)
-    // A circuit line under a Select press (and no device): the drag bends it.
-    const join = tool === 'select' && !shiftBox && id === null ? joinAt(p) : null
-    if (join) {
-      if (!bridge.canEdit) {
-        toast.error(bridge.blockedReason)
+    // 1. Direct handles that sit outside device symbols: pinned spline vertices, home-run tip/label, and auto-placed device marks.
+    if (tool === 'select' && !shiftBox && !routing && !splitting) {
+      const vh = vertexHitAnyJoin(p)
+      if (vh) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'bend', from: p, to: p, join: vh.join, vertexIndex: vh.vertexIndex })
         return
       }
-      e.currentTarget.setPointerCapture(e.pointerId)
-      setDrag({ kind: 'bend', from: p, to: p, join })
-      return
+      const hr = homeRunAt(p)
+      if (hr && (hr.part === 'tip' || hr.part === 'label')) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'homerun', from: p, to: p, homeRun: hr.homeRun, part: hr.part })
+        return
+      }
+      const sw = switchLabelAt(p)
+      if (sw) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'switch_label', from: p, to: p, label: sw })
+        return
+      }
+      const mark = autoMarkAt(p)
+      if (mark) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'mark', from: p, to: p, mark })
+        return
+      }
+    }
+    const id = routing || splitting || shiftBox ? null : (idsAt(index, view, p, paperMmPerPx)[0] ?? null)
+    // 2. When no foreground device/run is under the pointer, check home-run shaft & circuit/switch-leg wire spans
+    //    (wins over background rooms, grids, and walls the wire crosses!).
+    if (tool === 'select' && !shiftBox && !isForegroundModelEl(id)) {
+      const hr = homeRunAt(p)
+      if (hr) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'homerun', from: p, to: p, homeRun: hr.homeRun, part: hr.part })
+        return
+      }
+      const join = joinAt(p)
+      if (join) {
+        if (!bridge.canEdit) {
+          toast.error(bridge.blockedReason)
+          return
+        }
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDrag({ kind: 'bend', from: p, to: p, join, vertexIndex: vertexNearJoin(join, p) })
+        return
+      }
     }
     // Nothing under a Select press: a drag is a window or crossing box, a click deselects (the box's short-drag case).
     const boxing = shiftBox || (tool === 'select' && id === null)
@@ -338,6 +606,32 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       return
     }
     setDrag({ kind: 'press', from: p, id })
+  }
+
+  const onContextMenu = (e: React.MouseEvent<SVGRectElement>) => {
+    if (tool !== 'select' || !isPlanView || !bridge.canEdit) return
+    const p = paperOf(e as unknown as React.PointerEvent<SVGElement>)
+    if (!p) return
+    const sw = switchLabelAt(p)
+    if (sw) {
+      e.preventDefault()
+      e.stopPropagation()
+      setWireMenu({ kind: 'switch_label', clientX: e.clientX, clientY: e.clientY, paper: p, label: sw })
+      return
+    }
+    const hr = homeRunAt(p)
+    if (hr) {
+      e.preventDefault()
+      e.stopPropagation()
+      setWireMenu({ kind: 'homerun', clientX: e.clientX, clientY: e.clientY, paper: p, homeRun: hr.homeRun })
+      return
+    }
+    const join = joinAt(p)
+    if (join) {
+      e.preventDefault()
+      e.stopPropagation()
+      setWireMenu({ kind: 'join', clientX: e.clientX, clientY: e.clientY, paper: p, join })
+    }
   }
 
   const onPointerMove = (e: React.PointerEvent<SVGRectElement>) => {
@@ -362,7 +656,29 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
     }
     if (drag.kind === 'bend') {
       setDrag({ ...drag, to: p })
-      bridge.hint('Release to pin the circuit line’s bend here, Esc to cancel.')
+      bridge.hint(drag.vertexIndex !== null ? 'Release to move spline vertex here, Esc to cancel.' : 'Release to reshape wire here (right-click wire to insert more spline vertices), Esc to cancel.')
+      return
+    }
+    if (drag.kind === 'homerun') {
+      setDrag({ ...drag, to: p })
+      bridge.hint(
+        drag.part === 'tip'
+          ? 'Release to aim and resize home run arrow here, Esc to cancel.'
+          : drag.part === 'label'
+            ? 'Release to move home run label here, Esc to cancel.'
+            : 'Release to curve home run arrow through here, Esc to cancel.',
+      )
+      return
+    }
+    if (drag.kind === 'switch_label') {
+      setDrag({ ...drag, to: p })
+      bridge.hint(`Release to place switch-leg letter "${drag.label.text}" here, Esc to cancel.`)
+      return
+    }
+    if (drag.kind === 'mark') {
+      setDrag({ ...drag, to: p })
+      const far = Math.hypot(p.x - drag.mark.partAt.x, p.y - drag.mark.partAt.y) > 7
+      bridge.hint(far ? `Release to place ${drag.mark.text} tag with leader, Esc to cancel.` : `Release to reposition ${drag.mark.text}, Esc to cancel.`)
       return
     }
     if (drag.kind === 'run') {
@@ -420,8 +736,109 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         bridge.hint(view.mapping.modelReason)
         return
       }
-      const refused = bridge.submit({ type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitBend(view.view, d.join.linkId, d.join.a, d.join.b, { x: at.x, y: at.y }) } }, 'bend the circuit line')
-      bridge.hint(refused ?? 'Bend pinned. Clear it under Circuits on this plan in the view’s properties.')
+      const nextPt = { x: at.x, y: at.y }
+      let nextWaypoints: Vec2[]
+      if (d.vertexIndex !== null && d.vertexIndex < d.join.waypointsModel.length) {
+        nextWaypoints = d.join.waypointsModel.map((wp, i) => (i === d.vertexIndex ? nextPt : wp))
+      } else if (d.join.waypointsModel.length <= 1) {
+        nextWaypoints = [nextPt]
+      } else {
+        // Dragging on an existing multi-vertex spline moves its closest control vertex.
+        let closest = 0
+        let bestD = Infinity
+        d.join.waypointsPaper.forEach((wp, i) => {
+          const distP = Math.hypot(d.from.x - wp.x, d.from.y - wp.y)
+          if (distP < bestD) {
+            bestD = distP
+            closest = i
+          }
+        })
+        nextWaypoints = d.join.waypointsModel.map((wp, i) => (i === closest ? nextPt : wp))
+      }
+      const refused = bridge.submit(
+        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, d.join.linkId, d.join.a, d.join.b, nextWaypoints) } },
+        'reshape wire',
+      )
+      bridge.hint(refused ?? 'Wire reshaped. Right-click the wire to add/remove spline vertices, flip arc, or reset.')
+      if (refused) toast.error(refused)
+      return
+    }
+    if (d.kind === 'homerun') {
+      if (Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < CLICK_PX * paperMmPerPx) return
+      const at = view.mapping.toModel(paperToDrawing(view, d.to))
+      if (!at) {
+        bridge.hint(view.mapping.modelReason)
+        return
+      }
+      const existing = view.view.props?.circuitGraphics?.hints?.[d.homeRun.linkId]?.homeRun ?? {}
+      const anchor = d.homeRun.anchorModel
+      const nextHr =
+        d.part === 'tip'
+          ? { ...existing, memberId: d.homeRun.memberId, tipOffset: { x: at.x - anchor.x, y: at.y - anchor.y } }
+          : d.part === 'label'
+            ? { ...existing, memberId: d.homeRun.memberId, labelOffset: { x: at.x - d.homeRun.tipModel.x, y: at.y - d.homeRun.tipModel.y } }
+            : { ...existing, memberId: d.homeRun.memberId, bendOffset: { x: at.x - anchor.x, y: at.y - anchor.y } }
+      const refused = bridge.submit(
+        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitHomeRun(view.view, d.homeRun.linkId, nextHr) } },
+        d.part === 'tip' ? 'move home run arrow' : d.part === 'label' ? 'move home run label' : 'curve home run arrow',
+      )
+      bridge.hint(refused ?? 'Home run updated (it still follows the device when moved). Right-click to reset.')
+      if (refused) toast.error(refused)
+      return
+    }
+    if (d.kind === 'switch_label') {
+      if (Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < CLICK_PX * paperMmPerPx) {
+        bridge.select(d.label.memberId)
+        onPicked?.()
+        return
+      }
+      const at = view.mapping.toModel(paperToDrawing(view, d.to))
+      if (!at) {
+        bridge.hint(view.mapping.modelReason)
+        return
+      }
+      const offset = { x: at.x - d.label.memberAnchorModel.x, y: at.y - d.label.memberAnchorModel.y }
+      const refused = bridge.submit(
+        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withSwitchLegLabelOffset(view.view, d.label.hintKey, d.label.memberId, offset) } },
+        `move switch-leg letter "${d.label.text}"`,
+      )
+      bridge.hint(refused ?? `Moved switch-leg letter "${d.label.text}". Right-click it to reset.`)
+      if (refused) toast.error(refused)
+      return
+    }
+    if (d.kind === 'mark') {
+      if (Math.hypot(d.to.x - d.from.x, d.to.y - d.from.y) < CLICK_PX * paperMmPerPx) {
+        bridge.select(d.mark.partId)
+        onPicked?.()
+        return
+      }
+      const at = view.mapping.toModel(paperToDrawing(view, d.to))
+      if (!at) {
+        bridge.hint(view.mapping.modelReason)
+        return
+      }
+      const pulledFar = Math.hypot(d.to.x - d.mark.partAt.x, d.to.y - d.mark.partAt.y) > 7
+      const itemId = newElementId('tag')
+      const refused = bridge.submit(
+        {
+          type: 'add_drawing_item',
+          itemId,
+          ownerId: view.view.id,
+          shape: 'tag',
+          points: [{ x: Math.round(at.x), y: Math.round(at.y) }],
+          tag: {
+            elementId: asElementId(d.mark.partId),
+            template: 'mark',
+            styleId: 'tst-mark-clean',
+            leader: pulledFar,
+            leaderOverride: pulledFar,
+            mask: true,
+            ...(pulledFar ? { elbow: 'auto' as const } : {}),
+          },
+        },
+        `move ${d.mark.text} mark`,
+      )
+      bridge.hint(refused ?? `Moved ${d.mark.text} as a movable tag. Drag it again anytime or right-click to toggle its leader.`)
       if (refused) toast.error(refused)
       return
     }
@@ -462,6 +879,51 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const routeTicks = routing && runStrokes.length > 0 ? routeTicksAcross((bridge.tools.routeTicks?.() ?? []).map((q) => modelToPaperPoint(view, q)), runStrokes, TICK_HALF_MM) : []
   const moveDelta: RunPoint | null = drag?.kind === 'move' ? dragToModel(view, drag.from, drag.to, drag.free) : null
   const moveOffset = drag?.kind === 'move' ? paperOffsetFor(view, drag.from, drag.to, drag.free) : null
+  // Live wall-face snap & rotated symbol preview when dragging a single wall-mountable part (switch, receptacle, panelboard, etc.) near a wall.
+  const moveWallPreview = useMemo(() => {
+    if (drag?.kind !== 'move' || drag.free || !isPlanView || !moveDelta || drag.ids.length !== 1) return null
+    const id = drag.ids[0]
+    if (!id) return null
+    const el = model.elements[id]
+    if (el?.kind !== 'part' || el.planned !== undefined) return null
+    const typeEl = model.elements[el.typeId]
+    if (typeEl?.kind !== 'part_type' || !isWallFaceMountable(typeEl.definition)) return null
+    const targetPt = { x: el.position.x + moveDelta.x, y: el.position.y + moveDelta.y }
+    const snap = nearestWallFace(model, el.levelId, targetPt, { maxDistanceMm: 450 })
+    if (!snap) return null
+    const level = model.elements[el.levelId]
+    const z = (level?.kind === 'level' ? level.elevationMm : 0) + el.offsetMm
+    const previewPart: PartInstance = {
+      ...el,
+      position: snap.position,
+      rotationDeg: snap.rotationDeg,
+      host: { kind: 'wall_face', elementId: snap.wallId, stationMm: snap.stationMm, side: snap.side },
+    }
+    const previewModel: ModelState = { ...model, elements: { ...model.elements, [el.id]: previewPart } }
+    const lines: Array<{ readonly a: Vec2; readonly b: Vec2 }> = []
+    const circles: Array<{ readonly c: Vec2; readonly r: number }> = []
+    const texts: Array<{ readonly at: Vec2; readonly text: string; readonly sizeMm: number; readonly anchor?: 'start' | 'middle' | 'end' }> = []
+    const toPaper = (q: Vec2): Vec2 => modelToPaperPoint(view, { x: q.x, y: q.y, z })
+    drawPartSymbol(
+      previewModel,
+      previewPart,
+      (a, b) => lines.push({ a: toPaper(a), b: toPaper(b) }),
+      (pt, text, sizeMm, anchor) => texts.push({ at: toPaper(pt), text, sizeMm, anchor }),
+      null,
+      view.view.props?.detailLevel ?? 'medium',
+      {
+        scale: view.frame.scale,
+        symbolScale: view.view.props?.symbolScale ?? 1,
+        showMark: false,
+        circle: (c, rad) => {
+          const pc = toPaper(c)
+          const pe = toPaper({ x: c.x + rad, y: c.y })
+          circles.push({ c: pc, r: Math.hypot(pe.x - pc.x, pe.y - pc.y) })
+        },
+      },
+    )
+    return { center: toPaper(snap.position), lines, circles, texts }
+  }, [drag, isPlanView, moveDelta, model, view])
   const selectedOutlines = useMemo(
     () => bridge.selectedIds.slice(0, MAX_OUTLINES).flatMap((id) => {
       const poly = outlineOnPaper(index, view, id)
@@ -497,12 +959,29 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         {hoverOutlines.map(({ id, poly }) => (
           <polygon key={`h-${id}`} points={points(poly)} fill={PRIMARY} fillOpacity={0.06} stroke={PRIMARY} strokeOpacity={0.7} strokeWidth={0.35} strokeDasharray="1.2 0.8" data-testid="model-hover-outline" data-element-id={id} />
         ))}
-        {moveOffset &&
+        {moveWallPreview ? (
+          <g pointerEvents="none" data-testid="model-wall-snap-preview">
+            {moveWallPreview.circles.map((c, i) => (
+              <circle key={`mwc-${i}`} cx={c.c.x} cy={c.c.y} r={c.r} fill="none" stroke={PRIMARY} strokeWidth={0.45} />
+            ))}
+            {moveWallPreview.lines.map((l, i) => (
+              <line key={`mwl-${i}`} x1={l.a.x} y1={l.a.y} x2={l.b.x} y2={l.b.y} stroke={PRIMARY} strokeWidth={0.45} strokeLinecap="round" />
+            ))}
+            {moveWallPreview.texts.map((t, i) => (
+              <text key={`mwt-${i}`} x={t.at.x} y={t.at.y} fontSize={t.sizeMm} textAnchor={t.anchor ?? 'middle'} fill={PRIMARY} fontFamily="sans-serif">
+                {t.text}
+              </text>
+            ))}
+            <circle cx={moveWallPreview.center.x} cy={moveWallPreview.center.y} r={0.75} fill={PRIMARY} />
+          </g>
+        ) : (
+          moveOffset &&
           drag?.kind === 'move' &&
           drag.ids.slice(0, MAX_OUTLINES).map((id) => {
             const poly = outlineOnPaper(index, view, id)
             return poly ? <polygon key={`m-${id}`} points={points(poly, moveOffset)} fill="none" stroke={PRIMARY} strokeWidth={0.45} strokeDasharray="1.5 1" data-testid="model-move-preview" /> : null
-          })}
+          })
+        )}
         {runStrokes.map((s) => (
           <line
             key={`r-${s.id}`}
@@ -547,16 +1026,134 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
           </text>
         </g>
       )}
+      {hoverJoin && !drag && (
+        <g pointerEvents="none" data-testid="model-wire-hover">
+          <polyline points={points(hoverJoin.points)} fill="none" stroke={PRIMARY} strokeOpacity={0.55} strokeWidth={0.9} />
+          {hoverJoin.waypointsPaper.map((wp, i) => (
+            <circle key={`wp-${i}`} cx={wp.x} cy={wp.y} r={1.25} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.5} />
+          ))}
+        </g>
+      )}
+      {hoverHomeRun && !drag && (
+        <g pointerEvents="none" data-testid="model-homerun-hover">
+          <polyline points={points(hoverHomeRun.homeRun.pathPaper)} fill="none" stroke={PRIMARY} strokeOpacity={0.55} strokeWidth={0.9} />
+          <circle cx={hoverHomeRun.homeRun.tipPaper.x} cy={hoverHomeRun.homeRun.tipPaper.y} r={1.4} fill={hoverHomeRun.part === 'tip' ? PRIMARY : '#ffffff'} stroke={PRIMARY} strokeWidth={0.5} />
+          <rect
+            x={hoverHomeRun.homeRun.labelBoxPaper.min.x}
+            y={hoverHomeRun.homeRun.labelBoxPaper.min.y}
+            width={hoverHomeRun.homeRun.labelBoxPaper.max.x - hoverHomeRun.homeRun.labelBoxPaper.min.x}
+            height={hoverHomeRun.homeRun.labelBoxPaper.max.y - hoverHomeRun.homeRun.labelBoxPaper.min.y}
+            fill={hoverHomeRun.part === 'label' ? PRIMARY : 'none'}
+            fillOpacity={hoverHomeRun.part === 'label' ? 0.14 : 0}
+            stroke={PRIMARY}
+            strokeWidth={0.35}
+            strokeDasharray="1 0.8"
+          />
+        </g>
+      )}
+      {hoverSwitchLabel && !drag && (
+        <g pointerEvents="none" data-testid="model-switch-label-hover">
+          <rect
+            x={hoverSwitchLabel.atPaper.x - 0.6}
+            y={hoverSwitchLabel.atPaper.y - 2.4}
+            width={Math.max(2.4, hoverSwitchLabel.text.length * 1.4 + 1.2)}
+            height={3.0}
+            fill={PRIMARY}
+            fillOpacity={0.14}
+            stroke={PRIMARY}
+            strokeWidth={0.35}
+            strokeDasharray="1 0.8"
+          />
+        </g>
+      )}
+      {drag?.kind === 'switch_label' && (
+        <g pointerEvents="none" data-testid="model-switch-label-preview">
+          <line x1={drag.label.atPaper.x} y1={drag.label.atPaper.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.3} strokeDasharray="1 0.8" />
+          <text x={drag.to.x} y={drag.to.y} fontSize={2.1} fontStyle="italic" fill={PRIMARY} paintOrder="stroke" stroke="white" strokeWidth={0.7}>
+            {drag.label.text}
+          </text>
+        </g>
+      )}
+      {hoverMark && !drag && (
+        <g pointerEvents="none" data-testid="model-mark-hover">
+          <rect
+            x={hoverMark.box.min.x}
+            y={hoverMark.box.min.y}
+            width={hoverMark.box.max.x - hoverMark.box.min.x}
+            height={hoverMark.box.max.y - hoverMark.box.min.y}
+            fill={PRIMARY}
+            fillOpacity={0.12}
+            stroke={PRIMARY}
+            strokeWidth={0.35}
+            strokeDasharray="1 0.8"
+          />
+        </g>
+      )}
       {drag?.kind === 'bend' && (
         <g pointerEvents="none" data-testid="model-bend-preview" data-link-id={drag.join.linkId}>
-          <polyline
-            points={points([drag.join.points[0] ?? drag.from, drag.to, drag.join.points[drag.join.points.length - 1] ?? drag.from])}
-            fill="none"
-            stroke={PRIMARY}
-            strokeWidth={0.45}
-            strokeDasharray="1.5 1"
-          />
-          <circle cx={drag.to.x} cy={drag.to.y} r={1} fill="none" stroke={PRIMARY} strokeWidth={0.4} />
+          {(() => {
+            const start = drag.join.points[0] ?? drag.from
+            const end = drag.join.points[drag.join.points.length - 1] ?? drag.from
+            const wps =
+              drag.vertexIndex !== null && drag.vertexIndex < drag.join.waypointsPaper.length
+                ? drag.join.waypointsPaper.map((wp, i) => (i === drag.vertexIndex ? drag.to : wp))
+                : drag.join.waypointsPaper.length <= 1
+                  ? [drag.to]
+                  : drag.join.waypointsPaper.map((wp, i) => {
+                      let closest = 0
+                      let bestD = Infinity
+                      drag.join.waypointsPaper.forEach((c, ci) => {
+                        const d = Math.hypot(drag.from.x - c.x, drag.from.y - c.y)
+                        if (d < bestD) {
+                          bestD = d
+                          closest = ci
+                        }
+                      })
+                      return i === closest ? drag.to : wp
+                    })
+            return (
+              <>
+                <polyline points={points(previewWireCurve(start, wps, end))} fill="none" stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+                {wps.map((wp, i) => (
+                  <circle key={`dwp-${i}`} cx={wp.x} cy={wp.y} r={1.15} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.45} />
+                ))}
+              </>
+            )
+          })()}
+        </g>
+      )}
+      {drag?.kind === 'homerun' && (
+        <g pointerEvents="none" data-testid="model-homerun-preview" data-link-id={drag.homeRun.linkId}>
+          {drag.part === 'tip' && (
+            <>
+              <line x1={drag.homeRun.fromPaper.x} y1={drag.homeRun.fromPaper.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+              <circle cx={drag.to.x} cy={drag.to.y} r={1.3} fill={PRIMARY} />
+            </>
+          )}
+          {drag.part === 'shaft' && (
+            <>
+              <polyline points={points(previewWireCurve(drag.homeRun.fromPaper, [drag.to], drag.homeRun.tipPaper))} fill="none" stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+              <circle cx={drag.to.x} cy={drag.to.y} r={1.15} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.45} />
+            </>
+          )}
+          {drag.part === 'label' && (
+            <>
+              <line x1={drag.homeRun.tipPaper.x} y1={drag.homeRun.tipPaper.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.3} strokeDasharray="1 0.8" />
+              <text x={drag.to.x} y={drag.to.y} fontSize={2.6} textAnchor="middle" fill={PRIMARY} paintOrder="stroke" stroke="white" strokeWidth={0.7}>
+                {drag.homeRun.label}
+              </text>
+            </>
+          )}
+        </g>
+      )}
+      {drag?.kind === 'mark' && (
+        <g pointerEvents="none" data-testid="model-mark-preview">
+          {Math.hypot(drag.to.x - drag.mark.partAt.x, drag.to.y - drag.mark.partAt.y) > 7 && (
+            <line x1={drag.mark.partAt.x} y1={drag.mark.partAt.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.35} strokeDasharray="1.2 0.8" />
+          )}
+          <text x={drag.to.x} y={drag.to.y} fontSize={2.6} textAnchor="middle" fill={PRIMARY} paintOrder="stroke" stroke="white" strokeWidth={0.7}>
+            {drag.mark.text}
+          </text>
         </g>
       )}
       {drag?.kind === 'box' && (
@@ -581,12 +1178,20 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         width={r.max.x - r.min.x}
         height={r.max.y - r.min.y}
         fill="transparent"
-        className={drawingCursorClass({ aiming: routing || splitting, dragging: drag?.kind === 'move' || drag?.kind === 'run', clickPlaces: hover !== null && (bridge.clickPlaces?.() ?? false), overSelected, canEdit: bridge.canEdit, hovering: hover !== null })}
+        className={drawingCursorClass({
+          aiming: routing || splitting,
+          dragging: drag?.kind === 'move' || drag?.kind === 'run' || drag?.kind === 'homerun' || drag?.kind === 'bend' || drag?.kind === 'mark',
+          clickPlaces: hover !== null && (bridge.clickPlaces?.() ?? false),
+          overSelected: overSelected || hoverMark !== null || hoverHomeRun !== null || hoverJoin !== null,
+          canEdit: bridge.canEdit,
+          hovering: hover !== null || hoverMark !== null || hoverHomeRun !== null || hoverJoin !== null,
+        })}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onContextMenu={onContextMenu}
         onPointerCancel={() => {
-          if (drag?.kind === 'run') bridge.hint(bridge.runDrag.end(false))
+          if (drag?.kind === 'run') bridge.runDrag.end(false)
           setDrag(null)
         }}
         onPointerLeave={() => {
@@ -594,11 +1199,211 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
           if (drag) return
           bridge.hover(null)
           setHover(null)
+          setHoverJoin(null)
+          setHoverHomeRun(null)
+          setHoverMark(null)
         }}
         data-testid="model-drawing-hit"
       >
-        <title>{`${view.view.name}: click to select, Tab for more, drag empty space to box select (right: wholly inside, left: touching), drag a selection to move it, Ctrl+C / Ctrl+V to copy and paste parts at the pointer, Space-drag to pan. Drag duct or pipe by its middle, an end or an elbow.`}</title>
+        <title>{`${view.view.name}: click to select, drag devices by their symbol, drag any mark to reposition as a tag, drag wires or home run tips/labels to reshape, right-click wires for spline vertices.`}</title>
       </rect>
+      {wireMenu &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            style={{ position: 'fixed', left: wireMenu.clientX, top: wireMenu.clientY, zIndex: 70 }}
+            className="min-w-48 rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-md"
+            onPointerDown={(ev) => ev.stopPropagation()}
+            data-testid="wire-context-menu"
+          >
+            {wireMenu.kind === 'join' ? (
+              <>
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                  {wireMenu.join.kind === 'switch_leg' ? wireMenu.join.name : `Circuit ${wireMenu.join.name}`}
+                </div>
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    const at = view.mapping.toModel(paperToDrawing(view, wireMenu.paper))
+                    setWireMenu(null)
+                    if (!at) return
+                    const aEl = model.elements[wireMenu.join.a]
+                    const bEl = model.elements[wireMenu.join.b]
+                    const aPos = aEl?.kind === 'part' ? aEl.position : { x: at.x, y: at.y }
+                    const bPos = bEl?.kind === 'part' ? bEl.position : { x: at.x, y: at.y }
+                    const nextWps = insertWaypointOrdered(aPos, bPos, wireMenu.join.waypointsModel, { x: at.x, y: at.y })
+                    const refused = bridge.submit(
+                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, wireMenu.join.linkId, wireMenu.join.a, wireMenu.join.b, nextWps) } },
+                      'insert spline vertex on wire',
+                    )
+                    if (refused) toast.error(refused)
+                    else bridge.hint(`Inserted spline vertex (${nextWps.length} total). Drag vertices to shape, or right-click to add/remove.`)
+                  }}
+                >
+                  Insert spline vertex here
+                </button>
+                {wireMenu.join.waypointsModel.length > 0 && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                    onClick={() => {
+                      const j = wireMenu.join
+                      const p = wireMenu.paper
+                      setWireMenu(null)
+                      let closest = 0
+                      let bestD = Infinity
+                      j.waypointsPaper.forEach((wp, i) => {
+                        const d = Math.hypot(p.x - wp.x, p.y - wp.y)
+                        if (d < bestD) {
+                          bestD = d
+                          closest = i
+                        }
+                      })
+                      const nextWps = j.waypointsModel.filter((_, i) => i !== closest)
+                      const refused = bridge.submit(
+                        { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitWaypoints(view.view, j.linkId, j.a, j.b, nextWps.length > 0 ? nextWps : null) } },
+                        'remove spline vertex',
+                      )
+                      if (refused) toast.error(refused)
+                    }}
+                  >
+                    Remove nearest vertex
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    const j = wireMenu.join
+                    setWireMenu(null)
+                    const refused = bridge.submit(
+                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitFlipArc(view.view, j.linkId, j.a, j.b) } },
+                      'flip wire arc side',
+                    )
+                    if (refused) toast.error(refused)
+                  }}
+                >
+                  Flip arc side
+                </button>
+                {(wireMenu.join.waypointsModel.length > 0 || wireMenu.join.flipped) && (
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-sm px-2 py-1.5 text-left text-destructive hover:bg-accent"
+                    onClick={() => {
+                      const j = wireMenu.join
+                      setWireMenu(null)
+                      const cleared = withCircuitFlipArc(
+                        { ...view.view, props: { ...(view.view.props ?? {}), circuitGraphics: withCircuitWaypoints(view.view, j.linkId, j.a, j.b, null) } },
+                        j.linkId,
+                        j.a,
+                        j.b,
+                        false,
+                      )
+                      const refused = bridge.submit({ type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: cleared } }, 'reset wire shape')
+                      if (refused) toast.error(refused)
+                    }}
+                  >
+                    Reset wire to automatic
+                  </button>
+                )}
+              </>
+            ) : wireMenu.kind === 'switch_label' ? (
+              <>
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Switch leg &ldquo;{wireMenu.label.text}&rdquo;</div>
+                <button
+                  type="button"
+                  disabled={!wireMenu.label.custom}
+                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                  onClick={() => {
+                    const sw = wireMenu.label
+                    setWireMenu(null)
+                    const refused = bridge.submit(
+                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withSwitchLegLabelOffset(view.view, sw.hintKey, sw.memberId, null) } },
+                      `reset switch-leg letter "${sw.text}"`,
+                    )
+                    if (refused) toast.error(refused)
+                  }}
+                >
+                  Reset switch-leg letter position
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Home run {wireMenu.homeRun.name}</div>
+                <button
+                  type="button"
+                  disabled={!wireMenu.homeRun.hasCustom}
+                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:opacity-40"
+                  onClick={() => {
+                    const hr = wireMenu.homeRun
+                    setWireMenu(null)
+                    const refused = bridge.submit(
+                      { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitHomeRun(view.view, hr.linkId, null) } },
+                      'reset home run to automatic',
+                    )
+                    if (refused) toast.error(refused)
+                  }}
+                >
+                  Reset home run to automatic
+                </button>
+                {(() => {
+                  const hr = wireMenu.homeRun
+                  const currentGroup = view.view.props?.circuitGraphics?.hints?.[hr.linkId]?.mwbcGroup
+                  const thisLink = model.elements[hr.linkId]
+                  const panelId = thisLink?.kind === 'service_link' ? thisLink.source.elementId : null
+                  if (currentGroup) {
+                    const members = Object.entries(view.view.props?.circuitGraphics?.hints ?? {})
+                      .filter(([, h]) => h.mwbcGroup === currentGroup)
+                      .map(([id]) => id)
+                    return (
+                      <button
+                        type="button"
+                        className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                        onClick={() => {
+                          setWireMenu(null)
+                          const refused = bridge.submit(
+                            { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitMwbcGroup(view.view, members, null) } },
+                            'split MWBC shared-neutral home run',
+                          )
+                          if (refused) toast.error(refused)
+                        }}
+                      >
+                        Split MWBC shared-neutral home run
+                      </button>
+                    )
+                  }
+                  if (!panelId) return null
+                  const peers = circuitHomeRuns.filter((other) => {
+                    if (other.linkId === hr.linkId) return false
+                    const el = model.elements[other.linkId]
+                    return el?.kind === 'service_link' && el.source.elementId === panelId
+                  })
+                  if (peers.length === 0) return null
+                  const peer = peers[0]!
+                  return (
+                    <button
+                      type="button"
+                      className="flex w-full items-center rounded-sm px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => {
+                        setWireMenu(null)
+                        const groupId = `mwbc-${[hr.linkId, peer.linkId].sort().join('-')}`
+                        const refused = bridge.submit(
+                          { type: 'set_view_properties', viewId: view.view.id, props: { circuitGraphics: withCircuitMwbcGroup(view.view, [hr.linkId, peer.linkId], groupId) } },
+                          `combine ${hr.name} & ${peer.name} as MWBC`,
+                        )
+                        if (refused) toast.error(refused)
+                      }}
+                    >
+                      Combine as MWBC with {peer.name}
+                    </button>
+                  )
+                })()}
+              </>
+            )}
+          </div>,
+          document.body,
+        )}
       {bridge.canEdit && bridge.plus && !drag && !routing && (
         <DrawingPlusSpots model={model} view={view} selectedIds={bridge.selectedIds} serverFeatures={bridge.serverFeatures ?? []} paperMmPerPx={paperMmPerPx} onPick={bridge.plus} hint={bridge.hint} />
       )}

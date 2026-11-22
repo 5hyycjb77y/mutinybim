@@ -1,4 +1,21 @@
-import { BOUNDING_ELEMENT_POINT, OPENING_SILL_KEY, asElementId, builtinPartType, planLevelSync, surfacesAt, type Command, type LevelSyncPlan, type SurfacesAtResult, type SyncStorey } from "@permitzip/bim-kernel";
+import {
+  BOUNDING_ELEMENT_POINT,
+  OPENING_SILL_KEY,
+  asElementId,
+  builtinPartType,
+  nearestWallFace,
+  planLevelSync,
+  surfacesAt,
+  wallFaceFrame,
+  wallFaceSideToward,
+  wallStationOf,
+  type Command,
+  type LevelSyncPlan,
+  type PartHost,
+  type SurfacesAtResult,
+  type SyncStorey,
+  type Wall,
+} from "@permitzip/bim-kernel";
 import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
@@ -406,6 +423,25 @@ export interface PlacedPart {
   readonly command: PlacePart;
 }
 
+/**
+ * Mounts a part flush onto a wall's interior or exterior finish face (`wall_face` host).
+ * Local `+Y` faces out of the wall into the room so wall-anchored symbols (receptacles,
+ * switches, panels) touch the wall line cleanly without cutting into the wall thickness,
+ * and follow automatically whenever the wall moves, stretches, or changes thickness.
+ */
+export interface WallMountSpec {
+  /** Wall element id to mount on. */
+  readonly wall: string;
+  /** Distance along the wall from its start point toward its end. Omit when `at` or `toward` projects onto the wall. */
+  readonly along?: Measure;
+  /** Which finish face: `1` (left of wall start→end) or `-1` (right). Omit when `toward` or `at` chooses the room side. */
+  readonly side?: 1 | -1;
+  /** Any point inside the room the device should face (picks `side` automatically, and `along` if omitted and `at` is absent). */
+  readonly toward?: PlanPoint;
+  /** Extra standoff past the finish face into the room (default 0: flush on the finish face). */
+  readonly offset?: Measure;
+}
+
 export interface PlaceSpec {
   readonly level: string;
   /**
@@ -416,40 +452,184 @@ export interface PlaceSpec {
    * definition with it.
    */
   readonly type: string;
-  readonly at: PlanPoint;
-  /** Height of its base above the level (a unit on a roof curb, a heater on a stand). */
+  /** Plan position. Required unless `onWall` names a wall with `along` or `toward`. */
+  readonly at?: PlanPoint;
+  /** Height of its base above the level (a unit on a roof curb, a heater on a stand, a receptacle at 18" AFF). */
   readonly height?: Measure;
   readonly rotationDeg?: number;
   readonly mark?: string;
   readonly values?: NonNullable<PlacePart["values"]>;
   /** Stands on a slab or roof (its id): the part's base follows the slab's top. */
   readonly onSlab?: string;
+  /**
+   * Mounts flush on a wall finish face (`{ wall, along?, side?, toward?, offset? }`
+   * or `"nearest"` to snap `at` to the closest wall on this level). Computes the exact
+   * finish-face position and rotation and keeps the part following wall edits.
+   */
+  readonly onWall?: WallMountSpec | "nearest";
   readonly zone?: string;
   readonly id?: string;
+}
+
+function resolveWallMount(
+  ctx: ScriptContext,
+  levelId: string,
+  onWall: WallMountSpec | "nearest",
+  fallbackAt?: { x: number; y: number },
+  maxDistanceMm = 1500,
+): { readonly host: Extract<PartHost, { kind: "wall_face" }>; readonly position: { x: number; y: number }; readonly rotationDeg: number } {
+  return onWorking(ctx, "equipment.onWall", (model) => {
+    if (onWall === "nearest") {
+      if (!fallbackAt) throw new ScriptRunError('onWall: "nearest" needs a position (`at`) to snap to a wall face.');
+      const hit = nearestWallFace(model, levelId, fallbackAt, { maxDistanceMm });
+      if (!hit) throw new ScriptRunError(`No wall found within ${Math.round(maxDistanceMm)} mm on level ${levelId} to mount on.`);
+      const host: Extract<PartHost, { kind: "wall_face" }> = {
+        kind: "wall_face",
+        elementId: hit.wallId,
+        stationMm: hit.stationMm,
+        side: hit.side,
+      };
+      return { host, position: hit.position, rotationDeg: hit.rotationDeg };
+    }
+    const raw = model.elements[onWall.wall];
+    if (raw?.kind !== "wall") throw new ScriptRunError(`Wall "${onWall.wall}" wasn't found in the model (add walls to \`reads.kinds\` or create the wall first).`);
+    const wall: Wall = raw;
+    const towardMm = onWall.toward ? planMm(onWall.toward, "Wall mount toward") : undefined;
+    const stationRef = fallbackAt ?? towardMm;
+    const sideRef = towardMm ?? fallbackAt;
+    const stationMm =
+      onWall.along !== undefined
+        ? mm(onWall.along, "Distance along wall")
+        : stationRef
+          ? wallStationOf(wall, stationRef).stationMm
+          : (() => {
+              throw new ScriptRunError(`onWall for wall "${onWall.wall}" needs \`along\`, \`at\`, or \`toward\` to know where along the wall to mount.`);
+            })();
+    const side: 1 | -1 = onWall.side ?? (sideRef ? wallFaceSideToward(wall, sideRef) : 1);
+    const faceOffsetMm = onWall.offset !== undefined ? mm(onWall.offset, "Wall face offset") : 0;
+    const frame = wallFaceFrame(wall, stationMm, side, faceOffsetMm);
+    const host: Extract<PartHost, { kind: "wall_face" }> = {
+      kind: "wall_face",
+      elementId: wall.id,
+      stationMm: frame.clampedStationMm,
+      side,
+      ...(faceOffsetMm !== 0 ? { faceOffsetMm } : {}),
+    };
+    return { host, position: frame.position, rotationDeg: frame.rotationDeg };
+  });
 }
 
 export const equipment = {
   /** Places one part (equipment, a fixture, a device) on a level; connect it with `routes.along({ from: placed.connector("supply") })`. */
   place(ctx: ScriptContext, spec: PlaceSpec): PlacedPart {
+    const levelId = levelOf(ctx, spec.level);
+    if (spec.onSlab && spec.onWall) throw new ScriptRunError("equipment.place takes either `onSlab` or `onWall`, not both.");
+    const rawAt = spec.at ? planMm(spec.at, "Position") : undefined;
+    const wallMount = spec.onWall ? resolveWallMount(ctx, levelId, spec.onWall, rawAt) : null;
+    const position = wallMount ? wallMount.position : rawAt;
+    if (!position) throw new ScriptRunError("equipment.place needs `at` unless `onWall` specifies a wall and station.");
     // The working model when the script has one (it sees types outside the script's reads), else the slice.
     const known = onWorkingIfAny(ctx, (model) => model.elements[spec.type] !== undefined) ?? ctx.model.find(spec.type) !== undefined;
     const libraryDefinition = known ? undefined : (builtinPartType(spec.type)?.definition ?? ctx.model.libraryPart(spec.type));
+    const host: PartHost | undefined = wallMount ? wallMount.host : spec.onSlab ? { kind: "slab", elementId: spec.onSlab } : undefined;
+    const rotationDeg = wallMount ? wallMount.rotationDeg : spec.rotationDeg;
     const command: PlacePart = {
       type: "place_part",
       partId: spec.id ?? ctx.id("part"),
       typeId: spec.type,
       ...(libraryDefinition ? { partType: libraryDefinition } : {}),
-      levelId: levelOf(ctx, spec.level),
-      position: planMm(spec.at, "Position"),
+      levelId,
+      position,
       ...(spec.height ? { offsetMm: mm(spec.height, "Height") } : {}),
-      ...(spec.rotationDeg !== undefined ? { rotationDeg: spec.rotationDeg } : {}),
+      ...(rotationDeg !== undefined ? { rotationDeg } : {}),
       ...(spec.mark ? { mark: spec.mark } : {}),
       ...(spec.values ? { values: spec.values } : {}),
-      ...(spec.onSlab ? { host: { kind: "slab", elementId: spec.onSlab } } : {}),
+      ...(host ? { host } : {}),
       ...(spec.zone ? { zone: spec.zone } : {}),
     };
     ctx.edit(command);
     const partId = command.partId;
     return { id: partId, connector: (connectorId) => ({ kind: "part", partId, connectorId }), command };
+  },
+
+  /**
+   * Re-hosts one or more existing placed parts flush onto a wall finish face
+   * (`wall_face` host) via `set_part_host`, moving and orienting each part onto
+   * the finish face so wall-anchored symbols clear the wall thickness and follow
+   * future wall edits. Pass `"nearest"` to snap each part to its closest wall.
+   */
+  hostOnWall(
+    ctx: ScriptContext,
+    partIds: string | readonly string[],
+    onWall: WallMountSpec | "nearest" = "nearest",
+    opts: { readonly maxDistance?: Measure } = {},
+  ): readonly { readonly partId: string; readonly wallId: string; readonly side: 1 | -1; readonly stationMm: number }[] {
+    const ids = typeof partIds === "string" ? [partIds] : [...partIds];
+    const maxDistMm = opts.maxDistance ? mm(opts.maxDistance, "Max snap distance") : 1500;
+    const mounted: { readonly partId: string; readonly wallId: string; readonly side: 1 | -1; readonly stationMm: number }[] = [];
+    for (const partId of ids) {
+      const part = onWorking(ctx, "equipment.hostOnWall", (model) => {
+        const el = model.elements[partId];
+        if (el?.kind !== "part") throw new ScriptRunError(`Part "${partId}" wasn't found in the model.`);
+        return el;
+      });
+      const resolved = resolveWallMount(ctx, part.levelId, onWall, part.position, maxDistMm);
+      ctx.edit({ type: "set_part_host", ids: [partId], host: resolved.host, seat: true });
+      mounted.push({ partId, wallId: resolved.host.elementId, side: resolved.host.side, stationMm: resolved.host.stationMm });
+    }
+    return mounted;
+  },
+
+  /**
+   * Binds switching / lighting control devices (switches, 3-way/4-way pairs, 0-10V dimmers,
+   * occupancy or daylight sensors) to the fixtures or controlled receptacles they govern under
+   * one switch-leg designation (`"a"`, `"b"`, …) and control wiring protocol.
+   */
+  controlZone(
+    ctx: ScriptContext,
+    spec: {
+      /** Switch-leg designation letter (`"a"`, `"b"`, `"c"`…). */
+      readonly leg: string;
+      /** One or more switches, dimmers, occupancy sensors or daylight sensors (multiple switches form 3-way/4-way travelers). */
+      readonly controllers: readonly (string | PlacedPart)[];
+      /** Fixtures or controlled receptacles governed by this control zone. */
+      readonly loads: readonly (string | PlacedPart)[];
+      /** Wiring protocol: `"line_voltage"` (default dashed switch leg), `"0-10v"` / `"dali"` / `"low_voltage"` (dash-dot control wiring), or `"wireless"`. */
+      readonly protocol?: "line_voltage" | "0-10v" | "dali" | "low_voltage" | "wireless";
+      /** Optional emergency lighting mode (`"none"`, `"unswitched"`, or `"switched"` for UL 924 shunt/relay) applied to loads in this zone. */
+      readonly emergencyMode?: "none" | "unswitched" | "switched";
+    },
+  ): void {
+    const leg = spec.leg.trim().toLowerCase();
+    if (!leg) throw new ScriptRunError("equipment.controlZone needs a non-empty switch-leg designation (e.g. \"a\").");
+    const idOf = (x: string | PlacedPart) => (typeof x === "string" ? x : x.id);
+    const filterDeclared = (partId: string, candidate: Record<string, string | number | boolean>): Record<string, string | number | boolean> => {
+      return (
+        onWorkingIfAny(ctx, (m) => {
+          const part = m.elements[partId];
+          if (part?.kind !== "part") return candidate;
+          const pt = m.elements[part.typeId];
+          if (pt?.kind !== "part_type") return candidate;
+          const allowed = new Set(pt.definition.instanceParams.map((p) => p.name));
+          const out: Record<string, string | number | boolean> = {};
+          for (const [k, v] of Object.entries(candidate)) if (allowed.has(k)) out[k] = v;
+          return out;
+        }) ?? candidate
+      );
+    };
+    for (const c of spec.controllers) {
+      const id = idOf(c);
+      const values = filterDeclared(id, { switch_leg: leg, ...(spec.protocol ? { control_type: spec.protocol } : {}) });
+      if (Object.keys(values).length > 0) ctx.edit({ type: "set_parameters", id, scope: "instance", values });
+    }
+    for (const l of spec.loads) {
+      const id = idOf(l);
+      const values = filterDeclared(id, {
+        switch_leg: leg,
+        ...(spec.protocol ? { control_type: spec.protocol } : {}),
+        ...(spec.emergencyMode !== undefined ? { emergency: spec.emergencyMode !== "none", emergency_mode: spec.emergencyMode } : {}),
+      });
+      if (Object.keys(values).length > 0) ctx.edit({ type: "set_parameters", id, scope: "instance", values });
+    }
   },
 };

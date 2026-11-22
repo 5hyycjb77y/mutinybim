@@ -1,7 +1,7 @@
 import { documentIndex } from "../commands/views";
 import type { DrawingItem } from "../documents";
 import type { ModelState, Vec2, ViewElement } from "../types";
-import { tagHasLeader, tagItemBox, tagTarget, type TagSpec } from "./annotations";
+import { tagHasLeader, tagItemBox, tagLeaderTarget, tagTarget, type TagSpec } from "./annotations";
 import { annotationBoxes, paperMapping } from "./auto-tag";
 import { elbowLeaderPath, placeTagsClear, type ElbowLeader, type PlaceTagsOptions, type ElbowTagRequest } from "./elbow-leader";
 
@@ -82,7 +82,8 @@ export function tagElbowLeader(model: ModelState, view: ViewElement, item: Drawi
   if (!spec || spec.elbow === undefined || !tagHasLeader(model, spec)) return null;
   const { toPaper } = paperMapping(view);
   const box = tagItemBox(model, view, item, toPaper);
-  const target = tagTarget(model, view, spec);
+  const toward = spec.elbow !== "auto" ? spec.elbow : item.points[0];
+  const target = tagLeaderTarget(model, view, spec, toward);
   if (!box || !target) return null;
   return elbowLeaderPath(box, toPaper(target), spec.elbow === "auto" ? undefined : toPaper(spec.elbow));
 }

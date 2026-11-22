@@ -50,6 +50,7 @@ export * from "./connections/templates";
 export * from "./diagrams/electrical-graph";
 export * from "./diagrams/one-line-layout";
 export * from "./diagrams/one-line-model";
+export * from "./diagrams/controls-diagram";
 export * from "./diagrams/feeder-types";
 export * from "./fields/electrical-resolver";
 export * from "./fields/feeder-types";

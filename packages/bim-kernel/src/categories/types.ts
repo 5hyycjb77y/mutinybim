@@ -58,3 +58,9 @@ export const CATEGORY_OVERRIDES_FEATURE = "graphics:category_overrides";
 
 /** The protocol feature a peer must advertise before a writer stores per-category `detailLevel` / `singleLineBelowMm`, `ViewProps.showLineCodes`, or `SystemGraphics.lineCode`. */
 export const VIEW_SCHEMATIC_DETAIL_FEATURE = "graphics:view_schematic_detail";
+
+/** The protocol feature a peer must advertise before a writer stores `ViewProps.symbolScale`. */
+export const VIEW_SYMBOL_SCALE_FEATURE = "graphics:symbol_scale";
+
+/** The protocol feature a peer must advertise before a writer stores multi-vertex spline waypoints, arc flips, per-span hash-mark placement, or movable terminal arrow hints on a plan view. */
+export const VIEW_LINK_ROUTING_FEATURE = "graphics:link_routing";

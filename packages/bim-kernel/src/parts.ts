@@ -213,13 +213,37 @@ const symbolUnitsSchema = z.enum(["model", "paper"]);
 const symbolPenSchema = z.enum(["thin", "medium", "wide", "heavy"]);
 const symbolFillSchema = z.enum(["solid", "mask"]);
 const symbolDetailLevelsSchema = z.array(z.enum(["coarse", "medium", "fine"])).min(1).max(3);
+/**
+ * Optional visibility condition evaluated against a placed part's resolved
+ * parameters (`values` merged over `typeValues` and parameter defaults).
+ * Lets any part type drive plan symbol graphics (fills, hatches, marks) directly
+ * from instance parameters without duplicating types.
+ */
+export const symbolConditionSchema = z
+  .object({
+    param: z.string().regex(PARAM_NAME, "lower_snake_case, starting with a letter"),
+    equals: paramValueSchema.optional(),
+    truthy: z.boolean().optional(),
+  })
+  .strict();
+export type SymbolCondition = z.infer<typeof symbolConditionSchema>;
+
 const symbolCommonShape = {
   /** Coordinate units: "model" (default, mm in model space) or "paper" (annotative mm on paper, scaled by view scale). */
   units: symbolUnitsSchema.optional(),
+  /**
+   * Minimum plotted paper span (mm) when `units` is "model": at large scales the
+   * symbol draws at true model size; when zoomed out so its plotted span would
+   * shrink below `minPaperMm`, the whole model-unit symbol scales up uniformly
+   * around its origin `(0, 0)` so it stays legible in the field.
+   */
+  minPaperMm: z.number().positive().max(100).optional(),
   pen: symbolPenSchema.optional(),
   detailLevels: symbolDetailLevelsSchema.optional(),
   /** Keep glyph strokes upright (world-aligned) even when the part is rotated on a wall. */
   upright: z.boolean().optional(),
+  /** Show this primitive only when the named parameter matches the condition. */
+  when: symbolConditionSchema.optional(),
 };
 
 export const symbolSchema = z.discriminatedUnion("kind", [
@@ -234,8 +258,10 @@ export const symbolSchema = z.discriminatedUnion("kind", [
     text: z.string().min(1).max(40),
     heightMm: z.number().positive().max(1000),
     anchor: z.enum(["start", "middle", "end"]).optional(),
-    /** Upright (unrotated) world/paper offset added after placing `at` — keeps switch subscripts ("3", "D") cleanly to the lower-right of "$" on any wall rotation. */
+    /** Upright (unrotated) world/paper offset added after placing `at` so subscripts stay cleanly positioned on any rotation. */
     uprightOffset: z.tuple([z.number().finite(), z.number().finite()]).optional(),
+    /** Opaque paper-white background mask behind the glyph so crossing linework stays readable. */
+    mask: z.boolean().optional(),
     ...symbolCommonShape,
   }),
 ]);
@@ -352,11 +378,17 @@ export const partSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ifc"), entity: z.string().min(1).max(80), typeName: z.string().min(1).max(200), boundingBoxGeometry: z.literal(true) }),
 ]);
 
+/** Default mounting/hosting behavior declared by a part type (discipline-neutral). */
+export const PART_HOSTING_MODES = ["free", "wall_face", "ceiling", "floor"] as const;
+export type PartHostingMode = (typeof PART_HOSTING_MODES)[number];
+
 export const partTypeDefinitionSchema = z.object({
   familyName: z.string().min(1).max(200),
   typeName: z.string().min(1).max(200),
   category: z.enum(PART_CATEGORIES),
   description: z.string().max(400).optional(),
+  /** Optional placement hosting rule: `"wall_face"` snaps flush onto wall finish faces (+Y into room). */
+  hosting: z.enum(PART_HOSTING_MODES).optional(),
   typeParams: z.array(paramDefSchema).max(80),
   typeValues: z.record(z.string(), paramValueSchema),
   instanceParams: z.array(paramDefSchema).max(80),
@@ -724,6 +756,7 @@ export type SymbolFill = "solid" | "mask";
 
 interface ResolvedSymbolCommon {
   readonly units?: SymbolUnits;
+  readonly minPaperMm?: number;
   readonly pen?: SymbolPen;
   readonly detailLevels?: readonly ("coarse" | "medium" | "fine")[];
   readonly upright?: boolean;
@@ -735,7 +768,7 @@ export type ResolvedSymbol =
   | ({ readonly kind: "arc"; readonly center: Vec2; readonly radius: number; readonly startDeg: number; readonly sweepDeg: number } & ResolvedSymbolCommon)
   | ({ readonly kind: "line"; readonly from: Vec2; readonly to: Vec2 } & ResolvedSymbolCommon)
   | ({ readonly kind: "polyline"; readonly points: readonly Vec2[]; readonly closed: boolean; readonly fill?: SymbolFill } & ResolvedSymbolCommon)
-  | ({ readonly kind: "text"; readonly at: Vec2; readonly text: string; readonly heightMm: number; readonly anchor?: "start" | "middle" | "end"; readonly uprightOffset?: readonly [number, number] } & ResolvedSymbolCommon);
+  | ({ readonly kind: "text"; readonly at: Vec2; readonly text: string; readonly heightMm: number; readonly anchor?: "start" | "middle" | "end"; readonly uprightOffset?: readonly [number, number]; readonly mask?: boolean } & ResolvedSymbolCommon);
 
 export interface ResolvedConnector {
   readonly id: string;
@@ -784,31 +817,67 @@ export function resolveGeometry(def: PartTypeDefinition, values: Readonly<Record
   });
 }
 
+/** True when a symbol primitive's optional `when` condition matches a part's resolved parameters. */
+export function symbolConditionMatches(when: SymbolCondition | undefined, def: PartTypeDefinition, values: Readonly<Record<string, ParamValue>>): boolean {
+  if (!when) return true;
+  let val: ParamValue | undefined = values[when.param];
+  if (val === undefined) val = def.typeValues[when.param];
+  if (val === undefined) {
+    const p = def.instanceParams.find((x) => x.name === when.param) ?? def.typeParams.find((x) => x.name === when.param);
+    val = p?.default;
+  }
+  if (when.equals !== undefined) return val === when.equals;
+  if (when.truthy !== undefined) {
+    const isTruthy = typeof val === "boolean" ? val : typeof val === "number" ? val !== 0 : typeof val === "string" ? val.trim() !== "" && val.trim().toLowerCase() !== "false" && val.trim().toLowerCase() !== "none" : false;
+    return isTruthy === when.truthy;
+  }
+  return Boolean(val);
+}
+
 export function resolveSymbol(def: PartTypeDefinition, values: Readonly<Record<string, ParamValue>> = {}): ResolvedSymbol[] {
   const r = (d: Dim) => resolveDim(def, values, d);
   const v2 = (t: readonly [Dim, Dim]): Vec2 => ({ x: r(t[0]), y: r(t[1]) });
-  return def.symbol.map((s): ResolvedSymbol => {
+  const out: ResolvedSymbol[] = [];
+  for (const s of def.symbol) {
+    if (!symbolConditionMatches(s.when, def, values)) continue;
     const common: ResolvedSymbolCommon = {
       ...(s.units !== undefined ? { units: s.units } : {}),
+      ...(s.minPaperMm !== undefined ? { minPaperMm: s.minPaperMm } : {}),
       ...(s.pen !== undefined ? { pen: s.pen } : {}),
       ...(s.detailLevels !== undefined ? { detailLevels: s.detailLevels } : {}),
       ...(s.upright ? { upright: true } : {}),
     };
     switch (s.kind) {
       case "rect":
-        return { kind: "rect", center: v2(s.center), size: v2(s.size), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
+        out.push({ kind: "rect", center: v2(s.center), size: v2(s.size), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common });
+        break;
       case "circle":
-        return { kind: "circle", center: v2(s.center), radius: r(s.radius), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
+        out.push({ kind: "circle", center: v2(s.center), radius: r(s.radius), ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common });
+        break;
       case "arc":
-        return { kind: "arc", center: v2(s.center), radius: r(s.radius), startDeg: s.startDeg, sweepDeg: s.sweepDeg, ...common };
+        out.push({ kind: "arc", center: v2(s.center), radius: r(s.radius), startDeg: s.startDeg, sweepDeg: s.sweepDeg, ...common });
+        break;
       case "line":
-        return { kind: "line", from: v2(s.from), to: v2(s.to), ...common };
+        out.push({ kind: "line", from: v2(s.from), to: v2(s.to), ...common });
+        break;
       case "polyline":
-        return { kind: "polyline", points: s.points.map(v2), closed: s.closed, ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common };
+        out.push({ kind: "polyline", points: s.points.map(v2), closed: s.closed, ...(s.fill !== undefined ? { fill: s.fill } : {}), ...common });
+        break;
       case "text":
-        return { kind: "text", at: v2(s.at), text: s.text, heightMm: s.heightMm, ...(s.anchor !== undefined ? { anchor: s.anchor } : {}), ...(s.uprightOffset !== undefined ? { uprightOffset: s.uprightOffset } : {}), ...common };
+        out.push({
+          kind: "text",
+          at: v2(s.at),
+          text: s.text,
+          heightMm: s.heightMm,
+          ...(s.anchor !== undefined ? { anchor: s.anchor } : {}),
+          ...(s.uprightOffset !== undefined ? { uprightOffset: s.uprightOffset } : {}),
+          ...(s.mask ? { mask: true } : {}),
+          ...common,
+        });
+        break;
     }
-  });
+  }
+  return out;
 }
 
 export function resolveConnectors(def: PartTypeDefinition, values: Readonly<Record<string, ParamValue>> = {}): ResolvedConnector[] {

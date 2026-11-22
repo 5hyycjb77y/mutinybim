@@ -68,6 +68,7 @@ const ConstructionStagesDialog = dynamic(() => import('./construction/Constructi
 const EquipmentListDialog = dynamic(() => import('./equipment-list/EquipmentListDialog').then((m) => m.EquipmentListDialog), { ssr: false })
 const AddonsPreview = dynamic(() => import('./settings/AddonsPreview').then((m) => m.AddonsPreview), { ssr: false })
 const TagStylesDialog = dynamic(() => import('./organization/TagStylesDialog').then((m) => m.TagStylesDialog), { ssr: false })
+const TextStylesDialog = dynamic(() => import('./organization/TextStylesDialog').then((m) => m.TextStylesDialog), { ssr: false })
 const ManageGroupsDialog = dynamic(() => import('./organization/ManageGroupsDialog').then((m) => m.ManageGroupsDialog), { ssr: false })
 const NewListScheduleDialog = dynamic(() => import('./schedules/NewListScheduleDialog').then((m) => m.NewScheduleWindow), { ssr: false })
 const SheetFigureDialog = dynamic(() => import('./views-sheets/SheetFigureDialog').then((m) => m.SheetFigureDialog), { ssr: false })
@@ -354,6 +355,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const [coordinationOpen, setCoordinationOpen] = useState(false)
   /** Tag styles open: on which style, previewed on which element. */
   const [tagStylesOpen, setTagStylesOpen] = useState<{ readonly styleId: string | null; readonly sampleElementId: string | null } | null>(null)
+  const [textStylesOpen, setTextStylesOpen] = useState(false)
   const [level, setLevel] = useState<string>('all')
   const [connection, setStatus] = useState<ConnectionStatus>('connecting')
   const [problem, setProblem] = useState<ConnectionProblem | null>(null)
@@ -3611,6 +3613,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                       hostLevelId={viewLevelId}
                       levelName={model ? (canonicalViewLevel(model, openView.props?.level) ?? null) : null}
                       phaseFields={viewPhaseFields(openView)}
+                      onOpenTextStyles={() => setTextStylesOpen(true)}
                       schedule={workflows.viewProperties(openView)}
                       diagram={
                         openView.props?.diagram ? (
@@ -3974,6 +3977,11 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       {tagStylesOpen && (
         <ModelFromStore store={modelStore}>
           {(shown) => shown && <TagStylesDialog model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} initialStyleId={tagStylesOpen.styleId} sampleElementId={tagStylesOpen.sampleElementId} onClose={() => setTagStylesOpen(null)} />}
+        </ModelFromStore>
+      )}
+      {textStylesOpen && (
+        <ModelFromStore store={modelStore}>
+          {(shown) => shown && <TextStylesDialog model={shown} canEdit={canEdit} blockedReason={blockedReason} submit={submitWithUndo} onClose={() => setTextStylesOpen(false)} />}
         </ModelFromStore>
       )}
       {partEditor && (

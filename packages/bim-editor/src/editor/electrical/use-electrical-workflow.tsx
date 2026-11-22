@@ -18,6 +18,7 @@ import { CheckPanel } from './CheckPanel'
 import { ElectricalTypesDialog, type ElectricalTypesTab } from './ElectricalTypesDialog'
 import { RebalanceDialog } from './RebalanceDialog'
 import { EditCircuitDialog } from './EditCircuitDialog'
+import { EditControlsDialog } from './EditControlsDialog'
 import { ELECTRICAL_PLACE_TYPES, type ElectricalPlaceKind, type ElectricalRibbon } from './electrical-tab'
 import { ElectricalProperties } from './ElectricalProperties'
 import { FeedPanelDialog } from './FeedPanelDialog'
@@ -57,7 +58,7 @@ export interface ElectricalWorkflowInput {
   /** Open the one New schedule window on a pick (`form:<kind>`); the surface owns it. */
   readonly openNewSchedule?: (pick: string) => void
   /** Open (or make) a live diagram view; returns why it can't, or null. */
-  readonly openDiagram?: (kind: 'one_line' | 'electrical_riser') => string | null
+  readonly openDiagram?: (kind: 'one_line' | 'electrical_riser' | 'controls_diagram') => string | null
   /** Select these elements in the model (a finding's items). */
   readonly select: (ids: readonly string[]) => void
   /** The placed part under a screen point in the plan or 3D view, for dragging devices onto panels. */
@@ -97,6 +98,7 @@ export interface ElectricalWorkflow {
 type DialogState =
   | { readonly kind: 'add'; readonly memberIds: readonly string[]; readonly linkId: string }
   | { readonly kind: 'edit'; readonly linkId: string }
+  | { readonly kind: 'controls' }
   | { readonly kind: 'feed'; readonly panelId: string; readonly linkId: string }
   | { readonly kind: 'rebalance'; readonly panelId: string | null }
   | { readonly kind: 'types'; readonly tab: ElectricalTypesTab }
@@ -227,6 +229,10 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
     addBlocked,
     editCircuit: () => (singleCircuit ? setDialog({ kind: 'edit', linkId: singleCircuit.linkId }) : notify(editCircuitBlocked ?? '')),
     editBlocked: editCircuitBlocked,
+    editControls: {
+      run: () => setDialog({ kind: 'controls' }),
+      blocked: editBlocked ?? (model ? null : 'The model is still loading.'),
+    },
     removeFromCircuit: () => {
       if (!model) return
       const plan = planRemoveFromCircuits(model, target.loads)
@@ -245,7 +251,7 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
     ...(openDiagram
       ? {
           diagram: {
-            open: (kind: 'one_line' | 'electrical_riser') => {
+            open: (kind: 'one_line' | 'electrical_riser' | 'controls_diagram') => {
               const refusal = openDiagram(kind)
               if (refusal) notify(refusal, 'error')
             },
@@ -267,7 +273,19 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
 
   const properties =
     model && (target.loads.length > 0 || target.panels.length > 0) ? (
-      <ElectricalProperties model={model} target={target} addBlocked={addBlocked} onAdd={openAdd} onEdit={(linkId) => setDialog({ kind: 'edit', linkId })} onPanelView={openPanelView} onFeed={() => openFeed()} submit={submit} editBlocked={editBlocked} onManageTypes={() => setDialog({ kind: 'types', tab: 'connection' })} />
+      <ElectricalProperties
+        model={model}
+        target={target}
+        addBlocked={addBlocked}
+        onAdd={openAdd}
+        onEdit={(linkId) => setDialog({ kind: 'edit', linkId })}
+        onEditControls={() => setDialog({ kind: 'controls' })}
+        onPanelView={openPanelView}
+        onFeed={() => openFeed()}
+        submit={submit}
+        editBlocked={editBlocked}
+        onManageTypes={() => setDialog({ kind: 'types', tab: 'connection' })}
+      />
     ) : model && unreadyWhy ? (
       <Alert data-testid="electrical-not-ready">
         <Plug />
@@ -481,6 +499,7 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
         />
       )}
       {dialog?.kind === 'edit' && <EditCircuitDialog model={model} linkId={dialog.linkId} submit={submit} onClose={() => setDialog(null)} sizing={{ edition: nec.necEdition, engine: nec.engine }} />}
+      {dialog?.kind === 'controls' && <EditControlsDialog model={model} selectedIds={selectedIds} submit={submit} onSelect={select} onClose={() => setDialog(null)} />}
       {schedules.overlay}
     </>
   ) : null

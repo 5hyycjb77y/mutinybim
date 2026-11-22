@@ -1,8 +1,10 @@
 import { peerReads } from "../elements/feature";
 import { diagramLayoutRow } from "../layout/diagram-layout-point";
+import { activePackSet } from "../packs/scope";
 import { firstPartyStoredOwner } from "../packs/first-party/manifests";
 import { packNotLoadedMessage } from "../packs/set";
 import { DIAGRAM_KIND_LABELS, DIAGRAM_OPEN_KINDS_FEATURE, isRound5DiagramKind, type StoredDiagramKind } from "./definition";
+import { DIAGRAM_GRAPH_POINT } from "./graph";
 
 /**
  * Stored diagram kinds are open (contract 1.12.0): besides the four every peer
@@ -16,6 +18,19 @@ import { DIAGRAM_KIND_LABELS, DIAGRAM_OPEN_KINDS_FEATURE, isRound5DiagramKind, t
 /** What a diagram kind is called: its layout row's label in force, the built-in label, or the stored kind itself. */
 export function diagramKindLabel(kind: StoredDiagramKind): string {
   return diagramLayoutRow(kind)?.label ?? DIAGRAM_KIND_LABELS[kind] ?? kind;
+}
+
+/** Every live diagram kind available in the active pack set (graph + label). */
+export function diagramKinds(): readonly { readonly kind: StoredDiagramKind; readonly label: string }[] {
+  const set = activePackSet();
+  const seen = new Set<string>();
+  const out: Array<{ readonly kind: StoredDiagramKind; readonly label: string }> = [];
+  for (const g of set.items(DIAGRAM_GRAPH_POINT)) {
+    if (seen.has(g.kind)) continue;
+    seen.add(g.kind);
+    out.push({ kind: g.kind, label: diagramKindLabel(g.kind) });
+  }
+  return out;
 }
 
 /**

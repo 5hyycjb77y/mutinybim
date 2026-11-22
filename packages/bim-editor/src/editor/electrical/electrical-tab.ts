@@ -11,6 +11,11 @@ export const ELECTRICAL_PLACE_TYPES = {
   receptacle: 'builtin:duplex-receptacle@1',
   light: 'builtin:troffer-2x4-led@1',
   switch: 'builtin:switch-single-pole@1',
+  switch_3way: 'builtin:switch-three-way@1',
+  switch_4way: 'builtin:switch-four-way@1',
+  switch_dimmer: 'builtin:switch-dimmer@1',
+  occ_sensor: 'builtin:occupancy-sensor-ceiling@1',
+  daylight_sensor: 'builtin:daylight-sensor@1',
   junction_box: 'builtin:junction-box-4sq@1',
   equipment_1p: 'builtin:equipment-connection-1p@1',
   equipment_2p: 'builtin:equipment-connection-2p@1',
@@ -71,6 +76,7 @@ export interface ElectricalRibbon {
   readonly addBlocked: string | null
   readonly editCircuit: () => void
   readonly editBlocked: string | null
+  readonly editControls?: ElectricalAction
   readonly removeFromCircuit: () => void
   readonly removeBlocked: string | null
   readonly feedPanel: () => void
@@ -84,7 +90,7 @@ export interface ElectricalRibbon {
   /** Schedules group: make a live schedule of this kind (`blockedFor` null when it can be made, else why not). */
   readonly schedules?: ScheduleAction
   /** Open (or make) the live diagram of a kind: drawn from the model, kept up to date (diagrams/). */
-  readonly diagram?: { readonly open: (kind: 'one_line' | 'electrical_riser') => void; readonly blocked: string | null }
+  readonly diagram?: { readonly open: (kind: 'one_line' | 'electrical_riser' | 'controls_diagram') => void; readonly blocked: string | null }
   /** Connection types, feeder types and room templates (the project's electrical catalog). */
   readonly types?: ElectricalAction
   /** One entry per docked record (the add-on's `docks` declaration), each opened beside the plan. */
@@ -118,6 +124,7 @@ function schedulesGroup(s: ScheduleAction): RibbonGroup {
         description: 'Connection types, equipment connections, and mechanical equipment with its circuit',
         keywords: ['schedule'],
         children: [
+          scheduleCommand(s, 'lighting_controls', 'Lighting controls schedule', Table2, 'Every switching / control zone with controllers, loads, protocol, circuit, EM mode and sequence', 'ribbon-electrical-lighting-controls-schedule', ['controls', 'switching', 'switch leg', 'dimming', 'zones']),
           scheduleCommand(s, 'connection_types', 'Connection types', Table2, 'Devices grouped by type and load', 'ribbon-electrical-connection-types-schedule', ['devices', 'receptacles']),
           scheduleCommand(s, 'equipment_connections', 'Equipment connections', Table2, 'Hardwired equipment with MCA, MOCP and its live circuit', 'ribbon-electrical-equipment-connections-schedule', ['mca', 'mocp', 'disconnect']),
           scheduleCommand(s, 'mechanical_equipment', 'Mechanical equipment (with electrical)', Table2, 'The mechanical equipment list with volts, MCA, MOCP and the circuit it is on', 'ribbon-electrical-mechanical-schedule', ['rtu', 'hvac', 'cross trade']),
@@ -155,7 +162,12 @@ function placeGroup(e: ElectricalRibbon): RibbonGroup {
           placeCommand(e, 'downlight', 'Downlight', Lightbulb, 'A 6" LED downlight, 277 V', ['can', 'recessed']),
           placeCommand(e, 'light_emergency', 'Light, emergency battery', BatteryCharging, 'A 2x4 troffer with an emergency battery', ['emergency', 'egress', 'em']),
           placeCommand(e, 'exit_sign', 'Exit sign', BatteryCharging, 'An LED exit sign with battery', ['exit', 'egress']),
-          placeCommand(e, 'switch', 'Switch', ToggleLeft, 'A single-pole switch', ['light switch', 'toggle']),
+          placeCommand(e, 'switch', 'Switch', ToggleLeft, 'A single-pole switch (snaps & rotates onto wall faces)', ['light switch', 'toggle']),
+          placeCommand(e, 'switch_3way', 'Switch, 3-way', ToggleLeft, 'A 3-way switch ($3) for multi-location control', ['3-way', 'traveler', 'switch']),
+          placeCommand(e, 'switch_4way', 'Switch, 4-way', ToggleLeft, 'A 4-way intermediate switch ($4)', ['4-way', 'switch']),
+          placeCommand(e, 'switch_dimmer', 'Switch, dimmer', ToggleLeft, 'A 0-10V / LED wall dimmer ($D)', ['dimmer', '0-10v', 'switch']),
+          placeCommand(e, 'occ_sensor', 'Occupancy sensor, ceiling', CircleDot, 'A ceiling dual-tech occupancy/vacancy sensor (OS)', ['occupancy', 'vacancy', 'sensor', 'controls']),
+          placeCommand(e, 'daylight_sensor', 'Daylight sensor, ceiling', CircleDot, 'A ceiling 0-10V daylight harvesting sensor (DS)', ['daylight', 'photocell', 'sensor', 'controls']),
           placeCommand(e, 'junction_box', 'Junction box', Box, 'A 4" square junction box', ['j-box', 'jbox']),
           placeCommand(e, 'equipment_1p', 'Equipment connection, 120 V', PlugZap, 'A hardwired connection, 1 pole: set its load and breaker to the nameplate', ['hardwired', 'disconnect', 'equipment']),
           placeCommand(e, 'equipment_2p', 'Equipment connection, 208 V 2-pole', PlugZap, 'A hardwired connection, 2 poles', ['hardwired', 'water heater', 'equipment']),
@@ -230,6 +242,20 @@ function circuitCommands(e: ElectricalRibbon): RibbonCommand[] {
       run: e.editCircuit,
       testId: 'ribbon-electrical-edit-circuit',
     },
+    ...(e.editControls
+      ? [
+          {
+            id: 'edit-controls',
+            label: 'Edit controls',
+            icon: ToggleLeft,
+            description: 'Assign lighting/receptacle switch legs (a, b), control wiring protocol (line voltage, 0-10V, DALI), and emergency lighting mode',
+            keywords: ['switch leg', 'controls', 'lighting control', '0-10v', 'dali', 'dimmer', 'sensor', 'emergency', 'zone'],
+            disabledReason: e.editControls.blocked,
+            run: e.editControls.run,
+            testId: 'ribbon-electrical-edit-controls',
+          } satisfies RibbonCommand,
+        ]
+      : []),
     {
       id: 'feed-panel',
       label: 'Feed panel',
@@ -263,6 +289,7 @@ function diagramsGroup(d: NonNullable<ElectricalRibbon['diagram']>): RibbonGroup
     commands: [
       { id: 'one-line-diagram', label: 'One-line diagram', icon: Network, description: 'The live one-line, drawn from your panels and feeders and redrawn whenever they change; place it on a sheet like any view', keywords: ['single line', 'sld', 'one line', 'riser', 'distribution', 'feeder'], disabledReason: d.blocked, run: () => d.open('one_line'), testId: 'ribbon-electrical-one-line' },
       { id: 'electrical-riser', label: 'Riser diagram', icon: Network, description: 'The live electrical riser: the same equipment and feeders drawn floor by floor', keywords: ['riser', 'vertical', 'floors'], disabledReason: d.blocked, run: () => d.open('electrical_riser'), testId: 'ribbon-electrical-riser' },
+      { id: 'lighting-controls-diagram', label: 'Controls diagram', icon: ToggleLeft, description: 'The live lighting controls diagram: panels, switching zones, protocols (line voltage, 0-10V, DALI), controllers, luminaires and emergency modes', keywords: ['controls', 'switching', 'lighting control', 'dimming', 'zones', 'diagram'], disabledReason: d.blocked, run: () => d.open('controls_diagram'), testId: 'ribbon-electrical-controls-diagram' },
     ],
   }
 }

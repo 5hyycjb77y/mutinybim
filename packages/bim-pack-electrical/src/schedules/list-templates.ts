@@ -26,6 +26,8 @@ export const LIGHTING_FIXTURE_SCHEDULE: ScheduleDefinitionV2 = {
     param("watts", "WATTS", { total: true }),
     param("voltage", "VOLTS"),
     param("emergency", "EM"),
+    param("emergency_mode", "EM MODE"),
+    param("switch_leg", "ZONE"),
     field("circuit", "CIRCUIT", { hideWhenEmpty: true }),
     field("load", "LOAD (VA)", { total: true, hideWhenEmpty: true }),
     field("room", "ROOM", { hideWhenEmpty: true }),

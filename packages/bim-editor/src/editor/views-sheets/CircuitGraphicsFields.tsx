@@ -61,7 +61,16 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
   const current: CircuitGraphicsProps = view.props?.circuitGraphics ?? {}
   const resolved = resolveCircuitGraphics(view)
   const change = (patch: Partial<CircuitGraphicsProps>, label: string) => set({ circuitGraphics: { ...current, ...patch } }, label)
-  const bends = Object.values(current.hints ?? {}).reduce((n, h) => n + Object.keys(h.bends ?? {}).length, 0)
+  const bends = Object.values(current.hints ?? {}).reduce(
+    (n, h) =>
+      n +
+      Object.keys(h.bends ?? {}).length +
+      Object.keys(h.waypoints ?? {}).length +
+      Object.keys(h.flipArc ?? {}).length +
+      Object.keys(h.memberLabelOffsets ?? {}).length +
+      (h.homeRun ? 1 : 0),
+    0,
+  )
   const hint = STYLES.find((s) => s.value === resolved.style)?.hint ?? ''
   const off = resolved.style === 'off'
   const defaulted = current.style === undefined
@@ -95,8 +104,10 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
           </FieldDescription>
         </Field>
         {([
-          ['homeRuns', 'Home runs', 'home runs', 'An arrow and the panel and circuit number (L1-1) on the device nearest the panel.', resolved.homeRuns],
-          ['switchLegs', 'Switch legs', 'switch legs', 'Dashed lines from each switch to the fixtures with its switch letter.', resolved.switchLegs],
+          ['showCircuits', 'Branch circuit lines', 'branch circuit lines', 'Draw branch power circuit wires and home runs. Turn off with Switch legs on for a dedicated lighting controls schematic plan.', resolved.showCircuits],
+          ['homeRuns', 'Home runs', 'home runs', 'An arrow and the panel and circuit number (L1-1) on the device nearest the panel. Drag its tip, shaft or label on the plan to adjust.', resolved.homeRuns],
+          ['switchLegs', 'Switch legs & controls', 'switch legs', 'Dashed switch legs (and dash-dot 0-10V / low-voltage control loops) from switches, dimmers and sensors to controlled loads.', resolved.switchLegs],
+          ['switchLegLabels', 'Switch-leg letters (a, b)', 'switch-leg letters', 'Lowercase ANSI/NECA 100 switch-leg designations beside switches and controlled fixtures. Drag any letter on the plan to move it.', resolved.switchLegLabels],
           ['allCopies', 'Show circuiting on all units', 'circuiting on all units', 'Typical units draw their own circuiting. Off: only the original, its home runs marked TYP.', resolved.allCopies],
         ] as const).map(([key, label, what, description, checked]) => (
           <Field key={key} orientation="horizontal">
@@ -144,7 +155,7 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
               const picked = HASH_MARKS.find((s) => s.value === v)
               if (picked) change({ hashMarks: picked.value }, 'change the wire hash marks')
             }}
-            disabled={!canEdit || off || !resolved.homeRuns}
+            disabled={!canEdit || off || (!resolved.homeRuns && !resolved.switchLegs)}
             data-testid="view-circuit-hash-marks"
           >
             {HASH_MARKS.map((s) => (
@@ -155,18 +166,61 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
             ))}
           </ToggleGroup>
           <FieldDescription className="text-xs">
-            {off || !resolved.homeRuns ? 'Marks draw across each home run: turn home runs on first.' : (HASH_MARKS.find((s) => s.value === resolved.hashMarks)?.hint ?? '')}
+            {off || (!resolved.homeRuns && !resolved.switchLegs) ? 'Turn home runs or switch legs on first to show conductor hash marks.' : (HASH_MARKS.find((s) => s.value === resolved.hashMarks)?.hint ?? '')}
           </FieldDescription>
         </Field>
+        {!off && resolved.hashMarks !== 'off' && (
+          <Field>
+            <FieldLabel>Tick mark placement</FieldLabel>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={resolved.hashMarksOn}
+              onValueChange={(v) => {
+                if (v === 'home_runs' || v === 'home_runs_and_switch_legs' || v === 'all_runs') {
+                  const msg =
+                    v === 'all_runs'
+                      ? 'show wire ticks on all runs'
+                      : v === 'home_runs_and_switch_legs'
+                        ? 'show wire ticks on home runs and switch legs'
+                        : 'show wire ticks on home runs only'
+                  change({ hashMarksOn: v }, msg)
+                }
+              }}
+              disabled={!canEdit}
+              data-testid="view-circuit-hash-marks-on"
+            >
+              <ToggleGroupItem value="home_runs" className="text-xs">Home runs</ToggleGroupItem>
+              <ToggleGroupItem value="home_runs_and_switch_legs" className="text-xs">+ Switch legs</ToggleGroupItem>
+              <ToggleGroupItem value="all_runs" className="text-xs">All runs</ToggleGroupItem>
+            </ToggleGroup>
+          </Field>
+        )}
         {bends > 0 && (
           <Button
             variant="outline"
             size="sm"
             disabled={!canEdit}
-            onClick={() => change({ hints: Object.fromEntries(Object.entries(current.hints ?? {}).map(([id, h]) => [id, { ...(h.priority !== undefined ? { priority: h.priority } : {}) }])) }, 'clear the pinned bends')}
+            onClick={() =>
+              change(
+                {
+                  hints: Object.fromEntries(
+                    Object.entries(current.hints ?? {}).map(([id, h]) => [
+                      id,
+                      {
+                        ...(h.priority !== undefined ? { priority: h.priority } : {}),
+                        ...(h.mwbcGroup !== undefined ? { mwbcGroup: h.mwbcGroup } : {}),
+                      },
+                    ]),
+                  ),
+                },
+                'reset wire bends and home runs',
+              )
+            }
             data-testid="view-circuit-clear-bends"
           >
-            Clear {bends} pinned {bends === 1 ? 'bend' : 'bends'}
+            Reset {bends} manual {bends === 1 ? 'adjustment' : 'adjustments'}
           </Button>
         )}
       </FieldGroup>

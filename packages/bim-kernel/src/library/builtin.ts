@@ -298,7 +298,7 @@ const PANEL: LibraryEntry = {
     connectors: [power("feeder", p("height"), p("voltage"), 3, 0)],
     geometry: [{ kind: "box", center: [0, half("depth"), { param: "height", scale: 0.5, add: 300 }], size: [p("width"), p("depth"), p("height")] }],
     symbol: [
-      { kind: "rect", center: [0, half("depth")], size: [p("width"), p("depth")], fill: "mask", pen: "medium" },
+      { kind: "rect", center: [0, half("depth")], size: [p("width"), p("depth")], fill: "mask", pen: "medium", minPaperMm: 4.5 },
       { kind: "rect", center: [0, { param: "depth", scale: 0.75 }], size: [p("width"), { param: "depth", scale: 0.5 }], fill: "solid", pen: "medium" },
     ],
     tagFields: ["panel_name"],
@@ -314,11 +314,17 @@ const TROFFER: LibraryEntry = {
     category: "lighting_fixture",
     typeParams: [length("length", "Length"), length("width", "Width"), num("watts", "Input power", "w", { min: 0 }), num("lumens", "Output", "lumens", { min: 0 }), num("voltage", "Voltage", "v", { min: 0 })],
     typeValues: { length: 4 * FT, width: 2 * FT, watts: 32, lumens: 4000, voltage: 277 },
-    instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Switch leg"), { name: "emergency", label: "Emergency battery", kind: "boolean", default: false }],
+    instanceParams: [
+      text("circuit", "Circuit"),
+      text("switch_leg", "Switch leg"),
+      { name: "emergency", label: "Emergency battery", kind: "boolean", default: false },
+      { name: "emergency_mode", label: "Emergency mode", kind: "choice", choices: ["none", "unswitched", "switched"], default: "none" },
+    ],
     connectors: [power("power", 100, p("voltage"), 1, p("watts"))],
     geometry: [{ kind: "box", center: [0, 0, 60], size: [p("length"), p("width"), 120] }],
     symbol: [
-      { kind: "rect", center: [0, 0], size: [p("length"), p("width")], fill: "mask", pen: "medium" },
+      { kind: "rect", center: [0, 0], size: [p("length"), p("width")], fill: "mask", pen: "medium", minPaperMm: 4 },
+      { kind: "rect", center: [{ param: "length", scale: -0.25 }, 0], size: [{ param: "length", scale: 0.5 }, p("width")], fill: "solid", pen: "medium", when: { param: "emergency", truthy: true } },
       { kind: "line", from: [neg("length"), 0], to: [half("length"), 0], pen: "thin", detailLevels: ["medium", "fine"] },
     ],
     tagFields: ["mark", "circuit"],

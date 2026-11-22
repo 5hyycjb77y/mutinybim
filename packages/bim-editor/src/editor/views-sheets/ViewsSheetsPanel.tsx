@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Box, ChevronDown, ChevronRight, Compass, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
-import { canonicalViewLevel, type DiagramKind, documentIndex, type ModelState, type Sheet, type ViewElement } from '@permitzip/bim-kernel'
+import { canonicalViewLevel, documentIndex, type ModelState, type Sheet, type StoredDiagramKind, type ViewElement } from '@permitzip/bim-kernel'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible'
@@ -22,8 +22,8 @@ import { VIEW_DRAG_TYPE, VIEW_TYPE_LABEL, sameOpen, type CreatableViewType, type
 
 export type PanelRequest =
   | { readonly kind: 'new_view'; readonly viewType: CreatableViewType }
-  /** A live diagram drawn from the model (one-line, electrical riser, plumbing riser). */
-  | { readonly kind: 'new_diagram'; readonly diagramKind: DiagramKind }
+  /** A live diagram drawn from the model (one-line, electrical riser, controls diagram, plumbing riser…). */
+  | { readonly kind: 'new_diagram'; readonly diagramKind: StoredDiagramKind }
   | { readonly kind: 'new_sheet' }
   | { readonly kind: 'new_schedule' }
   | { readonly kind: 'rename_view'; readonly view: ViewElement }
@@ -131,6 +131,10 @@ export function NewMenuItems({ onRequest, disabled }: { onRequest: (request: Pan
         <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_diagram', diagramKind: 'electrical_riser' })}>
           <Network data-icon="inline-start" />
           Electrical riser diagram
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_diagram', diagramKind: 'controls_diagram' })} data-testid="new-view-controls-diagram">
+          <Network data-icon="inline-start" />
+          Lighting controls diagram
         </DropdownMenuItem>
         <DropdownMenuItem disabled={disabled} onSelect={() => onRequest({ kind: 'new_diagram', diagramKind: 'plumbing_riser' })} data-testid="new-view-plumbing-riser">
           <Network data-icon="inline-start" />

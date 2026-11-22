@@ -164,6 +164,8 @@ export const partSymbolSchema = z.object({
   sketch: idSchema.optional(),
   /** Coordinate units: "model" (default) or "paper" (annotative paper mm, scaled by view scale). */
   units: z.enum(["model", "paper"]).optional(),
+  /** Minimum plotted paper span (mm) when `units` is "model": draws true size when larger, clamps up uniformly around (0, 0) when zoomed out. */
+  minPaperMm: z.number().positive().max(100).optional(),
   /** Line weight for the symbol's strokes. */
   pen: z.enum(["thin", "medium", "wide", "heavy"]).optional(),
   /** When true, closed shapes in this symbol fill solid black. */

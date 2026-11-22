@@ -7,6 +7,7 @@ import { draftElements, elementOrder, elementValues, isFrozenElements } from "..
 import { organizationMembersOf } from "./members";
 import { asElementId, type BimElement, type ElementId, type ModelState } from "../types";
 import {
+  ANNOTATION_TEXT_STYLES_FEATURE,
   DEFAULT_GROUP_ID,
   DEFAULT_GROUPS,
   DEFAULT_PHASE_FILTERS,
@@ -19,6 +20,8 @@ import {
   TAG_STYLE_CATEGORIES,
   TAG_STYLE_ORIENTATIONS,
   TAG_STYLE_UNITS,
+  TEXT_STYLE_BACKGROUNDS,
+  TEXT_STYLE_ROLES,
   ORGANIZATION_PARTITION,
   ORGANIZATION_SETTINGS_ID,
   PHASE_DISPLAYS,
@@ -40,6 +43,8 @@ import {
   type TagStyleArrow,
   type TagStyleCategory,
   type TagStyleEntry,
+  type TextStyleEntry,
+  type TextStyleRole,
 } from "./model";
 import { MAX_TYPICAL_COPIES, arrayCopies } from "./typicals";
 import { ORG_FIELDS, organizationFieldValue } from "./fields";
@@ -84,7 +89,7 @@ const statusesSchema = z.object({
 const tagStyleLines = z.array(z.string().trim().min(1).max(120)).min(1).max(6).readonly();
 const tagTextSize = z.number().min(1.5).max(10);
 const tagStyleDefaults = z.array(z.enum(TAG_STYLE_CATEGORIES)).max(TAG_STYLE_CATEGORIES.length).readonly();
-/** The rest of a tag style's look. On update, "" clears a prefix or suffix and [] clears applies-to. */
+/** The rest of a tag style's look. On update, "" clears a prefix, suffix or textStyleId and [] clears applies-to. */
 const tagStyleExtras = {
   prefix: z.string().max(20).optional(),
   suffix: z.string().max(20).optional(),
@@ -94,7 +99,14 @@ const tagStyleExtras = {
   appliesTo: tagStyleDefaults.optional(),
   /** "none" clears it on update. */
   arrow: z.enum(["none", ...TAG_STYLE_ARROWS]).optional(),
+  /** Opaque paper-white background mask behind the tag head. */
+  mask: z.boolean().optional(),
+  /** Model Text Type id; "" clears on update. */
+  textStyleId: z.string().max(200).optional(),
 };
+const textStyleSize = z.number().min(1.2).max(20);
+const textStyleFont = z.string().trim().max(80);
+const textStyleDefaults = z.array(z.enum(TEXT_STYLE_ROLES)).max(TEXT_STYLE_ROLES.length).readonly();
 const typicalMark = z.string().trim().min(1).max(20);
 const typicalPoint = z.object({ x: z.number().finite().min(-1e7).max(1e7), y: z.number().finite().min(-1e7).max(1e7) }).strict();
 const addonId = z.string().regex(/^[a-z][a-z0-9_-]{0,59}$/, "An add-on id is lower case letters, digits, - and _");
@@ -201,6 +213,35 @@ export const organizationCommandSchemas = [
     ...tagStyleExtras,
   }),
   z.object({ type: z.literal("delete_tag_style"), styleId: id }),
+  z.object({
+    type: z.literal("create_text_style"),
+    styleId: id,
+    name,
+    textSizeMm: textStyleSize.optional(),
+    fontFamily: textStyleFont.optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    uppercase: z.boolean().optional(),
+    background: z.enum(TEXT_STYLE_BACKGROUNDS).optional(),
+    color: color.optional(),
+    defaultFor: textStyleDefaults.optional(),
+  }),
+  z.object({
+    type: z.literal("update_text_style"),
+    styleId: id,
+    name: name.optional(),
+    textSizeMm: textStyleSize.optional(),
+    /** "" clears back to the standard sheet font. */
+    fontFamily: textStyleFont.optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    uppercase: z.boolean().optional(),
+    background: z.enum(TEXT_STYLE_BACKGROUNDS).optional(),
+    /** "" clears back to default ink. */
+    color: z.union([color, z.literal("")]).optional(),
+    defaultFor: textStyleDefaults.optional(),
+  }),
+  z.object({ type: z.literal("delete_text_style"), styleId: id }),
   /** Make a group a typical (unit 001 repeated): copies listed, or laid out with `array`. Fields left out keep their value. */
   z.object({
     type: z.literal("set_group_typical"),
@@ -638,6 +679,12 @@ export function executeOrganizationCommand(model: ModelState, command: Organizat
       case "create_tag_style": {
         tagStyleKindsStored([...(command.defaultFor ?? []), ...(command.appliesTo ?? [])]);
         tagStyleArrowStored(command.arrow);
+        if ((command.mask !== undefined || (command.textStyleId !== undefined && command.textStyleId !== "")) && !peerReads(ANNOTATION_TEXT_STYLES_FEATURE)) {
+          refuse("invalid_value", "Tag style text types and masks can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        }
+        if (command.textStyleId && !org.textStyleById.has(command.textStyleId)) {
+          refuse("element_not_found", `There is no text type "${command.textStyleId}".`, [asElementId(command.textStyleId)]);
+        }
         mustBeNewId(edit, command.styleId);
         uniqueName(org.tagStyles, command.name, null, "tag style");
         const defaultFor = command.defaultFor ?? [];
@@ -660,6 +707,12 @@ export function executeOrganizationCommand(model: ModelState, command: Organizat
       case "update_tag_style": {
         tagStyleKindsStored([...(command.defaultFor ?? []), ...(command.appliesTo ?? [])]);
         tagStyleArrowStored(command.arrow);
+        if ((command.mask !== undefined || (command.textStyleId !== undefined && command.textStyleId !== "")) && !peerReads(ANNOTATION_TEXT_STYLES_FEATURE)) {
+          refuse("invalid_value", "Tag style text types and masks can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        }
+        if (command.textStyleId && !org.textStyleById.has(command.textStyleId)) {
+          refuse("element_not_found", `There is no text type "${command.textStyleId}".`, [asElementId(command.textStyleId)]);
+        }
         const s = liveTagStyle(org, command.styleId);
         if (command.name !== undefined) uniqueName(org.tagStyles, command.name, s.id, "tag style");
         defaultsWithinAppliesTo(command.defaultFor ?? s.entry.defaultFor, command.appliesTo ?? s.entry.appliesTo ?? []);
@@ -682,6 +735,68 @@ export function executeOrganizationCommand(model: ModelState, command: Organizat
         const s = liveTagStyle(org, command.styleId);
         const users = tagsUsingStyle(model, s.id);
         if (users > 0) refuse("in_use", `${plural(users, "tag")} ${users === 1 ? "uses" : "use"} "${s.entry.name}". Give ${users === 1 ? "it" : "them"} another style first.`, [asElementId(s.id)]);
+        edit.putEntry(s.id, s.entry, true);
+        return edit.done();
+      }
+      case "create_text_style": {
+        if (!peerReads(ANNOTATION_TEXT_STYLES_FEATURE)) {
+          refuse("invalid_value", "Text types can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        }
+        mustBeNewId(edit, command.styleId);
+        uniqueName(org.textStyles, command.name, null, "text type");
+        const defaultFor = command.defaultFor ?? [];
+        const summary = takeTextDefaults(edit, org, command.styleId, defaultFor);
+        const last = org.textStyles[org.textStyles.length - 1]?.entry.order;
+        edit.putEntry(command.styleId, {
+          type: "text_style",
+          name: command.name,
+          textSizeMm: command.textSizeMm ?? 2.4,
+          ...(command.fontFamily ? { fontFamily: command.fontFamily } : {}),
+          ...(command.bold ? { bold: true } : {}),
+          ...(command.italic ? { italic: true } : {}),
+          ...(command.uppercase ? { uppercase: true } : {}),
+          background: command.background ?? "opaque",
+          ...(command.color ? { color: command.color } : {}),
+          defaultFor: [...defaultFor],
+          order: orderBetween(last, undefined),
+        });
+        return edit.done(summary);
+      }
+      case "update_text_style": {
+        if (!peerReads(ANNOTATION_TEXT_STYLES_FEATURE)) {
+          refuse("invalid_value", "Text types can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        }
+        const s = liveTextStyle(org, command.styleId);
+        if (command.name !== undefined) uniqueName(org.textStyles, command.name, s.id, "text type");
+        const summary = command.defaultFor ? takeTextDefaults(edit, org, s.id, command.defaultFor) : [];
+        const fontFamily = command.fontFamily !== undefined ? command.fontFamily : s.entry.fontFamily;
+        const colorVal = command.color !== undefined ? command.color : s.entry.color;
+        const bold = command.bold !== undefined ? command.bold : s.entry.bold;
+        const italic = command.italic !== undefined ? command.italic : s.entry.italic;
+        const uppercase = command.uppercase !== undefined ? command.uppercase : s.entry.uppercase;
+        edit.putEntry(s.id, {
+          type: "text_style",
+          name: command.name ?? s.entry.name,
+          textSizeMm: command.textSizeMm ?? s.entry.textSizeMm,
+          ...(fontFamily ? { fontFamily } : {}),
+          ...(bold ? { bold: true } : {}),
+          ...(italic ? { italic: true } : {}),
+          ...(uppercase ? { uppercase: true } : {}),
+          background: command.background ?? s.entry.background,
+          ...(colorVal ? { color: colorVal } : {}),
+          defaultFor: command.defaultFor !== undefined ? [...command.defaultFor] : [...s.entry.defaultFor],
+          order: s.entry.order,
+        });
+        return edit.done(summary);
+      }
+      case "delete_text_style": {
+        if (!peerReads(ANNOTATION_TEXT_STYLES_FEATURE)) {
+          refuse("invalid_value", "Text types can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        }
+        const s = liveTextStyle(org, command.styleId);
+        if (org.textStyles.length <= 1) refuse("invalid_value", "Keep at least one text type in the model.", [asElementId(s.id)]);
+        const tagUsers = org.tagStyles.filter((ts) => ts.entry.textStyleId === s.id).length;
+        if (tagUsers > 0) refuse("in_use", `${plural(tagUsers, "tag style")} ${tagUsers === 1 ? "uses" : "use"} "${s.entry.name}". Switch them first.`, [asElementId(s.id)]);
         edit.putEntry(s.id, s.entry, true);
         return edit.done();
       }
@@ -820,11 +935,21 @@ function disciplineDefOf(input: Extract<OrganizationCommand, { type: "pin_firm_d
   };
 }
 
-type TagStyleExtrasInput = { readonly prefix?: string; readonly suffix?: string; readonly orientation?: TagStyleEntry["orientation"]; readonly units?: TagStyleEntry["units"]; readonly leaderEnd?: TagStyleEntry["leaderEnd"]; readonly appliesTo?: readonly TagStyleCategory[]; readonly arrow?: TagStyleArrow | "none" };
+type TagStyleExtrasInput = {
+  readonly prefix?: string;
+  readonly suffix?: string;
+  readonly orientation?: TagStyleEntry["orientation"];
+  readonly units?: TagStyleEntry["units"];
+  readonly leaderEnd?: TagStyleEntry["leaderEnd"];
+  readonly appliesTo?: readonly TagStyleCategory[];
+  readonly arrow?: TagStyleArrow | "none";
+  readonly mask?: boolean;
+  readonly textStyleId?: string;
+};
 
 /** A style without its optional look fields, so an update can leave a cleared one out rather than store it empty. */
 function tagStyleBase(entry: TagStyleEntry): TagStyleEntry {
-  const { prefix: _p, suffix: _s, orientation: _o, units: _u, leaderEnd: _l, appliesTo: _a, arrow: _w, ...base } = entry;
+  const { prefix: _p, suffix: _s, orientation: _o, units: _u, leaderEnd: _l, appliesTo: _a, arrow: _w, mask: _m, textStyleId: _t, ...base } = entry;
   return base;
 }
 
@@ -837,6 +962,8 @@ function tagStyleExtrasFrom(was: TagStyleEntry | undefined, c: TagStyleExtrasInp
   const leaderEnd = c.leaderEnd ?? was?.leaderEnd;
   const appliesTo = c.appliesTo ?? was?.appliesTo;
   const arrow = c.arrow ?? was?.arrow;
+  const mask = c.mask !== undefined ? c.mask : was?.mask;
+  const textStyleId = c.textStyleId !== undefined ? c.textStyleId : was?.textStyleId;
   return {
     ...(prefix ? { prefix } : {}),
     ...(suffix ? { suffix } : {}),
@@ -845,7 +972,29 @@ function tagStyleExtrasFrom(was: TagStyleEntry | undefined, c: TagStyleExtrasInp
     ...(leaderEnd && leaderEnd !== "dot" ? { leaderEnd } : {}),
     ...(appliesTo && appliesTo.length > 0 ? { appliesTo: [...appliesTo] } : {}),
     ...(arrow && arrow !== "none" ? { arrow } : {}),
+    ...(mask !== undefined ? { mask } : {}),
+    ...(textStyleId ? { textStyleId } : {}),
   };
+}
+
+function liveTextStyle(org: Organization, styleId: string): Resolved<TextStyleEntry> {
+  const s = org.textStyleById.get(styleId);
+  if (!s) refuse("element_not_found", `There is no text type "${styleId}". It may have been deleted; reopen Text types.`, [asElementId(styleId)]);
+  return s;
+}
+
+/** A role is the default of one text type: the roles `styleId` now takes come off every other text type. */
+function takeTextDefaults(edit: Edit, org: Organization, styleId: string, roles: readonly TextStyleRole[]): string[] {
+  const taking = new Set(roles);
+  const summary: string[] = [];
+  for (const other of org.textStyles) {
+    if (other.id === styleId) continue;
+    const kept = other.entry.defaultFor.filter((r) => !taking.has(r));
+    if (kept.length === other.entry.defaultFor.length) continue;
+    edit.putEntry(other.id, { ...other.entry, defaultFor: kept });
+    summary.push(`"${other.entry.name}" is no longer the default for ${other.entry.defaultFor.filter((r) => taking.has(r)).map((r) => r.replace(/_/g, " ")).join(", ")}`);
+  }
+  return summary;
 }
 
 /** A style can only be the default for kinds it may label. */

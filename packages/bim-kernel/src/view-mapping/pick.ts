@@ -1,5 +1,6 @@
 import type { Rect } from "../crop";
 import { otherLevelElementsInRange, viewCropAndWindow } from "../drawing/views";
+import { partPlanOutline } from "../drawing/runs";
 import { elementSolid, hull2 } from "../drawing/solids";
 import { modelLevels, viewLevelNames } from "../levels";
 import { displayContextOf, displayResolver } from "../organization/model";
@@ -154,6 +155,7 @@ function stripBox(a: Vec2, b: Vec2, half: number): Vec2[] {
 
 interface Build {
   readonly model: ModelState;
+  readonly view: ViewElement;
   readonly mapping: ViewMapping;
   readonly levelZ: ReadonlyMap<string, number>;
 }
@@ -242,6 +244,50 @@ function footprintOf(b: Build, el: BimElement): Footprint | null {
         mapping.floorMm,
         mapping.floorMm,
       );
+    }
+    case "part": {
+      const pts: Vec2[] = [];
+      let depth = -Infinity;
+      let far = Infinity;
+      const solid = elementSolid(b.model, el, mapping.floorMm);
+      if (solid) {
+        for (const piece of solid.pieces) {
+          for (const q of [...piece.r0, ...piece.r1]) {
+            const d = mapping.toDrawing(q);
+            pts.push({ x: d.u, y: d.v });
+            if (d.depth > depth) depth = d.depth;
+            if (d.depth < far) far = d.depth;
+          }
+        }
+      }
+      // In plans, include the rendered annotative plan symbol bounds so clicking/dragging
+      // a paper-space or minPaperMm-clamped symbol picks the part directly, not only its 3D wall box.
+      if (!section) {
+        const look = elementLook(b.model, b.view, el);
+        const sym = partPlanOutline(b.model, el, {
+          scale: b.view.props?.scale ?? 48,
+          symbolScale: b.view.props?.symbolScale ?? 1,
+          detail: look.detailLevel ?? b.view.props?.detailLevel ?? "medium",
+          planSymbol: look.planSymbol,
+        });
+        if (sym.bounds) {
+          const z = (b.levelZ.get(el.levelId) ?? mapping.floorMm) + (el.offsetMm ?? 0);
+          for (const q of [
+            { x: sym.bounds.min.x, y: sym.bounds.min.y },
+            { x: sym.bounds.max.x, y: sym.bounds.min.y },
+            { x: sym.bounds.max.x, y: sym.bounds.max.y },
+            { x: sym.bounds.min.x, y: sym.bounds.max.y },
+          ]) {
+            const d = at(q.x, q.y, z);
+            pts.push({ x: d.u, y: d.v });
+            if (d.depth > depth) depth = d.depth;
+            if (d.depth < far) far = d.depth;
+          }
+        }
+      }
+      if (pts.length === 0) return null;
+      const poly = hull2(pts);
+      return poly.length > 0 ? make(poly.length < 3 ? stripBox(poly[0] as Vec2, (poly[1] ?? poly[0]) as Vec2, 25) : poly, depth, far) : null;
     }
     default: {
       const solid = elementSolid(b.model, el, mapping.floorMm);
@@ -362,7 +408,7 @@ export function buildViewPickIndex(model: ModelState, view: ViewElement, previou
       }
       const footprints = previous.footprints;
       const grid = { cells: previous.cells, big: previous.big };
-      const build: Build = { model, mapping: previous.mapping, levelZ: previous.levelZ };
+      const build: Build = { model, view, mapping: previous.mapping, levelZ: previous.levelZ };
       for (const id of withLegs) {
         const old = footprints.get(id);
         if (old) {
@@ -386,7 +432,7 @@ export function buildViewPickIndex(model: ModelState, view: ViewElement, previou
   const empty = { viewId: view.id, view, model, mapping, window, levelZ, cropOn };
   if (mapping.kind !== "plan" && mapping.kind !== "section") return { ...empty, shown: () => false, footprints: new Map(), cells: new Map(), big: new Set() };
   const shown = shownFilter(model, view);
-  const build: Build = { model, mapping, levelZ };
+  const build: Build = { model, view, mapping, levelZ };
   const footprints = new Map<string, Footprint>();
   const grid = { cells: new Map<string, Set<string>>(), big: new Set<string>() };
   for (const [id, el] of elementEntries(model.elements)) {

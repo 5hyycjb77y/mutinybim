@@ -187,6 +187,44 @@ export interface TagStyleEntry {
   readonly appliesTo?: readonly TagStyleCategory[];
   /** An arrow along the labelled run, towards its lower or higher end. Absent: none. */
   readonly arrow?: TagStyleArrow;
+  /** Opaque paper-white background mask behind the tag head (style default; a tag's own `mask` may override). */
+  readonly mask?: boolean;
+  /** Optional model Text Style id (`TextStyleEntry`) supplying font, cap height, weight, and opaque mask. */
+  readonly textStyleId?: string;
+}
+
+/** Peers that store model-wide Text Types (`text_style`) and `TagStyleEntry.mask` / `textStyleId`. */
+export const ANNOTATION_TEXT_STYLES_FEATURE = "annotation:text_styles";
+
+/** Drawing label roles that can inherit a model Text Type by default. */
+export const TEXT_STYLE_ROLES = ["part_mark", "link_label", "tag", "dimension", "note", "space_label"] as const;
+export type TextStyleRole = (typeof TEXT_STYLE_ROLES)[number];
+
+/** Whether a Text Type paints an opaque white background behind its letters so crossing linework stays readable. */
+export const TEXT_STYLE_BACKGROUNDS = ["transparent", "opaque"] as const;
+export type TextStyleBackground = (typeof TEXT_STYLE_BACKGROUNDS)[number];
+
+/**
+ * A named, reusable Text Type (analogous to Revit Text Types / CAD Text Styles):
+ * cap height on paper, font family, bold/italic/uppercase, opaque or transparent
+ * background mask, and optional ink colour. Editing a Text Type updates every
+ * plan label, tag, link label, dimension or room title that uses it.
+ */
+export interface TextStyleEntry {
+  readonly type: "text_style";
+  readonly name: string;
+  /** Cap height on paper, mm (2.4 mm ≈ 3/32" NCS standard). */
+  readonly textSizeMm: number;
+  readonly fontFamily?: string;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly uppercase?: boolean;
+  readonly background: TextStyleBackground;
+  /** #rrggbb, ink override when printing in colour. */
+  readonly color?: string;
+  /** Drawing roles that inherit this Text Type by default. Each role has at most one default. */
+  readonly defaultFor: readonly TextStyleRole[];
+  readonly order: number;
 }
 
 /**
@@ -235,7 +273,7 @@ export interface ProjectParameterEntry {
   readonly def?: { readonly label: string; readonly valueType: "text" | "date" | "choice"; readonly choices?: readonly string[] };
 }
 
-export type OrganizationEntry = GroupEntry | PhaseEntry | PhaseFilterEntry | OrganizationSettingsEntry | TagStyleEntry | AddonSetupEntry | DisciplineSetupEntry | ProjectParameterEntry;
+export type OrganizationEntry = GroupEntry | PhaseEntry | PhaseFilterEntry | OrganizationSettingsEntry | TagStyleEntry | TextStyleEntry | AddonSetupEntry | DisciplineSetupEntry | ProjectParameterEntry;
 
 /** Model-wide: every area loads these, like levels and part types. */
 export const ORGANIZATION_ZONE = "organization";
@@ -266,10 +304,60 @@ export const DEFAULT_PHASE_FILTERS: ReadonlyArray<{ readonly id: string; readonl
   { id: "pf-complete", entry: { type: "phase_filter", name: "Show complete", statuses: { new: "show", existing: "show", demolished: "hide", temporary: "hide" }, order: 3 } },
 ];
 
-/** Two starting styles; neither is anyone's default until a person makes it so. */
+/** Starter tag styles; none is anyone's default until a person makes it so. */
 export const DEFAULT_TAG_STYLES: ReadonlyArray<{ readonly id: string; readonly entry: TagStyleEntry }> = [
   { id: "tst-duct-size-insulation", entry: { type: "tag_style", name: "Duct size and insulation", lines: ["{size_with_insulation}"], textSizeMm: 2.4, leader: false, box: "none", defaultFor: [], order: 0 } },
   { id: "tst-terminal-mark-cfm", entry: { type: "tag_style", name: "Air terminal mark and CFM", lines: ["{mark}", "{cfm} CFM"], textSizeMm: 2.4, leader: false, box: "box", defaultFor: [], order: 1 } },
+  { id: "tst-mark-clean", entry: { type: "tag_style", name: "Clean mark (masked)", lines: ["{mark}"], textSizeMm: 2.4, leader: false, box: "none", mask: true, defaultFor: [], order: 2 } },
+];
+
+/** Starter Text Types; none overrides a model's legacy defaults until assigned via `defaultFor` (keeping saved models byte-for-byte identical until opted in). */
+export const DEFAULT_TEXT_STYLES: ReadonlyArray<{ readonly id: string; readonly entry: TextStyleEntry }> = [
+  {
+    id: "txt-annotation-3-32",
+    entry: {
+      type: "text_style",
+      name: '3/32" Annotation (Opaque)',
+      textSizeMm: 2.4,
+      background: "opaque",
+      defaultFor: [],
+      order: 0,
+    },
+  },
+  {
+    id: "txt-compact-1-16",
+    entry: {
+      type: "text_style",
+      name: '1/16" Compact Label (Opaque)',
+      textSizeMm: 1.8,
+      background: "opaque",
+      defaultFor: [],
+      order: 1,
+    },
+  },
+  {
+    id: "txt-space-1-8",
+    entry: {
+      type: "text_style",
+      name: '1/8" Room / Space',
+      textSizeMm: 2.5,
+      uppercase: true,
+      background: "transparent",
+      defaultFor: [],
+      order: 2,
+    },
+  },
+  {
+    id: "txt-note-3-32",
+    entry: {
+      type: "text_style",
+      name: '3/32" General Note',
+      textSizeMm: 2.4,
+      background: "transparent",
+      defaultFor: [],
+      order: 3,
+    },
+  },
 ];
 
 const DEFAULT_SETTINGS: OrganizationSettingsEntry = { type: "settings", activeGroupId: DEFAULT_GROUP_ID, activePhaseId: DEFAULT_PHASE_ID };
@@ -293,6 +381,8 @@ export interface Organization {
   readonly filterById: ReadonlyMap<string, Resolved<PhaseFilterEntry>>;
   readonly tagStyles: readonly Resolved<TagStyleEntry>[];
   readonly tagStyleById: ReadonlyMap<string, Resolved<TagStyleEntry>>;
+  readonly textStyles: readonly Resolved<TextStyleEntry>[];
+  readonly textStyleById: ReadonlyMap<string, Resolved<TextStyleEntry>>;
   /** Active group and phase, falling back to the defaults if theirs was removed. */
   readonly activeGroupId: string;
   readonly activePhaseId: string;
@@ -363,6 +453,7 @@ export function organizationOf(model: Pick<ModelState, "elements" | "connections
   const phases = merge(DEFAULT_PHASES, stored, "phase");
   const filters = merge(DEFAULT_PHASE_FILTERS, stored, "phase_filter");
   const tagStyles = merge(DEFAULT_TAG_STYLES, stored, "tag_style");
+  const textStyles = merge(DEFAULT_TEXT_STYLES, stored, "text_style");
   const settingsRecord = stored.get(ORGANIZATION_SETTINGS_ID);
   const settings = settingsRecord?.entry.type === "settings" ? settingsRecord.entry : DEFAULT_SETTINGS;
   const groupById = new Map(groups.map((g) => [g.id, g]));
@@ -376,6 +467,8 @@ export function organizationOf(model: Pick<ModelState, "elements" | "connections
     filterById: new Map(filters.map((f) => [f.id, f])),
     tagStyles,
     tagStyleById: new Map(tagStyles.map((s) => [s.id, s])),
+    textStyles,
+    textStyleById: new Map(textStyles.map((s) => [s.id, s])),
     activeGroupId: groupById.has(settings.activeGroupId) ? settings.activeGroupId : DEFAULT_GROUP_ID,
     activePhaseId: phaseIndex.has(settings.activePhaseId) ? settings.activePhaseId : (phases[phases.length - 1]?.id ?? DEFAULT_PHASE_ID),
     typicalCap: settings.typicalCap ?? DEFAULT_TYPICAL_CAP,
@@ -606,4 +699,36 @@ export function viewOrganizationProblem(model: Pick<ModelState, "elements" | "co
     if (!org.groupById.has(id)) return `There is no group "${id}". It may have been deleted; reopen the view's Show list.`;
   }
   return null;
+}
+
+/** Resolved paper typography for a drawing label role (or explicit Text Type id). */
+export interface ResolvedTextLook {
+  readonly id: string;
+  readonly name: string;
+  readonly textSizeMm: number;
+  readonly fontFamily?: string;
+  readonly bold: boolean;
+  readonly italic: boolean;
+  readonly uppercase: boolean;
+  readonly mask: boolean;
+  readonly color?: string;
+}
+
+/** Resolve a named Text Type (`styleId`) or the model's assigned default Text Type for a drawing role. Returns `null` when no Text Type is assigned so legacy models stay unchanged. */
+export function resolveTextStyle(model: Pick<ModelState, "elements"> & { readonly connections?: ModelState["connections"] }, role: TextStyleRole, styleId?: string): ResolvedTextLook | null {
+  const org = organizationOf({ elements: model.elements, connections: model.connections ?? [] });
+  const picked = (styleId ? org.textStyleById.get(styleId) : undefined) ?? org.textStyles.find((s) => s.entry.defaultFor.includes(role));
+  if (!picked) return null;
+  const e = picked.entry;
+  return {
+    id: picked.id,
+    name: e.name,
+    textSizeMm: e.textSizeMm,
+    ...(e.fontFamily ? { fontFamily: e.fontFamily } : {}),
+    bold: e.bold === true,
+    italic: e.italic === true,
+    uppercase: e.uppercase === true,
+    mask: e.background === "opaque",
+    ...(e.color ? { color: e.color } : {}),
+  };
 }

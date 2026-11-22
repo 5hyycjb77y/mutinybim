@@ -1,4 +1,4 @@
-import { elementValues, type BimElement, type ModelState, type PartInstance, linksFedFrom, type ServiceLink, fieldText, resolveField, type FieldOptions, type FormScheduleDef, formScheduleKindLabel, type FormColumn, type ScheduleSource, type FormNote, type FormScheduleDefinition, type EvaluatedForm, type FormAlign, type FormGrid, formScheduleSupport } from "@permitzip/bim-kernel";
+import { elementValues, type BimElement, type ModelState, type PartInstance, linksFedFrom, type ServiceLink, fieldText, resolveField, roomOf, roomText, type FieldOptions, type FormScheduleDef, formScheduleKindLabel, type FormColumn, type ScheduleSource, type FormNote, type FormScheduleDefinition, type EvaluatedForm, type FormAlign, type FormGrid, formScheduleSupport } from "@permitzip/bim-kernel";
 import type { LinkLoad, NodeLoads } from "../connections/engine";
 import { parseLoadClass } from "../connections/loads";
 import { isCircuitableLoad, memberName, panelSchedule } from "../connections/panel";
@@ -6,7 +6,7 @@ import { distributionOf, hotConductors, PHASE_NAMES, type DistributionInfo } fro
 import { feederTypeField } from "../fields/electrical-resolver";
 import { feederTypeRows } from "../fields/feeder-types";
 import { electricalEngineFor } from "../fields/rules-registry";
-import { CONNECTION_TYPES_TEMPLATE, EQUIPMENT_CONNECTIONS_TEMPLATE, FEEDER_TEMPLATE, PANEL_TEMPLATE, SWITCHBOARD_TEMPLATE } from "./distribution-templates";
+import { CONNECTION_TYPES_TEMPLATE, EQUIPMENT_CONNECTIONS_TEMPLATE, FEEDER_TEMPLATE, LIGHTING_CONTROLS_TEMPLATE, PANEL_TEMPLATE, SWITCHBOARD_TEMPLATE } from "./distribution-templates";
 
 const { COLLATOR, cell, empty, headerOf, listForm, options, partOf, titleOf, typeOf } = formScheduleSupport;
 
@@ -281,8 +281,128 @@ function evaluateParts(model: Pick<ModelState, "elements">, def: FormScheduleDef
   return listForm(model, def, rows.map((r) => ({ ids: r.ids, value: value(r.first, r.ids.length) })));
 }
 
+const CONTROL_PROTOCOL_NAMES: Readonly<Record<string, string>> = {
+  line_voltage: "Line Voltage",
+  "0-10v": "0-10V Dimming",
+  dali: "DALI",
+  low_voltage: "Low Voltage",
+  wireless: "Wireless",
+};
+
+function evaluateLightingControls(model: Pick<ModelState, "elements">, def: FormScheduleDefinition): EvaluatedForm {
+  const elements = model.elements;
+  const opts = options(def);
+  const byLeg = new Map<string, { controllers: PartInstance[]; loads: PartInstance[] }>();
+  const unswitchedEm: PartInstance[] = [];
+
+  for (const el of elementValues(elements)) {
+    if (el.kind !== "part" || el.planned !== undefined || ("deleted" in el && el.deleted)) continue;
+    const t = typeOf(elements, el);
+    if (!t) continue;
+    const cat = t.definition.category;
+    if (cat !== "lighting_fixture" && cat !== "electrical_device") continue;
+    const leg = typeof el.values.switch_leg === "string" ? el.values.switch_leg.trim().toLowerCase() : "";
+    const isCtrl = cat === "electrical_device" && /(switch|dimmer|sensor|photocell|time clock|relay pack)/i.test(t.definition.familyName);
+    if (leg) {
+      const bucket = byLeg.get(leg) ?? { controllers: [], loads: [] };
+      if (isCtrl) bucket.controllers.push(el);
+      else bucket.loads.push(el);
+      byLeg.set(leg, bucket);
+    } else if (cat === "lighting_fixture") {
+      const emMode = el.values.emergency_mode ?? t.definition.typeValues.emergency_mode;
+      const emFlag = el.values.emergency ?? t.definition.typeValues.emergency;
+      if (emMode === "unswitched" || (emMode !== "none" && emMode !== "switched" && emFlag === true)) {
+        unswitchedEm.push(el);
+      }
+    }
+  }
+
+  const partLabel = (p: PartInstance): string => p.mark?.trim() || (typeof p.values.type_mark === "string" ? p.values.type_mark.trim() : "") || p.id;
+  const rows: Array<{ readonly ids: readonly string[]; readonly value: (path: string) => string }> = [];
+
+  const pushZoneRow = (zone: string, controllers: PartInstance[], loads: PartInstance[], isUnswitchedEm: boolean) => {
+    controllers.sort((a, b) => COLLATOR.compare(partLabel(a), partLabel(b)));
+    loads.sort((a, b) => COLLATOR.compare(partLabel(a), partLabel(b)));
+    const all = [...controllers, ...loads];
+    const rooms = [
+      ...new Set(
+        all
+          .map((p) => {
+            const r = roomOf(elements, p);
+            return r ? (roomText(r) ?? "").trim() : "";
+          })
+          .filter(Boolean),
+      ),
+    ];
+    const circuits = [...new Set(all.map((p) => fieldText(elements, p.id, "circuit", opts).trim()).filter(Boolean))];
+    let protocol = "";
+    let hasUnswitched = isUnswitchedEm;
+    let hasSwitched = false;
+    let hasSensor = false;
+    let hasDaylight = false;
+    let hasDimmer = false;
+    let hasThreeWay = false;
+
+    for (const p of all) {
+      const t = typeOf(elements, p);
+      const fam = t?.definition.familyName ?? "";
+      if (/occupancy/i.test(fam)) hasSensor = true;
+      if (/daylight/i.test(fam)) hasDaylight = true;
+      if (/dimmer/i.test(fam)) hasDimmer = true;
+      if (/three-way|four-way/i.test(fam)) hasThreeWay = true;
+      const pr = p.values.control_type ?? t?.definition.typeValues.control_type;
+      if (typeof pr === "string" && pr.trim()) {
+        const norm = pr.trim().toLowerCase();
+        if (!protocol || (protocol === "line_voltage" && norm !== "line_voltage")) protocol = norm;
+      }
+      const emMode = p.values.emergency_mode ?? t?.definition.typeValues.emergency_mode;
+      const emFlag = p.values.emergency ?? t?.definition.typeValues.emergency;
+      if (emMode === "switched") hasSwitched = true;
+      else if (emMode === "unswitched" || (emMode !== "none" && emFlag === true)) hasUnswitched = true;
+    }
+    const protocolText = isUnswitchedEm ? "Constant Hot" : (CONTROL_PROTOCOL_NAMES[protocol || "line_voltage"] ?? (protocol || "Line Voltage"));
+    const emText = hasSwitched ? "Switched EM (UL 924)" : hasUnswitched ? "Unswitched EM" : "Normal";
+    const seqParts: string[] = [];
+    if (isUnswitchedEm) seqParts.push("Constant-hot egress / battery backup");
+    else {
+      if (hasSensor) seqParts.push("Vacancy / occupancy auto-OFF");
+      if (hasDaylight) seqParts.push("Daylight harvesting");
+      if (hasDimmer || protocol === "0-10v" || protocol === "dali") seqParts.push("Continuous dimming");
+      if (hasThreeWay) seqParts.push("Multi-location (3-way) switching");
+      if (seqParts.length === 0) seqParts.push(controllers.length > 0 ? "Manual ON/OFF switching" : "Direct circuit control");
+      if (hasSwitched) seqParts.push("UL 924 EM override");
+      else if (hasUnswitched) seqParts.push("EM integral battery");
+    }
+    const map: Readonly<Record<string, string>> = {
+      zone,
+      room: rooms.join(", ") || "—",
+      controllers: controllers.map(partLabel).join(", ") || (isUnswitchedEm ? "Unswitched" : "—"),
+      loads: loads.map(partLabel).join(", ") || "—",
+      protocol: protocolText,
+      circuit: circuits.join(", ") || "—",
+      emergency_mode: emText,
+      sequence: seqParts.join("; "),
+    };
+    rows.push({
+      ids: all.map((p) => p.id),
+      value: (path) => map[path] ?? "",
+    });
+  };
+
+  for (const leg of [...byLeg.keys()].sort((a, b) => COLLATOR.compare(a, b))) {
+    const bucket = byLeg.get(leg)!;
+    pushZoneRow(leg.toUpperCase(), bucket.controllers, bucket.loads, false);
+  }
+  if (unswitchedEm.length > 0) {
+    pushZoneRow("EM", [], unswitchedEm, true);
+  }
+
+  return listForm(model, def, rows);
+}
+
 const CIRCUITS: ScheduleSource = { kind: "classes", classes: ["mep.service_link"], includeSubclasses: true };
 const EQUIPMENT: ScheduleSource = { kind: "classes", classes: ["mep.equipment"], includeSubclasses: true };
+const LIGHTING_AND_CONTROLS: ScheduleSource = { kind: "classes", classes: ["mep.lighting_fixture", "mep.electrical_device"], includeSubclasses: true };
 const DISTRIBUTION = "panel or switchboard";
 
 export const DISTRIBUTION_FORM_ROWS: readonly FormScheduleDef[] = [
@@ -291,4 +411,5 @@ export const DISTRIBUTION_FORM_ROWS: readonly FormScheduleDef[] = [
   { kind: "feeder", evaluate: evaluateFeeders, label: "Feeder schedule", template: FEEDER_TEMPLATE, source: CIRCUITS, order: 30 },
   { kind: "connection_types", evaluate: evaluateParts, label: "Electrical connection type schedule", template: CONNECTION_TYPES_TEMPLATE, source: { kind: "catalog", catalog: "part_types" }, order: 40 },
   { kind: "equipment_connections", evaluate: evaluateParts, label: "Equipment connection schedule", template: EQUIPMENT_CONNECTIONS_TEMPLATE, source: EQUIPMENT, order: 50 },
+  { kind: "lighting_controls", evaluate: evaluateLightingControls, label: "Lighting controls schedule", template: LIGHTING_CONTROLS_TEMPLATE, source: LIGHTING_AND_CONTROLS, order: 55 },
 ];
