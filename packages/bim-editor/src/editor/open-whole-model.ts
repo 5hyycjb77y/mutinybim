@@ -18,18 +18,21 @@ export type WholeModelViewer = Pick<ModelViewer3D, 'setAuthoredLevels' | 'setVer
 export async function openWholeModel(viewer: WholeModelViewer, mode: 'plan' | '3d', levelFilter: string, opts: { readonly frame?: boolean; readonly planCamera?: PlanCameraState | null } = {}): Promise<void> {
   viewer.setAuthoredLevels(null)
   await viewer.setVerticalSection(null)
-  viewer.setMode(mode)
+  // Entering the plan at a kept camera: setMode's default framing would show for the frames
+  // isolateLevel takes, and the saved camera would snap onto it visibly. setPlanCamera enters
+  // plan mode itself, already where the person left it.
+  const enterPlanAt = mode === 'plan' ? opts.planCamera : undefined
+  if (enterPlanAt) await viewer.setPlanCamera(enterPlanAt)
+  else viewer.setMode(mode)
   if (mode === 'plan') {
     // A saved plan's crop box and cut height belong to that plan, not to "All levels".
     viewer.setPlanCrop(null)
     viewer.resetPlanCut()
   }
   await viewer.isolateLevel(levelFilter === 'all' ? null : levelFilter)
-  if (mode !== 'plan') return
-  // Coming back after other views or a drawing: where this person left the Top-down plan, zoom and all.
-  if (opts.planCamera) await viewer.setPlanCamera(opts.planCamera)
+  if (mode !== 'plan' || enterPlanAt) return
   // Framed once as it opens; Properties opening on a pick must not move the plan under the pointer.
-  else if (opts.frame !== false) await viewer.frame(undefined, false, { followInsets: false })
+  if (opts.frame !== false) await viewer.frame(undefined, false, { followInsets: false })
 }
 
 /** The canvas key the Top-down plan opens under (`model:plan`). */

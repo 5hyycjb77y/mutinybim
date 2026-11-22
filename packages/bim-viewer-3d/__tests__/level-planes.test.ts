@@ -101,6 +101,7 @@ describe("ModelViewer3D lens angle and settled notifications", () => {
     orthoView.zoom = 2;
     const cameraListeners = new Set<() => void>();
     const cameraSettledListeners = new Set<() => void>();
+    const callOrder: string[] = [];
     const stub = Object.create(ModelViewer3D.prototype) as ModelViewer3D;
     Object.assign(stub, {
       mode: "3d",
@@ -110,10 +111,17 @@ describe("ModelViewer3D lens angle and settled notifications", () => {
       cameraListeners,
       cameraSettledListeners,
       fovDirty: false,
+      orbitPointPinned: false,
       fragments: { update: jest.fn(async () => undefined) },
-      controls: { setLookAt: jest.fn(async () => undefined), zoomTo: jest.fn(async () => undefined) },
+      controls: {
+        setLookAt: jest.fn(async () => undefined),
+        zoomTo: jest.fn(async () => undefined),
+        setFocalOffset: jest.fn(() => { callOrder.push("setFocalOffset"); }),
+        update: jest.fn(() => { callOrder.push("update"); }),
+        setOrbitPoint: jest.fn(() => { callOrder.push("setOrbitPoint"); }),
+      },
     });
-    return { stub, perspective, orthoView };
+    return { stub, perspective, orthoView, callOrder };
   }
 
   it("emits settled once after a drag gesture and immediately on direct setFovDeg calls", () => {
@@ -143,10 +151,10 @@ describe("ModelViewer3D lens angle and settled notifications", () => {
   });
 
   it("reports orthographic visible height in mm and notifies camera listeners on lens-only setCamera3d changes", async () => {
-    const { stub } = viewerStub(45);
+    const { stub, callOrder } = viewerStub(45);
     expect(stub.getOrthoHeightMm()).toBeCloseTo(50_000, 6);
-    const changed = jest.fn();
-    const settled = jest.fn();
+    const changed = jest.fn(() => { callOrder.push("changed"); });
+    const settled = jest.fn(() => { callOrder.push("settled"); });
     stub.onCameraChange(changed);
     stub.onCameraSettled(settled);
 
@@ -154,5 +162,6 @@ describe("ModelViewer3D lens angle and settled notifications", () => {
     expect(stub.getFovDeg()).toBe(70);
     expect(changed).toHaveBeenCalledTimes(1);
     expect(settled).toHaveBeenCalledTimes(1);
+    expect(callOrder).toEqual(["setFocalOffset", "update", "changed", "settled"]);
   });
 });

@@ -1462,7 +1462,7 @@ export class ModelViewer3D {
 
   /** Mark the cached directional shadow map dirty so the next frame refreshes it once. */
   private invalidateShadows() {
-    this.renderer.shadowMap.needsUpdate = true;
+    if (this.renderer?.shadowMap) this.renderer.shadowMap.needsUpdate = true;
   }
 
   /** Set the 3D directional sun angle in degrees (`azimuthDeg`: 0 = East, 90 = South, 180 = West; `elevationDeg`: 5..85). */
@@ -1687,11 +1687,17 @@ export class ModelViewer3D {
   camera3dState(): View3dCamera | null {
     if (this.mode === "plan") return null;
     const camera = this.camera3d();
+    camera.updateMatrixWorld();
     const target = new THREE.Vector3();
     this.controls.getTarget(target);
+    // An off-centre orbit pin moves `controls.getTarget()` to the pivot while keeping the picture
+    // still via a focal offset. Project onto the camera's true viewing axis so saving and restoring
+    // (with the focal offset cleared) preserves the exact viewing direction on the first round trip.
+    const dist = Math.max(camera.position.distanceTo(target), 0.01);
+    const ahead = camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), dist);
     const k = (v: THREE.Vector3) => ({ x: v.x / MM, y: -v.z / MM, z: v.y / MM });
     const ortho = this.orthoView;
-    return { eye: k(camera.position), target: k(target), up: { x: 0, y: 0, z: 1 }, fovDeg: this.perspective.fov, orthoHeightMm: (ortho.top - ortho.bottom) / ortho.zoom / MM };
+    return { eye: k(camera.position), target: k(ahead), up: { x: 0, y: 0, z: 1 }, fovDeg: this.perspective.fov, orthoHeightMm: (ortho.top - ortho.bottom) / ortho.zoom / MM };
   }
 
   /** Where the plan camera looks and how far it is zoomed; null outside plan. `setPlanCamera` puts it back. */
@@ -1733,6 +1739,17 @@ export class ModelViewer3D {
     if (cam instanceof THREE.OrthographicCamera) {
       await Promise.all([moving, this.controls.zoomTo((cam.top - cam.bottom) / Math.max(1e-6, camera.orthoHeightMm * MM), animate)]);
     } else await moving;
+    // The plan conversion may have left a focal offset behind (a pinned orbit point kept its
+    // screen place): setLookAt does not clear one, so the restored view would aim off its
+    // target and read as a small turn. Clear it and let it apply before re-pinning, because
+    // setOrbitPoint keeps the point where it currently sits on screen. The saved camera is
+    // the truth; the pin follows it.
+    this.controls.setFocalOffset(0, 0, 0, false);
+    this.controls.update(0);
+    if (this.orbitPointPinned) {
+      pinOrbitPoint(this.controls, target);
+      this.controls.update(0);
+    }
     if (fovChanged) {
       for (const listener of this.cameraListeners) listener();
       for (const listener of this.cameraSettledListeners) listener();

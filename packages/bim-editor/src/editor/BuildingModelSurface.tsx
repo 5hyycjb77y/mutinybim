@@ -151,7 +151,7 @@ import { besidePropertiesRight, propertiesSurfaceClass } from './layout/properti
 import type { ViewDisplay } from './views-sheets/ViewPropertiesPanel'
 import { newViewDisplay, useViewDisplayPrefsFrom } from './views-sheets/use-view-display-prefs'
 import { useViewCameraMemoryFrom } from './views-sheets/use-view-camera-memory'
-import { cameraMemoryKey, framingSignature } from './views-sheets/view-camera-memory'
+import { CameraPlacement, cameraMemoryKey, framingSignature } from './views-sheets/view-camera-memory'
 import { FREE_3D_KEY } from '../contracts/building-model/view-camera-prefs'
 import { VIEW_TYPE_LABEL, newId, type CreatableViewType, type OpenItem, type SubmitCommand } from './views-sheets/types'
 import { useSheetImagesFrom } from '@permitzip/bim-editor/editor/views-sheets/use-sheet-images'
@@ -726,6 +726,8 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const shownCamera = useRef<{ readonly viewer: unknown; readonly key: string } | null>(null)
   // Where the Top-down plan was left, for this tab: it reopens there after other views.
   const topDownPlan = useRef(new TopDownPlanMemory())
+  // A settle while a placement is still running says where the camera was, not where this person is.
+  const cameraPlacing = useRef(new CameraPlacement())
   // Read before the canvas resizes under the drawing and the viewer re-fits the plan beneath it.
   useLayoutEffect(() => {
     if (viewer && showDrawing && shownCamera.current?.viewer === viewer) topDownPlan.current.coveredByDrawing(viewer, shownCamera.current.key)
@@ -757,7 +759,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       viewer.setAuthoredLevels(shown.levels)
       if (view.viewType === 'floor_plan' || view.viewType === 'ceiling_plan') {
         await viewer.setVerticalSection(null)
+        if (cancelled) return
         await viewer.isolateLevel(props.level ?? null)
+        if (cancelled) return
         const cut = livePlanCutMm(current, view, floor)
         viewer.setMode('plan', cut)
         viewer.setPlanCut(cut)
@@ -766,12 +770,15 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         if (!cancelled) viewer.setPlanCrop(props.cropView === false ? null : { min: view.cropMin, max: view.cropMax })
       } else if ((view.viewType === 'section' || view.viewType === 'elevation') && props.section) {
         await viewer.isolateLevel(null)
+        if (cancelled) return
         await viewer.setVerticalSection({ ...props.section, eyeElevationMm: floor + 1600 })
       } else if (view.viewType === 'three_d') {
         await viewer.setVerticalSection(null)
+        if (cancelled) return
         viewer.setMode('3d')
         viewer.setPlanCrop(null)
         await viewer.isolateLevel(props.level ?? null)
+        if (cancelled) return
         // The 3D crop box itself is applied by useCrop3d.
         // Where this person left this view last, else the view's own camera (what prints).
         const camera = cameraFor(view.id) ?? viewCamera3d(current, view)
@@ -779,9 +786,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else await viewer.framePlanRect(view.cropMin, view.cropMax)
       }
     }
+    const placementToken = cameraPlacing.current.start()
     void run().catch((err: unknown) => {
       console.error('[BuildingModelSurface] opening the view in the canvas failed', { cameraKey, err })
       toast.error("The view couldn't be shown in the canvas. Its printed drawing is still available.")
+    }).finally(() => {
+      cameraPlacing.current.finish(placementToken)
     })
     return () => {
       cancelled = true
@@ -794,6 +804,11 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   useEffect(() => {
     if (!viewer || !cameraRememberKey || !cameraMemory.loaded) return
     return viewer.onCameraSettled(() => {
+      // Opening a view moves the camera in steps: a settle that lands while the placement is still
+      // running says where the camera was before the view opened (the previous view's position),
+      // not where this person is — remembering it would make the view open at the previous view's
+      // camera from then on.
+      if (cameraPlacing.current.inFlight) return
       const camera = viewer.camera3dState()
       if (camera) rememberCamera(cameraRememberKey, camera)
     })
