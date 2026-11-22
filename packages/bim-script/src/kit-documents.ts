@@ -6,23 +6,36 @@ import {
   LINE_WEIGHTS_2D,
   ONE_LINE_TEXT_MM,
   autoDimensionCommand,
+  boxAroundAabb,
+  boxForRegion,
   buildViewScene,
   builtinFormTemplate,
+  cameraLookingFrom,
+  defaultCamera,
   detailComponents,
   diagramKinds,
+  elementsAabb,
   enlargedPlanCommands,
   formScheduleKinds,
   isBoundFormKind,
   fieldProviderRegistry,
   layoutOneLine,
+  modelAabb,
+  normalizeBox,
   oneLineCommands,
   oneLineCropCommand,
   planAutoTags,
   sheetLayoutCommand,
+  viewCamera3d,
+  viewCropBox3d,
+  workingAngleOf,
+  type Aabb3,
   type AutoTagCategory,
   type Command,
+  type CropBox3d,
   type DetailLevel,
   type DiagramHints,
+  type LookFrom,
   type ModelState,
   type OneLineSpec,
   type ScheduleColumnDef,
@@ -32,7 +45,9 @@ import {
   type ScheduleGroup,
   type ScheduleSort,
   type StoredDiagramKind,
+  type View3dCamera,
   type ViewElement,
+  type ViewProjection,
   type VisualStyle,
 } from "@permitzip/bim-kernel";
 import { openSchedule, scheduleV1ToV2, ScheduleDefinitionError, type ColumnValues, type RowSet } from "@permitzip/bim-kernel/schedules";
@@ -271,6 +286,103 @@ export type TagStyleChanges = Omit<UpdateTagStyle, "type" | "styleId">
 function mm(m: Measure, what: string): number {
   if (m.kind !== "length") throw new Error(`${what} is a length; the value given is a ${m.kind}.`);
   return Math.round(measureIn(m, "mm") * 1000) / 1000;
+}
+
+/** A 3D point in model space, typed lengths (`x` east, `y` plan north, `z` up from project zero). */
+export interface Point3Spec {
+  readonly x: Measure;
+  readonly y: Measure;
+  readonly z: Measure;
+}
+
+/** Named vantage directions for a 3D view (`south_west`, `south_east`, `north_west`, `north_east`, `south`, `north`, `east`, `west`, `top`). */
+export type LookFrom3d = LookFrom;
+
+/** Camera settings for a saved 3D view: named vantage or explicit eye/target, lens angle (`fovDeg`, 5–120°), orthographic framing height, and projection. */
+export interface Camera3dSpec {
+  /** Named vantage looking at the view's 3D crop box (alternative to `eye` + `target`). */
+  readonly lookFrom?: LookFrom3d;
+  readonly eye?: Point3Spec;
+  readonly target?: Point3Spec;
+  /** Up direction (unitless vector; default `{ x: 0, y: 0, z: 1 }`). */
+  readonly up?: { readonly x: number; readonly y: number; readonly z: number };
+  /** Perspective vertical field of view, degrees (5–120). */
+  readonly fovDeg?: number;
+  /** Orthographic visible vertical span at the target (typed length). */
+  readonly orthoHeight?: Measure;
+  /** Projection for live 3D viewing (`"perspective"` or `"orthographic"`). */
+  readonly projection?: ViewProjection;
+}
+
+/** A saved 3D view with optional camera (`fovDeg`, `lookFrom`, `eye`/`target`), projection, and 3D crop box. */
+export interface View3dSpec extends Camera3dSpec {
+  readonly name: string;
+  /** Fit the 3D crop box to these element ids, grown out to nearby levels and grid lines. */
+  readonly fitElements?: readonly string[];
+  /** Fit the 3D crop box to this typed 3D region. */
+  readonly fitRegion?: { readonly min: Point3Spec; readonly max: Point3Spec };
+  /** Explicit oriented 3D crop box. */
+  readonly cropBox?: { readonly center: Point3Spec; readonly halfSize: Point3Spec; readonly rotationDeg?: number };
+  /** Crop on/off (default on). */
+  readonly cropView?: boolean;
+  /** Show the 3D crop box while editing (default on). */
+  readonly showCropBox?: boolean;
+  readonly id?: string;
+}
+
+function point3Mm(pt: Point3Spec, what: string): { readonly x: number; readonly y: number; readonly z: number } {
+  return { x: mm(pt.x, `${what} x`), y: mm(pt.y, `${what} y`), z: mm(pt.z, `${what} z`) };
+}
+
+function validFovDeg(fovDeg: number): number {
+  if (!Number.isFinite(fovDeg) || fovDeg < 5 || fovDeg > 120) {
+    throw new ScriptRunError(`Field of view (${fovDeg}°) must be between 5° and 120°.`);
+  }
+  return fovDeg;
+}
+
+function regionAabb(region: { readonly min: Point3Spec; readonly max: Point3Spec }): Aabb3 {
+  const a = point3Mm(region.min, "3D region min");
+  const b = point3Mm(region.max, "3D region max");
+  return {
+    min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), z: Math.min(a.z, b.z) },
+    max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y), z: Math.max(a.z, b.z) },
+  };
+}
+
+function cropBoxForCreate(model: ModelState, spec: View3dSpec): { readonly box: CropBox3d; readonly cropBox?: CropBox3d; readonly fit?: { readonly elementIds?: readonly string[]; readonly region?: Aabb3 } } {
+  const fitElements = spec.fitElements && spec.fitElements.length > 0 ? [...spec.fitElements] : undefined;
+  const fitRegion = spec.fitRegion ? regionAabb(spec.fitRegion) : undefined;
+  if (spec.cropBox && (fitElements || fitRegion)) throw new ScriptRunError("Give either cropBox or fitElements/fitRegion, not both.");
+  if (spec.cropBox) {
+    const cropBox = normalizeBox({
+      center: point3Mm(spec.cropBox.center, "3D crop box center"),
+      halfSize: point3Mm(spec.cropBox.halfSize, "3D crop box half-size"),
+      rotationDeg: spec.cropBox.rotationDeg ?? 0,
+    });
+    return { box: cropBox, cropBox };
+  }
+  if (fitElements || fitRegion) {
+    const fromElements = fitElements ? elementsAabb(model, fitElements) : null;
+    if (fitElements && !fromElements && !fitRegion) throw new ScriptRunError("None of those elements is in what the script reads, or none has a size to fit the 3D view to.");
+    const parts = [fromElements, fitRegion ?? null].filter((x): x is Aabb3 => x !== null);
+    const merged: Aabb3 = {
+      min: { x: Math.min(...parts.map((b) => b.min.x)), y: Math.min(...parts.map((b) => b.min.y)), z: Math.min(...parts.map((b) => b.min.z)) },
+      max: { x: Math.max(...parts.map((b) => b.max.x)), y: Math.max(...parts.map((b) => b.max.y)), z: Math.max(...parts.map((b) => b.max.z)) },
+    };
+    return { box: boxForRegion(model, merged), fit: { ...(fitElements ? { elementIds: fitElements } : {}), ...(fitRegion ? { region: fitRegion } : {}) } };
+  }
+  return { box: boxAroundAabb(modelAabb(model), workingAngleOf(model)) };
+}
+
+function cameraFromSpec(base: View3dCamera, spec: Camera3dSpec, fallbackFovDeg = base.fovDeg): View3dCamera {
+  return {
+    eye: spec.eye ? point3Mm(spec.eye, "Camera eye") : base.eye,
+    target: spec.target ? point3Mm(spec.target, "Camera target") : base.target,
+    up: spec.up ?? base.up,
+    fovDeg: spec.fovDeg !== undefined ? validFovDeg(spec.fovDeg) : fallbackFovDeg,
+    orthoHeightMm: spec.orthoHeight !== undefined ? mm(spec.orthoHeight, "Orthographic view height") : base.orthoHeightMm,
+  };
 }
 
 export interface SheetSpec {
@@ -613,6 +725,47 @@ export const documents = {
   /** An interior or exterior elevation looking from `from..to`; its live elevation marker prints on overlapping plans. Returns the view's id. */
   elevationView(ctx: ScriptContext, spec: VerticalViewSpec): string {
     return verticalView(ctx, "elevation", spec);
+  },
+  /** A saved 3D view with its 3D crop box, projection, and camera (`lookFrom` preset or explicit `eye`/`target`, `fovDeg` 5–120°, `orthoHeight`). Returns the view's id. */
+  view3d(ctx: ScriptContext, spec: View3dSpec): string {
+    const viewId = spec.id ?? ctx.id("view3d");
+    const hasCamera = spec.lookFrom !== undefined || spec.eye !== undefined || spec.target !== undefined || spec.up !== undefined || spec.fovDeg !== undefined || spec.orthoHeight !== undefined;
+    const resolved = onWorking(ctx, "documents.view3d", (model) => {
+      const { box, cropBox, fit } = cropBoxForCreate(model, spec);
+      const base = spec.lookFrom ? cameraLookingFrom(box, spec.lookFrom) : defaultCamera(box);
+      const camera = hasCamera ? cameraFromSpec(base, spec) : undefined;
+      return { cropBox, fit, camera };
+    });
+    ctx.edit({
+      type: "create_3d_view",
+      viewId,
+      name: spec.name,
+      ...(resolved.camera ? { camera: resolved.camera } : {}),
+      ...(spec.projection ? { projection: spec.projection } : {}),
+      ...(resolved.cropBox ? { cropBox: resolved.cropBox } : {}),
+      ...(resolved.fit ? { fit: resolved.fit } : {}),
+      ...(spec.cropView !== undefined ? { cropView: spec.cropView } : {}),
+      ...(spec.showCropBox !== undefined ? { showCropBox: spec.showCropBox } : {}),
+    });
+    return viewId;
+  },
+  /** Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, `projection`), preserving any unspecified fields from its current camera. */
+  setCamera3d(ctx: ScriptContext, viewRef: string, spec: Camera3dSpec): void {
+    const { viewId, camera } = onWorking(ctx, "documents.setCamera3d", (model) => {
+      const v = viewIn(model, viewRef, "3D view");
+      if (v.viewType !== "three_d") throw new ScriptRunError(`View "${v.name}" is not a 3D view.`);
+      const box = viewCropBox3d(model, v);
+      const current = viewCamera3d(model, v);
+      if (!box || !current) throw new ScriptRunError(`View "${v.name}" has no 3D camera.`);
+      const base = spec.lookFrom ? cameraLookingFrom(box, spec.lookFrom) : current;
+      return { viewId: v.id, camera: cameraFromSpec(base, spec, current.fovDeg) };
+    });
+    ctx.edit({
+      type: "set_3d_view_camera",
+      viewId,
+      camera,
+      ...(spec.projection ? { projection: spec.projection } : {}),
+    });
   },
   /**
    * A Revit-style enlarged plan: creates a cropped plan view on the same level

@@ -112,8 +112,10 @@ PDFs always draw the printed drawing.
 
 `bim_list_views_and_sheets` reports each 3D view's `crop_box_ft` (centre, size,
 turn), `camera_ft` (eye, target), `projection`, `crop_on` and how it prints.
-In `batch_documents` the kernel steps are `create_3d_view`,
-`set_3d_view_camera` and `set_3d_crop_box`, in **millimetres**.
+In scripts (`@permitzip/bim-script`), prefer `documents.view3d(ctx, { name, lookFrom, fovDeg, projection, ... })`
+and `documents.setCamera3d(ctx, view, { fovDeg, lookFrom, eye, target, orthoHeight, projection })`
+with typed units (`fovDeg` 5–120°); in `batch_documents` the underlying kernel steps are
+`create_3d_view`, `set_3d_view_camera` and `set_3d_crop_box`, in **millimetres**.
 
 **How 3D views print.** Vector hidden-line from the view's own camera,
 orthographic (a perspective view prints parallel from the same direction),

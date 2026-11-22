@@ -8,7 +8,7 @@ Generated from the code on every change, for people and for agents. For guides a
 
 - [Example scripts](examples.md): 4 whole scripts to copy
 - [Recipes](recipes.md): 31 worked tasks
-- Script kit: 137 functions
+- Script kit: 139 functions
   - [ctx: the script context](script-kit/ctx.md): 15 functions
   - [units](script-kit/units.md): 6 functions
   - [building](script-kit/building.md): 27 functions
@@ -16,7 +16,7 @@ Generated from the code on every change, for people and for agents. For guides a
   - [equipment](script-kit/equipment.md): 3 functions
   - [parts](script-kit/parts.md): 8 functions
   - [PartBuilder](script-kit/part-builder.md): 22 functions
-  - [documents](script-kit/documents.md): 42 functions
+  - [documents](script-kit/documents.md): 44 functions
   - [checks](script-kit/checks.md): 1 functions
   - [defineScript](script-kit/define-script.md): 1 functions
 - [Edit commands](commands.md): 204 commands `ctx.edit` takes

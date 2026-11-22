@@ -33,6 +33,9 @@ const MM = 0.001;
 /** How far the outline reaches past the building, mm. */
 export const LEVEL_PLANE_MARGIN_MM = 1500;
 const LABEL_SCREEN_HEIGHT = 0.028;
+/** The lens angle the label size was tuned at, degrees. A sprite without size attenuation still scales with the projection (spanning scale/tan(fov/2) of the view), so any other angle rescales it to keep the same screen size. */
+const LABEL_FOV_CALIBRATION_DEG = 45;
+const LABEL_FOV_CALIBRATION_TAN = Math.tan(THREE.MathUtils.degToRad(LABEL_FOV_CALIBRATION_DEG) / 2);
 
 /** Feet and inches for the label: 26'-6". */
 function heightText(mm: number): string {
@@ -96,11 +99,19 @@ export interface LevelPlaneColors {
   readonly background: string;
 }
 
+/** How the active 3D camera projects sprites: perspective by lens angle, orthographic by visible height. */
+export type LevelLabelCamera =
+  | { readonly projection: "perspective"; readonly fovDeg: number }
+  | { readonly projection: "orthographic"; readonly orthoHeightMm: number };
+
 export class LevelPlanes {
   readonly object = new THREE.Group();
   private specs: readonly LevelPlaneSpec[] = [];
   private extent: PlanExtentMm | null = null;
   private highlighted: string | null = null;
+  private labelCamera: LevelLabelCamera = { projection: "perspective", fovDeg: LABEL_FOV_CALIBRATION_DEG };
+  /** Label sprites and their canvas aspect ratios, to rescale when the camera projection or lens changes. */
+  private labels: { readonly sprite: THREE.Sprite; readonly aspect: number }[] = [];
 
   constructor(private colors: LevelPlaneColors) {
     this.object.name = "level-planes";
@@ -129,12 +140,41 @@ export class LevelPlanes {
     this.object.visible = visible;
   }
 
+  /** Keep the labels the same fraction of the view whatever lens angle or orthographic zoom the camera carries. */
+  setCamera(camera: LevelLabelCamera) {
+    if (
+      camera.projection === this.labelCamera.projection &&
+      (camera.projection === "perspective"
+        ? Math.abs(camera.fovDeg - (this.labelCamera as Extract<LevelLabelCamera, { projection: "perspective" }>).fovDeg) < 1e-6
+        : Math.abs(camera.orthoHeightMm - (this.labelCamera as Extract<LevelLabelCamera, { projection: "orthographic" }>).orthoHeightMm) < 1e-6)
+    ) {
+      return;
+    }
+    this.labelCamera = camera;
+    this.applyLabelScales();
+  }
+
+  /** Keep the labels the same fraction of the view whatever lens angle a perspective camera carries (the FOV slider, or a saved 3D camera). */
+  setFovDeg(fovDeg: number) {
+    this.setCamera({ projection: "perspective", fovDeg });
+  }
+
+  /** Undo the projection's scaling so labels span the same NDC height in both perspective (scale/tan(fov/2)) and orthographic (scale*2/orthoHeightM). */
+  private applyLabelScales() {
+    const height =
+      this.labelCamera.projection === "orthographic"
+        ? (LABEL_SCREEN_HEIGHT / (2 * LABEL_FOV_CALIBRATION_TAN)) * Math.max(1e-3, this.labelCamera.orthoHeightMm) * MM
+        : LABEL_SCREEN_HEIGHT * (Math.tan(THREE.MathUtils.degToRad(this.labelCamera.fovDeg) / 2) / LABEL_FOV_CALIBRATION_TAN);
+    for (const { sprite, aspect } of this.labels) sprite.scale.set(height * aspect, height, 1);
+  }
+
   dispose() {
     this.clear();
     this.object.removeFromParent();
   }
 
   private clear() {
+    this.labels = [];
     for (const child of [...this.object.children]) {
       child.traverse((o) => {
         if (o instanceof THREE.LineLoop) {
@@ -166,11 +206,12 @@ export class LevelPlanes {
       const { texture, aspect } = labelTexture(layout.text, color, this.colors.background);
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, sizeAttenuation: false, depthTest: false, transparent: true }));
       sprite.center.set(0, 0);
-      sprite.scale.set(LABEL_SCREEN_HEIGHT * aspect, LABEL_SCREEN_HEIGHT, 1);
+      this.labels.push({ sprite, aspect });
       sprite.position.set(...layout.label);
       sprite.renderOrder = 6;
       group.add(sprite);
       this.object.add(group);
     }
+    this.applyLabelScales();
   }
 }

@@ -671,6 +671,20 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["view", "elevation", "interior elevation", "exterior elevation", "elevation marker"],
   },
   {
+    name: "documents.view3d",
+    summary: "A saved 3D view with its 3D crop box, live projection (`perspective` or `orthographic`), and camera (`lookFrom` corner/side preset or explicit `eye`/`target`, vertical lens angle `fovDeg` in 5–120°, and `orthoHeight`). Returns the view's id.",
+    signature: "view3d(ctx: ScriptContext, spec: View3dSpec): string",
+    example: layout(`${WALLS}\n    const v = documents.view3d(ctx, { name: "South-East Perspective", lookFrom: "south_east", fovDeg: 55, projection: "perspective" });\n    const sheet = documents.sheet(ctx, { number: "A-501", name: "3D Views" });\n    documents.place(ctx, sheet, v, { x: units.mm(420), y: units.mm(300) });`),
+    topics: ["view", "3d view", "camera", "perspective", "orthographic", "field of view", "fov", "isometric", "3d crop box"],
+  },
+  {
+    name: "documents.setCamera3d",
+    summary: "Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, or `projection`), preserving any unspecified fields from its current camera.",
+    signature: "setCamera3d(ctx: ScriptContext, view: string, camera: Camera3dSpec): void",
+    example: layout(`${WALLS}\n    const v = documents.view3d(ctx, { name: "Entry 3D", lookFrom: "south_west", projection: "perspective" });\n    documents.setCamera3d(ctx, v, { fovDeg: 65 });`),
+    topics: ["view", "3d view", "camera", "field of view", "fov", "lens", "perspective", "orthographic"],
+  },
+  {
     name: "documents.enlargedPlan",
     summary: "A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4\" or 1/2\" = 1'-0\") AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets. Returns `{ viewId, calloutId }`.",
     signature: "enlargedPlan(ctx: ScriptContext, spec: EnlargedPlanSpec): { viewId: string; calloutId: string }",

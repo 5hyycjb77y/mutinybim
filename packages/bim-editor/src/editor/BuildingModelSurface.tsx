@@ -220,9 +220,6 @@ export type BuildingModelView = '3d' | 'plan' | 'sheet'
 
 export type { BuildingModelTool } from './building-model-ribbon'
 
-/** Space the properties panel takes on the right of the canvas (w-80), so overlays clear it. */
-const PROPERTIES_PANEL_PX = 320
-
 /** Keys typed into a field are the field's, not the view's. */
 function typingInField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
@@ -2048,7 +2045,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
-        if (ids.length > 0 && isNudgeKey(e.key)) {
+        if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
           e.preventDefault()
           setToolHint(session.nudgeSelection(ids, e.key, e.shiftKey))
           return
@@ -3524,7 +3521,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             <OrientationControls
               trueNorthDeg={site.trueNorthDeg}
               viewer={viewer}
-              rightInset={openView || selection ? PROPERTIES_PANEL_PX : 0}
+              rightInset={propertiesOpen ? propertiesWidth : 0}
               canCreateViews={canEdit}
               blockedReason={blockedReason}
               onCreatePlan={() => setRequest({ kind: 'new_view', viewType: 'floor_plan' })}
@@ -3718,7 +3715,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             </div>
           )}
           {status === 'read_only' && !phase && !showDrawing && (
-            <div className="absolute bottom-3 left-3 max-w-sm">
+            <div className="absolute bottom-14 left-3 max-w-sm">
               <Alert>
                 <Wind />
                 <AlertTitle>View only</AlertTitle>

@@ -13,6 +13,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`documents.ceilingView`](#documentsceilingview): A reflected ceiling plan of one level; returns the view's id.
 - [`documents.sectionView`](#documentssectionview): A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports annotative `headExt`/`tailExt`, Revit `splitGap` break, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm` datum extensions.
 - [`documents.elevationView`](#documentselevationview): An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); its live elevation marker (circle + pointer arrow with auto-updating detail#/sheet# head) prints automatically on overlapping plans.
+- [`documents.view3d`](#documentsview3d): A saved 3D view with its 3D crop box, live projection (`perspective` or `orthographic`), and camera (`lookFrom` corner/side preset or explicit `eye`/`target`, vertical lens angle `fovDeg` in 5–120°, and `orthoHeight`).
+- [`documents.setCamera3d`](#documentssetcamera3d): Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, or `projection`), preserving any unspecified fields from its current camera.
 - [`documents.enlargedPlan`](#documentsenlargedplan): A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4" or 1/2" = 1'-0") AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets.
 - [`documents.callout`](#documentscallout): Places a live parametric callout box + split head bubble on a view referencing any existing enlarged plan, 2D detail, section, or elevation view.
 - [`documents.setCrop`](#documentssetcrop): Sets a view's crop box in typed units, toggles cropView/showCropBox, or adjusts section/elevation far clip depth, level datum extensions (`levelLeftExtMm`/`levelRightExtMm`), and section mark `headExt`/`tailExt`/`splitGap`.
@@ -233,6 +235,63 @@ export default defineScript({
     const elev = documents.elevationView(ctx, { name: "Restroom North Elevation", from: { x: units.ft(2), y: units.ft(8) }, to: { x: units.ft(12), y: units.ft(8) }, direction: 1, depth: units.ft(10), scale: 24 });
     const sheet = documents.sheet(ctx, { number: "A-401", name: "Interior Elevations" });
     documents.place(ctx, sheet, elev, { x: units.mm(400), y: units.mm(300) });
+  },
+});
+```
+
+</details>
+
+## documents.view3d
+
+A saved 3D view with its 3D crop box, live projection (`perspective` or `orthographic`), and camera (`lookFrom` corner/side preset or explicit `eye`/`target`, vertical lens angle `fovDeg` in 5–120°, and `orthoHeight`). Returns the view's id.
+
+```ts
+view3d(ctx: ScriptContext, spec: View3dSpec): string
+```
+
+Topics: view, 3d view, camera, perspective, orthographic, field of view, fov, isometric, 3d crop box
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const v = documents.view3d(ctx, { name: "South-East Perspective", lookFrom: "south_east", fovDeg: 55, projection: "perspective" });
+    const sheet = documents.sheet(ctx, { number: "A-501", name: "3D Views" });
+    documents.place(ctx, sheet, v, { x: units.mm(420), y: units.mm(300) });
+  },
+});
+```
+
+</details>
+
+## documents.setCamera3d
+
+Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, or `projection`), preserving any unspecified fields from its current camera.
+
+```ts
+setCamera3d(ctx: ScriptContext, view: string, camera: Camera3dSpec): void
+```
+
+Topics: view, 3d view, camera, field of view, fov, lens, perspective, orthographic
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const v = documents.view3d(ctx, { name: "Entry 3D", lookFrom: "south_west", projection: "perspective" });
+    documents.setCamera3d(ctx, v, { fovDeg: 65 });
   },
 });
 ```

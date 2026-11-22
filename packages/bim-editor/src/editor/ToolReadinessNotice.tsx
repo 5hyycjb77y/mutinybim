@@ -49,7 +49,7 @@ export function ToolReadinessNotice({
     }
   }
   return (
-    <div className="absolute bottom-3 left-1/2 z-10 w-full max-w-lg -translate-x-1/2 px-3" data-testid="tool-blocker" data-blocker={blocker.id}>
+    <div className="absolute bottom-14 left-1/2 z-10 w-full max-w-lg -translate-x-1/2 px-3" data-testid="tool-blocker" data-blocker={blocker.id}>
       <Alert>
         {blocker.id === 'no-level' ? <Layers /> : blocker.id === 'paused' ? <WifiOff /> : blocker.id === 'no-model-view' ? <MousePointerClick /> : <TriangleAlert />}
         <AlertTitle>{blocker.title}</AlertTitle>

@@ -326,6 +326,7 @@ export class ModelViewer3D {
   private readonly cropOutline: CropBoxOutline;
   private readonly cameraListeners = new Set<() => void>();
   private readonly cameraSettledListeners = new Set<() => void>();
+  private fovDirty = false;
   private readonly pointerClaims = new Set<symbol>();
   private selected: Pick | null = null;
   private frameCount = 0;
@@ -1399,6 +1400,39 @@ export class ModelViewer3D {
     return this.projection;
   }
 
+  /**
+   * Lens angle of the perspective camera, degrees (clamped to 5..120, the range a
+   * saved 3D camera may store). Felt at once in perspective; an orthographic view
+   * keeps its framing, and the angle applies again on the switch back.
+   * Pass `{ settle: false }` while dragging a slider and `{ settle: true }` (default)
+   * when the gesture finishes so camera memory saves once without per-tick churn.
+   */
+  setFovDeg(fovDeg: number, options?: { readonly settle?: boolean }) {
+    const clamped = Math.min(120, Math.max(5, fovDeg));
+    const changed = Math.abs(this.perspective.fov - clamped) > 1e-6;
+    if (changed) {
+      this.perspective.fov = clamped;
+      this.perspective.updateProjectionMatrix();
+      this.fovDirty = true;
+      void this.fragments.update(true);
+      for (const listener of this.cameraListeners) listener();
+    }
+    if (options?.settle !== false && this.fovDirty) {
+      this.fovDirty = false;
+      for (const listener of this.cameraSettledListeners) listener();
+    }
+  }
+
+  /** The perspective camera's lens angle, degrees. */
+  getFovDeg(): number {
+    return this.perspective.fov;
+  }
+
+  /** Visible vertical span of the orthographic 3D camera, mm. */
+  getOrthoHeightMm(): number {
+    return (this.orthoView.top - this.orthoView.bottom) / Math.max(1e-6, this.orthoView.zoom) / MM;
+  }
+
   /** Look from `eye` at `target`; a parallel view zooms to frame what a perspective eye there would see. */
   private async lookFrom(eye: THREE.Vector3, target: THREE.Vector3, animate: boolean) {
     const camera = this.camera();
@@ -1671,15 +1705,22 @@ export class ModelViewer3D {
     const s = (q: View3dCamera["eye"]) => new THREE.Vector3(q.x * MM, q.z * MM, -q.y * MM);
     const eye = s(camera.eye);
     const target = s(camera.target);
-    if (Math.abs(this.perspective.fov - camera.fovDeg) > 1e-6) {
-      this.perspective.fov = camera.fovDeg;
+    const clampedFov = Math.min(120, Math.max(5, camera.fovDeg));
+    const fovChanged = Math.abs(this.perspective.fov - clampedFov) > 1e-6;
+    if (fovChanged) {
+      this.perspective.fov = clampedFov;
       this.perspective.updateProjectionMatrix();
+      this.fovDirty = false;
     }
     const moving = this.controls.setLookAt(eye.x, eye.y, eye.z, target.x, target.y, target.z, animate);
     const cam = this.camera3d();
     if (cam instanceof THREE.OrthographicCamera) {
       await Promise.all([moving, this.controls.zoomTo((cam.top - cam.bottom) / Math.max(1e-6, camera.orthoHeightMm * MM), animate)]);
     } else await moving;
+    if (fovChanged) {
+      for (const listener of this.cameraListeners) listener();
+      for (const listener of this.cameraSettledListeners) listener();
+    }
     await this.fragments.update(true);
   }
 

@@ -325,6 +325,17 @@ export interface VerticalViewSpec {
 }
 export interface EnlargedPlanSpec { parent: string; name: string; from: PlanPoint; to: PlanPoint; scale?: number; label?: string; head?: PlanPoint; discipline?: string; cutHeight?: Measure; id?: string; calloutId?: string }
 export interface CalloutRefSpec { view: string; target: string; from: PlanPoint; to: PlanPoint; head?: PlanPoint; label?: string; id?: string }
+export interface Point3Spec { readonly x: Measure; readonly y: Measure; readonly z: Measure }
+export type LookFrom3d = "south_west" | "south_east" | "north_west" | "north_east" | "south" | "north" | "east" | "west" | "top";
+export interface Camera3dSpec {
+  lookFrom?: LookFrom3d; eye?: Point3Spec; target?: Point3Spec; up?: { x: number; y: number; z: number };
+  fovDeg?: number; orthoHeight?: Measure; projection?: "perspective" | "orthographic";
+}
+export interface View3dSpec extends Camera3dSpec {
+  name: string; fitElements?: readonly string[]; fitRegion?: { min: Point3Spec; max: Point3Spec };
+  cropBox?: { center: Point3Spec; halfSize: Point3Spec; rotationDeg?: number };
+  cropView?: boolean; showCropBox?: boolean; id?: string;
+}
 `;
 
 function member(e: KitEntry): string {

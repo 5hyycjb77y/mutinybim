@@ -164,8 +164,8 @@ The `core` family is the catalogue's core pack less the four reads already in th
 | `bim_set_issue_status` | none | host step | issue status is recorded by the host's issuing |
 | `bim_add_sheet_note` | ctx.edit: `create_text_note` | covered | script covers it → retirement candidate (maintainer's call) |
 | `bim_edit_text_note` | ctx.edit: `edit_text_note`, `resize_text_note` | covered | script covers it → retirement candidate (maintainer's call) |
-| `bim_create_3d_view` | ctx.edit: `create_3d_view` | covered | script covers it → retirement candidate (maintainer's call) |
-| `bim_set_3d_view_camera` | ctx.edit: `set_3d_view_camera` | covered | script covers it → retirement candidate (maintainer's call) |
+| `bim_create_3d_view` | `documents.view3d(ctx, spec)` (emits `create_3d_view` with typed units, `lookFrom`, `fovDeg` 5–120°, `projection`, and 3D crop) | covered | script covers it → retirement candidate (maintainer's call) |
+| `bim_set_3d_view_camera` | `documents.setCamera3d(ctx, view, camera)` (emits `set_3d_view_camera`; preserves unspecified fields so `{ fovDeg }` updates the lens cleanly) | covered | script covers it → retirement candidate (maintainer's call) |
 | `bim_set_3d_crop_box` | ctx.edit: `set_3d_crop_box` | covered | script covers it → retirement candidate (maintainer's call) |
 
 ## coordination
