@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@permitzip/bim-ui'
 import { Lock, Sparkles, Sun, Unlock } from 'lucide-react'
 import { toggleSelectionLock, useSelectionLocks } from './selection-locks'
@@ -9,6 +9,7 @@ interface ViewerLightingControls {
   setSun(azimuthDeg: number, elevationDeg: number): void
   setShadows(enabled: boolean): void
   setRenderQuality(quality: 'draft' | 'standard' | 'high'): void
+  getRenderQuality?: () => 'draft' | 'standard' | 'high'
 }
 
 const SUN_PRESETS = [
@@ -37,7 +38,12 @@ interface Props {
 export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTogglePin, viewer, is3d = false }: Props): ReactNode {
   const locks = useSelectionLocks()
   const [sunIdx, setSunIdx] = useState(1)
-  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>('standard')
+  const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>(() => viewer?.getRenderQuality?.() ?? 'standard')
+
+  useEffect(() => {
+    const current = viewer?.getRenderQuality?.()
+    if (current) setQuality(current)
+  }, [viewer])
 
   const cycleSun = () => {
     const next = (sunIdx + 1) % SUN_PRESETS.length

@@ -228,6 +228,22 @@ export function choosePickHits<P>(hits: readonly { readonly pick: P; readonly se
   return { solid: hits.find((h) => !h.seeThrough)?.pick ?? null, seeThrough: hits.find((h) => h.seeThrough)?.pick ?? null };
 }
 
+/**
+ * Detect CPU software WebGL renderers (SwiftShader, llvmpipe, Windows Basic Render Driver)
+ * where per-fragment 9-tap PCF shadows and PMREM IBL cut frame rate in half and starve UI input.
+ */
+function isSoftwareWebGL(renderer: THREE.WebGLRenderer): boolean {
+  try {
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const unmasked = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) ?? "") : "";
+    const basic = String(gl.getParameter(gl.RENDERER) ?? "");
+    return /swiftshader|llvmpipe|software|basic render driver|mesa offscreen/i.test(`${unmasked} ${basic}`);
+  } catch {
+    return false;
+  }
+}
+
 export class ModelViewer3D {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
@@ -238,6 +254,7 @@ export class ModelViewer3D {
   private sunLight: THREE.DirectionalLight | null = null;
   private shadowsEnabled = true;
   private renderQuality: "draft" | "standard" | "high" = "standard";
+  private studioEnv: THREE.Texture | null = null;
   private projection: Projection = "perspective";
   /** Where the 3D view was looking when plan took over (a projection switch in plan frames about it). */
   private readonly last3dTarget = new THREE.Vector3();
@@ -349,15 +366,19 @@ export class ModelViewer3D {
     this.overlayScene.add(this.cropOutline.object);
     // Standard hardware 24-bit depth buffer (logarithmicDepthBuffer writes gl_FragDepth, which disables hardware gl.polygonOffset and early-Z culling).
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const softwareGpu = isSoftwareWebGL(this.renderer);
+    if (softwareGpu) {
+      this.renderQuality = "draft";
+    }
+    this.renderer.setPixelRatio(softwareGpu ? 1 : Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMappingExposure = softwareGpu ? 1.0 : 1.05;
+    this.renderer.shadowMap.enabled = !softwareGpu;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // Shadows only change when geometry, visibility, clipping, sun, or quality change — never on mouse hover/orbit.
     this.renderer.shadowMap.autoUpdate = false;
-    this.renderer.shadowMap.needsUpdate = true;
+    this.renderer.shadowMap.needsUpdate = !softwareGpu;
     this.renderer.localClippingEnabled = false;
     // Counted per frame, across the model pass and the crop box outline pass.
     this.renderer.info.autoReset = false;
@@ -366,16 +387,19 @@ export class ModelViewer3D {
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = this.palette.background;
-    const env = buildStudioEnvironment(this.renderer);
-    if (env) {
-      this.scene.environment = env;
-      this.scene.environmentIntensity = 0.65;
+    if (!softwareGpu) {
+      const env = buildStudioEnvironment(this.renderer);
+      if (env) {
+        this.studioEnv = env;
+        this.scene.environment = env;
+        this.scene.environmentIntensity = 0.65;
+      }
     }
     // Low ambient + a strong key light with soft shadows so walls, openings and floors read with real depth.
-    this.scene.add(new THREE.HemisphereLight(0xf6f8fc, 0x7d8794, 0.85));
-    const sun = new THREE.DirectionalLight(0xfff6ea, 2.2);
+    this.scene.add(new THREE.HemisphereLight(0xf6f8fc, 0x7d8794, softwareGpu ? 0.95 : 0.85));
+    const sun = new THREE.DirectionalLight(0xfff6ea, softwareGpu ? 2.3 : 2.2);
     sun.position.set(60, 100, 35);
-    sun.castShadow = true;
+    sun.castShadow = !softwareGpu;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 300;
@@ -399,6 +423,7 @@ export class ModelViewer3D {
     groundShadow.rotation.x = -Math.PI / 2;
     groundShadow.position.y = -0.3;
     groundShadow.receiveShadow = true;
+    groundShadow.visible = !softwareGpu;
     groundShadow.name = "architectural-ground-shadow";
     this.groundShadowPlane = groundShadow;
     this.scene.add(groundShadow);
@@ -1247,8 +1272,9 @@ export class ModelViewer3D {
       this.carryControlState(enabled);
     } else {
       this.cutPlane = null;
-      if (this.sunLight) this.sunLight.castShadow = this.shadowsEnabled;
-      if (this.groundShadowPlane) this.groundShadowPlane.visible = this.shadowsEnabled;
+      const shadowsActive = this.shadowsEnabled && this.renderQuality !== "draft";
+      if (this.sunLight) this.sunLight.castShadow = shadowsActive;
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = shadowsActive;
       this.scene.background = this.palette.background;
       void this.setPlanCategoriesVisible(true);
       const camera = this.camera3d();
@@ -1476,10 +1502,10 @@ export class ModelViewer3D {
     this.invalidateShadows();
   }
 
-  /** Turn 3D sun shadows on or off (always off in 2D plan mode so floor plans stay crisp). */
+  /** Turn 3D sun shadows on or off (always off in 2D plan mode and Draft quality). */
   setShadows(enabled: boolean) {
     this.shadowsEnabled = enabled;
-    const active = this.mode === "3d" && enabled;
+    const active = this.mode === "3d" && enabled && this.renderQuality !== "draft";
     if (this.sunLight) this.sunLight.castShadow = active;
     if (this.groundShadowPlane) this.groundShadowPlane.visible = active;
     this.invalidateShadows();
@@ -1488,28 +1514,46 @@ export class ModelViewer3D {
   /** Switch 3D visual rendering quality (`draft` = fast matte, `standard` = balanced PBR + shadows, `high` = crisp 4K shadow map + rich studio exposure). */
   setRenderQuality(quality: "draft" | "standard" | "high") {
     this.renderQuality = quality;
+    const shadowsActive = this.mode === "3d" && this.shadowsEnabled && quality !== "draft";
     if (quality === "draft") {
       this.renderer.toneMappingExposure = 1.0;
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
+      this.renderer.shadowMap.enabled = false;
+      this.scene.environment = null;
       if (this.sunLight) this.sunLight.castShadow = false;
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = false;
     } else if (quality === "high") {
       this.renderer.toneMappingExposure = 1.12;
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer.shadowMap.enabled = true;
+      if (!this.studioEnv) this.studioEnv = buildStudioEnvironment(this.renderer);
+      if (this.studioEnv) {
+        this.scene.environment = this.studioEnv;
+        this.scene.environmentIntensity = 0.65;
+      }
       if (this.sunLight) {
         this.sunLight.shadow.mapSize.set(4096, 4096);
         this.sunLight.shadow.map?.dispose();
         this.sunLight.shadow.map = null;
-        this.sunLight.castShadow = this.mode === "3d" && this.shadowsEnabled;
+        this.sunLight.castShadow = shadowsActive;
       }
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = shadowsActive;
     } else {
       this.renderer.toneMappingExposure = 1.05;
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      this.renderer.shadowMap.enabled = true;
+      if (!this.studioEnv) this.studioEnv = buildStudioEnvironment(this.renderer);
+      if (this.studioEnv) {
+        this.scene.environment = this.studioEnv;
+        this.scene.environmentIntensity = 0.65;
+      }
       if (this.sunLight) {
         this.sunLight.shadow.mapSize.set(2048, 2048);
         this.sunLight.shadow.map?.dispose();
         this.sunLight.shadow.map = null;
-        this.sunLight.castShadow = this.mode === "3d" && this.shadowsEnabled;
+        this.sunLight.castShadow = shadowsActive;
       }
+      if (this.groundShadowPlane) this.groundShadowPlane.visible = shadowsActive;
     }
     this.invalidateShadows();
   }
@@ -2512,6 +2556,8 @@ export class ModelViewer3D {
     }
     for (const entry of this.toneMaterials.values()) entry.material.dispose();
     this.dashedEdge?.dispose();
+    this.studioEnv?.dispose();
+    this.studioEnv = null;
     this.palette.dispose();
     void this.fragments.dispose();
     this.renderer.dispose();
