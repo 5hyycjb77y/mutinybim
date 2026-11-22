@@ -57,33 +57,33 @@ export function materialCutGrey(mat: MaterialDef | null | undefined, fallback = 
 export function resolveElementMaterial(
   model: Pick<ModelState, "elements">,
   el: BimElement,
-  packSet: PackSet = activePackSet(),
+  packSet?: PackSet,
 ): MaterialDef | null {
-  if (isCoreElement(el)) {
+  const directValues = (el as { readonly values?: Readonly<Record<string, unknown>> }).values;
+  const directId = directValues?.[MATERIAL_ID_KEY];
+  if (typeof directId === "string") {
+    const found = materialOf(directId, packSet ?? activePackSet());
+    if (found) return found;
+  }
+  if (isCoreElement(el) && el.typeId !== undefined) {
     let ref = elementTypeValue(model.elements, el, MATERIAL_ID_KEY);
-    if (ref === undefined && el.typeId !== undefined) {
+    if (ref === undefined) {
       const type = model.elements[el.typeId];
       if (isCoreElement(type)) ref = type.values?.[MATERIAL_ID_KEY];
     }
     if (typeof ref === "string") {
-      const found = materialOf(ref, packSet);
+      const found = materialOf(ref, packSet ?? activePackSet());
       if (found) return found;
     }
-  }
-  // Add-on kinds and ceilings may carry scalar values["material.id"] directly.
-  const directValues = (el as { readonly values?: Readonly<Record<string, unknown>> }).values;
-  if (directValues && typeof directValues[MATERIAL_ID_KEY] === "string") {
-    const found = materialOf(directValues[MATERIAL_ID_KEY], packSet);
-    if (found) return found;
   }
   if (el.kind === "ceiling") {
     const form = (el as { readonly form?: string }).form;
     const wantGypsum = form === "soffit" || form === "cloud";
-    const found = allMaterials(packSet).find((m) => (wantGypsum ? m.category === "gypsum" : m.surfaceHatch === "grid_600x1200" || m.surfaceHatch === "grid_600"));
+    const found = allMaterials(packSet ?? activePackSet()).find((m) => (wantGypsum ? m.category === "gypsum" : m.surfaceHatch === "grid_600x1200" || m.surfaceHatch === "grid_600"));
     if (found) return found;
   }
   if (el.kind === "column" && typeof el.material === "string") {
-    const found = materialOf(el.material, packSet);
+    const found = materialOf(el.material, packSet ?? activePackSet());
     if (found) return found;
   }
   return null;

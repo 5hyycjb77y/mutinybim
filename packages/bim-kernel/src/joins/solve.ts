@@ -49,6 +49,8 @@ interface Layer {
   readonly lines: ReadonlyMap<string, JoinLine | null>;
   readonly cells: ReadonlyMap<string, readonly string[]>;
   readonly depth: number;
+  readonly priorities: Map<string, number>;
+  readonly solved: Map<string, LineJoins>;
 }
 
 type Table = ReadonlyMap<string, LineJoinRow>;
@@ -111,7 +113,7 @@ function build(elements: Elements, table: Table): Layer {
       }
     }
   }
-  return { parent: null, lines, cells, depth: 0 };
+  return { parent: null, lines, cells, depth: 0, priorities: new Map(), solved: new Map() };
 }
 
 function fold(layer: Layer): Layer {
@@ -123,7 +125,7 @@ function fold(layer: Layer): Layer {
     for (const [k, v] of chain[i]?.lines ?? []) lines.set(k, v);
     for (const [k, v] of chain[i]?.cells ?? []) cells.set(k, v);
   }
-  return { parent: null, lines, cells, depth: 0 };
+  return { parent: null, lines, cells, depth: 0, priorities: new Map(), solved: new Map() };
 }
 
 const sameLine = (a: JoinLine | null, b: JoinLine | null): boolean =>
@@ -132,6 +134,7 @@ const sameLine = (a: JoinLine | null, b: JoinLine | null): boolean =>
 function derive(base: Layer, to: Elements, changedIds: readonly string[], table: Table): Layer {
   const lines = new Map<string, JoinLine | null>();
   const cells = new Map<string, string[]>();
+  let joinOrTypeTouched = false;
   const cellFor = (key: string): string[] => {
     let list = cells.get(key);
     if (!list) {
@@ -145,6 +148,7 @@ function derive(base: Layer, to: Elements, changedIds: readonly string[], table:
     const el = to[id];
     const row = el ? table.get(el.kind) : undefined;
     const now = el && row ? lineOf(row, el, to) : null;
+    if (was !== null || now !== null || el?.kind === "element_type") joinOrTypeTouched = true;
     if (sameLine(was, now)) continue;
     if (was) {
       for (const key of cellKeys(was)) {
@@ -156,8 +160,9 @@ function derive(base: Layer, to: Elements, changedIds: readonly string[], table:
     if (now) for (const key of cellKeys(now)) cellFor(key).push(id);
     lines.set(id, now);
   }
-  if (lines.size === 0) return base;
-  const next: Layer = { parent: base, lines, cells, depth: base.depth + 1 };
+  if (!joinOrTypeTouched) return base;
+  if (lines.size === 0) return { parent: base.parent, lines: base.lines, cells: base.cells, depth: base.depth, priorities: new Map(), solved: new Map() };
+  const next: Layer = { parent: base, lines, cells, depth: base.depth + 1, priorities: new Map(), solved: new Map() };
   return next.depth > MAX_DEPTH ? fold(next) : next;
 }
 
@@ -255,10 +260,14 @@ interface Ctx {
 }
 
 function priorityOf(ctx: Ctx, f: Frame): number {
+  const hit = ctx.layer.priorities.get(f.line.id);
+  if (hit !== undefined) return hit;
   const el = ctx.elements[f.line.id];
   const row = ctx.table.get(f.line.kind);
   const p = el && row ? row.priority(el, ctx.elements) : 0;
-  return Number.isFinite(p) ? p : 0;
+  const value = Number.isFinite(p) ? p : 0;
+  ctx.layer.priorities.set(f.line.id, value);
+  return value;
 }
 
 /** True when `a` outranks `b`: higher priority, then the lower id. */
@@ -392,6 +401,8 @@ export function lineJoinsOf(elements: Elements, id: string, set: PackSet = activ
   const table = tableIn(set);
   if (table.size === 0) return null;
   const layer = indexFor(elements, set);
+  const cached = layer.solved.get(id);
+  if (cached) return cached;
   const line = lookupLine(layer, id);
   if (!line) return null;
   const ctx: Ctx = { elements, table, layer };
@@ -402,7 +413,7 @@ export function lineJoinsOf(elements: Elements, id: string, set: PackSet = activ
   const outline = [at(s.left, 1), at(e.left, 1), at(e.right, -1), at(s.right, -1)];
   const eid = asElementId(id);
   const cleanup = (which: End, r: EndSolve): EndCleanup => ({ elementId: eid, end: which, style: r.style, with: r.with.map(asElementId), outline });
-  return {
+  const result: LineJoins = {
     elementId: eid,
     levelId: line.levelId,
     start: line.start,
@@ -415,6 +426,8 @@ export function lineJoinsOf(elements: Elements, id: string, set: PackSet = activ
     cleanups: [cleanup("start", s), cleanup("end", e)],
     outline,
   };
+  layer.solved.set(id, result);
+  return result;
 }
 
 /** Another line met at one of this line's ends: at the other's end (a corner) or along its face (`otherEnd` null: this one tees into it). */
