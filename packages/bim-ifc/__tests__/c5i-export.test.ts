@@ -218,7 +218,7 @@ describe("the file", () => {
     const names = sets?.kind === "list" ? sets.items.map((r) => (r.kind === "ref" ? file.entities.get(r.id)?.args[2] : undefined)).map((n) => (n?.kind === "string" ? n.value : "?")) : [];
     expect(names.sort()).toEqual(["MutinyBIM_Mechanical", "Pset_ElectricalDeviceCommon", "Pset_ManufacturerTypeInformation"]);
     const ours = ofType(file, "IFCPROPERTYSET").map((s) => (s.args[2]?.kind === "string" ? s.args[2].value : ""));
-    const standard = new Set(["Pset_ElectricalDeviceCommon", "Pset_ManufacturerTypeInformation", "Pset_SpaceCommon", "Pset_SpaceOccupancyRequirements"]);
+    const standard = new Set(["Pset_DuctSegmentTypeCommon", "Pset_ElectricalDeviceCommon", "Pset_ManufacturerTypeInformation", "Pset_SpaceCommon", "Pset_SpaceOccupancyRequirements"]);
     expect(ours.filter((n) => n.startsWith("Pset_") && !standard.has(n))).toEqual([]);
     expect(ours).toContain(IFC_ORGANIZATION_PSET);
   });

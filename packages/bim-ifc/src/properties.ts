@@ -67,7 +67,7 @@ export function baselineParameterHomes(): ParameterHome[] {
 
 /** One value on its way to a property or quantity set. */
 export type PropertyInput =
-  | { readonly kind: "number"; readonly name: string; readonly value: number; readonly unit?: string }
+  | { readonly kind: "number"; readonly name: string; readonly value: number; readonly unit?: string; readonly measure?: "IFCPOSITIVELENGTHMEASURE" }
   | { readonly kind: "text"; readonly name: string; readonly value: string }
   | { readonly kind: "bool"; readonly name: string; readonly value: boolean };
 
@@ -122,7 +122,7 @@ function nominal(units: UnitSet, input: PropertyInput): StepValue {
     case "number": {
       const m = measureOf(input.value, input.unit);
       units.note(m.unitType);
-      return typed(m.measure, real(m.value));
+      return typed(input.measure ?? m.measure, real(m.value));
     }
     case "bool":
       return typed("IFCBOOLEAN", { bool: input.value });

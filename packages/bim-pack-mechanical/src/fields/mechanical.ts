@@ -39,6 +39,26 @@ const nameplate = (path: string, label: string, kind: Kind, unit: UnitCode, name
 export const MECHANICAL_FIELD_PROVIDER: FieldProvider = {
   id: "mep.mechanical",
   fields: [
+    // IFC 4.3 Pset_DuctSegmentTypeCommon permits occurrence overrides.
+    ...(["width", "height", "diameter"] as const).map((dimension): ProviderField => ({
+      path: `run.${dimension}`,
+      label: `Nominal ${dimension}`,
+      classes: ["mep.duct"],
+      valueType: "quantity",
+      kind: "length",
+      unit: "mm",
+      storedUnit: "mm",
+      writer: locked("Read from the run size."),
+      deps: { elementKinds: ["run_segment"] },
+      ifc: { pset: "Pset_DuctSegmentTypeCommon", property: dimension === "height" ? "NominalHeight" : "NominalDiameterOrWidth" },
+      read: (el) => {
+        if (el.kind !== "run_segment") return null;
+        const size = el.size;
+        if (dimension === "diameter") return size.shape === "round" ? size.diameter : null;
+        return size.shape === "rect" || size.shape === "oval" ? size[dimension] : null;
+      },
+    })),
+
     {
       path: "own.va",
       label: "Electrical load",

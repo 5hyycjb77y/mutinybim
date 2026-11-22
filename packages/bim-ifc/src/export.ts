@@ -599,7 +599,19 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const placement = geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 }));
       const s = el.size;
       const section = s.shape === "rect" || s.shape === "oval" ? { width: s.width, height: s.height } : s.shape === "round" ? { diameter: s.diameter } : s.shape === "pipe" ? { diameter: s.nominalMm } : { diameter: s.tradeSizeMm };
-      product = writeElement(el, cls, null, null, placement, geo.sweep(el.start, el.end, section));
+      const system = els[el.systemId];
+      const systemName = system?.kind === "mep_system" ? system.name.trim() : "";
+      const dimensions = `${Object.values(section).map((value) => Math.round(value * 10) / 10).join("x")} mm`;
+      const shapeName = s.shape === "oval" || s.shape === "round" ? ` ${s.shape}` : "";
+      const name = `${dimensions}${shapeName} ${systemName || cls.classLabel || el.domain}`;
+      product = writeElement(el, cls, name, null, placement, geo.sweep(el.start, el.end, section));
+      for (const [dimension, value] of Object.entries(section)) {
+        if (!(value > 0)) continue;
+        const path = `run.${dimension}`;
+        const declared = cls.classId ? registry.field(cls.classId, path) : undefined;
+        const provided = cls.classId && fields.getClass(cls.classId) ? fields.field(cls.classId, path) : undefined;
+        bag.put((declared ?? provided)?.ifc ?? null, { kind: "number", name: dimension, value, unit: "mm", measure: "IFCPOSITIVELENGTHMEASURE" }, "MutinyBIM_Run");
+      }
     } else {
       // Every other kind: placed at its stated point, with a body only where the kernel states a box.
       const pos: unknown = Reflect.get(el, "position");

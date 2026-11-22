@@ -132,6 +132,10 @@ describe("rooftop-unit", () => {
     const sections = ofType(file, "IFCDUCTSEGMENT").map((seg) => {
       const rep = get(file, refs(get(file, ref(seg, 6)), 2)[0]);
       const profile = get(file, ref(get(file, refs(rep, 3)[0]), 0));
+      expect(text(seg, 2)).toMatch(/ mm (Supply air|Return air)$/);
+      expect(psets(file, seg).Pset_DuctSegmentTypeCommon).toEqual({
+        NominalDiameterOrWidth: num(profile, 3), NominalHeight: num(profile, 4),
+      });
       return [num(profile, 3), num(profile, 4)];
     });
     // 4000 CFM at 12 in deep: wider than 20 in.
