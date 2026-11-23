@@ -11,12 +11,14 @@ import {
   buildViewScene,
   builtinFormTemplate,
   cameraLookingFrom,
+  calloutSyncCommands,
   defaultCamera,
   detailComponents,
   diagramKinds,
   elementsAabb,
   enlargedPlanCommands,
   formScheduleKinds,
+  isAxisAlignedRectPolygon,
   isBoundFormKind,
   fieldProviderRegistry,
   layoutOneLine,
@@ -25,6 +27,7 @@ import {
   oneLineCommands,
   oneLineCropCommand,
   planAutoTags,
+  polygonBounds,
   sheetLayoutCommand,
   viewCamera3d,
   viewCropBox3d,
@@ -392,6 +395,12 @@ export interface SheetSpec {
   readonly titleBlock?: CreateSheet["titleBlock"];
   /** Title block fields by name (drawn by, checked by, …). */
   readonly fields?: CreateSheet["fields"];
+  /** Discipline key for sidebar grouping (`"architecture"`, `"mechanical"`, `"electrical"`, `"plumbing"`, `"structural"`, `"general"`, …). */
+  readonly discipline?: string;
+  /** Optional custom folder/group label in the Views & Sheets panel (overrides the discipline heading). */
+  readonly group?: string;
+  /** Explicit numeric sort position within the sheet set (lower first; ties sort naturally by sheet number). */
+  readonly sortOrder?: number;
   readonly id?: string;
 }
 
@@ -418,6 +427,10 @@ export interface PlanViewSpec {
   readonly visualStyle?: VisualStyle;
   /** Print repeating inline service codes (CW, SAN, G…) inside single-line runs. Absent: on. */
   readonly showLineCodes?: boolean;
+  /** Automatically offset vertically stacked single-line runs laterally on plan with crossing jump gaps (default on for floor plans). */
+  readonly offsetStackedRuns?: boolean;
+  /** Which vertical-view disciplines (`["architecture"]`, `["all"]`, …) display their section/elevation callout markers on this plan. */
+  readonly showReferenceDisciplines?: readonly string[];
   /** Multiplier for annotative paper-space symbols and `minPaperMm` floors in this plan (0.5–3.0). Absent: 1. */
   readonly symbolScale?: number;
   /** Categories the view hides. */
@@ -426,6 +439,8 @@ export interface PlanViewSpec {
   readonly categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
   /** Optional crop box corners on plan (model coordinates). */
   readonly crop?: { readonly from: { readonly x: Measure; readonly y: Measure }; readonly to: { readonly x: Measure; readonly y: Measure } };
+  /** Optional custom closed polygon crop boundary (L-shape / P-line in model coordinates, >= 3 corners). */
+  readonly cropPolygon?: readonly { readonly x: Measure; readonly y: Measure }[];
   readonly id?: string;
 }
 
@@ -436,11 +451,15 @@ export interface ViewChanges {
   readonly detailLevel?: DetailLevel;
   readonly visualStyle?: VisualStyle;
   readonly showLineCodes?: boolean;
+  readonly offsetStackedRuns?: boolean;
+  readonly showReferenceDisciplines?: readonly string[];
   /** Multiplier for annotative paper-space symbols and `minPaperMm` floors in this plan (0.5–3.0). */
   readonly symbolScale?: number;
   readonly hide?: ViewProps["hiddenCategories"];
   /** Replaces the view's per-category and per-service (`"service:<id>"`) graphics overrides map. Pass `{}` to clear all overrides. */
   readonly categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
+  /** Optional custom closed polygon crop boundary (model coordinates, >= 3 corners); `null` resets to rectangular crop. */
+  readonly cropPolygon?: readonly { readonly x: Measure; readonly y: Measure }[] | null;
 }
 
 function toCategoryOverrides(spec: Readonly<Record<string, CategoryOverrideSpec>>): NonNullable<ViewProps["categoryOverrides"]> {
@@ -483,20 +502,28 @@ export interface VerticalViewSpec {
   /** Optional level whose plan shows this marker; absent: shown on every level's plan it overlaps. */
   readonly level?: string;
   readonly discipline?: string;
+  /** Optional parent plan view id that owns/references this section or elevation cut. */
+  readonly referencingView?: string;
+  /** Disciplines whose plans print this section/elevation callout marker (e.g. `["architecture"]`, or `["all"]`). */
+  readonly showInDisciplines?: readonly string[];
   readonly hide?: ViewProps["hiddenCategories"];
+  /** Per-category or per-service overrides in this section/elevation (e.g. `{ pipe: { detailLevel: "fine" } }`). */
+  readonly categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
   readonly id?: string;
 }
 
-/** A Revit-style enlarged plan: creates a cropped plan view at enlarged scale AND places a live auto-updating callout bubble on the parent plan. */
+/** A Revit-style enlarged plan: creates a cropped plan view at enlarged scale (rectangular OR custom L-shape / P-line polygon) AND places a live auto-updating callout bubble on the parent plan. */
 export interface EnlargedPlanSpec {
   /** Parent floor plan or ceiling plan (id or name). */
   readonly parent: string;
   /** Name of the new enlarged plan view. */
   readonly name: string;
-  /** One corner of the enlarged callout box on plan. */
-  readonly from: { readonly x: Measure; readonly y: Measure };
-  /** Opposite corner of the enlarged callout box on plan. */
-  readonly to: { readonly x: Measure; readonly y: Measure };
+  /** One corner of a rectangular enlarged callout box on plan (optional when `polygon` is supplied). */
+  readonly from?: { readonly x: Measure; readonly y: Measure };
+  /** Opposite corner of a rectangular enlarged callout box on plan (optional when `polygon` is supplied). */
+  readonly to?: { readonly x: Measure; readonly y: Measure };
+  /** Optional custom closed P-line / L-shape boundary (>= 3 corners on plan); shapes both the callout outline and the enlarged view's polygonal crop region. */
+  readonly polygon?: readonly { readonly x: Measure; readonly y: Measure }[];
   /** Enlarged scale ratio (e.g. 48 = 1/4"=1'-0", 24 = 1/2"=1'-0"). Defaults to 24 if parent is <= 48, else 48. */
   readonly scale?: number;
   /** Optional callout head label (e.g. "EEP"); absent: live detail number on its sheet. */
@@ -509,25 +536,46 @@ export interface EnlargedPlanSpec {
   readonly calloutId?: string;
 }
 
-/** A live parametric callout box + split bubble placed on a view, referencing any existing enlarged plan, detail, section, or elevation view. */
+/** A live parametric callout box or custom P-line polygon + split bubble placed on a view, referencing any existing enlarged plan, detail, section, or elevation view. */
 export interface CalloutRefSpec {
   /** View the callout is drawn on (id or name). */
   readonly view: string;
   /** Existing view the callout refers to (id or name); head reads its live detail#/sheet#. */
   readonly target: string;
-  readonly from: { readonly x: Measure; readonly y: Measure };
-  readonly to: { readonly x: Measure; readonly y: Measure };
+  readonly from?: { readonly x: Measure; readonly y: Measure };
+  readonly to?: { readonly x: Measure; readonly y: Measure };
+  /** Optional custom closed P-line / L-shape boundary (>= 3 corners on plan). */
+  readonly polygon?: readonly { readonly x: Measure; readonly y: Measure }[];
   /** Optional head bubble position on plan; absent: just outside the upper-left corner. */
   readonly head?: { readonly x: Measure; readonly y: Measure };
   /** Optional head label; absent: live detail number on its sheet. */
   readonly label?: string;
+  /** Whether to print the referenced view's name beside the callout bubble (default true). */
+  readonly showLabel?: boolean;
   readonly id?: string;
 }
 
-/** Changes a view's crop box (and optionally far clip depth, level datum extensions, or annotative section head/tail/split for sections/elevations). */
+/** Reshapes an existing callout's boundary (rectangular OR custom L-shape / P-line polygon) and optionally syncs its referenced enlarged plan's crop region. */
+export interface CalloutBoundarySpec {
+  /** Rectangular extents (optional when `polygon` is given). */
+  readonly from?: { readonly x: Measure; readonly y: Measure };
+  readonly to?: { readonly x: Measure; readonly y: Measure };
+  /** Custom closed P-line / L-shape polygon boundary (>= 3 corners on plan). */
+  readonly polygon?: readonly { readonly x: Measure; readonly y: Measure }[];
+  /** Optional new callout head bubble position on plan. */
+  readonly head?: { readonly x: Measure; readonly y: Measure };
+  /** Whether to print the referenced view's name beside the callout bubble. */
+  readonly showLabel?: boolean;
+  /** Keep the referenced enlarged plan's crop box and cropPolygon synced in lockstep (default true). */
+  readonly syncViewCrop?: boolean;
+}
+
+/** Changes a view's crop box or custom polygonal crop region (and optionally far clip depth, level datum extensions, or annotative section head/tail/split). */
 export interface CropBoxSpec {
   readonly from?: { readonly x: Measure; readonly y: Measure };
   readonly to?: { readonly x: Measure; readonly y: Measure };
+  /** Optional custom closed polygon crop boundary (L-shape / P-line, >= 3 corners); pass `null` to reset to a plain rectangle. */
+  readonly cropPolygon?: readonly { readonly x: Measure; readonly y: Measure }[] | null;
   readonly cropView?: boolean;
   readonly showCropBox?: boolean;
   /** Toggle annotation crop boundary and its paper-mm offset outside the model crop box (for section/grid/level bubbles & tags). */
@@ -556,7 +604,12 @@ function levelName(ctx: ScriptContext, level: string): string {
   return el?.kind === "level" && typeof el.name === "string" ? el.name : level;
 }
 
+function planPolyMm(pts: readonly { readonly x: Measure; readonly y: Measure }[], what: string): { readonly x: number; readonly y: number }[] {
+  return pts.map((p, i) => ({ x: mm(p.x, `${what}[${i}].x`), y: mm(p.y, `${what}[${i}].y`) }));
+}
+
 function view(ctx: ScriptContext, viewType: CreateView["viewType"], spec: PlanViewSpec): string {
+  const cropPolygon = spec.cropPolygon ? planPolyMm(spec.cropPolygon, "Crop polygon") : undefined;
   const props: ViewProps = {
     level: levelName(ctx, spec.level),
     ...(spec.discipline ? { discipline: spec.discipline } : {}),
@@ -565,9 +618,12 @@ function view(ctx: ScriptContext, viewType: CreateView["viewType"], spec: PlanVi
     ...(spec.detailLevel ? { detailLevel: spec.detailLevel } : {}),
     ...(spec.visualStyle ? { visualStyle: spec.visualStyle } : {}),
     ...(spec.showLineCodes !== undefined ? { showLineCodes: spec.showLineCodes } : {}),
+    ...(spec.offsetStackedRuns !== undefined ? { offsetStackedRuns: spec.offsetStackedRuns } : {}),
+    ...(spec.showReferenceDisciplines ? { showReferenceDisciplines: [...spec.showReferenceDisciplines] } : {}),
     ...(spec.symbolScale !== undefined ? { symbolScale: spec.symbolScale } : {}),
     ...(spec.hide ? { hiddenCategories: spec.hide } : {}),
     ...(spec.categoryOverrides ? { categoryOverrides: toCategoryOverrides(spec.categoryOverrides) } : {}),
+    ...(cropPolygon ? { cropPolygon } : {}),
   };
   const viewId = spec.id ?? ctx.id("view");
   const crop = spec.crop
@@ -596,6 +652,7 @@ function verticalView(ctx: ScriptContext, viewType: "section" | "elevation", spe
     ...(spec.discipline ? { discipline: spec.discipline } : {}),
     ...(spec.scale ? { scale: spec.scale } : {}),
     ...(spec.hide ? { hiddenCategories: spec.hide } : {}),
+    ...(spec.categoryOverrides ? { categoryOverrides: toCategoryOverrides(spec.categoryOverrides) } : {}),
     ...(spec.levelLeftExtMm !== undefined ? { levelLeftExtMm: spec.levelLeftExtMm } : {}),
     ...(spec.levelRightExtMm !== undefined ? { levelRightExtMm: spec.levelRightExtMm } : {}),
     section: {
@@ -606,6 +663,8 @@ function verticalView(ctx: ScriptContext, viewType: "section" | "elevation", spe
       ...(spec.headExt !== undefined ? { headExtMm: mm(spec.headExt, "Section head extension") } : {}),
       ...(spec.tailExt !== undefined ? { tailExtMm: mm(spec.tailExt, "Section tail extension") } : {}),
       ...(spec.splitGap !== undefined ? { splitGap: spec.splitGap } : {}),
+      ...(spec.referencingView ? { referencingViewId: spec.referencingView } : {}),
+      ...(spec.showInDisciplines ? { showInDisciplines: [...spec.showInDisciplines] } : {}),
     },
   };
   ctx.edit({ type: "create_view", viewId, name: spec.name, viewType, ...(crop ? { crop } : {}), props });
@@ -703,10 +762,20 @@ export const documents = {
   /** A new sheet; returns its id. */
   sheet(ctx: ScriptContext, spec: SheetSpec): string {
     const sheetId = spec.id ?? ctx.id("sheet");
-    ctx.edit({ type: "create_sheet", sheetId, number: spec.number, name: spec.name, ...(spec.titleBlock ? { titleBlock: spec.titleBlock } : {}), ...(spec.fields ? { fields: spec.fields } : {}) });
+    ctx.edit({
+      type: "create_sheet",
+      sheetId,
+      number: spec.number,
+      name: spec.name,
+      ...(spec.titleBlock ? { titleBlock: spec.titleBlock } : {}),
+      ...(spec.fields ? { fields: spec.fields } : {}),
+      ...(spec.discipline !== undefined ? { discipline: spec.discipline } : {}),
+      ...(spec.group !== undefined ? { group: spec.group } : {}),
+      ...(spec.sortOrder !== undefined ? { sortOrder: spec.sortOrder } : {}),
+    });
     return sheetId;
   },
-  /** Changes a sheet's number, name, title block or fields. */
+  /** Changes a sheet's number, name, title block, fields, or sidebar discipline/group/sortOrder metadata. */
   setSheet(ctx: ScriptContext, sheetId: string, changes: Omit<SheetSpec, "id">): void {
     ctx.edit({ type: "set_sheet_properties", sheetId, ...changes });
   },
@@ -775,10 +844,15 @@ export const documents = {
   enlargedPlan(ctx: ScriptContext, spec: EnlargedPlanSpec): { readonly viewId: string; readonly calloutId: string } {
     const viewId = spec.id ?? ctx.id("view");
     const calloutId = spec.calloutId ?? ctx.id("callout");
-    const box = {
-      min: { x: mm(spec.from.x, "Callout start x"), y: mm(spec.from.y, "Callout start y") },
-      max: { x: mm(spec.to.x, "Callout end x"), y: mm(spec.to.y, "Callout end y") },
-    };
+    const polygon = spec.polygon ? planPolyMm(spec.polygon, "Callout polygon") : undefined;
+    const box =
+      spec.from && spec.to
+        ? {
+            min: { x: mm(spec.from.x, "Callout start x"), y: mm(spec.from.y, "Callout start y") },
+            max: { x: mm(spec.to.x, "Callout end x"), y: mm(spec.to.y, "Callout end y") },
+          }
+        : undefined;
+    if (!box && !polygon) throw new ScriptRunError("documents.enlargedPlan requires either `from` + `to` or a `polygon` of at least 3 corners.");
     const head = spec.head ? { x: mm(spec.head.x, "Callout head x"), y: mm(spec.head.y, "Callout head y") } : undefined;
     const cutHeightMm = spec.cutHeight ? mm(spec.cutHeight, "Cut height") : undefined;
     const commands = onWorking(ctx, "documents.enlargedPlan", (model) => {
@@ -788,7 +862,8 @@ export const documents = {
         viewId,
         calloutId,
         name: spec.name,
-        box,
+        ...(box ? { box } : {}),
+        ...(polygon ? { polygon } : {}),
         ...(spec.scale ? { scale: spec.scale } : {}),
         ...(spec.label ? { label: spec.label } : {}),
         ...(head ? { head } : {}),
@@ -801,14 +876,25 @@ export const documents = {
     return { viewId, calloutId };
   },
   /**
-   * A live parametric callout box + split head bubble on `view` pointing to an
-   * existing `target` view (enlarged plan, 2D detail, section, or elevation).
-   * The head reads the target's live detail#/sheet# whenever it moves sheets.
+   * A live parametric callout box or custom P-line polygon + split head bubble
+   * on `view` pointing to an existing `target` view (enlarged plan, 2D detail,
+   * section, or elevation). The head reads the target's live detail#/sheet#
+   * whenever it moves sheets.
    */
   callout(ctx: ScriptContext, spec: CalloutRefSpec): string {
     const itemId = spec.id ?? ctx.id("callout");
-    const min = { x: Math.min(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.min(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
-    const max = { x: Math.max(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.max(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
+    const polygon = spec.polygon ? planPolyMm(spec.polygon, "Callout polygon") : undefined;
+    const polyBounds = polygon ? polygonBounds(polygon) : null;
+    if (!polyBounds && (!spec.from || !spec.to)) {
+      throw new ScriptRunError("documents.callout requires either `from` + `to` or a `polygon` of at least 3 corners.");
+    }
+    const min = polyBounds
+      ? polyBounds.min
+      : { x: Math.min(mm(spec.from!.x, "Callout x"), mm(spec.to!.x, "Callout x")), y: Math.min(mm(spec.from!.y, "Callout y"), mm(spec.to!.y, "Callout y")) };
+    const max = polyBounds
+      ? polyBounds.max
+      : { x: Math.max(mm(spec.from!.x, "Callout x"), mm(spec.to!.x, "Callout x")), y: Math.max(mm(spec.from!.y, "Callout y"), mm(spec.to!.y, "Callout y")) };
+    const useCustomPoly = polygon !== undefined && polygon.length >= 3 && !isAxisAlignedRectPolygon(polygon, 1.0);
     const resolved = onWorking(ctx, "documents.callout", (model) => {
       const owner = viewIn(model, spec.view, "view");
       const target = viewIn(model, spec.target, "target view");
@@ -822,11 +908,47 @@ export const documents = {
       ownerId: resolved.ownerId,
       shape: "callout",
       points: [min, max, resolved.head],
-      callout: { viewId: resolved.targetId, ...(spec.label?.trim() ? { label: spec.label.trim() } : {}) },
+      callout: {
+        viewId: resolved.targetId,
+        ...(spec.label?.trim() ? { label: spec.label.trim() } : {}),
+        ...(useCustomPoly && polygon ? { boundary: polygon } : {}),
+        ...(spec.showLabel !== undefined ? { showLabel: spec.showLabel } : {}),
+      },
     });
     return itemId;
   },
-  /** Sets a view's crop box (and optionally crop on/off, far clip depth, level datum extensions, or section head/tail/split). */
+  /**
+   * Reshapes an existing callout's boundary (rectangular OR custom L-shape /
+   * P-line polygon) and atomically syncs its referenced enlarged plan's crop
+   * box and polygonal crop region in lockstep (Revit behavior).
+   */
+  setCalloutBoundary(ctx: ScriptContext, calloutId: string, spec: CalloutBoundarySpec): void {
+    const polygon = spec.polygon
+      ? planPolyMm(spec.polygon, "Callout polygon")
+      : spec.from && spec.to
+        ? (() => {
+            const min = { x: Math.min(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.min(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
+            const max = { x: Math.max(mm(spec.from.x, "Callout x"), mm(spec.to.x, "Callout x")), y: Math.max(mm(spec.from.y, "Callout y"), mm(spec.to.y, "Callout y")) };
+            return [min, { x: max.x, y: min.y }, max, { x: min.x, y: max.y }];
+          })()
+        : null;
+    if (!polygon) throw new ScriptRunError("documents.setCalloutBoundary requires either `polygon` or `from` + `to`.");
+    const head = spec.head ? { x: mm(spec.head.x, "Callout head x"), y: mm(spec.head.y, "Callout head y") } : undefined;
+    const commands = onWorking(ctx, "documents.setCalloutBoundary", (model) => {
+      const item = model.elements[calloutId];
+      if (!item || item.kind !== "drawing_item" || item.deleted || item.shape !== "callout") {
+        throw new ScriptRunError(`Callout "${calloutId}" does not exist.`);
+      }
+      const nextItem =
+        spec.showLabel !== undefined && item.callout
+          ? { ...item, callout: { ...item.callout, showLabel: spec.showLabel } }
+          : item;
+      return calloutSyncCommands(model, nextItem, polygon, head, { syncViewCrop: spec.syncViewCrop !== false });
+    });
+    if (typeof commands === "string") throw new ScriptRunError(commands);
+    for (const step of commands) ctx.edit(step);
+  },
+  /** Sets a view's crop box or custom polygonal crop region (and optionally crop on/off, far clip depth, level datum extensions, or section head/tail/split). */
   setCrop(ctx: ScriptContext, viewRef: string, spec: CropBoxSpec): void {
     const { viewId, existingSection } = onWorking(ctx, "documents.setCrop", (model) => {
       const v = viewIn(model, viewRef, "view");
@@ -839,6 +961,8 @@ export const documents = {
             max: { x: Math.max(mm(spec.from.x, "Crop x"), mm(spec.to.x, "Crop x")), y: Math.max(mm(spec.from.y, "Crop y"), mm(spec.to.y, "Crop y")) },
           }
         : undefined;
+    const cropPolygon =
+      spec.cropPolygon === undefined ? undefined : spec.cropPolygon === null ? null : planPolyMm(spec.cropPolygon, "Crop polygon");
     const sectionUpdate =
       existingSection && (spec.headExt !== undefined || spec.tailExt !== undefined || spec.splitGap !== undefined)
         ? {
@@ -852,6 +976,7 @@ export const documents = {
       type: "set_view_crop",
       viewId,
       ...(crop ? { crop } : {}),
+      ...(cropPolygon !== undefined ? { cropPolygon } : {}),
       ...(spec.cropView !== undefined ? { cropView: spec.cropView } : {}),
       ...(spec.showCropBox !== undefined ? { showCropBox: spec.showCropBox } : {}),
       ...(spec.annotationCrop !== undefined ? { annotationCrop: spec.annotationCrop } : {}),
@@ -862,8 +987,10 @@ export const documents = {
       ...(sectionUpdate ? { section: sectionUpdate } : {}),
     });
   },
-  /** Changes a view's detail level, visual style, inline service codes, scale, discipline, or per-category/service graphics overrides. */
+  /** Changes a view's detail level, visual style, inline service codes, scale, discipline, polygonal crop, or per-category/service graphics overrides. */
   setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void {
+    const cropPolygon =
+      changes.cropPolygon === undefined ? undefined : changes.cropPolygon === null ? null : planPolyMm(changes.cropPolygon, "Crop polygon");
     ctx.edit({
       type: "set_view_properties",
       viewId,
@@ -874,9 +1001,12 @@ export const documents = {
         ...(changes.detailLevel !== undefined ? { detailLevel: changes.detailLevel } : {}),
         ...(changes.visualStyle !== undefined ? { visualStyle: changes.visualStyle } : {}),
         ...(changes.showLineCodes !== undefined ? { showLineCodes: changes.showLineCodes } : {}),
+        ...(changes.offsetStackedRuns !== undefined ? { offsetStackedRuns: changes.offsetStackedRuns } : {}),
+        ...(changes.showReferenceDisciplines !== undefined ? { showReferenceDisciplines: [...changes.showReferenceDisciplines] } : {}),
         ...(changes.symbolScale !== undefined ? { symbolScale: changes.symbolScale } : {}),
         ...(changes.hide !== undefined ? { hiddenCategories: changes.hide } : {}),
         ...(changes.categoryOverrides !== undefined ? { categoryOverrides: toCategoryOverrides(changes.categoryOverrides) } : {}),
+        ...(cropPolygon !== undefined ? { cropPolygon } : {}),
       },
     });
   },

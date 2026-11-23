@@ -102,6 +102,8 @@ export interface ElectricalWorkflow {
   readonly necEdition: NecEdition | null
   /** The project's code rules (engine + edition), for dialogs mounted elsewhere that size circuits (Not placed yet › Circuit). */
   readonly nec: Pick<NecRules, 'engine' | 'necEdition'>
+  /** Open the docked interactive PanelView editor for a panel element id. */
+  readonly openPanelView: (panelId?: string) => void
 }
 
 type DialogState =
@@ -628,5 +630,5 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
     </>
   ) : null
 
-  return { ribbon, autoTab: target.loads.length > 0 || target.panels.length > 0 ? 'circuit' : null, properties, overlay: overlay ?? loadingSchedule, scheduleProperties: schedules.propertiesFor, newScheduleForms: schedules.formSlot, necEdition: nec.necEdition, nec }
+  return { ribbon, autoTab: target.loads.length > 0 || target.panels.length > 0 ? 'circuit' : null, properties, overlay: overlay ?? loadingSchedule, scheduleProperties: schedules.propertiesFor, newScheduleForms: schedules.formSlot, necEdition: nec.necEdition, nec, openPanelView }
 }

@@ -74,9 +74,10 @@ describe("plans drawn for a discipline", () => {
 
   it("each space prints its name and number; hiding rooms or tagging the space removes the plain label", () => {
     let m = office();
-    expect(texts(m, "v-all")).toContain("TOILET ROOM 101");
-    expect(texts(m, "v-p")).toContain("TOILET ROOM 101");
+    expect(texts(m, "v-all")).toEqual(expect.arrayContaining(["TOILET ROOM", "101"]));
+    expect(texts(m, "v-p")).toEqual(expect.arrayContaining(["TOILET ROOM", "101"]));
     m = ok(m, { type: "set_view_properties", viewId: "v-all", props: { hiddenCategories: ["rooms"] } });
-    expect(texts(m, "v-all")).not.toContain("TOILET ROOM 101");
+    expect(texts(m, "v-all")).not.toContain("TOILET ROOM");
+    expect(texts(m, "v-all")).not.toContain("101");
   });
 });

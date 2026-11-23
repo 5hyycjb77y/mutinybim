@@ -2,7 +2,7 @@
  * Press-and-drag on placed drafting items with Select: the same move the
  * ribbon's Move tool makes (one command, one undo step), driven by the pointer.
  */
-import { drawDetailItem, expandDetailGroups, modifyCommand, type DrawingItem, type Primitive, type Vec2 } from '@permitzip/bim-kernel'
+import { calloutBoundaryPolygon, drawDetailItem, expandDetailGroups, modifyCommand, type DrawingItem, type Primitive, type Vec2 } from '@permitzip/bim-kernel'
 
 /** How far the pointer travels on screen before a press on an item becomes a drag; less is a click. */
 export const DRAG_START_PX = 4
@@ -60,6 +60,14 @@ export function dragGhost(input: {
   const prims: Primitive[] = []
   for (const item of expandDetailGroups(input.items, input.ids).items) {
     if (drawDetailItem({ toPaper: shifted, scale: input.storedPerPaperMm, prims }, item)) continue
+    if (item.shape === 'callout' && item.callout) {
+      const poly = calloutBoundaryPolygon(item)
+      if (poly && poly.length >= 3) {
+        const pts = poly.map(shifted)
+        pts.forEach((c, i) => prims.push({ kind: 'line', a: c, b: pts[(i + 1) % pts.length]!, pen: 'thin', dash: [2, 1] }))
+        continue
+      }
+    }
     const [a, b] = item.points.map(shifted)
     if (item.shape === 'line' && a && b) {
       prims.push({ kind: 'line', a, b, pen: 'medium' })

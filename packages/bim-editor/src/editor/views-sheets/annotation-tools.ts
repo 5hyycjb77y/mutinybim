@@ -251,6 +251,242 @@ export function nudgeEdits(items: readonly DrawingItem[], ids: readonly string[]
   return { ok: true, commands: picked.map((it) => ({ type: 'update_drawing_item', itemId: it.id, points: it.points.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y })) })) }
 }
 
+/** A model-graphics snap target on paper: either an exact corner/intersection or a projection along a wall face / grid line. */
+export interface GraphicsSnapHit {
+  readonly at: Vec2
+  readonly label: string
+  readonly kind: 'corner' | 'intersection' | 'edge' | 'ortho'
+  readonly guideLine?: readonly [Vec2, Vec2]
+}
+
+export interface GraphicsSnapIndex {
+  readonly points: readonly { readonly at: Vec2; readonly label: string; readonly kind: 'corner' | 'intersection' }[]
+  readonly segments: readonly { readonly a: Vec2; readonly b: Vec2; readonly label: string }[]
+}
+
+function lineIntersection2(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2): Vec2 | null {
+  const dx1 = a2.x - a1.x
+  const dy1 = a2.y - a1.y
+  const dx2 = b2.x - b1.x
+  const dy2 = b2.y - b1.y
+  const denom = dx1 * dy2 - dy1 * dx2
+  if (Math.abs(denom) < 1e-6) return null
+  const t = ((b1.x - a1.x) * dy2 - (b1.y - a1.y) * dx2) / denom
+  const u = ((b1.x - a1.x) * dy1 - (b1.y - a1.y) * dx1) / denom
+  if (t < -0.02 || t > 1.02 || u < -0.02 || u > 1.02) return null
+  return { x: a1.x + t * dx1, y: a1.y + t * dy1 }
+}
+
+function projectPointOnSegment(p: Vec2, a: Vec2, b: Vec2): { readonly at: Vec2; readonly dist: number } {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lenSq = dx * dx + dy * dy
+  if (lenSq < 1e-9) return { at: a, dist: Math.hypot(p.x - a.x, p.y - a.y) }
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
+  const at = { x: a.x + t * dx, y: a.y + t * dy }
+  return { at, dist: Math.hypot(p.x - at.x, p.y - at.y) }
+}
+
+/**
+ * Build a paper-space graphics snap index for a view: wall exterior & interior
+ * face corners and face segments, structural grid lines and grid intersections,
+ * plus column/opening/part corners so callout boundaries and P-lines snap
+ * cleanly to real architectural & MEP graphics (Revit behavior).
+ */
+export function buildGraphicsSnapIndex(model: ModelState, view: ViewElement, toPaper: (p: Vec2) => Vec2): GraphicsSnapIndex {
+  const points: { at: Vec2; label: string; kind: 'corner' | 'intersection' }[] = []
+  const segments: { a: Vec2; b: Vec2; label: string }[] = []
+  const grids: { a: Vec2; b: Vec2; label: string }[] = []
+
+  for (const el of viewLevelElements(model, view)) {
+    if ('deleted' in el && el.deleted) continue
+    if (el.kind === 'wall') {
+      const dx = el.end.x - el.start.x
+      const dy = el.end.y - el.start.y
+      const len = Math.hypot(dx, dy)
+      if (len < 1) continue
+      const half = (el.thickness || 150) / 2
+      const nx = (-dy / len) * half
+      const ny = (dx / len) * half
+      const c0 = toPaper({ x: el.start.x + nx, y: el.start.y + ny })
+      const c1 = toPaper({ x: el.end.x + nx, y: el.end.y + ny })
+      const c2 = toPaper({ x: el.end.x - nx, y: el.end.y - ny })
+      const c3 = toPaper({ x: el.start.x - nx, y: el.start.y - ny })
+      const sC = toPaper(el.start)
+      const eC = toPaper(el.end)
+      points.push(
+        { at: c0, label: 'wall corner', kind: 'corner' },
+        { at: c1, label: 'wall corner', kind: 'corner' },
+        { at: c2, label: 'wall corner', kind: 'corner' },
+        { at: c3, label: 'wall corner', kind: 'corner' },
+        { at: sC, label: 'wall centerline end', kind: 'corner' },
+        { at: eC, label: 'wall centerline end', kind: 'corner' },
+      )
+      segments.push(
+        { a: c0, b: c1, label: 'wall face' },
+        { a: c3, b: c2, label: 'wall face' },
+        { a: c0, b: c3, label: 'wall end face' },
+        { a: c1, b: c2, label: 'wall end face' },
+        { a: sC, b: eC, label: 'wall centerline' },
+      )
+    } else if (el.kind === 'grid') {
+      const a = toPaper(el.start)
+      const b = toPaper(el.end)
+      grids.push({ a, b, label: `grid ${el.label}` })
+      segments.push({ a, b, label: `grid ${el.label}` })
+      points.push({ at: a, label: `grid ${el.label} end`, kind: 'corner' }, { at: b, label: `grid ${el.label} end`, kind: 'corner' })
+    } else if (el.kind === 'column') {
+      const hw = (el.size.x || 300) / 2
+      const hd = (el.size.y || 300) / 2
+      const c0 = toPaper({ x: el.position.x - hw, y: el.position.y - hd })
+      const c1 = toPaper({ x: el.position.x + hw, y: el.position.y - hd })
+      const c2 = toPaper({ x: el.position.x + hw, y: el.position.y + hd })
+      const c3 = toPaper({ x: el.position.x - hw, y: el.position.y + hd })
+      points.push(
+        { at: c0, label: 'column corner', kind: 'corner' },
+        { at: c1, label: 'column corner', kind: 'corner' },
+        { at: c2, label: 'column corner', kind: 'corner' },
+        { at: c3, label: 'column corner', kind: 'corner' },
+      )
+      segments.push(
+        { a: c0, b: c1, label: 'column face' },
+        { a: c1, b: c2, label: 'column face' },
+        { a: c2, b: c3, label: 'column face' },
+        { a: c3, b: c0, label: 'column face' },
+      )
+    } else if (el.kind === 'opening' || el.kind === 'part') {
+      const p = anchorInView(model, view, { elementId: el.id, anchor: 'mid' })
+      if (p) points.push({ at: toPaper(p), label: el.kind === 'opening' ? el.openingType : 'part', kind: 'corner' })
+    }
+  }
+
+  // Exact structural grid intersections + perpendicular wall-face intersections
+  for (let i = 0; i < grids.length; i++) {
+    for (let j = i + 1; j < grids.length; j++) {
+      const hit = lineIntersection2(grids[i]!.a, grids[i]!.b, grids[j]!.a, grids[j]!.b)
+      if (hit) points.push({ at: hit, label: 'grid intersection', kind: 'intersection' })
+    }
+  }
+  // Wall-face corner intersections (e.g. L/T wall joints where two wall faces meet)
+  const wallFaces = segments.filter((s) => s.label === 'wall face')
+  if (wallFaces.length <= 240) {
+    for (let i = 0; i < wallFaces.length; i++) {
+      for (let j = i + 1; j < wallFaces.length; j++) {
+        const hit = lineIntersection2(wallFaces[i]!.a, wallFaces[i]!.b, wallFaces[j]!.a, wallFaces[j]!.b)
+        if (hit) points.push({ at: hit, label: 'wall face intersection', kind: 'intersection' })
+      }
+    }
+  }
+  return { points, segments }
+}
+
+/**
+ * Snap a paper point `at` to real model graphics (wall corners/intersections,
+ * grid intersections, wall face lines, grid lines) plus optional orthogonal
+ * alignment against reference vertices (for clean 90° L-shapes and P-lines).
+ */
+export function snapToGraphics(
+  index: GraphicsSnapIndex | null,
+  at: Vec2,
+  reachMm: number,
+  opts?: {
+    /** Reference vertices for 90° orthogonal alignment tracking (e.g. adjacent/start P-line corners). */
+    readonly alignRefs?: readonly Vec2[]
+    /** Restrict movement strictly along X or Y (e.g. single-edge drag or Shift/Ortho lock). */
+    readonly lockAxis?: 'x' | 'y' | null
+    /** Previous vertex when Ortho mode (F8 / Shift) is active. */
+    readonly orthoFrom?: Vec2 | null
+  },
+): GraphicsSnapHit | null {
+  const alignRefs = opts?.alignRefs ?? []
+  const lockAxis = opts?.lockAxis ?? null
+
+  // Optional ortho projection when Shift/Ortho is active from a prior vertex
+  let query = at
+  let orthoGuide: readonly [Vec2, Vec2] | undefined
+  if (opts?.orthoFrom && !lockAxis) {
+    const dx = Math.abs(at.x - opts.orthoFrom.x)
+    const dy = Math.abs(at.y - opts.orthoFrom.y)
+    if (dx >= dy) {
+      query = { x: at.x, y: opts.orthoFrom.y }
+      orthoGuide = [opts.orthoFrom, query]
+    } else {
+      query = { x: opts.orthoFrom.x, y: at.y }
+      orthoGuide = [opts.orthoFrom, query]
+    }
+  }
+
+  // 1. Exact corner / intersection snap
+  if (index) {
+    let bestPt: { at: Vec2; label: string; kind: 'corner' | 'intersection'; d: number } | null = null
+    for (const p of index.points) {
+      const d = lockAxis === 'x' ? Math.abs(p.at.x - query.x) : lockAxis === 'y' ? Math.abs(p.at.y - query.y) : Math.hypot(p.at.x - query.x, p.at.y - query.y)
+      // When locked to a single axis (dragging an edge), only snap to points near the edge's span
+      if (lockAxis === 'x' && Math.abs(p.at.y - query.y) > reachMm * 8) continue
+      if (lockAxis === 'y' && Math.abs(p.at.x - query.x) > reachMm * 8) continue
+      if (d <= reachMm && (!bestPt || d < bestPt.d - 0.05 || (Math.abs(d - bestPt.d) <= 0.05 && p.kind === 'intersection' && bestPt.kind !== 'intersection'))) {
+        bestPt = { ...p, d }
+      }
+    }
+    if (bestPt) {
+      const snapped = lockAxis === 'x' ? { x: bestPt.at.x, y: query.y } : lockAxis === 'y' ? { x: query.x, y: bestPt.at.y } : bestPt.at
+      return { at: snapped, label: bestPt.label, kind: bestPt.kind, ...(orthoGuide ? { guideLine: [opts!.orthoFrom!, snapped] } : {}) }
+    }
+  }
+
+  // 2. Check alignment to adjacent/start P-line vertices (horizontal or vertical tracking!)
+  let bestAlignX: { ref: Vec2; d: number } | null = null
+  let bestAlignY: { ref: Vec2; d: number } | null = null
+  if (!lockAxis) {
+    for (const ref of alignRefs) {
+      const dx = Math.abs(query.x - ref.x)
+      const dy = Math.abs(query.y - ref.y)
+      if (dx <= reachMm && (!bestAlignX || dx < bestAlignX.d)) bestAlignX = { ref, d: dx }
+      if (dy <= reachMm && (!bestAlignY || dy < bestAlignY.d)) bestAlignY = { ref, d: dy }
+    }
+  }
+
+  // 3. Nearest point on a wall face or grid line (combining with alignment axis if both hit!)
+  if (index) {
+    let bestSeg: { at: Vec2; label: string; d: number } | null = null
+    const probe = {
+      x: bestAlignX ? bestAlignX.ref.x : query.x,
+      y: bestAlignY ? bestAlignY.ref.y : query.y,
+    }
+    for (const seg of index.segments) {
+      const proj = projectPointOnSegment(probe, seg.a, seg.b)
+      if (proj.dist <= reachMm && (!bestSeg || proj.dist < bestSeg.d)) {
+        bestSeg = { at: proj.at, label: seg.label, d: proj.dist }
+      }
+    }
+    if (bestSeg) {
+      const snapped = lockAxis === 'x' ? { x: bestSeg.at.x, y: query.y } : lockAxis === 'y' ? { x: query.x, y: bestSeg.at.y } : bestSeg.at
+      const guide = bestAlignX
+        ? ([bestAlignX.ref, snapped] as const)
+        : bestAlignY
+          ? ([bestAlignY.ref, snapped] as const)
+          : orthoGuide
+            ? ([opts!.orthoFrom!, snapped] as const)
+            : undefined
+      return { at: snapped, label: bestSeg.label, kind: 'edge', ...(guide ? { guideLine: guide } : {}) }
+    }
+  }
+
+  // 4. Pure alignment / ortho snap when no graphic is under the pointer
+  if (bestAlignX || bestAlignY) {
+    const snapped = {
+      x: bestAlignX ? bestAlignX.ref.x : query.x,
+      y: bestAlignY ? bestAlignY.ref.y : query.y,
+    }
+    const ref = bestAlignX && (!bestAlignY || bestAlignX.d <= bestAlignY.d) ? bestAlignX.ref : bestAlignY!.ref
+    return { at: snapped, label: 'square alignment', kind: 'ortho', guideLine: [ref, snapped] }
+  }
+  if (orthoGuide) {
+    return { at: query, label: 'ortho 90°', kind: 'ortho', guideLine: orthoGuide }
+  }
+  return null
+}
+
 /** Paper box for selecting a tag or a dimension. */
 export function annotationBox(model: ModelState, view: ViewElement | null, item: DrawingItem, toPaper: (p: Vec2) => Vec2): { x: number; y: number; w: number; h: number } | null {
   if (item.tag && item.points[0]) {

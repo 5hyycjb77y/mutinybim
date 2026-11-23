@@ -87,6 +87,8 @@ export const diagramHintsSchema = z
     textOffsets: z.record(z.string().trim().min(1).max(200), z.object({ dx: z.number().finite().min(-5000).max(5000), dy: z.number().finite().min(-5000).max(5000), leader: z.boolean().optional() }).strict()),
     /** Round 12: print the available fault current at each bus. Absent: off. Written only when every peer advertises `DIAGRAM_FAULT_CURRENT_FEATURE`. */
     faultCurrent: z.boolean(),
+    /** How run lengths without an explicit `lengthFt` are resolved (`explicit` = 0 ft worst-case, `shortest` = 3D straight-line, `manhattan` = 3D rectilinear). */
+    lengthMode: z.enum(["explicit", "shortest", "manhattan"]),
   })
   .partial()
   .strict();

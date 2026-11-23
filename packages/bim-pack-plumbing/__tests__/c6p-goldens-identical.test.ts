@@ -22,13 +22,13 @@ import { buildSampleMarketGas, SAMPLE_MARKET_GAS_SYSTEM, SAMPLE_MARKET_GAS_TOTAL
 import { PLUMBING_GAS_PACK, type GasSystemSizing } from "../src";
 
 const GOLDEN_SHA256: Readonly<Record<string, string>> = {
-  "isometric-stack.svg": "75a309a320de56c92d1b6882e1efdfa4f9cfde33906c1eba1656489c9977dc2c",
-  "riser-gas-propane.svg": "54facae6cbd775191117315fefd92160bfbfef122f1d57f6ae5e1c89115cb711",
-  "riser-stack-sanitary.svg": "561aaa78344eea448ab28052746ea0b6118088fc938d593d5faf4a47628dc87a",
-  "riser-sample-market-dcw.svg": "15c6120e1b0360b2b64587a8cd913f1b579ad4206ff3c84b99aa7cc1d2f0c150",
-  "riser-sample-market-dhw.svg": "7b26412b42f66d8eae6297ded1f734964e7f19c8d60e7553624b8b729b7f756f",
-  "riser-sample-market-gas.svg": "daf8736c4e85506d96650494890f564962098cdbe668e54fef1e7e1a1108d269",
-  "riser-sample-market-sanitary.svg": "cf9c8e827fa8706f5b90b5eb68787cb85f914a5172b23ee6f522309b919071cb",
+  "isometric-stack.svg": "a476f4b260f5d4bd012c60ea1ed88d77740bd1ab9b57774464b8cfe4f59cc82e",
+  "riser-gas-propane.svg": "4e3512b2e9197d9e54ba65f3cc637ee339730d50f7dc0b5c775af666952cef62",
+  "riser-stack-sanitary.svg": "9a3c7a6661006b71da9acb34ea8540000114ce3d86e6e71551478f9ddf0abd27",
+  "riser-sample-market-dcw.svg": "1a23e6dc30c59499c3ba2e10d84f290bde7048128e9afb45ff7731c994d23ff9",
+  "riser-sample-market-dhw.svg": "7ff91c6ce781ace00eab6e3f7c1ab5ed9b938e6bba4c7c7198c3f68eae79372d",
+  "riser-sample-market-gas.svg": "2008a7d4c66cdf13a9a03c40478e3938eb1d3af846758f768530f370920e8f0c",
+  "riser-sample-market-sanitary.svg": "5e3484f73d5ee5a0245e9675e50e4350e205832feb3616f76a3e5080c3760b75",
 };
 
 function gasSizing(registry: CalcRegistry): GasSystemSizing {

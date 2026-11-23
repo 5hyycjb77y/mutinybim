@@ -1,6 +1,6 @@
 import { pushTo, linksFedFrom, type ServiceLink, formatFieldTemplate, resolveField, type OneLineTextLine, type BimElement, type ElementId, type PartInstance, type PartTypeElement, DEFAULT_DIAGRAM_LABELS, type DiagramHints, type DiagramLabelKind, type DiagramEdge, type DiagramGraph, type DiagramNode, type DiagramWarning } from "@permitzip/bim-kernel";
 import { fedFromTextMismatch } from "../connections/fed-from";
-import { faultCurrentAt } from "../calc/fault-current";
+import { estimatedFeederLengthFt, faultCurrentAt, type FeederLengthMode } from "../calc/fault-current";
 import type { OneLineEquipmentKind as OneLineKind, OneLineProtectiveDevice as OneLineDevice } from "./one-line-layout";
 import { distributionOf, electricalConnectorOf, electricalName, type DistributionInfo } from "../connections/systems";
 import { voltageSystemText } from "../fields/electrical-resolver";
@@ -83,19 +83,22 @@ function plannedOf(part: PartInstance): { readonly levelId: string | null; reado
   return { levelId: part.planned.levelHint ?? null, extra: [{ text: NOT_PLACED_MARK }], flag: { planned: true } };
 }
 
-function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKind: OneLineKind, schematic: boolean): DiagramEdge {
+function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKind: OneLineKind, schematic: boolean, lengthMode: FeederLengthMode = "explicit"): DiagramEdge {
   const rating = link.electrical?.ratingA;
   const device: OneLineDevice = rating !== undefined ? "breaker" : BUS.has(parentKind) && parentKind !== "switchboard" ? "breaker" : "none";
   const breaker = resolveField(elements, fedId, "supply.breaker").text;
   const conductors = resolveField(elements, fedId, "supply.conductors").text;
   const mark = link.electrical?.feederType;
   const catalog = mark ? feederTypeInfoOf(elements, mark) : null;
+  const explicitLen = link.electrical?.lengthFt;
+  const derivedLen = explicitLen === undefined && lengthMode !== "explicit" ? estimatedFeederLengthFt(elements, link.source.elementId, fedId, lengthMode) : null;
+  const lengthFt = explicitLen ?? (derivedLen !== null ? Math.round(derivedLen * 10) / 10 : undefined);
   return {
     linkId: link.id,
     device,
     ...(breaker ? { deviceLabel: breaker } : {}),
     ...(!schematic && (conductors || catalog?.conductors) ? { conductors: conductors || (catalog?.conductors ?? "") } : {}),
-    ...(!schematic && link.electrical?.lengthFt !== undefined ? { lengthFt: link.electrical.lengthFt } : {}),
+    ...(!schematic && lengthFt !== undefined ? { lengthFt } : {}),
     ...(mark ? { typeMark: mark } : {}),
   };
 }
@@ -124,11 +127,13 @@ function drawnLoad(elements: Elements, part: PartInstance, connector: string): b
 export interface ElectricalDiagramHints extends DiagramHints {
   /** Print the available fault current at each bus ("AFC 22 kA"). Absent: off. */
   readonly faultCurrent?: boolean;
+  /** How feeder length is obtained when not explicitly entered on the feeder ("explicit" | "shortest" | "manhattan"). */
+  readonly lengthMode?: FeederLengthMode;
 }
 
 /** The fault-current line a bus prints: "AFC 22 kA", "AFC 14.3 kA"; never blank (says what is missing). */
-export function afcLine(elements: Elements, partId: string): string | null {
-  const node = faultCurrentAt(elements, partId);
+export function afcLine(elements: Elements, partId: string, lengthMode?: FeederLengthMode): string | null {
+  const node = faultCurrentAt(elements, partId, lengthMode ? { lengthMode } : undefined);
   if (!node) return null;
   if (node.availableA !== null) {
     const ka = node.availableA / 1000;
@@ -233,7 +238,8 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
     const service = typeof own === "string" && own ? own : parentService;
     const labelKind = labelKindOf(c.kind);
     const where = plannedOf(c.part);
-    const afc = hints.faultCurrent === true && c.info && c.info.kind !== "transformer" ? afcLine(elements, c.part.id) : null;
+    const lengthMode: FeederLengthMode = hints.lengthMode ?? "explicit";
+    const afc = hints.faultCurrent === true && c.info && c.info.kind !== "transformer" ? afcLine(elements, c.part.id, lengthMode) : null;
     const lines = [...textLines(elements, c.part.id, labels(labelKind)), ...(afc ? [{ text: afc }] : []), ...where.extra];
     // Bus against the breaker that feeds it (V3: change one, forget the other).
     if (c.supply && parent && c.info && c.info.kind !== "transformer" && c.info.busA !== null) {
@@ -286,7 +292,7 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
           levelId: plannedOf(src.part).levelId,
           ...plannedOf(src.part).flag,
           service: "emergency",
-          feed: feedEdge(elements, c.emergency, c.part.id, src.kind, schematic),
+          feed: feedEdge(elements, c.emergency, c.part.id, src.kind, schematic, lengthMode),
           children: [],
         };
       }
@@ -301,7 +307,7 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
       levelId: where.levelId,
       service,
       ...where.flag,
-      ...(c.supply && parent ? { feed: feedEdge(elements, c.supply, c.part.id, parent.kind, schematic) } : {}),
+      ...(c.supply && parent ? { feed: feedEdge(elements, c.supply, c.part.id, parent.kind, schematic, lengthMode) } : {}),
       children: [...kids, ...loads, ...future],
       ...(emergency ? { emergency } : {}),
       ...(BUS.has(c.kind) && c.info?.mainA !== null && c.info?.mainA !== undefined ? { mainBreaker: true } : {}),

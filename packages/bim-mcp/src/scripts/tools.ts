@@ -4,6 +4,9 @@ import { z } from "zod";
 import { DEFAULT_SETTINGS, canonicalJson, elementCount, elementValues, gatedRecordFeatures, type ModelState } from "@permitzip/bim-kernel";
 import { contentHashOf, makeItem, scriptItemSchema, scriptReadsSchema, type ScriptItem, type ScriptReads } from "@permitzip/bim-library";
 import {
+  CLASH_DETAIL_LEVELS,
+  CLASH_SCOPES,
+  CLASH_TYPES,
   RUNNER_CONTRACT,
   SLICE_FORMAT,
   ScriptOutputError,
@@ -14,6 +17,7 @@ import {
   checkScriptOutput,
   checkScriptSource,
   commandFields,
+  evaluateClashReport,
   kitUseWarnings,
   lintScript,
   parseScriptOutput,
@@ -23,8 +27,10 @@ import {
   searchReference,
   sliceAsModel,
   sliceModel,
+  type ClashReport,
   type ModelSlice,
   type OutputCheck,
+  type RawClashReportOptions,
   type ScriptOutput,
   type ScriptRunResult,
 } from "@permitzip/bim-script";
@@ -350,18 +356,75 @@ interface Checked {
   readonly check: OutputCheck;
   readonly change: ScriptChangeReport;
   readonly hash: string;
+  readonly clashes?: ClashReport;
+}
+
+const DEFAULT_RUN_CLASH_TYPES = ["hard", "self", "clearance", "dedicated_space", "ceiling"] as const;
+
+type RunClashesInput =
+  | boolean
+  | {
+      readonly enabled?: boolean;
+      readonly scope?: (typeof CLASH_SCOPES)[number];
+      readonly ruleset?: "default" | "coordination" | "documents" | "issue";
+      readonly types?: readonly (typeof CLASH_TYPES)[number][];
+      readonly min_severity?: "error" | "warning" | "info";
+      readonly detail?: (typeof CLASH_DETAIL_LEVELS)[number];
+      readonly level?: string;
+      readonly tolerance_in?: number;
+      readonly soft_clearance_in?: number;
+      readonly structure_clearance_in?: number;
+      readonly max_findings?: number;
+      readonly skip_rules?: readonly string[];
+    };
+
+function resolveRunClashOptions(raw: RunClashesInput | undefined, defaultLevel?: string): RawClashReportOptions | null {
+  if (!raw) return null;
+  if (raw === true) {
+    return {
+      scope: "touched",
+      ruleset: "coordination",
+      types: DEFAULT_RUN_CLASH_TYPES,
+      detail: "compact",
+      ...(defaultLevel ? { level: defaultLevel } : {}),
+    };
+  }
+  if (raw.enabled === false) return null;
+  return {
+    scope: raw.scope ?? "touched",
+    ruleset: raw.ruleset ?? "coordination",
+    ...(raw.types ? { types: raw.types } : {}),
+    ...(raw.min_severity ? { minSeverity: raw.min_severity } : {}),
+    detail: raw.detail ?? "compact",
+    ...(raw.level ?? defaultLevel ? { level: raw.level ?? defaultLevel } : {}),
+    ...(raw.tolerance_in !== undefined ? { toleranceIn: raw.tolerance_in } : {}),
+    ...(raw.soft_clearance_in !== undefined ? { softClearanceIn: raw.soft_clearance_in } : {}),
+    ...(raw.structure_clearance_in !== undefined ? { structureClearanceIn: raw.structure_clearance_in } : {}),
+    ...(raw.max_findings !== undefined ? { maxFindings: raw.max_findings } : {}),
+    ...(raw.skip_rules ? { skipRules: raw.skip_rules } : {}),
+  };
 }
 
 /** The run's output, checked and summarised; a refusal in words when it doesn't check out. */
-async function checked(helpers: ScriptToolHost, run: RunOnModel): Promise<Checked | { readonly stopped: Extract<ScriptRunResult, { ok: false }> } | { readonly refused: string }> {
+async function checked(helpers: ScriptToolHost, run: RunOnModel, clashOptions?: RawClashReportOptions | null): Promise<Checked | { readonly stopped: Extract<ScriptRunResult, { ok: false }> } | { readonly refused: string }> {
   if (!run.result.ok) return { stopped: run.result };
   const output = parseScriptOutput(run.result.output);
   if (output.kind === "part_types") await drawingEngine(helpers);
-  const check = checkScriptOutput(run.head, output, { features: run.slice.features });
+  let clashes: ClashReport | undefined;
+  const check = checkScriptOutput(run.head, output, {
+    features: run.slice.features,
+    ...(clashOptions
+      ? {
+          onAfterEdits: (after, touchedIds) => {
+            clashes = evaluateClashReport(after, clashOptions, touchedIds);
+          },
+        }
+      : {}),
+  });
   if (output.kind === "part_types") return { output, check, change: partTypesChange(output), hash: outputHash(output) };
   const change = editsChange(run.head, output, run.slice);
   if ("refused" in change) return { refused: change.refused };
-  return { output, check, change, hash: outputHash(output) };
+  return { output, check, change, hash: outputHash(output), ...(clashes ? { clashes } : {}) };
 }
 
 /** Loads the part geometry engine for pictures; without it the checks still run and say there is no picture. */
@@ -738,13 +801,36 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
     },
   );
 
+  const clashesArg = z
+    .union([
+      z.boolean(),
+      z
+        .object({
+          enabled: z.boolean().optional(),
+          scope: z.enum(CLASH_SCOPES).optional(),
+          ruleset: z.enum(["default", "coordination", "documents", "issue"]).optional(),
+          types: z.array(z.enum(CLASH_TYPES)).max(8).optional(),
+          min_severity: z.enum(["error", "warning", "info"]).optional(),
+          detail: z.enum(CLASH_DETAIL_LEVELS).optional(),
+          level: z.string().min(1).max(80).optional(),
+          tolerance_in: z.number().min(0).max(12).optional(),
+          soft_clearance_in: z.number().min(0).max(24).optional(),
+          structure_clearance_in: z.number().min(0).max(24).optional(),
+          max_findings: z.number().int().min(1).max(100).optional(),
+          skip_rules: z.array(z.string().min(1).max(60)).max(40).optional(),
+        })
+        .strict(),
+    ])
+    .optional()
+    .describe("Optional clash & clearance feedback on the previewed edits. Pass true for touched hard/self/clearance/dedicated_space/ceiling clashes (compact), or an object configuring scope (touched|level|all), types, min_severity, detail (summary|compact|full), tolerances, and max_findings.");
+
   server.registerTool(
     "bim_run_script",
     {
       title: "Run a script (preview)",
       annotations: READ_ONLY_TOOL,
-      description: `Preview: run a script ${options.runsWhere ?? SEALED_MACHINE_WORDS} and check its output. Saves nothing; returns what would change, apply_with and script_id (send the id, not the text, next time).`,
-      inputSchema: { project_id: target.project_id, model_id: target.model_id.optional(), ...area, script: scriptArg, values: valuesArg, selection: selectionArg },
+      description: `Preview: run a script ${options.runsWhere ?? SEALED_MACHINE_WORDS} and check its output. Saves nothing; returns what would change, optional configurable clash feedback (clashes), apply_with and script_id (send the id, not the text, next time).`,
+      inputSchema: { project_id: target.project_id, model_id: target.model_id.optional(), ...area, script: scriptArg, values: valuesArg, selection: selectionArg, clashes: clashesArg },
     },
     async (args, extra) => {
       try {
@@ -765,7 +851,8 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           repeated = before !== undefined;
           return before ?? null;
         });
-        const got = await checked(helpers, run);
+        const clashOptions = resolveRunClashOptions(args.clashes, args.level);
+        const got = await checked(helpers, run, clashOptions);
         if ("stopped" in got) {
           if (got.stopped.code.startsWith("cap_") && !repeated) {
             stopped.set(stoppedKey(resolved.script.seed, values, run.slice.revision), got.stopped);
@@ -798,6 +885,7 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
             steps: got.output.steps,
             changes: { creates: got.change.summary.creates, edits: got.change.summary.edits, deletes: got.change.summary.deletes },
             checks: checkLines(got.check),
+            ...(got.clashes ? { clashes: got.clashes } : {}),
             ...report,
             approval,
             ...(tier.tier === "ask_every_time" ? { approval_reasons: tier.reasons } : {}),

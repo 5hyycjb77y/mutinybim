@@ -78,7 +78,7 @@ const DETAIL_HINT: Record<DetailLevel, string> = {
 const CUT_PATTERN_LABEL: Record<CutPattern, string> = { cross: 'Cross', solid: 'Solid', hatch: 'Hatch' }
 
 /** View categories with bodies (their hidden edges can draw dashed): the registry's view categories less annotation and room labels. */
-const NO_HIDDEN_EDGES: ReadonlySet<ViewCategory> = new Set<ViewCategory>(['tags', 'dimensions', 'rooms', 'grids', 'doors_windows'])
+const NO_HIDDEN_EDGES: ReadonlySet<ViewCategory> = new Set<ViewCategory>(['tags', 'dimensions', 'rooms', 'grids', 'doors_windows', 'opening_tags'])
 const DASH_CATEGORIES: readonly ViewCategory[] = builtinCategoryRegistry()
   .list()
   .flatMap((c) => (isViewCategory(c.id) && !NO_HIDDEN_EDGES.has(c.id) ? [c.id] : []))

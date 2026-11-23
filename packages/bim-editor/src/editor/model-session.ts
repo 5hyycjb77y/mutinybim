@@ -2055,7 +2055,7 @@ export class ModelSession {
     if (only?.kind === 'run_segment' || (only?.kind === 'run_fitting' && !only.host && only.ports.length === 2)) {
       const kernel = this.kernel
       const plain: Command = { type: 'drag_run', elementId: only.id, delta: { ...delta } }
-      if (!kernel || kernel.executeCommand(view, plain).ok || Math.hypot(delta.x, delta.y) < 1) return plain
+      if (!kernel || kernel.executeCommand(view, plain).ok) return plain
       const flipped: Command = { ...plain, reroute: true }
       return kernel.executeCommand(view, flipped).ok ? flipped : plain
     }

@@ -1,4 +1,5 @@
 import { pushTo } from "../collections";
+import { cleanPolygon, polygonBounds } from "../drawing/polygon-clip";
 import { z } from "zod";
 import { convert } from "@permitzip/bim-units";
 import { canonicalJson } from "../canonical";
@@ -109,6 +110,8 @@ const sectionSchema = z.object({
   headExtMm: z.number().finite().min(-50000).max(50000).optional(),
   tailExtMm: z.number().finite().min(-50000).max(50000).optional(),
   splitGap: z.boolean().optional(),
+  referencingViewId: id.optional(),
+  showInDisciplines: z.array(z.string().min(1).max(64)).max(20).readonly().optional(),
 });
 
 
@@ -195,7 +198,14 @@ export const scheduleV2Schema = z
   })
   .strict();
 
-const calloutSpecSchema = z.object({ viewId: id, label: z.string().trim().min(1).max(12).optional() }).strict();
+const calloutSpecSchema = z
+  .object({
+    viewId: id,
+    label: z.string().trim().min(1).max(12).optional(),
+    boundary: z.array(vec2).min(3).max(200).readonly().optional(),
+    showLabel: z.boolean().optional(),
+  })
+  .strict();
 
 const revisionsSchema = z
   .array(z.object({ number: z.string().trim().min(1).max(10), date: z.string().trim().min(1).max(20), description: z.string().trim().min(1).max(80) }).strict())
@@ -246,6 +256,8 @@ const viewPropsPatchObject = z
     linkedMinObjectMm: z.number().finite().min(0).max(3000),
     detailLevel: z.enum(["coarse", "medium", "fine"]),
     showLineCodes: z.boolean(),
+    offsetStackedRuns: z.boolean(),
+    showReferenceDisciplines: z.array(z.string().min(1).max(64)).max(20),
     /** Plans: multiplier for annotative paper-space symbols and `minPaperMm` floors (0.5–3.0). */
     symbolScale: z.number().finite().min(0.5).max(3),
     visualStyle: z.enum(VISUAL_STYLES),
@@ -257,6 +269,8 @@ const viewPropsPatchObject = z
     cutPattern: z.enum(CUT_PATTERNS),
     section: sectionSchema,
     cropView: z.boolean(),
+    /** Optional closed polygonal crop boundary (model mm, >= 3 vertices); null resets to the plain rectangle. */
+    cropPolygon: z.array(vec2).min(3).max(200).nullable(),
     showCropBox: z.boolean(),
     annotationCrop: z.boolean(),
     annotationCropOffsetMm: z.number().finite().min(0).max(100),
@@ -325,7 +339,7 @@ const documentRecord = z.discriminatedUnion("kind", [
     viewType: z.enum(["floor_plan", "ceiling_plan", "section", "elevation", "three_d", "schedule", "detail"]),
     cropMin: vec2,
     cropMax: vec2,
-    props: viewPropsPatchObject.extend({ discipline: disciplineSchema, workingAngleDeg: z.number().finite().min(-45).max(45), viewBottomMm: z.number().finite().min(-30000).max(30000), viewTopMm: z.number().finite().min(0).max(60000), ...view3dPropsShape }).partial().optional(),
+    props: viewPropsPatchObject.extend({ discipline: disciplineSchema, workingAngleDeg: z.number().finite().min(-45).max(45), viewBottomMm: z.number().finite().min(-30000).max(30000), viewTopMm: z.number().finite().min(0).max(60000), cropPolygon: z.array(vec2).min(3).max(200).readonly(), ...view3dPropsShape }).partial().optional(),
   }),
   z.object({
     ...base,
@@ -333,7 +347,7 @@ const documentRecord = z.discriminatedUnion("kind", [
     number: z.string().min(1).max(40),
     title: z.string().min(1).max(200),
     viewIds: z.array(id).max(500),
-    props: z.object({ titleBlock: z.enum(TITLE_BLOCK_TYPES).optional(), titleBlockRow: titleBlockRowSchema.optional(), fields: fields.optional(), revisions: revisionsSchema.optional() }).optional(),
+    props: z.object({ titleBlock: z.enum(TITLE_BLOCK_TYPES).optional(), titleBlockRow: titleBlockRowSchema.optional(), fields: fields.optional(), revisions: revisionsSchema.optional(), discipline: z.string().min(1).max(64).optional(), group: z.string().min(1).max(80).optional(), sortOrder: z.number().finite().optional() }).optional(),
   }),
   z.object({ ...base, kind: z.literal("viewport"), sheetId: id, viewId: id, center: vec2, size: vec2, scale, northArrow: z.boolean().optional(), northArrowOffsetMm: vec2.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
   z.object({
@@ -393,6 +407,8 @@ export const viewCommandSchemas = [
     viewId: id,
     /** The crop box in the view's own frame: plan mm; sections along-cut mm by elevation mm. */
     crop: crop.optional(),
+    /** Optional custom closed polygon crop boundary (model mm, >= 3 vertices); null clears back to rectangular crop. */
+    cropPolygon: z.array(vec2).min(3).max(200).nullable().optional(),
     /** Set the crop box to fit the view's content (model on its level, or a detail view's drawing). */
     fit: z.literal(true).optional(),
     cropView: z.boolean().optional(),
@@ -417,6 +433,9 @@ export const viewCommandSchemas = [
     titleBlockRow: titleBlockRowSchema.optional(),
     fields: fields.optional(),
     revisions: revisionsSchema.optional(),
+    discipline: z.string().trim().min(1).max(64).optional(),
+    group: z.string().trim().min(1).max(80).optional(),
+    sortOrder: z.number().finite().optional(),
   }),
   z.object({
     type: z.literal("set_sheet_properties"),
@@ -429,6 +448,9 @@ export const viewCommandSchemas = [
     fields: fields.optional(),
     /** The whole revision table, oldest first (replaces it). */
     revisions: revisionsSchema.optional(),
+    discipline: z.string().trim().min(1).max(64).nullable().optional(),
+    group: z.string().trim().min(1).max(80).nullable().optional(),
+    sortOrder: z.number().finite().nullable().optional(),
   }),
   z.object({ type: z.literal("delete_sheet"), sheetId: id }),
   z.object({ type: z.literal("place_viewport"), viewportId: id, sheetId: id, viewId: id, center: vec2, scale: scale.optional(), northArrowOffsetMm: vec2.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
@@ -749,8 +771,17 @@ function replacedScheduleKinds(current: ViewProps | undefined, patch: z.infer<ty
 
 /** Patch fields replace; `discipline: null` clears the discipline (everything prints in ink). */
 function mergeProps(current: ViewProps | undefined, patch: z.infer<typeof viewPropsPatch>): ViewProps {
-  const { discipline, workingAngleDeg, viewBottomMm, viewTopMm, categoryOverrides, ...rest } = patch;
+  const { discipline, workingAngleDeg, viewBottomMm, viewTopMm, categoryOverrides, cropPolygon, ...rest } = patch;
   let merged: ViewProps = { ...current, ...rest };
+  if (cropPolygon !== undefined) {
+    const { cropPolygon: _oldPoly, ...withoutPoly } = merged;
+    if (cropPolygon === null) {
+      merged = withoutPoly;
+    } else {
+      const cleaned = cleanPolygon(cropPolygon.map(roundVec), 0.5);
+      merged = cleaned.length >= 3 ? { ...withoutPoly, cropPolygon: cleaned } : withoutPoly;
+    }
+  }
   if (categoryOverrides !== undefined) {
     const { categoryOverrides: _old, ...without } = merged;
     merged = Object.keys(categoryOverrides).length === 0 ? without : { ...without, categoryOverrides };
@@ -1039,6 +1070,14 @@ function checkCallout(reader: TrackedReader, shape: DrawingItem["shape"], spec: 
   if (!target || target.kind !== "view" || target.deleted) fail(`There is no view ${spec.viewId} for the callout to refer to. It may have been deleted.`, [spec.viewId], "element_not_found");
   if (target.viewType === "schedule" || target.viewType === "three_d") fail(`"${target.name}" is a ${target.viewType === "schedule" ? "schedule" : "3D view"}; callouts refer to a plan, section or detail view.`, [spec.viewId], "wrong_kind");
   const [a, b] = points;
+  if (spec.boundary) {
+    const cleaned = cleanPolygon(spec.boundary, 0.5);
+    const bounds = polygonBounds(cleaned);
+    if (cleaned.length < 3 || !bounds || bounds.max.x - bounds.min.x < 1 || bounds.max.y - bounds.min.y < 1) {
+      fail("A polygonal callout boundary needs at least three non-collinear corners with non-zero area.", [itemId]);
+    }
+    return;
+  }
   if (a && b && (Math.abs(a.x - b.x) < 1 || Math.abs(a.y - b.y) < 1)) fail("The callout's box is too small to see. Drag it out further.", [itemId]);
 }
 
@@ -1191,8 +1230,9 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         const props = withCanonicalLevel(model, defaultViewProps(command.viewType, command.props));
         checkProps(command.viewType, props, command.viewId);
         uniqueViewName(docs(), command.name, null);
-        // No crop given: a plan of a level that already has one starts on that plan's crop, so the two line up on sheets.
-        const c = command.crop ?? matchingPlanCrop(model, command.viewType, props.level) ?? fitCrop(model, { viewType: command.viewType, props }, []);
+        // No crop given: derive from cropPolygon when set, else a matching level plan's crop, else fit content.
+        const polyCrop = props.cropPolygon && props.cropPolygon.length >= 3 ? polygonBounds(props.cropPolygon) : null;
+        const c = command.crop ?? polyCrop ?? matchingPlanCrop(model, command.viewType, props.level) ?? fitCrop(model, { viewType: command.viewType, props }, []);
         checkCrop(c, command.viewId);
         write({
           ...NEW_META,
@@ -1305,7 +1345,25 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           props = { ...props, section: { ...props.section, depthMm: round(command.farClipMm) } };
           authored.push({ elementId: view.id, field: F.prop("section"), value: canonicalJson(props.section) });
         }
-        const wanted = command.crop ?? (command.fit ? fitCrop(model, view, items) : null);
+        let polyBounds: { readonly min: Vec2; readonly max: Vec2 } | null = null;
+        if (command.cropPolygon !== undefined) {
+          if (command.cropPolygon === null) {
+            const { cropPolygon: _drop, ...withoutPoly } = props;
+            props = withoutPoly;
+            authored.push({ elementId: view.id, field: F.prop("cropPolygon"), value: "null" });
+          } else {
+            const cleaned = cleanPolygon(command.cropPolygon.map(roundVec), 0.5);
+            const bounds = polygonBounds(cleaned);
+            if (cleaned.length < 3 || !bounds || bounds.max.x - bounds.min.x < 25.4 || bounds.max.y - bounds.min.y < 25.4) {
+              fail("A polygonal crop boundary needs at least three corners spanning at least 1 in each way.", [view.id]);
+            }
+            props = { ...props, cropPolygon: cleaned };
+            authored.push({ elementId: view.id, field: F.prop("cropPolygon"), value: canonicalJson(cleaned) });
+            polyBounds = bounds;
+            if (command.cropView === undefined && props.cropView === false) setProp("cropView", true);
+          }
+        }
+        const wanted = command.crop ?? polyBounds ?? (command.fit ? fitCrop(model, view, items) : null);
         let cropMin = view.cropMin;
         let cropMax = view.cropMax;
         if (wanted) {
@@ -1352,6 +1410,9 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           ...(command.titleBlockRow ? { titleBlockRow: command.titleBlockRow } : {}),
           ...(command.fields ? { fields: command.fields } : {}),
           ...(command.revisions && command.revisions.length > 0 ? { revisions: command.revisions } : {}),
+          ...(command.discipline ? { discipline: command.discipline } : {}),
+          ...(command.group ? { group: command.group } : {}),
+          ...(command.sortOrder !== undefined ? { sortOrder: command.sortOrder } : {}),
         };
         write({ ...NEW_META, id: asElementId(command.sheetId), kind: "sheet", number: command.number, title: command.name, viewIds: [], props, partition: documentPartition(undefined, undefined) });
         break;
@@ -1366,14 +1427,20 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         if (command.titleBlock !== undefined) authored.push({ elementId: sheet.id, field: F.titleBlock, value: command.titleBlock });
         if (command.titleBlockRow !== undefined) authored.push({ elementId: sheet.id, field: F.titleBlockRow, value: command.titleBlockRow ? `${command.titleBlockRow.id}@${command.titleBlockRow.revision}` : "" });
         if (command.revisions !== undefined) authored.push({ elementId: sheet.id, field: F.revisions, value: canonicalJson(command.revisions) });
+        if (command.discipline !== undefined) authored.push({ elementId: sheet.id, field: F.sheetDiscipline, value: command.discipline ?? "" });
+        if (command.group !== undefined) authored.push({ elementId: sheet.id, field: F.sheetGroup, value: command.group ?? "" });
+        if (command.sortOrder !== undefined) authored.push({ elementId: sheet.id, field: F.sheetSortOrder, value: command.sortOrder === null ? "" : String(command.sortOrder) });
         const nextFields = { ...(sheet.props?.fields ?? {}) };
         for (const [key, value] of Object.entries(command.fields ?? {})) {
           if (value === "") delete nextFields[key];
           else nextFields[key] = value;
           authored.push({ elementId: sheet.id, field: F.field(key), value });
         }
-        const { titleBlockRow: keptRow, ...keptProps } = sheet.props ?? {};
+        const { titleBlockRow: keptRow, discipline: keptDisc, group: keptGroup, sortOrder: keptSort, ...keptProps } = sheet.props ?? {};
         const row = command.titleBlockRow === undefined ? keptRow : command.titleBlockRow ?? undefined;
+        const disc = command.discipline === undefined ? keptDisc : command.discipline ?? undefined;
+        const grp = command.group === undefined ? keptGroup : command.group ?? undefined;
+        const sortOrd = command.sortOrder === undefined ? keptSort : command.sortOrder ?? undefined;
         const next: Sheet = {
           ...sheet,
           number: command.number ?? sheet.number,
@@ -1384,6 +1451,9 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
             ...(command.titleBlock ? { titleBlock: command.titleBlock } : {}),
             fields: nextFields,
             ...(command.revisions !== undefined ? { revisions: command.revisions } : {}),
+            ...(disc ? { discipline: disc } : {}),
+            ...(grp ? { group: grp } : {}),
+            ...(sortOrd !== undefined ? { sortOrder: sortOrd } : {}),
           },
         };
         write(next);

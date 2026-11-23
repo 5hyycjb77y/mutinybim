@@ -74,7 +74,10 @@ export const VIEW_CATEGORY_LABELS: Readonly<Record<ViewCategory, string>> = {
   lighting_fixtures: "Lighting fixtures",
   electrical_equipment: "Panels and electrical equipment",
   insulation: "Duct and pipe insulation",
+  opening_tags: "Door and window tags",
 };
+
+export const BUILDING_VIEW_DISCIPLINE: ClassDiscipline = "architecture";
 
 const VIEW_CATEGORY_DISCIPLINE: Readonly<Partial<Record<ViewCategory, ClassDiscipline>>> = {
   duct: "mechanical",
@@ -82,9 +85,10 @@ const VIEW_CATEGORY_DISCIPLINE: Readonly<Partial<Record<ViewCategory, ClassDisci
   air_terminal: "mechanical",
   insulation: "mechanical",
   pipe: "plumbing",
-  walls: "architecture",
-  doors_windows: "architecture",
-  rooms: "architecture",
+  walls: BUILDING_VIEW_DISCIPLINE,
+  doors_windows: BUILDING_VIEW_DISCIPLINE,
+  opening_tags: BUILDING_VIEW_DISCIPLINE,
+  rooms: BUILDING_VIEW_DISCIPLINE,
   grids: "structure",
   structure: "structure",
   electrical_devices: "electrical",

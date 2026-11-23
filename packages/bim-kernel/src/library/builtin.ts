@@ -88,7 +88,10 @@ function ceilingTerminal(id: string, typeName: string, system: "supply_air" | "r
         { kind: "box", center: [0, 0, 25], size: [p("face_size"), p("face_size"), 50] },
         { kind: "cylinder", center: [0, 0, 100], radius: half("neck_diameter"), height: 100, axis: "z" },
       ],
-      symbol: [outline("face_size", "face_size"), ...(system === "supply_air" ? cross("face_size", "face_size") : [innerFace])],
+      symbol: [
+        { kind: "rect", center: [0, 0], size: [p("face_size"), p("face_size")], fill: "mask", pen: "medium" },
+        ...(system === "supply_air" ? cross("face_size", "face_size") : [innerFace]),
+      ],
       tagFields: ["mark", "airflow"],
       source: source(),
     },

@@ -32,10 +32,10 @@ pack; activate it too when the sheets need them.
 
 | Tool | Use it to |
 | --- | --- |
-| `bim_create_view` | Floor plan or ceiling plan for a level, section from a cut line, 3D, or detail view |
-| `bim_set_view_properties` | Scale, what a plan shows (`top_ft`, `cut_height_ft`, `bottom_ft`, `view_depth_ft`), line weights by category (`line_weights`), discipline, hidden categories, **how each linked model draws** (`linked_models`, see `mutinybim-coordination`), detail level, and the **crop box**: `crop_min_ft` + `crop_max_ft` (both), `crop_view`, `show_crop_box`, `annotation_crop`, `far_clip_ft` (sections). `fit_crop` sizes the crop to the content and must be sent on its own. A placed viewport resizes with its crop. `projection: "perspective" \| "orthographic"` (3D views only; plans, sections and details are always orthographic and refuse it) sets how the live 3D view draws depth; sheets print 3D views orthographic either way. **`category_overrides`**: Visibility/Graphics for any category (see below) |
-| `bim_create_sheet` | New sheet with number, name, title block (ARCH D 36x24 default, or ANSI B 17x11) and title block fields |
-| `bim_place_viewport` | Put a view on a sheet at a paper position (inches from top-left). A view goes on one sheet only |
+| `bim_create_view` | Floor plan or ceiling plan for a level, section from a cut line, 3D, or detail view. Plan views also accept an optional closed `cropPolygon` (L-shape / P-line in model mm) via `documents.planView`, `documents.enlargedPlan(..., { polygon })`, `documents.setCrop(..., { cropPolygon })`, or `documents.setCalloutBoundary` |
+| `bim_set_view_properties` | Scale, what a plan shows (`top_ft`, `cut_height_ft`, `bottom_ft`, `view_depth_ft`), line weights by category (`line_weights`), discipline, hidden categories, **how each linked model draws** (`linked_models`, see `mutinybim-coordination`), detail level, and the **crop box**: `crop_min_ft` + `crop_max_ft` (both), `cropPolygon` (custom L-shape / P-line polygon via `set_view_crop` or `documents.setCrop`; `null` resets to rectangle), `crop_view`, `show_crop_box`, `annotation_crop`, `far_clip_ft` (sections). `fit_crop` sizes the crop to the content and must be sent on its own. A placed viewport resizes with its crop. `projection: "perspective" \| "orthographic"` (3D views only; plans, sections and details are always orthographic and refuse it) sets how the live 3D view draws depth; sheets print 3D views orthographic either way. **`category_overrides`**: Visibility/Graphics for any category (see below) |
+| `bim_create_sheet` | New sheet with number, name, title block (ARCH D 36x24 default, or ANSI B 17x11), title block fields, and optional `props` (`discipline`, `group`, `sortOrder`) for sidebar discipline grouping and ordering |
+| `bim_place_viewport` | Put a view on a sheet at a paper position (inches from top-left). A view goes on one sheet only. In scripts (`documents.place`), `title.northArrowOffset` positions the north arrow relative to the viewport title |
 | `bim_add_sheet_note` | Note on a sheet: a box at `at_in` (its top-left, inches from the sheet's top-left) that wraps at `width_in` (default 4"). Plain `text`, or rich `paragraphs` (see below). Optional fixed `height_in`, `rotation_deg`, `leader_to_in`, default `text_height_in` (3/32") |
 | `bim_edit_text_note` | Replace a note's whole text (sheet or detail view), keeping its box. Pass `expected_content` from `bim_list_views_and_sheets`; if anyone changed the note's words since, nothing is saved: read again and re-plan |
 | `bim_rename_view` / `bim_duplicate_view` / `bim_delete_view` | Rename; copy with its properties and crop (not placed); delete (`if_placed: "remove_from_sheet"` to take it off its sheet too, else refused when placed) |
@@ -67,7 +67,8 @@ bottom and draw everything on their level, as before. Sections use
 `{"duct": {"cut": "wide", "beyond": "medium"}, "walls": {"cut": "heavy"}}`
 with pens thin, medium, wide, heavy; `null` clears one pen or a whole category
 back to the drawing default. Categories: duct, duct_fitting, pipe,
-air_terminal, equipment, walls, doors_windows, rooms, grids, structure, tags,
+air_terminal, equipment, walls, doors_windows, opening_tags (door and window
+marks without hiding doors or windows), rooms, grids, structure, tags,
 dimensions, electrical_devices, lighting_fixtures, electrical_equipment
 (panels and other gear), insulation. The same names hide categories. The linked models take their own pens under `linked_models`
 (`cut_line_weight`, `beyond_line_weight`) plus `linked_hidden_lines` and

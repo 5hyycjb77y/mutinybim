@@ -18,6 +18,7 @@ import { paramNamed } from "../parts";
 import { addOnMarkedPoint, addOnRun, addOnTagCategory, addOnTagText, isAddOnRecord } from "./addon-kinds";
 import { tagFieldAliases } from "./tag-types";
 import { outlineAreaMm2, spaceAreaM2, spaceOutlines } from "../spaces/space-geometry";
+import { ceilingForm, ceilingHeightAtPoint, ceilingRole } from "../ceilings/read";
 import { partPlanOutline, type PlanOutline } from "../drawing/part-outline";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { linkedAnchorInSection, linkedAnchorItem, linkedAnchorPoint, missingLinkedAnchorWords } from "../reference-geometry/linked-anchors";
@@ -415,6 +416,12 @@ function pointOf(model: Pick<ModelState, "elements">, el: BimElement): Point3 | 
       const at = outline ? outlineCentroid(outline) : null;
       const span = areaElevationSpan(model, el);
       return at && span ? { ...at, z: (span.z0 + span.z1) / 2 } : null;
+    }
+    case "ceiling": {
+      if (el.outline.length < 3) return null;
+      const at = outlineCentroid(el.outline);
+      if (!at) return null;
+      return { ...at, z: levelZ(model, el.levelId) + ceilingHeightAtPoint(el, at) };
     }
     default: {
       const at = addOnMarkedPoint(el);
@@ -1043,6 +1050,10 @@ export function tagTextSizeMm(model: Pick<ModelState, "elements">, spec: TagSpec
   if (style?.textStyleId) return resolveTextStyle({ elements: model.elements, connections: [] }, "tag", style.textStyleId)?.textSizeMm ?? style.textSizeMm;
   if (style) return style.textSizeMm;
   if (spec.textSizeMm !== undefined) return spec.textSizeMm;
+  const host = model.elements[spec.elementId];
+  if (host && (host.kind === "room" || host.kind === "space")) {
+    return resolveTextStyle({ elements: model.elements, connections: [] }, "space_label")?.textSizeMm ?? 2.5;
+  }
   return resolveTextStyle({ elements: model.elements, connections: [] }, "tag")?.textSizeMm ?? 2.4;
 }
 
@@ -1065,7 +1076,8 @@ export function tagLines(model: Pick<ModelState, "elements">, spec: TagSpec): st
   const style = styleOfTag(model, spec);
   if (style) {
     const lines = renderTagStyleLines(model, el, style.lines, { units: style.units, prefix: style.prefix, suffix: style.suffix });
-    return lines.length > 0 ? lines : ["?"];
+    if (lines.length > 0) return lines;
+    // If a mark-only style (e.g. `tst-mark-clean`) was attached to a space, room, ceiling, or run with no `mark`, fall back to the element's template text instead of printing "?".
   }
   const template = spec.template === "auto" ? autoTemplate(model, el) : spec.template;
   const mark = "mark" in el && typeof el.mark === "string" ? el.mark : "";
@@ -1075,7 +1087,7 @@ export function tagLines(model: Pick<ModelState, "elements">, spec: TagSpec): st
   switch (template) {
     case "duct_size":
     case "pipe_size":
-      if (el.kind === "run_segment") return [sizeLabel(el.size)];
+      if (el.kind === "run_segment") return [el.flex ? `${sizeLabel(el.size)} FLEX` : sizeLabel(el.size)];
       return [addOnTagText(el, model.elements) ?? (mark || "?")];
     case "gas_pipe": {
       // A gas segment tag: size and developed length of the piece (`1" 3 LF`); off gas pipe, a size tag.
@@ -1098,6 +1110,15 @@ export function tagLines(model: Pick<ModelState, "elements">, spec: TagSpec): st
     case "fixture":
       return [mark || typeName || "?"];
     case "mark":
+      if (el.kind === "ceiling") {
+        const form = ceilingForm(el);
+        const role = ceilingRole(el);
+        const mid = outlineCentroid(el.outline);
+        const mm = mid ? ceilingHeightAtPoint(el, mid) : el.heightMm;
+        const totalIn = Math.round(Math.abs(mm) / 25.4);
+        const ftIn = `${mm < 0 ? "-" : ""}${Math.floor(totalIn / 12)}'-${totalIn % 12}"`;
+        return [form === "open_to_structure" ? "OPEN TO STRUCTURE" : `${role.id === "ceiling" ? "" : `${role.label.toUpperCase()} `}${ftIn}`];
+      }
       return [mark || "?"];
     case "fields":
       return (spec.fields ?? ["mark"]).map((f) => param(f) || "-");
@@ -1134,6 +1155,7 @@ export function tagShape(model: Pick<ModelState, "elements">, spec: TagSpec): Ta
   if (style) return style.box;
   const el = model.elements[spec.elementId];
   if (!el) return "box";
+  if (el.kind === "ceiling") return "none";
   const t = spec.template === "auto" ? autoTemplate(model, el) : spec.template;
   return t !== "duct_size" && t !== "duct_size_insulation" && t !== "pipe_size" && t !== "pipe_size_insulation" && t !== "gas_pipe" && t !== "name_number" ? "box" : "none";
 }
@@ -1305,17 +1327,19 @@ export function drawTag(ctx: AnnotationDrawContext, item: DrawingItem): Annotati
   const head = item.points[0];
   if (!spec || !head) return [];
   const tagStyle = styleOfTag(ctx.model, spec);
-  const textLook = resolveTextStyle(ctx.model, "tag", tagStyle?.textStyleId);
+  const hostEl = ctx.model.elements[spec.elementId];
+  const isSpaceTag = hostEl !== undefined && (hostEl.kind === "room" || hostEl.kind === "space");
+  const textLook = resolveTextStyle(ctx.model, isSpaceTag ? "space_label" : "tag", tagStyle?.textStyleId);
   const size = tagTextSizeMm(ctx.model, spec);
   const leader = tagHasLeader(ctx.model, spec);
   const rawLines = tagLines(ctx.model, spec) ?? ["?"];
-  const lines = textLook?.uppercase ? rawLines.map((l) => l.toUpperCase()) : rawLines;
+  const lines = textLook?.uppercase || isSpaceTag ? rawLines.map((l) => l.toUpperCase()) : rawLines;
   const at = ctx.toPaper(head);
   const rotation = tagRotationDeg(ctx.model, ctx.view, spec, ctx.toPaper);
   const shape = tagShape(ctx.model, spec);
   const box = tagHeadBox(item.id, lines, at, size, rotation, shape);
   const { w, h } = tagHeadSize(lines, size);
-  const masked = spec.mask ?? tagStyle?.mask ?? (textLook ? textLook.mask : false);
+  const masked = spec.mask ?? tagStyle?.mask ?? (textLook ? textLook.mask : isSpaceTag);
   // The mask goes down first so the outline and words print over it and the linework drawn before it is hidden.
   if (masked) {
     const under = tagOutline(shape === "none" ? "box" : shape, w, h).map((p) => add(at, turn(p, rotation)));

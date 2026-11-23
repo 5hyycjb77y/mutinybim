@@ -135,16 +135,28 @@ export function flexRings(seg: Pick<RunSegment, "start" | "end" | "flex" | "size
 
 /** Plan linework of a flex segment: both edges of the curve, with ticks across it every few inches (how flex is drawn). */
 export function flexPlanLines(seg: Pick<RunSegment, "start" | "end" | "flex" | "size">): Array<[Vec2, Vec2, "edge" | "tick"]> {
-  const pts = flexPoints(seg).map((q) => ({ x: q.x, y: q.y }));
+  // Collapse coincident XY points where the flex turns straight down into a vertical neck so edges never pinch to a point.
+  const raw = flexPoints(seg).map((q) => ({ x: q.x, y: q.y }));
+  const pts: Vec2[] = [];
+  for (const q of raw) {
+    const prev = pts[pts.length - 1];
+    if (!prev || Math.hypot(q.x - prev.x, q.y - prev.y) >= 2) pts.push(q);
+  }
+  if (pts.length < 2) return [];
   const half = (seg.size.shape === "round" ? seg.size.diameter : 200) / 2;
   const out: Array<[Vec2, Vec2, "edge" | "tick"]> = [];
+  let lastN: Vec2 = { x: 0, y: 1 };
   const side = (i: number): Vec2 => {
-    const a = pts[Math.max(0, i - 1)] ?? { x: 0, y: 0 };
+    const a = pts[Math.max(0, i - 1)] ?? pts[0]!;
     const b = pts[Math.min(pts.length - 1, i + 1)] ?? a;
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const l = Math.hypot(dx, dy);
-    return l < 1e-6 ? { x: 0, y: 0 } : { x: -dy / l, y: dx / l };
+    if (l >= 1e-3) {
+      lastN = { x: -dy / l, y: dx / l };
+      return lastN;
+    }
+    return lastN;
   };
   const TICK_MM = 75;
   let sinceTick = 0;
@@ -157,7 +169,7 @@ export function flexPlanLines(seg: Pick<RunSegment, "start" | "end" | "flex" | "
     out.push([{ x: a.x + na.x * half, y: a.y + na.y * half }, { x: b.x + nb.x * half, y: b.y + nb.y * half }, "edge"]);
     out.push([{ x: a.x - na.x * half, y: a.y - na.y * half }, { x: b.x - nb.x * half, y: b.y - nb.y * half }, "edge"]);
     sinceTick += Math.hypot(b.x - a.x, b.y - a.y);
-    if (sinceTick >= TICK_MM && (na.x !== 0 || na.y !== 0)) {
+    if (sinceTick >= TICK_MM) {
       sinceTick = 0;
       out.push([{ x: b.x + nb.x * half, y: b.y + nb.y * half }, { x: b.x - nb.x * half, y: b.y - nb.y * half }, "tick"]);
     }

@@ -835,7 +835,9 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         bridge.hint(view.mapping.modelReason)
         return
       }
-      const pulledFar = Math.hypot(d.to.x - d.mark.partAt.x, d.to.y - d.mark.partAt.y) > 7
+      const pulledFar = d.mark.allowLeader !== false && Math.hypot(d.to.x - d.mark.partAt.x, d.to.y - d.mark.partAt.y) > 7
+      const targetEl = model.elements[d.mark.partId]
+      const useCleanMarkStyle = (d.mark.template ?? 'mark') === 'mark' && targetEl !== undefined && (targetEl.kind === 'part' || targetEl.kind === 'opening')
       const itemId = newElementId('tag')
       const refused = bridge.submit(
         {
@@ -846,8 +848,8 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
           points: [{ x: Math.round(at.x), y: Math.round(at.y) }],
           tag: {
             elementId: asElementId(d.mark.partId),
-            template: 'mark',
-            styleId: 'tst-mark-clean',
+            template: d.mark.template ?? 'mark',
+            ...(useCleanMarkStyle ? { styleId: 'tst-mark-clean' } : {}),
             leader: pulledFar,
             leaderOverride: pulledFar,
             mask: true,

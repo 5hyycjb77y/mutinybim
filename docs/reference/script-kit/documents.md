@@ -6,18 +6,19 @@ Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set.
 
 Every example below is a complete script that passes the kit's checks; the kit's tests run each one.
 
-- [`documents.sheet`](#documentssheet): A new sheet (number, name, title block); returns its id.
-- [`documents.setSheet`](#documentssetsheet): Changes a sheet's number, name, title block or fields.
-- [`documents.planView`](#documentsplanview): A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, and per-category/service overrides including singleLineBelow); returns the view's id.
-- [`documents.setView`](#documentssetview): Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
+- [`documents.sheet`](#documentssheet): A new sheet (number, name, title block, optional `discipline`, `group`, and `sortOrder` for Views & Sheets discipline grouping/ordering); returns its id.
+- [`documents.setSheet`](#documentssetsheet): Changes a sheet's number, name, title block, fields, or sidebar `discipline` / `group` / `sortOrder` metadata.
+- [`documents.planView`](#documentsplanview): A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
+- [`documents.setView`](#documentssetview): Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
 - [`documents.ceilingView`](#documentsceilingview): A reflected ceiling plan of one level; returns the view's id.
-- [`documents.sectionView`](#documentssectionview): A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports annotative `headExt`/`tailExt`, Revit `splitGap` break, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm` datum extensions.
-- [`documents.elevationView`](#documentselevationview): An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); its live elevation marker (circle + pointer arrow with auto-updating detail#/sheet# head) prints automatically on overlapping plans.
+- [`documents.sectionView`](#documentssectionview): A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines` (e.g. `["architecture"]` to filter which discipline plans print the section marker), `categoryOverrides` (e.g. `{ pipe: { detailLevel: "fine" } }`), `headExt`/`tailExt`, `splitGap`, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm`.
+- [`documents.elevationView`](#documentselevationview): An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines`, and `categoryOverrides`.
 - [`documents.view3d`](#documentsview3d): A saved 3D view with its 3D crop box, live projection (`perspective` or `orthographic`), and camera (`lookFrom` corner/side preset or explicit `eye`/`target`, vertical lens angle `fovDeg` in 5–120°, and `orthoHeight`).
 - [`documents.setCamera3d`](#documentssetcamera3d): Updates a saved 3D view's camera (`fovDeg` 5–120°, `lookFrom`, `eye`/`target`, `orthoHeight`, or `projection`), preserving any unspecified fields from its current camera.
-- [`documents.enlargedPlan`](#documentsenlargedplan): A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4" or 1/2" = 1'-0") AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets.
-- [`documents.callout`](#documentscallout): Places a live parametric callout box + split head bubble on a view referencing any existing enlarged plan, 2D detail, section, or elevation view.
-- [`documents.setCrop`](#documentssetcrop): Sets a view's crop box in typed units, toggles cropView/showCropBox, or adjusts section/elevation far clip depth, level datum extensions (`levelLeftExtMm`/`levelRightExtMm`), and section mark `headExt`/`tailExt`/`splitGap`.
+- [`documents.enlargedPlan`](#documentsenlargedplan): A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4" or 1/2" = 1'-0") with either a rectangular box (`from`..`to`) OR a custom closed L-shape / P-line `polygon` crop, AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets.
+- [`documents.callout`](#documentscallout): Places a live parametric callout box or custom L-shape / P-line `polygon` + split head bubble on a view referencing any existing enlarged plan, 2D detail, section, or elevation view.
+- [`documents.setCalloutBoundary`](#documentssetcalloutboundary): Reshapes an existing enlarged callout's extents — either to a new rectangle (`from`/`to`) or to a custom closed L-shape / P-line `polygon` (>= 3 corners) — and atomically syncs the referenced enlarged plan view's crop box and polygonal `cropPolygon` in lockstep (Revit behavior).
+- [`documents.setCrop`](#documentssetcrop): Sets a view's rectangular crop box (`from`/`to`) or custom closed polygonal `cropPolygon` (L-shape / P-line, or `null` to reset back to a rectangle), toggles cropView/showCropBox, or adjusts section/elevation far clip depth, level datum extensions (`levelLeftExtMm`/`levelRightExtMm`), and section mark `headExt`/`tailExt`/`splitGap`.
 - [`documents.duplicateView`](#documentsduplicateview): A copy of a view (another discipline's plan of the same level); returns the new id.
 - [`documents.place`](#documentsplace): Puts a view (a plan, a schedule, a detail) on a sheet at a point (its centre, from the sheet's lower-left corner), with optional scale and viewport title/north-arrow offsets; returns the viewport's id.
 - [`documents.setViewportTitle`](#documentssetviewporttitle): Moves a placed viewport's title block on its sheet (`offset`) and/or changes the horizontal title underline length (`ruleLength`, or `null` to reset).
@@ -46,7 +47,7 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`documents.autoDimension`](#documentsautodimension): Dimensions runs, walls or grid lines in a plan or section as one edit: each (one dimension along every element) or chain (one string across them).
 - [`documents.packSheet`](#documentspacksheet): Arranges a sheet's viewports in its drawing area (the editor's Arrange): packed or a grid, optionally shrinking views to a standard scale that fits, as one edit.
 - [`documents.diagramKinds`](#documentsdiagramkinds): Lists every live diagram kind registered by active packs (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"plumbing_riser"`, …) with its label.
-- [`documents.diagram`](#documentsdiagram): Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"plumbing_riser"`, …; `documents.diagramKinds(ctx)` lists all available kinds).
+- [`documents.diagram`](#documentsdiagram): Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"air_schematic"`, `"plumbing_riser"`, `"plumbing_isometric"`, …; `documents.diagramKinds(ctx)` lists all available kinds).
 - [`documents.oneLine`](#documentsoneline): A one-line, riser, or pack-contributed live diagram in a new drafting view: drawn from a distribution you describe (diagram), or live from the model (live: "one_line", "electrical_riser", "controls_diagram", "plumbing_riser"…).
 - [`documents.detailLibrary`](#documentsdetaillibrary): The 2D detail library: components (id, name, category, default size in mm, whether it stretches), hatch and line patterns, line styles and weights.
 - [`documents.formKinds`](#documentsformkinds): The form schedule kinds the model's add-ons offer (panel, switchboard, feeder, connection_types, equipment_connections, lighting_controls…) and whether each is the schedule of one element.
@@ -54,13 +55,13 @@ Every example below is a complete script that passes the kit's checks; the kit's
 
 ## documents.sheet
 
-A new sheet (number, name, title block); returns its id.
+A new sheet (number, name, title block, optional `discipline`, `group`, and `sortOrder` for Views & Sheets discipline grouping/ordering); returns its id.
 
 ```ts
-sheet(ctx: ScriptContext, spec: { number: string; name: string; titleBlock?: TitleBlock; fields?: Record<string, string>; id?: string }): string
+sheet(ctx: ScriptContext, spec: { number: string; name: string; titleBlock?: TitleBlock; fields?: Record<string, string>; discipline?: string; group?: string; sortOrder?: number; id?: string }): string
 ```
 
-Topics: sheet, drawing, title block, sheets
+Topics: sheet, drawing, title block, sheets, sheet group, sheet discipline, sort order
 
 <details><summary>Example script</summary>
 
@@ -71,7 +72,7 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    documents.sheet(ctx, { number: "M-101", name: "Mechanical plan, Level 1" });
+    documents.sheet(ctx, { number: "M-101", name: "Mechanical plan, Level 1", discipline: "mechanical", group: "Mechanical", sortOrder: 401 });
   },
 });
 ```
@@ -80,13 +81,13 @@ export default defineScript({
 
 ## documents.setSheet
 
-Changes a sheet's number, name, title block or fields.
+Changes a sheet's number, name, title block, fields, or sidebar `discipline` / `group` / `sortOrder` metadata.
 
 ```ts
-setSheet(ctx: ScriptContext, sheetId: string, changes: { number: string; name: string; titleBlock?: TitleBlock; fields?: Record<string, string> }): void
+setSheet(ctx: ScriptContext, sheetId: string, changes: { number: string; name: string; titleBlock?: TitleBlock; fields?: Record<string, string>; discipline?: string; group?: string; sortOrder?: number }): void
 ```
 
-Topics: sheet, rename, title block fields
+Topics: sheet, rename, title block fields, sheet group, sort order
 
 <details><summary>Example script</summary>
 
@@ -98,7 +99,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const s = documents.sheet(ctx, { number: "M-101", name: "Mechanical plan" });
-    documents.setSheet(ctx, s, { number: "M-101", name: "Mechanical plan, Level 1", fields: { drawn_by: "KE" } });
+    documents.setSheet(ctx, s, { number: "M-101", name: "Mechanical plan, Level 1", discipline: "mechanical", sortOrder: 401, fields: { drawn_by: "KE" } });
   },
 });
 ```
@@ -107,13 +108,13 @@ export default defineScript({
 
 ## documents.planView
 
-A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, and per-category/service overrides including singleLineBelow); returns the view's id.
+A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
 
 ```ts
 planView(ctx: ScriptContext, spec: PlanViewSpec): string
 ```
 
-Topics: view, plan, floor plan, detail level, symbolScale, annotative, single line, double line, line code
+Topics: view, plan, floor plan, detail level, symbolScale, annotative, single line, double line, line code, stacked runs, section references
 
 <details><summary>Example script</summary>
 
@@ -124,7 +125,7 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium" });
+    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium", offsetStackedRuns: true });
   },
 });
 ```
@@ -133,13 +134,13 @@ export default defineScript({
 
 ## documents.setView
 
-Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
+Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
 
 ```ts
 setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void
 ```
 
-Topics: view, detail level, symbolScale, annotative, category overrides, single line, double line, schematic, line code
+Topics: view, detail level, symbolScale, annotative, category overrides, single line, double line, schematic, line code, stacked runs, section references
 
 <details><summary>Example script</summary>
 
@@ -151,7 +152,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing" });
-    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, scale: 48 });
+    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, offsetStackedRuns: true, scale: 48 });
   },
 });
 ```
@@ -186,13 +187,13 @@ export default defineScript({
 
 ## documents.sectionView
 
-A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports annotative `headExt`/`tailExt`, Revit `splitGap` break, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm` datum extensions. Its live section mark prints automatically on overlapping plans. Returns the view's id.
+A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines` (e.g. `["architecture"]` to filter which discipline plans print the section marker), `categoryOverrides` (e.g. `{ pipe: { detailLevel: "fine" } }`), `headExt`/`tailExt`, `splitGap`, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm`. Returns the view's id.
 
 ```ts
 sectionView(ctx: ScriptContext, spec: VerticalViewSpec): string
 ```
 
-Topics: view, section, section cut, building section, section marker, split gap, level lines
+Topics: view, section, section cut, building section, section marker, split gap, level lines, discipline filter
 
 <details><summary>Example script</summary>
 
@@ -204,7 +205,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
-    const sec = documents.sectionView(ctx, { name: "Building Section A-A", from: { x: units.ft(0), y: units.ft(10) }, to: { x: units.ft(30), y: units.ft(10) }, direction: 1, depth: units.ft(15), scale: 48, splitGap: true });
+    const sec = documents.sectionView(ctx, { name: "Building Section A-A", from: { x: units.ft(0), y: units.ft(10) }, to: { x: units.ft(30), y: units.ft(10) }, direction: 1, depth: units.ft(15), scale: 48, splitGap: true, showInDisciplines: ["architecture"] });
     const sheet = documents.sheet(ctx, { number: "A-301", name: "Sections" });
     documents.place(ctx, sheet, sec, { x: units.mm(400), y: units.mm(300) });
   },
@@ -215,13 +216,13 @@ export default defineScript({
 
 ## documents.elevationView
 
-An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); its live elevation marker (circle + pointer arrow with auto-updating detail#/sheet# head) prints automatically on overlapping plans. Returns the view's id.
+An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines`, and `categoryOverrides`. Its live clickable NCS elevation marker (circle + pointer arrow with auto-updating detail#/sheet# head) prints automatically on overlapping plans. Returns the view's id.
 
 ```ts
 elevationView(ctx: ScriptContext, spec: VerticalViewSpec): string
 ```
 
-Topics: view, elevation, interior elevation, exterior elevation, elevation marker
+Topics: view, elevation, interior elevation, exterior elevation, elevation marker, discipline filter
 
 <details><summary>Example script</summary>
 
@@ -233,8 +234,8 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
-    const elev = documents.elevationView(ctx, { name: "Restroom North Elevation", from: { x: units.ft(2), y: units.ft(8) }, to: { x: units.ft(12), y: units.ft(8) }, direction: 1, depth: units.ft(10), scale: 24 });
-    const sheet = documents.sheet(ctx, { number: "A-401", name: "Interior Elevations" });
+    const elev = documents.elevationView(ctx, { name: "South Exterior Elevation", from: { x: units.ft(-4), y: units.ft(-6) }, to: { x: units.ft(34), y: units.ft(-6) }, direction: 1, depth: units.ft(30), scale: 48, showInDisciplines: ["architecture"] });
+    const sheet = documents.sheet(ctx, { number: "A-301", name: "Exterior Elevations" });
     documents.place(ctx, sheet, elev, { x: units.mm(400), y: units.mm(300) });
   },
 });
@@ -301,13 +302,13 @@ export default defineScript({
 
 ## documents.enlargedPlan
 
-A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4" or 1/2" = 1'-0") AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets. Returns `{ viewId, calloutId }`.
+A Revit-style enlarged plan in one step: creates a cropped plan view on the same level at enlarged scale (default 1/4" or 1/2" = 1'-0") with either a rectangular box (`from`..`to`) OR a custom closed L-shape / P-line `polygon` crop, AND places a live parametric callout bubble on the parent plan whose detail#/sheet# head auto-updates when the enlarged plan moves sheets. Returns `{ viewId, calloutId }`.
 
 ```ts
 enlargedPlan(ctx: ScriptContext, spec: EnlargedPlanSpec): { viewId: string; calloutId: string }
 ```
 
-Topics: view, enlarged plan, callout, callout bubble, plan callout, detail callout
+Topics: view, enlarged plan, callout, callout bubble, plan callout, detail callout, polygon, p-line, l-shape, crop polygon
 
 <details><summary>Example script</summary>
 
@@ -320,7 +321,19 @@ export default defineScript({
   run(ctx) {
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
     const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plan", scale: 48 });
-    const { viewId } = documents.enlargedPlan(ctx, { parent: plan, name: "Enlarged Restroom Plan", from: { x: units.ft(0), y: units.ft(0) }, to: { x: units.ft(12), y: units.ft(10) }, scale: 24 });
+    const { viewId } = documents.enlargedPlan(ctx, {
+      parent: plan,
+      name: "Enlarged Wet Core",
+      polygon: [
+        { x: units.ft(0), y: units.ft(0) },
+        { x: units.ft(14), y: units.ft(0) },
+        { x: units.ft(14), y: units.ft(6) },
+        { x: units.ft(10), y: units.ft(6) },
+        { x: units.ft(10), y: units.ft(12) },
+        { x: units.ft(0), y: units.ft(12) },
+      ],
+      scale: 24,
+    });
     const sheet = documents.sheet(ctx, { number: "P-401", name: "Enlarged Plumbing Plans" });
     documents.place(ctx, sheet, viewId, { x: units.mm(300), y: units.mm(300) });
   },
@@ -331,13 +344,13 @@ export default defineScript({
 
 ## documents.callout
 
-Places a live parametric callout box + split head bubble on a view referencing any existing enlarged plan, 2D detail, section, or elevation view. The head reads the target's live detail#/sheet# automatically; returns the callout's id.
+Places a live parametric callout box or custom L-shape / P-line `polygon` + split head bubble on a view referencing any existing enlarged plan, 2D detail, section, or elevation view. The head reads the target's live detail#/sheet# automatically; returns the callout's id.
 
 ```ts
 callout(ctx: ScriptContext, spec: CalloutRefSpec): string
 ```
 
-Topics: callout, callout bubble, view reference, enlarged plan, detail reference
+Topics: callout, callout bubble, view reference, enlarged plan, detail reference, polygon, p-line
 
 <details><summary>Example script</summary>
 
@@ -358,15 +371,53 @@ export default defineScript({
 
 </details>
 
+## documents.setCalloutBoundary
+
+Reshapes an existing enlarged callout's extents — either to a new rectangle (`from`/`to`) or to a custom closed L-shape / P-line `polygon` (>= 3 corners) — and atomically syncs the referenced enlarged plan view's crop box and polygonal `cropPolygon` in lockstep (Revit behavior).
+
+```ts
+setCalloutBoundary(ctx: ScriptContext, calloutId: string, spec: CalloutBoundarySpec): void
+```
+
+Topics: callout, enlarged plan, crop, crop polygon, p-line, l-shape, boundary
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plan", scale: 48 });
+    const { calloutId } = documents.enlargedPlan(ctx, { parent: plan, name: "Enlarged Core", from: { x: units.ft(0), y: units.ft(0) }, to: { x: units.ft(12), y: units.ft(10) }, scale: 24 });
+    documents.setCalloutBoundary(ctx, calloutId, {
+      polygon: [
+        { x: units.ft(0), y: units.ft(0) },
+        { x: units.ft(14), y: units.ft(0) },
+        { x: units.ft(14), y: units.ft(5) },
+        { x: units.ft(10), y: units.ft(5) },
+        { x: units.ft(10), y: units.ft(10) },
+        { x: units.ft(0), y: units.ft(10) },
+      ],
+    });
+  },
+});
+```
+
+</details>
+
 ## documents.setCrop
 
-Sets a view's crop box in typed units, toggles cropView/showCropBox, or adjusts section/elevation far clip depth, level datum extensions (`levelLeftExtMm`/`levelRightExtMm`), and section mark `headExt`/`tailExt`/`splitGap`.
+Sets a view's rectangular crop box (`from`/`to`) or custom closed polygonal `cropPolygon` (L-shape / P-line, or `null` to reset back to a rectangle), toggles cropView/showCropBox, or adjusts section/elevation far clip depth, level datum extensions (`levelLeftExtMm`/`levelRightExtMm`), and section mark `headExt`/`tailExt`/`splitGap`.
 
 ```ts
 setCrop(ctx: ScriptContext, view: string, spec: CropBoxSpec): void
 ```
 
-Topics: crop, crop box, view crop, enlarged plan, far clip, section marker, level lines
+Topics: crop, crop box, crop polygon, p-line, l-shape, view crop, enlarged plan, far clip, section marker, level lines
 
 <details><summary>Example script</summary>
 
@@ -1180,13 +1231,13 @@ export default defineScript({
 
 ## documents.diagram
 
-Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"plumbing_riser"`, …; `documents.diagramKinds(ctx)` lists all available kinds). Returns the view's id.
+Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"air_schematic"`, `"plumbing_riser"`, `"plumbing_isometric"`, …; `documents.diagramKinds(ctx)` lists all available kinds). For `one_line`, pass `hints: { faultCurrent: true, lengthMode: "shortest" | "manhattan" | "explicit", showLoads: true }` to annotate live 3D-estimated feeder lengths and available fault current (AFC vs kAIC). Returns the view's id.
 
 ```ts
 diagram(ctx: ScriptContext, spec: { name: string; kind: string; hints?: DiagramHints; id?: string }): string
 ```
 
-Topics: diagram, live diagram, controls diagram, lighting controls diagram, one-line, riser
+Topics: diagram, live diagram, controls diagram, lighting controls diagram, one-line, fault current, afc, feeder length, riser, isometric, air schematic
 
 <details><summary>Example script</summary>
 
@@ -1197,9 +1248,9 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    const ctrl = documents.diagram(ctx, { name: "E-501 Lighting Controls Diagram", kind: "controls_diagram" });
-    const sheet = documents.sheet(ctx, { number: "E-501", name: "Electrical Diagrams" });
-    documents.place(ctx, sheet, ctrl, { x: units.mm(300), y: units.mm(300) }, 1);
+    const sld = documents.diagram(ctx, { name: "E-201 One-Line Diagram", kind: "one_line", hints: { faultCurrent: true, lengthMode: "shortest", showLoads: true } });
+    const sheet = documents.sheet(ctx, { number: "E-201", name: "Electrical Diagrams", discipline: "electrical", sortOrder: 502 });
+    documents.place(ctx, sheet, sld, { x: units.mm(300), y: units.mm(300) }, 1);
   },
 });
 ```

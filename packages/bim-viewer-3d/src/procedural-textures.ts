@@ -94,9 +94,10 @@ function fillFineGrain(
   bc.putImageData(bImg, 0, 0);
 }
 
-export function proceduralMaterialMaps(pattern: MaterialPattern | undefined, colorHex: string): ProceduralMaps | null {
+export function proceduralMaterialMaps(pattern: MaterialPattern | undefined, colorHex: string, materialId?: string): ProceduralMaps | null {
   if (!pattern || pattern === "solid" || pattern === "glass") return null;
-  const key = `${pattern}:${colorHex.toLowerCase()}`;
+  const isStandingSeam = pattern === "metal" && Boolean(materialId && /(standing|roof|cladding|zinc)/i.test(materialId));
+  const key = `${pattern}:${isStandingSeam ? "seam" : "flat"}:${colorHex.toLowerCase()}`;
   if (CACHE.has(key)) return CACHE.get(key) ?? null;
 
   const size = 512;
@@ -228,55 +229,91 @@ export function proceduralMaterialMaps(pattern: MaterialPattern | undefined, col
       break;
     }
     case "metal": {
-      bumpScale = 0.016;
-      // Crisp architectural standing-seam zinc/metal cladding with brushed sheen & raised seam ribs
-      fillFineGrain(ac, bc, size, r, g, b, 6, 0.8, 97);
-      const panels = 6;
-      const pw = size / panels;
-      for (let i = 0; i < panels; i++) {
-        const sx = i * pw;
-        // Subtle directional metallic sheen gradient across each pan
-        const grad = ac.createLinearGradient(sx, 0, sx + pw, 0);
-        grad.addColorStop(0, "rgba(0,0,0,0.08)");
-        grad.addColorStop(0.18, "rgba(255,255,255,0.05)");
-        grad.addColorStop(0.85, "rgba(0,0,0,0.03)");
-        grad.addColorStop(1, "rgba(0,0,0,0.12)");
-        ac.fillStyle = grad;
-        ac.fillRect(sx, 0, pw, size);
-        // Raised standing seam rib (highlight + crisp shadow line)
-        ac.fillStyle = "rgba(255,255,255,0.16)";
-        ac.fillRect(sx, 0, 3, size);
-        ac.fillStyle = "rgba(0,0,0,0.34)";
-        ac.fillRect(sx + 3, 0, 4, size);
-        bc.fillStyle = "rgb(235,235,235)";
-        bc.fillRect(sx, 0, 4, size);
-        bc.fillStyle = "rgb(75,75,75)";
-        bc.fillRect(sx + 4, 0, 3, size);
+      if (isStandingSeam) {
+        bumpScale = 0.016;
+        // Architectural standing-seam zinc/metal roof cladding with raised seam ribs
+        fillFineGrain(ac, bc, size, r, g, b, 6, 0.8, 97);
+        const panels = 6;
+        const pw = size / panels;
+        for (let i = 0; i < panels; i++) {
+          const sx = i * pw;
+          const grad = ac.createLinearGradient(sx, 0, sx + pw, 0);
+          grad.addColorStop(0, "rgba(0,0,0,0.08)");
+          grad.addColorStop(0.18, "rgba(255,255,255,0.05)");
+          grad.addColorStop(0.85, "rgba(0,0,0,0.03)");
+          grad.addColorStop(1, "rgba(0,0,0,0.12)");
+          ac.fillStyle = grad;
+          ac.fillRect(sx, 0, pw, size);
+          ac.fillStyle = "rgba(255,255,255,0.16)";
+          ac.fillRect(sx, 0, 3, size);
+          ac.fillStyle = "rgba(0,0,0,0.34)";
+          ac.fillRect(sx + 3, 0, 4, size);
+          bc.fillStyle = "rgb(235,235,235)";
+          bc.fillRect(sx, 0, 4, size);
+          bc.fillStyle = "rgb(75,75,75)";
+          bc.fillRect(sx + 4, 0, 3, size);
+        }
+      } else {
+        // Clean brushed/satin galvanized & painted industrial sheet metal (equipment cabinets, ducts, panels)
+        bumpScale = 0.006;
+        const aImg = ac.createImageData(size, size);
+        const bImg = bc.createImageData(size, size);
+        const ad = aImg.data;
+        const bd = bImg.data;
+        for (let y = 0; y < size; y++) {
+          const streak = (hash2(0, y, 211) - 0.5) * 9;
+          for (let x = 0; x < size; x++) {
+            const sheen = Math.sin((x / size) * Math.PI * 2) * 5;
+            const micro = (hash2(x, y, 103) - 0.5) * 4;
+            const d = streak * 0.65 + sheen + micro;
+            const idx = (y * size + x) * 4;
+            ad[idx] = clamp(r + d);
+            ad[idx + 1] = clamp(g + d);
+            ad[idx + 2] = clamp(b + d);
+            ad[idx + 3] = 255;
+            const bv = clamp(128 + streak * 1.4 + micro);
+            bd[idx] = bv;
+            bd[idx + 1] = bv;
+            bd[idx + 2] = bv;
+            bd[idx + 3] = 255;
+          }
+        }
+        ac.putImageData(aImg, 0, 0);
+        bc.putImageData(bImg, 0, 0);
+        // Subtle recessed sheet-metal panel joint lines (2x2 clean cabinet grid, no roof ribs)
+        ac.strokeStyle = "rgba(0,0,0,0.10)";
+        ac.lineWidth = 1.5;
+        bc.strokeStyle = "rgb(104,104,104)";
+        bc.lineWidth = 1.5;
+        for (const p of [0, size / 2]) {
+          ac.beginPath(); ac.moveTo(p, 0); ac.lineTo(p, size); ac.stroke();
+          ac.beginPath(); ac.moveTo(0, p); ac.lineTo(size, p); ac.stroke();
+          bc.beginPath(); bc.moveTo(p, 0); bc.lineTo(p, size); bc.stroke();
+          bc.beginPath(); bc.moveTo(0, p); bc.lineTo(size, p); bc.stroke();
+        }
       }
       break;
     }
     case "tile": {
       bumpScale = 0.012;
-      // Clean 2'x4' architectural acoustic ceiling / large-format terrazzo tile grid
-      fillFineGrain(ac, bc, size, r, g, b, 6, 1.0, 113);
-      const cols = 4;
-      const rows = 2;
-      const cw = size / cols;
-      const rh = size / rows;
-      ac.strokeStyle = rgbCss(r, g, b, -20);
-      ac.lineWidth = 3;
-      bc.strokeStyle = "rgb(82,82,82)";
-      bc.lineWidth = 3;
-      for (let i = 0; i <= cols; i++) {
-        const p = i * cw;
-        ac.beginPath(); ac.moveTo(p, 0); ac.lineTo(p, size); ac.stroke();
-        bc.beginPath(); bc.moveTo(p, 0); bc.lineTo(p, size); bc.stroke();
+      // Single canonical acoustic ceiling / architectural tile cell (1x1 so UV scaling matches exact real-world grid dimensions!)
+      fillFineGrain(ac, bc, size, r, g, b, 7, 1.1, 113);
+      // Subtle acoustic mineral-fiber pinholes inside the tile
+      for (let i = 0; i < 160; i++) {
+        const px = Math.floor(hash2(i, 1, 317) * (size - 16)) + 8;
+        const py = Math.floor(hash2(i, 2, 317) * (size - 16)) + 8;
+        const rad = hash2(i, 3, 317) > 0.7 ? 1.4 : 0.9;
+        ac.fillStyle = rgbCss(r, g, b, -14);
+        ac.fillRect(px, py, rad, rad);
       }
-      for (let j = 0; j <= rows; j++) {
-        const p = j * rh;
-        ac.beginPath(); ac.moveTo(0, p); ac.lineTo(size, p); ac.stroke();
-        bc.beginPath(); bc.moveTo(0, p); bc.lineTo(size, p); bc.stroke();
-      }
+      // Crisp perimeter T-bar runner / grout reveal (drawn half-width on each tile edge so tiled neighbors form a sharp joint)
+      const edgeW = 6;
+      ac.strokeStyle = rgbCss(r, g, b, -26);
+      ac.lineWidth = edgeW;
+      ac.strokeRect(0, 0, size, size);
+      bc.strokeStyle = "rgb(72,72,72)";
+      bc.lineWidth = edgeW;
+      bc.strokeRect(0, 0, size, size);
       break;
     }
     default:
@@ -290,6 +327,33 @@ export function proceduralMaterialMaps(pattern: MaterialPattern | undefined, col
   };
   CACHE.set(key, maps);
   return maps;
+}
+
+/** Stamp exact world-space UVs onto a ceiling BufferGeometry matching its kernel CeilingGrid (1 UV unit = 1 tile). */
+export function applyCeilingGridUVs(
+  geometry: THREE.BufferGeometry,
+  grid: { readonly spacingXMm: number; readonly spacingYMm: number; readonly origin?: { readonly x: number; readonly y: number }; readonly rotationDeg?: number },
+): void {
+  const pos = geometry.attributes.position;
+  if (!pos) return;
+  const wMm = Math.max(50, grid.spacingXMm);
+  const lMm = Math.max(50, grid.spacingYMm);
+  const ox = grid.origin?.x ?? 0;
+  const oy = grid.origin?.y ?? 0;
+  const rad = ((grid.rotationDeg ?? 0) * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const uvs = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    // Kernel (mm) from Three.js scene metres: kernelX = x * 1000, kernelY = -z * 1000.
+    const dx = pos.getX(i) * 1000 - ox;
+    const dy = -pos.getZ(i) * 1000 - oy;
+    const lx = dx * c + dy * s;
+    const ly = -dx * s + dy * c;
+    uvs[i * 2] = lx / wMm;
+    uvs[i * 2 + 1] = ly / lMm;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
 }
 
 /** Generate world-scale triplanar/box UVs (1 tile = 1.5 m) for any BufferGeometry missing `uv`. */

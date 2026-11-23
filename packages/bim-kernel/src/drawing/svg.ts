@@ -41,7 +41,7 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
     if (p.kind === "line") {
       const dash = p.dash ? ` stroke-dasharray="${p.dash.join(" ")}"` : "";
       parts.push(
-        `<line x1="${p.a.x.toFixed(2)}" y1="${p.a.y.toFixed(2)}" x2="${p.b.x.toFixed(2)}" y2="${p.b.y.toFixed(2)}" stroke="${stroke(p.tone, ink(p.color))}" stroke-width="${lineWidthMm(p)}" stroke-linecap="square"${dash}/>`,
+        `<line x1="${p.a.x.toFixed(2)}" y1="${p.a.y.toFixed(2)}" x2="${p.b.x.toFixed(2)}" y2="${p.b.y.toFixed(2)}" stroke="${stroke(p.tone, ink(p.color))}" stroke-width="${lineWidthMm(p)}" stroke-linecap="round"${dash}/>`,
       );
     } else if (p.kind === "fill") {
       const v = Math.round(fillGrey(p.grey, p.tone) * 255).toString(16).padStart(2, "0");
@@ -67,7 +67,9 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
           : "";
       const weight = face ? ` font-weight="${face.weight}"` : p.bold ? ' font-weight="bold"' : "";
       const styleAttr = p.italic ? ' font-style="italic"' : "";
-      const fill = p.tone && p.tone !== "ink" ? ` fill="${stroke(p.tone)}"` : ink(p.color) ? ` fill="${ink(p.color)}"` : "";
+      const safeHref = p.href && /^https?:\/\//i.test(p.href.trim()) ? p.href.trim() : null;
+      const fill = safeHref && !opts.monochrome ? ' fill="#1d4ed8"' : p.tone && p.tone !== "ink" ? ` fill="${stroke(p.tone)}"` : ink(p.color) ? ` fill="${ink(p.color)}"` : "";
+      const baselineY = p.vAlign === "middle" ? p.at.y + p.size * 0.35 : p.at.y;
       const transform = p.rotate ? ` transform="rotate(${p.rotate.toFixed(2)} ${p.at.x.toFixed(2)} ${p.at.y.toFixed(2)})"` : "";
       if (p.mask && p.text.length > 0) {
         const padX = Math.max(0.45, p.size * 0.22);
@@ -75,12 +77,16 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
         const w = Math.max(p.size * 0.65, p.text.length * p.size * 0.64) + padX * 2;
         const h = p.size * 1.24 + padY * 2;
         const rx = p.anchor === "start" ? p.at.x - padX : p.anchor === "end" ? p.at.x - w + padX : p.at.x - w / 2;
-        const ry = p.at.y - p.size - padY;
+        const ry = p.vAlign === "middle" ? p.at.y - h / 2 : p.at.y - p.size - padY;
         parts.push(`<rect x="${rx.toFixed(2)}" y="${ry.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" fill="#fff" stroke="none"${transform}/>`);
       }
-      parts.push(
-        `<text x="${p.at.x.toFixed(2)}" y="${p.at.y.toFixed(2)}" font-size="${fontSize}" text-anchor="${p.anchor}"${family}${weight}${styleAttr}${fill}${transform}>${esc(p.text)}</text>`,
-      );
+      const underline = safeHref ? ' text-decoration="underline"' : "";
+      const textEl = `<text x="${p.at.x.toFixed(2)}" y="${baselineY.toFixed(2)}" font-size="${fontSize}" text-anchor="${p.anchor}"${family}${weight}${styleAttr}${underline}${fill}${transform}>${esc(p.text)}</text>`;
+      if (safeHref) {
+        parts.push(`<a href="${esc(safeHref)}" target="_blank" rel="noopener noreferrer" data-schedule-href="${esc(safeHref)}">${textEl}</a>`);
+      } else {
+        parts.push(textEl);
+      }
     }
   }
   // A note being edited in place is drawn by the editor from its draft instead.

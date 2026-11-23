@@ -73,20 +73,25 @@ describe("Sample Market (7492) risers from the model", () => {
     const b = sampleMarketModel();
     const ev = evaluateDiagram(b.head.elements, view(b, "v-dcw"));
     const words = texts(ev);
-    expect(words).toEqual(expect.arrayContaining(["WM-1", "DOMESTIC COLD WATER", '2"', "37 WFU", "SOV", "GWH", "CAP", '½"', '1½"']));
+    expect(words).toEqual(expect.arrayContaining(["WM-1", "DOMESTIC COLD WATER", '2" CW · 37 WFU', "SOV", "GWH", "CAP", '½"', '1½" CW']));
     const cold = sampleMarketMarks().filter(({ row }) => row.cold > 0 || (row.total > 0 && row.hot === 0) || (row.cold === 0 && row.hot === 0 && row.total === 0 && row.dfu === 0));
     for (const { mark } of cold) expect(words).toContain(mark);
-    expect(words).not.toContain("15.75 WFU");
+    expect(words.join(" ")).not.toContain("15.75 WFU");
     golden("riser-sample-market-dcw.svg", svgOf(b, "v-dcw"));
   });
 
-  it("P3 domestic water riser: hot water leaves the water heater on the cold line, 15.75 WFU, to every hot fixture", () => {
+  it("P3 domestic water riser: hot water leaves the water heater on the cold line, 15.75 WFU, to every hot fixture (shared fixtures drawn once with CW solid + HW dashed)", () => {
     const b = sampleMarketModel();
     const ev = evaluateDiagram(b.head.elements, view(b, "v-dhw"));
     const words = texts(ev);
-    expect(words).toEqual(expect.arrayContaining(["37 WFU", "15.75 WFU", "GWH"]));
-    // K01-1 is on both: its cold drop and its hot drop.
-    expect(count(words, "K01-1")).toBe(2);
+    expect(words.join(" ")).toContain("37 WFU");
+    expect(words.join(" ")).toContain("15.75 WFU");
+    expect(words).toContain("GWH");
+    // K01-1 is on both cold and hot water: drawn ONCE as one physical fixture fed by both a solid CW drop and a dashed HW drop.
+    expect(count(words, "K01-1")).toBe(1);
+    const lines = (ev?.items ?? []).filter((i) => i.shape === "line");
+    expect(lines.some((l) => l.lineStyle?.pattern === "dashed")).toBe(true);
+    expect(lines.some((l) => l.lineStyle?.pattern !== "dashed")).toBe(true);
     // One riser, one source: the hot system continues from the heater instead of drawing a second tree.
     const graph = plumbingDiagramGraph(b.head.elements, { systemKinds: ["domestic_cold_water", "domestic_hot_water"] });
     expect(graph.roots.map((r) => r.name)).toEqual(["WM-1"]);
@@ -205,8 +210,9 @@ describe("three-storey stack: floors, the stack and the isometric", () => {
     expect(y("san-wc-3-1")).toBeGreaterThan(y("san-wc-2-1"));
     expect(y("san-wc-2-1")).toBeGreaterThan(y("san-wc-1-1"));
     golden("riser-stack-sanitary.svg", svgOf(s, "v-stack-san"));
-    const water = texts(evaluateDiagram(s.head.elements, view(s, "v-stack-water")));
-    expect(water).toEqual(expect.arrayContaining([`${STACK_RISER_TOTALS.cwService} WFU`, "13 WFU"]));
+    const water = texts(evaluateDiagram(s.head.elements, view(s, "v-stack-water"))).join(" ");
+    expect(water).toContain(`${STACK_RISER_TOTALS.cwService} WFU`);
+    expect(water).toContain("13 WFU");
   });
 
   it("the isometric projects every pipe from the model: risers stand vertical, each fixture named where it is", () => {

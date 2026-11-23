@@ -66,9 +66,11 @@ export type OneLineItem =
       /** The x of the line it labels, in the vertical layout (where a horizontal layout puts it). */
       readonly ref?: number;
       readonly align?: "left" | "center";
+      /** Optional white masking background behind the text box so crossing diagram lines stay broken. */
+      readonly mask?: boolean;
     }
   /** A type mark in an oval on a line (it stays upright in every orientation). */
-  | { readonly shape: "oval"; readonly center: Vec2; readonly text: string; readonly widthMm: number; readonly heightMm: number; readonly nodeId: string };
+  | { readonly shape: "oval"; readonly center: Vec2; readonly text: string; readonly widthMm: number; readonly heightMm: number; readonly nodeId: string; readonly mask?: boolean };
 
 export const ONE_LINE_ORIENTATIONS = ["vertical", "horizontal"] as const;
 /** vertical: power flows down the sheet. horizontal: power flows left to right. */

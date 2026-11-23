@@ -36,6 +36,8 @@ export type OutputLint = (before: ModelState, after: ModelState, changedIds: rea
 
 export interface CheckOptions {
   readonly lint?: OutputLint;
+  /** Called once after all edit batches succeed with the post-script model and every touched element id. */
+  readonly onAfterEdits?: (after: ModelState, touchedIds: readonly string[]) => void;
   /** Features the model server advertises (the slice's `features`): batches are decided under them, as the server will. */
   readonly features?: readonly string[];
   /** Part types: draw a picture of each view (needs the geometry engine; absent pictures are noted). Default true. */
@@ -78,6 +80,7 @@ function checkIn(model: ModelState, raw: unknown, options: CheckOptions): Output
     return { kind: "part_types", ok: types.every((t) => t.problems.length === 0), types };
   }
   const batches: BatchCheck[] = [];
+  const touched = new Set<string>();
   let head = model;
   for (const [index, batch] of output.batches.entries()) {
     const preview = previewEdit(head, batch, { label: batch.label });
@@ -85,8 +88,8 @@ function checkIn(model: ModelState, raw: unknown, options: CheckOptions): Output
       batches.push({ label: batch.label, steps: batch.commands.length, status: "refused", message: preview.message, reopens: [], quantityChanges: [], lint: [], fingerprint: preview.fingerprint });
       return { kind: "edits", ok: false, steps: output.steps, batches };
     }
-    // The next batch (or lint) needs the head after this one; the last batch without lint doesn't.
-    if (!options.lint && index === output.batches.length - 1) {
+    // The next batch (or lint / post-edit clash check) needs the head after this one; the last batch without them doesn't.
+    if (!options.lint && !options.onAfterEdits && index === output.batches.length - 1) {
       batches.push({ label: batch.label, steps: batch.commands.length, status: "checked", reopens: preview.reopens, quantityChanges: preview.quantityChanges, lint: [], fingerprint: preview.fingerprint });
       break;
     }
@@ -95,10 +98,12 @@ function checkIn(model: ModelState, raw: unknown, options: CheckOptions): Output
       batches.push({ label: batch.label, steps: batch.commands.length, status: "refused", message: applied.error.message, reopens: [], quantityChanges: [], lint: [], fingerprint: preview.fingerprint });
       return { kind: "edits", ok: false, steps: output.steps, batches };
     }
+    for (const id of applied.changedIds) touched.add(id);
     const lint = options.lint ? options.lint(head, applied.model, applied.changedIds) : [];
     batches.push({ label: batch.label, steps: batch.commands.length, status: "checked", reopens: preview.reopens, quantityChanges: preview.quantityChanges, lint, fingerprint: preview.fingerprint });
     head = applied.model;
   }
+  options.onAfterEdits?.(head, [...touched]);
   return { kind: "edits", ok: true, steps: output.steps, batches };
 }
 

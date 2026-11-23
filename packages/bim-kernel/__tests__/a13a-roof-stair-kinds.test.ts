@@ -66,8 +66,8 @@ describe("a13a roof and stair kinds", () => {
     expect(body?.pieces).toHaveLength(22);
     expect(body?.pieces[21]?.r1[0]?.z).toBeCloseTo(22 * (4000 / 23), 6);
     const plan = planGraphicsOf(element(m.head, "s"), ctx(m)) ?? [];
-    // 21 tread nosings + 1 centerline walk path + 2 V arrowhead strokes = 24 lines
-    expect(plan.filter((x) => x.form === "line")).toHaveLength(24);
+    // 21 tread nosings + 2 break/cut lines + 1 centerline walk path + 2 V arrowhead strokes = 26 lines
+    expect(plan.filter((x) => x.form === "line")).toHaveLength(26);
     expect(plan.find((x) => x.form === "text")).toMatchObject({ text: "UP" });
   });
 

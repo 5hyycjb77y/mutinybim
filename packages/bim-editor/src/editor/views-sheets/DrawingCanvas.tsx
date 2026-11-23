@@ -6,7 +6,7 @@ import type { SheetTitle } from '../../contracts/building-model/sheet-title'
 import { toast } from 'sonner'
 import { escapeLeavesField, leftFieldHint } from '../escape-step'
 import { ChevronDown, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
-import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, NORTH_ARROW_RADIUS_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutHead, canonicalJson, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, referencingSheet, resolveNote, sectionMarkEndpoints, textBlockToSvg, viewportNorthArrow, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
+import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, NORTH_ARROW_RADIUS_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutBoundaryPolygon, calloutHead, calloutLeaderAnchor, calloutSyncCommands, canonicalJson, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, polygonBounds, referencingSheet, resolveNote, sectionMarkEndpoints, tagLines, textBlockToSvg, viewportNorthArrow, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
 import { distributionEquipment } from '@permitzip/bim-pack-electrical'
 import type { Presence } from '@permitzip/bim-sync'
 import { NOTE_LOCK_REFRESH_MS, PresenceClock, editingNoteActivity, lockMessage, noteLocks, type NoteLock } from '@permitzip/bim-sync/note-locks'
@@ -45,7 +45,7 @@ import { FieldBlockProperties, type FieldBlockDraft } from '../blocks/FieldBlock
 import { DiagramLayer } from '../diagrams/DiagramLayer'
 import { AnnotationProperties } from './AnnotationProperties'
 import { CalloutProperties, CalloutViewDialog } from './CalloutFields'
-import { annotationBox, dimensionFromDrag, nearestSnap, nudgeEdits, nudgePaperStep, snapPoints, tagSpecFor, tagSpecLike, tagTargetAt, type SnapPoint } from './annotation-tools'
+import { annotationBox, buildGraphicsSnapIndex, dimensionFromDrag, nearestSnap, nudgeEdits, nudgePaperStep, snapPoints, snapToGraphics, tagSpecFor, tagSpecLike, tagTargetAt, type GraphicsSnapHit, type SnapPoint } from './annotation-tools'
 import { linkedDimensionAnchors } from '../linked-reference/linked-dimension-anchors'
 import { useLinkedReferenceState } from '../linked-reference/use-linked-reference'
 import { DetailSelectionProperties } from './draft/DetailSelectionProperties'
@@ -59,7 +59,7 @@ import { CreateSimilarChord } from '../create-similar'
 import { ScheduleColumnGrips } from './ScheduleColumnGrips'
 import { doubleClickOpensView } from './placed-view-actions'
 import { keyTakenByModelTool, planPointerFor, type PlanPointer } from '../view-input/plan-pointer'
-import { annotationGrips, gripCommand, type Grip } from './draft/grips'
+import { annotationGrips, calloutBoundaryAfterGrip, gripCommand, type Grip } from './draft/grips'
 import { dragGhost, dragMoveCommand, dragStarted, dragTo } from './draft/drag-move'
 
 const NoteEditor = dynamic(() => import('./notes/NoteEditor').then((m) => m.NoteEditor), { ssr: false })
@@ -93,8 +93,10 @@ type Drag =
   | { readonly kind: 'items-move'; readonly ids: readonly string[]; readonly from: Vec2; readonly to: Vec2; readonly started: boolean; readonly collapseTo: string | null }
   /** A grip on a selected dimension, tag or note leader. */
   | { readonly kind: 'grip'; readonly id: string; readonly grip: Grip; readonly to: Vec2 }
-  /** A corner of a region boundary being sketched (Edit Boundary), paper mm. */
+  /** A corner of a region or callout boundary being sketched (Edit Boundary), paper mm. */
   | { readonly kind: 'boundary-vertex'; readonly index: number; readonly to: Vec2 }
+  /** A whole edge of a boundary being slid in or out (Edit Boundary), paper mm. */
+  | { readonly kind: 'boundary-edge'; readonly index: number; readonly from: Vec2; readonly to: Vec2 }
   /** A note's edge: width re-wraps live; the bottom edge fixes the height. */
   | { readonly kind: 'note-size'; readonly id: string; readonly edge: NoteEdge; readonly from: Vec2; readonly start: NoteFrame; readonly frame: NoteFrame }
 
@@ -291,8 +293,14 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     setDragState(next)
   }, [])
   const [noteEdit, setNoteEdit] = useState<NoteEditing | null>(null)
-  /** A callout box just dragged, waiting for the view it refers to. */
-  const [calloutDraft, setCalloutDraft] = useState<{ readonly a: Vec2; readonly b: Vec2; readonly head: Vec2 } | null>(null)
+  /** A callout box or sketched P-line polygon just drawn, waiting for the view it refers to. */
+  const [calloutDraft, setCalloutDraft] = useState<{ readonly a: Vec2; readonly b: Vec2; readonly head: Vec2; readonly polygon?: readonly Vec2[] } | null>(null)
+  /** New callout creation shape: classic rectangle or custom Revit-style P-line polygon. */
+  const [calloutMode, setCalloutMode] = useState<'rect' | 'pline'>('rect')
+  /** Active click-by-click P-line sketch (itemId === null creates a new callout; non-null replaces that callout's boundary). */
+  const [plineSketch, setPlineSketch] = useState<{ readonly itemId: string | null; readonly points: readonly Vec2[]; readonly hover: Vec2 | null } | null>(null)
+  /** Active graphics snap indicator while dragging callout grips, editing a boundary, or sketching a P-line. */
+  const [activeSnap, setActiveSnap] = useState<GraphicsSnapHit | null>(null)
   const noteFonts = useNoteFonts()
   const [dropHint, setDropHint] = useState(false)
   /** The viewport opened for editing in place on the sheet (double-click). If it leaves the sheet, sheet editing resumes. */
@@ -430,8 +438,19 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       setAlsoPicked([])
     }
   }
-  /** Edit Boundary on a filled or masking region: its corners (paper mm) until Finish or Cancel; the region keeps its old shape meanwhile. */
-  const [boundary, setBoundary] = useState<{ readonly itemId: string; readonly points: readonly Vec2[]; readonly picked: number | null } | null>(null)
+  /** Edit Boundary on a filled/masking region OR enlarged callout: its corners (paper mm) until Finish or Cancel. */
+  const [boundary, setBoundary] = useState<{ readonly itemId: string; readonly kind: 'region' | 'callout'; readonly points: readonly Vec2[]; readonly picked: number | null } | null>(null)
+  /** Paper-space snap index for wall faces/corners, grids & intersections — computed lazily while editing callouts or sketching P-lines. */
+  const needGraphicsSnap =
+    annotatedView !== null &&
+    (tool === 'callout' ||
+      boundary?.kind === 'callout' ||
+      plineSketch !== null ||
+      (selection?.kind === 'item' && items.some((i) => i.id === selection.id && i.shape === 'callout')))
+  const graphicsIndex = useMemo(
+    () => (needGraphicsSnap && annotatedView ? buildGraphicsSnapIndex(model, annotatedView, toPaperPoint) : null),
+    [needGraphicsSnap, model, annotatedView, toPaperPoint],
+  )
 
   /** The view under model editing: the open plan or section drawing, or the one opened on the sheet. */
   const modelView = useMemo(() => {
@@ -652,7 +671,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
 
   const startBoundary = useCallback(
     (itemId: string) => {
-      const item = items.find((i) => i.id === itemId && i.shape === 'region')
+      const item = items.find((i) => i.id === itemId && (i.shape === 'region' || i.shape === 'callout'))
       if (!item) return
       if (item.pinned) {
         toast("It's pinned. Unpin it first (Modify > Unpin).")
@@ -660,10 +679,62 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       }
       setTool('select')
       draft.setPending(null)
-      setBoundary({ itemId, points: item.points.map(toPaperPoint), picked: null })
+      setPlineSketch(null)
+      setActiveSnap(null)
+      if (item.shape === 'callout') {
+        const poly = calloutBoundaryPolygon(item)
+        if (!poly || poly.length < 3) return
+        setSelection({ kind: 'item', id: item.id })
+        setBoundary({ itemId, kind: 'callout', points: poly.map(toPaperPoint), picked: null })
+        return
+      }
+      setBoundary({ itemId, kind: 'region', points: item.points.map(toPaperPoint), picked: null })
     },
     [items, toPaperPoint, setTool, draft],
   )
+
+  /** Start click-by-click Revit-style P-line callout sketching (itemId = null creates a new callout; non-null replaces that callout's boundary). */
+  const startCalloutPlineSketch = useCallback(
+    (itemId: string | null) => {
+      if (!canEdit) {
+        toast.error(blockedReason)
+        return
+      }
+      setBoundary(null)
+      setActiveSnap(null)
+      draft.setPending(null)
+      if (itemId) setTool('select')
+      setPlineSketch({ itemId, points: [], hover: null })
+    },
+    [canEdit, blockedReason, draft, setTool],
+  )
+
+  /** Convert a custom polygonal P-line callout back to a clean axis-aligned rectangle (and clear target `cropPolygon`). */
+  const resetCalloutRectangle = useCallback(
+    (itemId: string) => {
+      const item = items.find((i) => i.id === itemId && i.shape === 'callout' && i.callout)
+      if (!item) return
+      const poly = calloutBoundaryPolygon(item)
+      const bounds = poly ? polygonBounds(poly) : null
+      if (!bounds) return
+      const rectPoly: Vec2[] = [bounds.min, { x: bounds.max.x, y: bounds.min.y }, bounds.max, { x: bounds.min.x, y: bounds.max.y }]
+      const cmds = calloutSyncCommands(model, item, rectPoly)
+      if (typeof cmds === 'string') {
+        toast.error(cmds)
+        return
+      }
+      const ok =
+        cmds.length === 1 && cmds[0]
+          ? send(cmds[0], 'reset callout to rectangle')
+          : send({ type: 'batch_documents', label: 'Reset callout boundary to rectangle', commands: cmds }, 'reset callout to rectangle')
+      if (ok) {
+        setBoundary(null)
+        setSelection({ kind: 'item', id: item.id })
+      }
+    },
+    [items, model, send],
+  )
+
   /** Create similar on a tag (C S, or its properties' button): the Tag tool, set to tag the next element the same way. */
   const startTagLike = useCallback(
     (like: TagSpec) => {
@@ -680,23 +751,103 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
   useEffect(() => {
     if (tool !== 'tag' && tagLike) setTagLike(null)
   }, [tool, tagLike])
+  useEffect(() => {
+    // Switching away from Callout cancels any in-progress new-callout P-line sketch
+    if (tool !== 'callout' && plineSketch && plineSketch.itemId === null) {
+      setPlineSketch(null)
+      setActiveSnap(null)
+    }
+  }, [tool, plineSketch])
   const similarChord = useRef(new CreateSimilarChord())
 
   const cancelBoundary = useCallback(() => {
+    const kind = boundary?.kind
     setBoundary(null)
-    toast('Boundary edit cancelled. The region is as it was.')
-  }, [])
+    setActiveSnap(null)
+    toast(kind === 'callout' ? 'Boundary edit cancelled. The callout is as it was.' : 'Boundary edit cancelled. The region is as it was.')
+  }, [boundary])
+
   const finishBoundary = useCallback(() => {
     if (!boundary) return
     if (boundary.points.length < 3) {
-      toast('A region needs at least three corners.')
+      toast('A boundary needs at least three corners.')
+      return
+    }
+    setActiveSnap(null)
+    if (boundary.kind === 'callout') {
+      const item = items.find((i) => i.id === boundary.itemId && i.shape === 'callout')
+      if (!item) return
+      const cmds = calloutSyncCommands(model, item, boundary.points.map(toStored))
+      if (typeof cmds === 'string') {
+        toast.error(cmds)
+        return
+      }
+      const ok =
+        cmds.length === 1 && cmds[0]
+          ? send(cmds[0], 'update callout boundary')
+          : send({ type: 'batch_documents', label: 'Update callout P-line boundary and sync enlarged plan crop', commands: cmds }, 'update callout boundary')
+      if (ok) {
+        setBoundary(null)
+        setSelection({ kind: 'item', id: boundary.itemId })
+      }
       return
     }
     if (send({ type: 'update_drawing_item', itemId: boundary.itemId, points: boundary.points.map(toStored) }, 'change the region boundary')) {
       setBoundary(null)
       setSelection({ kind: 'item', id: boundary.itemId })
     }
-  }, [boundary, send, toStored])
+  }, [boundary, items, model, send, toStored])
+
+  const cancelPlineSketch = useCallback(() => {
+    setPlineSketch(null)
+    setActiveSnap(null)
+  }, [])
+
+  const finishPlineSketch = useCallback(
+    (paperPts?: readonly Vec2[]) => {
+      const sketch = plineSketch
+      if (!sketch) return
+      const pts = paperPts ?? sketch.points
+      if (pts.length < 3) {
+        toast('Click at least three corners to close a custom P-line callout.')
+        return
+      }
+      const storedPts = pts.map(toStored)
+      const bounds = polygonBounds(storedPts)
+      if (!bounds || bounds.max.x - bounds.min.x < 25.4 || bounds.max.y - bounds.min.y < 25.4) {
+        toast('The P-line callout needs to span at least 1 in each way.')
+        return
+      }
+      setActiveSnap(null)
+      if (sketch.itemId) {
+        const item = items.find((i) => i.id === sketch.itemId && i.shape === 'callout')
+        if (!item) {
+          setPlineSketch(null)
+          return
+        }
+        const cmds = calloutSyncCommands(model, item, storedPts)
+        if (typeof cmds === 'string') {
+          toast.error(cmds)
+          return
+        }
+        const ok =
+          cmds.length === 1 && cmds[0]
+            ? send(cmds[0], 'update callout P-line boundary')
+            : send({ type: 'batch_documents', label: 'Sketch custom P-line callout boundary and sync enlarged plan crop', commands: cmds }, 'update callout P-line boundary')
+        if (ok) {
+          setPlineSketch(null)
+          setSelection({ kind: 'item', id: sketch.itemId })
+        }
+        return
+      }
+      // New P-line callout: open CalloutViewDialog with the sketched polygon!
+      const paperBounds = polygonBounds(pts)!
+      const head = toStored({ x: paperBounds.min.x - 8, y: paperBounds.min.y - 8 })
+      setPlineSketch(null)
+      setCalloutDraft({ a: bounds.min, b: bounds.max, head, polygon: storedPts })
+    },
+    [plineSketch, toStored, items, model, send],
+  )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -713,6 +864,19 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       // The Draw space and Place layers own Enter, Backspace and Esc while they are on.
       if (tracing || (placing && modelView)) return
       if (keyTakenByModelTool(e)) return
+      if (plineSketch) {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          finishPlineSketch()
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          cancelPlineSketch()
+        } else if (e.key === 'Backspace' && plineSketch.points.length > 0) {
+          e.preventDefault()
+          setPlineSketch({ ...plineSketch, points: plineSketch.points.slice(0, -1) })
+        }
+        return
+      }
       if (boundary) {
         if (e.key === 'Enter') {
           e.preventDefault()
@@ -720,7 +884,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         } else if (e.key === 'Escape') cancelBoundary()
         else if ((e.key === 'Delete' || e.key === 'Backspace') && boundary.picked !== null) {
           e.preventDefault()
-          if (boundary.points.length <= 3) toast('A region needs at least three corners.')
+          if (boundary.points.length <= 3) toast('A boundary needs at least three corners.')
           else setBoundary({ ...boundary, points: boundary.points.filter((_, i) => i !== boundary.picked), picked: null })
         }
         return
@@ -794,7 +958,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, modelEdit, boundary, finishBoundary, cancelBoundary, tracing, placing, modelView, startTagLike, blockedReason, toStored])
+  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored])
 
   /** Paper point under a pointer event on the overlay or anything in it. */
   const paperOf = (e: React.PointerEvent<SVGElement>): Vec2 | null => {
@@ -854,8 +1018,36 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     if (e.button !== 0) return
     const at = paperOf(e)
     if (!at) return
-    // Sketching a region boundary: only its grips take clicks until Finish or Cancel.
+    // Sketching a region or callout boundary: only its grips take clicks until Finish or Cancel.
     if (boundary) return
+    // Click-by-click Revit-style P-line callout sketching (either re-sketching an existing callout or drawing a new one).
+    if (plineSketch || (tool === 'callout' && calloutMode === 'pline')) {
+      if (!canEdit) {
+        toast.error(blockedReason)
+        return
+      }
+      if (active && !insideRect(active.rect, at)) {
+        toast(`Sketch inside ${active.view.name}'s frame, or press Esc to cancel.`)
+        return
+      }
+      e.preventDefault()
+      const currentPts = plineSketch?.points ?? []
+      const prevPt = currentPts.length > 0 ? currentPts[currentPts.length - 1]! : null
+      const orthoOn = draft.settings.ortho || e.shiftKey
+      const hit = snapToGraphics(graphicsIndex, at, snapReach, {
+        alignRefs: currentPts,
+        orthoFrom: orthoOn ? prevPt : null,
+      })
+      const pt = hit?.at ?? at
+      const closeReach = 4 / Math.max(zoom, 0.25)
+      if (currentPts.length >= 3 && Math.hypot(pt.x - currentPts[0]!.x, pt.y - currentPts[0]!.y) <= closeReach) {
+        finishPlineSketch(currentPts)
+        return
+      }
+      if (prevPt && Math.hypot(pt.x - prevPt.x, pt.y - prevPt.y) < 0.5) return
+      setPlineSketch({ itemId: plineSketch?.itemId ?? null, points: [...currentPts, pt], hover: pt })
+      return
+    }
     // A click outside the open note saves it (and does nothing else). A press on the note itself is not outside it:
     // a double-click on a selected note opens the editor on its first click, and the second must not close it again.
     if (noteEdit) {
@@ -934,6 +1126,13 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       return
     }
     if (tool === 'polygon') return
+    if (tool === 'callout') {
+      const hit = snapToGraphics(graphicsIndex, at, snapReach)
+      setActiveSnap(hit)
+      const start = hit?.at ?? at
+      setDrag({ kind: 'draw', shape: 'callout', a: start, b: start })
+      return
+    }
     const start = tool === 'dimension' ? at : draftInput.constrain(at, null).at
     setDrag({ kind: 'draw', shape: tool, a: start, b: start })
   }
@@ -946,17 +1145,97 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       const near = nearestSnap(snaps, at, snapReach)
       if (near?.ref.elementId !== hoverSnap?.ref.elementId || near?.ref.anchor !== hoverSnap?.ref.anchor) setHoverSnap(near)
     } else if (hoverSnap) setHoverSnap(null)
+    if (!drag && (plineSketch || (tool === 'callout' && calloutMode === 'pline'))) {
+      const currentPts = plineSketch?.points ?? []
+      const prevPt = currentPts.length > 0 ? currentPts[currentPts.length - 1]! : null
+      const orthoOn = draft.settings.ortho || e.shiftKey
+      const hit = snapToGraphics(graphicsIndex, at, snapReach, {
+        alignRefs: currentPts,
+        orthoFrom: orthoOn ? prevPt : null,
+      })
+      setActiveSnap(hit)
+      if (plineSketch) setPlineSketch((cur) => (cur ? { ...cur, hover: hit?.at ?? at } : cur))
+      return
+    }
     draftInput.move(at)
-    if (!drag) return
+    if (!drag) {
+      if (activeSnap) setActiveSnap(null)
+      return
+    }
     switch (drag.kind) {
       case 'draw':
-        setDrag({ ...drag, b: drag.shape === 'dimension' ? at : draftInput.constrain(at, drag.a).at })
+        if (drag.shape === 'callout') {
+          const hit = snapToGraphics(graphicsIndex, at, snapReach, { alignRefs: [drag.a] })
+          setActiveSnap(hit)
+          setDrag({ ...drag, b: hit?.at ?? at })
+        } else {
+          setDrag({ ...drag, b: drag.shape === 'dimension' ? at : draftInput.constrain(at, drag.a).at })
+        }
         break
       case 'grip':
-        setDrag({ ...drag, to: drag.grip.kind === 'dim-point' ? (nearestSnap(snaps, at, snapReach)?.at ?? at) : drag.grip.kind === 'dim-offset' ? at : draftInput.constrain(at, null).at })
+        if (drag.grip.kind === 'callout-corner' || drag.grip.kind === 'callout-edge' || drag.grip.kind === 'callout-poly-edge' || drag.grip.kind === 'callout-vertex') {
+          const item = items.find((i) => i.id === drag.id)
+          const polyPaper = item ? (calloutBoundaryPolygon(item)?.map(toPaperPoint) ?? []) : []
+          const alignRefs =
+            drag.grip.kind === 'callout-vertex' && polyPaper.length >= 3
+              ? [
+                  polyPaper[(drag.grip.index - 1 + polyPaper.length) % polyPaper.length]!,
+                  polyPaper[(drag.grip.index + 1) % polyPaper.length]!,
+                ]
+              : []
+          const isAxisEdge = drag.grip.kind === 'callout-edge' || drag.grip.kind === 'callout-poly-edge'
+          const hit = snapToGraphics(graphicsIndex, at, snapReach, {
+            lockAxis: isAxisEdge ? (drag.grip.axis ?? null) : null,
+            alignRefs,
+          })
+          setActiveSnap(hit)
+          const snapped = hit?.at ?? at
+          const constrained =
+            isAxisEdge && drag.grip.axis === 'x'
+              ? { x: snapped.x, y: drag.grip.at.y }
+              : isAxisEdge && drag.grip.axis === 'y'
+                ? { x: drag.grip.at.x, y: snapped.y }
+                : snapped
+          setDrag({ ...drag, to: constrained })
+        } else if (drag.grip.kind === 'callout-head') {
+          setActiveSnap(null)
+          setDrag({ ...drag, to: at })
+        } else {
+          setDrag({ ...drag, to: drag.grip.kind === 'dim-point' ? (nearestSnap(snaps, at, snapReach)?.at ?? at) : drag.grip.kind === 'dim-offset' ? at : draftInput.constrain(at, null).at })
+        }
         break
+      case 'boundary-edge': {
+        const bPts = boundary?.points ?? []
+        const n = bPts.length
+        const p0 = bPts[drag.index]
+        const p1 = bPts[(drag.index + 1) % n]
+        if (p0 && p1 && boundary?.kind === 'callout') {
+          const dx = Math.abs(p1.x - p0.x)
+          const dy = Math.abs(p1.y - p0.y)
+          const lockAxis: 'x' | 'y' | null = dy < dx * 0.2 ? 'y' : dx < dy * 0.2 ? 'x' : null
+          const hit = snapToGraphics(graphicsIndex, at, snapReach, { lockAxis })
+          setActiveSnap(hit)
+          setDrag({ ...drag, to: hit?.at ?? at })
+        } else {
+          setDrag({ ...drag, to: at })
+        }
+        break
+      }
       case 'boundary-vertex':
-        setDrag({ ...drag, to: draftInput.constrain(at, null).at })
+        if (boundary?.kind === 'callout') {
+          const n = boundary.points.length
+          const prevPt = boundary.points[(drag.index - 1 + n) % n]
+          const nextPt = boundary.points[(drag.index + 1) % n]
+          const alignRefs = [prevPt, nextPt].filter((p): p is Vec2 => Boolean(p))
+          const hit = snapToGraphics(graphicsIndex, at, snapReach, {
+            alignRefs,
+            orthoFrom: draft.settings.ortho || e.shiftKey ? (prevPt ?? null) : null,
+          })
+          setActiveSnap(hit)
+          setDrag({ ...drag, to: hit?.at ?? at })
+        } else {
+          setDrag({ ...drag, to: draftInput.constrain(at, null).at })
+        }
         break
       case 'note-new':
         setDrag({ ...drag, b: at })
@@ -985,6 +1264,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
   const onPointerUp = () => {
     const d = dragRef.current
     setDrag(null)
+    setActiveSnap(null)
     if (!d) return
     if (d.kind === 'note-new') {
       const wide = Math.abs(d.b.x - d.a.x) >= 5
@@ -1005,11 +1285,48 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       }
       const command = gripCommand({ model, view: annotatedView, item, grip: d.grip, to: d.to, snap: d.grip.kind === 'dim-point' ? nearestSnap(snaps, d.to, snapReach) : null, toPaper: toPaperPoint, toStored, items, ownerId, idPrefix: newId('grip') })
       if (typeof command === 'string') toast(command)
-      else if (command) send(command, d.grip.kind === 'frame-corner' ? `resize ${item.figure?.kind === 'image' ? 'picture' : 'chart'}` : d.grip.kind === 'tag-head' ? 'move the tag' : d.grip.kind.startsWith('leader') ? 'move the leader' : d.grip.kind === 'detail-end' ? 'drag the end' : 'change the dimension')
+      else if (command)
+        send(
+          command,
+          d.grip.kind === 'callout-head'
+            ? 'move the callout bubble'
+            : d.grip.kind.startsWith('callout-')
+              ? 'resize callout and sync enlarged plan crop'
+              : d.grip.kind === 'frame-corner'
+                ? `resize ${item.figure?.kind === 'image' ? 'picture' : 'chart'}`
+                : d.grip.kind === 'tag-head'
+                  ? 'move the tag'
+                  : d.grip.kind.startsWith('leader')
+                    ? 'move the leader'
+                    : d.grip.kind === 'detail-end'
+                      ? 'drag the end'
+                      : 'change the dimension',
+        )
       return
     }
     if (d.kind === 'boundary-vertex') {
       setBoundary((b) => (b ? { ...b, points: b.points.map((p, i) => (i === d.index ? d.to : p)), picked: d.index } : b))
+      return
+    }
+    if (d.kind === 'boundary-edge') {
+      setBoundary((b) => {
+        if (!b || b.points.length < 3) return b
+        const n = b.points.length
+        const i0 = d.index
+        const i1 = (i0 + 1) % n
+        const p0 = b.points[i0]!
+        const p1 = b.points[i1]!
+        const ex = p1.x - p0.x
+        const ey = p1.y - p0.y
+        const len = Math.hypot(ex, ey)
+        if (len < 1e-3) return b
+        const nx = -ey / len
+        const ny = ex / len
+        const proj = (d.to.x - d.from.x) * nx + (d.to.y - d.from.y) * ny
+        const dx = nx * proj
+        const dy = ny * proj
+        return { ...b, points: b.points.map((p, i) => (i === i0 || i === i1 ? { x: p.x + dx, y: p.y + dy } : p)), picked: null }
+      })
       return
     }
     if (d.kind === 'items-move') {
@@ -1029,6 +1346,21 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         const moved = tagElbows.moveCommand(lone, toStored({ x: at.x + d.to.x - d.from.x, y: at.y + d.to.y - d.from.y }))
         send(moved.command, moved.label)
         return
+      }
+      if (lone && lone.shape === 'callout' && lone.callout) {
+        const poly = calloutBoundaryPolygon(lone)
+        if (poly && poly.length >= 3) {
+          const aS = toStored(d.from)
+          const bS = toStored(d.to)
+          const dS = { x: bS.x - aS.x, y: bS.y - aS.y }
+          const shiftedPoly = poly.map((q) => ({ x: q.x + dS.x, y: q.y + dS.y }))
+          const shiftedHead = lone.points[2] ? { x: lone.points[2].x + dS.x, y: lone.points[2].y + dS.y } : undefined
+          const cmds = calloutSyncCommands(model, lone, shiftedPoly, shiftedHead)
+          if (typeof cmds === 'string') toast.error(cmds)
+          else if (cmds.length === 1 && cmds[0]) send(cmds[0], 'move the callout')
+          else send({ type: 'batch_documents', label: 'Move callout and sync enlarged plan crop', commands: cmds }, 'move the callout')
+          return
+        }
       }
       const made = dragMoveCommand({ items, ids: d.ids, from: d.from, to: d.to, toStored, ownerId, idPrefix: newId('mod') })
       if (!made.ok) toast(made.reason)
@@ -1339,8 +1671,55 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
             params={draft.params}
             onParams={draft.setParams}
             prompt={null}
-            onCancel={() => draftInput.cancel()}
-            sketch={boundary ? { prompt: 'Edit boundary: drag a corner, click a + to add a corner, click a corner and press Delete to remove it.', onFinish: finishBoundary, onCancel: cancelBoundary } : null}
+            onCancel={() => {
+              if (plineSketch) cancelPlineSketch()
+              else draftInput.cancel()
+            }}
+            calloutMode={calloutMode}
+            onCalloutMode={(mode) => {
+              setCalloutMode(mode)
+              if (mode === 'rect' && plineSketch?.itemId === null) cancelPlineSketch()
+            }}
+            calloutActions={
+              !boundary && !plineSketch && tool === 'select' && selectedItem?.shape === 'callout' && selectedItem.callout && alsoPicked.length === 0
+                ? {
+                    isPolygon: Boolean(selectedItem.callout.boundary && selectedItem.callout.boundary.length >= 3),
+                    canEdit,
+                    onEditBoundary: () => startBoundary(selectedItem.id),
+                    onSketchNew: () => startCalloutPlineSketch(selectedItem.id),
+                    ...(selectedItem.callout.boundary && selectedItem.callout.boundary.length >= 3 ? { onResetRect: () => resetCalloutRectangle(selectedItem.id) } : {}),
+                    onOpenView: () => onOpenView(selectedItem.callout!.viewId),
+                  }
+                : null
+            }
+            sketch={
+              plineSketch
+                ? {
+                    prompt:
+                      plineSketch.points.length < 3
+                        ? 'Sketch P-line callout: click corners snapping to walls & grids (Shift = 90° ortho, Backspace = undo).'
+                        : `Sketch P-line callout (${plineSketch.points.length} corners): click first corner, double-click, or press Enter to close.`,
+                    finishLabel: 'Close P-Line (Enter)',
+                    onFinish: () => finishPlineSketch(),
+                    onCancel: cancelPlineSketch,
+                  }
+                : boundary
+                  ? {
+                      prompt:
+                        boundary.kind === 'callout'
+                          ? 'Edit callout boundary: drag corners (snaps to walls & grids), click/drag + to add an L-shape notch, Delete removes a corner.'
+                          : 'Edit boundary: drag a corner, click a + to add a corner, click a corner and press Delete to remove it.',
+                      onFinish: finishBoundary,
+                      onCancel: cancelBoundary,
+                      ...(boundary.kind === 'callout'
+                        ? {
+                            onSketchNew: () => startCalloutPlineSketch(boundary.itemId),
+                            onResetRect: () => resetCalloutRectangle(boundary.itemId),
+                          }
+                        : {}),
+                    }
+                  : null
+            }
           />
         </div>
         <div
@@ -1393,6 +1772,11 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
               onPointerUp={onPointerUp}
               onPointerCancel={() => setDrag(null)}
               onDoubleClick={(e) => {
+                if (plineSketch && plineSketch.points.length >= 3) {
+                  e.preventDefault()
+                  finishPlineSketch()
+                  return
+                }
                 if (draftInput.finish()) return
                 // A press on a viewport starts a move with the pointer captured here, so the browser sends
                 // the double-click to this overlay rather than the viewport: find the viewport under the pointer.
@@ -1430,6 +1814,31 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   onResize={({ columnId, widthMm }) => send({ type: 'edit_schedule', viewId: selectedSchedule.view.id, steps: [{ op: 'resize_column', columnId, widthMm }] }, 'change the column width')}
                 />
               )}
+              {!active && tool === 'select' && drawn.scene && (
+                <g data-testid="sheet-link-hotspots">
+                  {drawn.scene.primitives.flatMap((pr, idx) => {
+                    if (pr.kind !== 'text' || !pr.href) return []
+                    const estW = Math.max(8, pr.text.length * pr.size * 0.65)
+                    const estH = pr.size * 1.6
+                    const x = pr.anchor === 'middle' ? pr.at.x - estW / 2 : pr.anchor === 'end' ? pr.at.x - estW : pr.at.x
+                    const y = pr.at.y - estH * 0.75
+                    return [
+                      <a
+                        key={`href-${idx}`}
+                        href={pr.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="cursor-pointer"
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <rect x={x} y={y} width={estW} height={estH} fill="transparent">
+                          <title>{`Open ${pr.href}`}</title>
+                        </rect>
+                      </a>,
+                    ]
+                  })}
+                </g>
+              )}
               {spaces && modelEdit && floorPlanView && (
                 <SpacesPlanLayer
                   projectId={spaces.projectId}
@@ -1463,25 +1872,45 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                 <ModelDrawingLayer model={model} view={modelView} bridge={modelEdit} paperOf={paperOf} paperMmPerPx={1 / (pxPerMm || 1)} onPicked={() => setSelection(null)} />
               )}
               {modelEdit && modelView && tool === 'select' && !noteEdit && !placing && !tracing && <LevelLinesLayer model={model} view={modelView} bridge={modelEdit} paperOf={paperOf} paperMmPerPx={1 / (pxPerMm || 1)} />}
-              {modelEdit && frame && openView?.props?.diagram && target.kind === 'detail' && tool === 'select' && !noteEdit && (
-                <DiagramLayer
-                  model={model}
-                  view={openView}
-                  toPaper={(p) => modelToPaper(frame, p)}
-                  toDrawing={(p) => paperToModel(frame, p)}
-                  paperOf={paperOf}
-                  selectedIds={modelEdit.selectedIds}
-                  canEdit={canEdit}
-                  blockedReason={blockedReason}
-                  submit={submit}
-                  onSelect={(id) => {
-                    setSelection(null)
-                    modelEdit.select(id)
-                  }}
-                  hint={(m) => modelEdit.hint(m)}
+              {(() => {
+                const diagramView = active?.view.props?.diagram ? active.view : target.kind === 'detail' && openView?.props?.diagram ? openView : null
+                const diagramFrame = active?.view.props?.diagram ? active.frame : frame
+                if (!modelEdit || !diagramView || !diagramFrame || tool !== 'select' || noteEdit || placing || tracing) return null
+                return (
+                  <DiagramLayer
+                    model={model}
+                    view={diagramView}
+                    toPaper={(p) => modelToPaper(diagramFrame, p)}
+                    toDrawing={(p) => paperToModel(diagramFrame, p)}
+                    paperOf={paperOf}
+                    selectedIds={modelEdit.selectedIds}
+                    canEdit={canEdit}
+                    blockedReason={blockedReason}
+                    submit={submit}
+                    onSelect={(id) => {
+                      setSelection(null)
+                      modelEdit.select(id)
+                    }}
+                    hint={(m) => modelEdit.hint(m)}
+                  />
+                )
+              })()}
+              {target.kind === 'detail' && openView && ownCropRect && <AnnotationCropRegion rect={ownCropRect} props={openView.props} testId="view-annotation-crop" />}
+              {showOwnCrop && ownCropRect && openView?.props?.cropPolygon && openView.props.cropPolygon.length >= 3 && drag?.kind !== 'crop' && (
+                <polygon
+                  points={openView.props.cropPolygon.map((pt) => {
+                    const q = toPaperPoint(pt)
+                    return `${q.x},${q.y}`
+                  }).join(' ')}
+                  fill="none"
+                  stroke={PRIMARY}
+                  strokeOpacity={0.6}
+                  strokeWidth={0.45}
+                  strokeDasharray="2 1"
+                  pointerEvents="none"
+                  data-testid="view-crop-polygon"
                 />
               )}
-              {target.kind === 'detail' && openView && ownCropRect && <AnnotationCropRegion rect={ownCropRect} props={openView.props} testId="view-annotation-crop" />}
               {showOwnCrop && ownCropRect && (
                 <CropBoxGrips
                   rect={ownCropRect}
@@ -1532,37 +1961,156 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                       />
                     )
                   }
+                  if (item.shape === 'callout' && item.callout) {
+                    const poly = calloutBoundaryPolygon(item)
+                    if (!poly || poly.length < 3) return null
+                    const paperPoly = poly.map(toPaperPoint)
+                    const headPaper = item.points[2] ? toPaperPoint(item.points[2]) : paperPoly[0]!
+                    const selected = selectedIds.includes(item.id)
+                    const isPoly = Boolean(item.callout.boundary && item.callout.boundary.length >= 3)
+                    const hitStrokeW = Math.max(2.6, 4.0 / Math.max(zoom, 0.25))
+                    const headInfo = calloutHead(model, item.callout)
+                    return (
+                      <g
+                        key={item.id}
+                        data-testid="drawn-callout"
+                        data-callout-id={item.id}
+                        data-selected={selected || undefined}
+                        transform={moveDelta && movingIds.has(item.id) ? `translate(${moveDelta.x} ${moveDelta.y})` : undefined}
+                      >
+                        <polygon
+                          points={paperPoly.map((q) => `${q.x},${q.y}`).join(' ')}
+                          fill="none"
+                          stroke={selected ? PRIMARY : 'transparent'}
+                          strokeWidth={selected ? Math.max(0.7, 0.9 / Math.max(zoom, 0.25)) : hitStrokeW}
+                          strokeDasharray={selected ? '3 1.5' : undefined}
+                          pointerEvents="none"
+                        />
+                        <polygon
+                          points={paperPoly.map((q) => `${q.x},${q.y}`).join(' ')}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={hitStrokeW}
+                          pointerEvents={tool === 'select' && !draftInput.active && !plineSketch && !boundary ? 'stroke' : 'none'}
+                          className={tool === 'select' && !draftInput.active && !plineSketch && !boundary ? 'cursor-pointer' : 'pointer-events-none'}
+                          onPointerDown={(e) => {
+                            if (tool !== 'select' || draftInput.active || plineSketch || boundary || e.button !== 0) return
+                            e.stopPropagation()
+                            modelEdit?.select(null)
+                            if (e.shiftKey && selection?.kind === 'item') {
+                              if (item.id !== selection.id) setAlsoPicked((cur) => (cur.includes(item.id) ? cur.filter((id) => id !== item.id) : [...cur, item.id]))
+                              return
+                            }
+                            pressItem(e, item.id)
+                          }}
+                          onDoubleClick={(e) => {
+                            if (tool !== 'select' || !canEdit || boundary) return
+                            e.stopPropagation()
+                            startBoundary(item.id)
+                          }}
+                        >
+                          <title>{`${headInfo.viewName || 'Callout'} (${isPoly ? 'P-Line' : 'Rectangle'}) — Click to drag extents on sheet; double-click border to edit P-line corners`}</title>
+                        </polygon>
+                        <circle
+                          cx={headPaper.x}
+                          cy={headPaper.y}
+                          r={HEAD_RADIUS_MM + 1.2}
+                          fill="transparent"
+                          stroke={selected && !boundary ? PRIMARY : 'transparent'}
+                          strokeWidth={0.5}
+                          pointerEvents={tool === 'select' && !draftInput.active && !plineSketch && !boundary ? 'all' : 'none'}
+                          className={tool === 'select' && !draftInput.active && !plineSketch && !boundary ? 'cursor-pointer' : 'pointer-events-none'}
+                          onPointerDown={(e) => {
+                            if (tool !== 'select' || draftInput.active || plineSketch || boundary || e.button !== 0) return
+                            e.stopPropagation()
+                            modelEdit?.select(null)
+                            pressItem(e, item.id)
+                          }}
+                          onDoubleClick={(e) => {
+                            if (tool !== 'select') return
+                            e.stopPropagation()
+                            onOpenView(item.callout!.viewId)
+                          }}
+                        >
+                          <title>{`${headInfo.top}/${headInfo.bottom} ${headInfo.viewName} — Click to select; double-click bubble to open view`}</title>
+                        </circle>
+                      </g>
+                    )
+                  }
                   const box = item.dim || item.tag ? annotationBox(model, annotatedView, item, toPaperPoint) : detailBox(item, toPaperPoint)
                   if (!box) return null
                   const selected = selectedIds.includes(item.id)
+                  const isMoving = Boolean(moveDelta && movingIds.has(item.id))
+                  const liveTagLines = isMoving && item.tag ? (tagLines(model, item.tag) ?? []) : null
                   return (
-                    <rect
-                      key={item.id}
-                      x={box.x - 1.5}
-                      y={box.y - 1.5}
-                      width={box.w + 3}
-                      height={box.h + 3}
-                      fill="transparent"
-                      stroke={selected ? PRIMARY : 'transparent'}
-                      strokeDasharray="2 1.5"
-                      strokeWidth={0.5}
-                      className={tool === 'select' && !draftInput.active ? 'cursor-pointer' : 'pointer-events-none'}
-                      data-testid={`drawn-${item.shape}`}
-                      data-selected={selected || undefined}
-                      transform={moveDelta && movingIds.has(item.id) ? `translate(${moveDelta.x} ${moveDelta.y})` : undefined}
-                      onPointerDown={(e) => {
-                        if (tool !== 'select' || draftInput.active || e.button !== 0) return
-                        if (e.shiftKey && selection?.kind === 'item') {
-                          e.stopPropagation()
-                          // Shift+click adds to (or takes from) the pick for modify operations.
-                          if (item.id !== selection.id) setAlsoPicked((cur) => (cur.includes(item.id) ? cur.filter((id) => id !== item.id) : [...cur, item.id]))
-                          return
-                        }
-                        pressItem(e, item.id)
-                      }}
-                    >
-                      <title>{item.shape === 'text' ? item.text : item.tag ? 'Tag' : item.dim ? 'Dimension' : item.shape}</title>
-                    </rect>
+                    <g key={item.id}>
+                      {isMoving && (
+                        <rect
+                          x={box.x - 1}
+                          y={box.y - 1}
+                          width={box.w + 2}
+                          height={box.h + 2}
+                          fill="#ffffff"
+                          fillOpacity={0.8}
+                          pointerEvents="none"
+                        />
+                      )}
+                      <g transform={isMoving && moveDelta ? `translate(${moveDelta.x} ${moveDelta.y})` : undefined}>
+                        {liveTagLines && liveTagLines.length > 0 && (
+                          <g pointerEvents="none">
+                            <rect
+                              x={box.x - 1.2}
+                              y={box.y - 1.2}
+                              width={box.w + 2.4}
+                              height={box.h + 2.4}
+                              rx={0.6}
+                              fill="#ffffff"
+                              fillOpacity={0.95}
+                              stroke={PRIMARY}
+                              strokeWidth={0.45}
+                            />
+                            {liveTagLines.map((ln, li) => (
+                              <text
+                                key={`lt-${li}`}
+                                x={box.x + box.w / 2}
+                                y={box.y + ((li + 0.72) * box.h) / liveTagLines.length}
+                                fontSize={2.4}
+                                textAnchor="middle"
+                                fill={PRIMARY}
+                                fontFamily="Helvetica, Arial, sans-serif"
+                              >
+                                {ln}
+                              </text>
+                            ))}
+                          </g>
+                        )}
+                        <rect
+                          x={box.x - 1.5}
+                          y={box.y - 1.5}
+                          width={box.w + 3}
+                          height={box.h + 3}
+                          fill="transparent"
+                          stroke={selected ? PRIMARY : 'transparent'}
+                          strokeDasharray="2 1.5"
+                          strokeWidth={0.5}
+                          className={tool === 'select' && !draftInput.active ? 'cursor-pointer' : 'pointer-events-none'}
+                          data-testid={`drawn-${item.shape}`}
+                          data-selected={selected || undefined}
+                          onPointerDown={(e) => {
+                            if (tool !== 'select' || draftInput.active || e.button !== 0) return
+                            if (e.shiftKey && selection?.kind === 'item') {
+                              e.stopPropagation()
+                              // Shift+click adds to (or takes from) the pick for modify operations.
+                              if (item.id !== selection.id) setAlsoPicked((cur) => (cur.includes(item.id) ? cur.filter((id) => id !== item.id) : [...cur, item.id]))
+                              return
+                            }
+                            pressItem(e, item.id)
+                          }}
+                        >
+                          <title>{item.shape === 'text' ? item.text : item.tag ? 'Tag' : item.dim ? 'Dimension' : item.shape}</title>
+                        </rect>
+                      </g>
+                    </g>
                   )
                 })}
               {tool === 'select' && !noteEdit && !placing && !tracing && (
@@ -1585,15 +2133,107 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   onOpenSheet={onOpenSheet}
                 />
               )}
+              {tool === 'select' && target.kind === 'sheet' && !active && !noteEdit && !placing && !tracing && (
+                <g data-testid="sheet-callout-shortcuts">
+                  {placed.flatMap((entry) => {
+                    if (entry.view.viewType !== 'floor_plan' && entry.view.viewType !== 'ceiling_plan') return []
+                    const viewItems = documentIndex(model).itemsByOwner.get(entry.view.id) ?? []
+                    return viewItems.flatMap((it) => {
+                      if (it.deleted || it.shape !== 'callout' || !it.callout) return []
+                      const poly = calloutBoundaryPolygon(it)
+                      if (!poly || poly.length < 3) return []
+                      const paperPoly = poly.map((q) => modelToPaper(entry.frame, q))
+                      const hitStrokeW = Math.max(2.6, 4.0 / Math.max(zoom, 0.25))
+                      const headInfo = calloutHead(model, it.callout)
+                      return [
+                        <polygon
+                          key={`sheet-co-${entry.viewport.id}-${it.id}`}
+                          points={paperPoly.map((q) => `${q.x},${q.y}`).join(' ')}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={hitStrokeW}
+                          pointerEvents="stroke"
+                          className="cursor-pointer hover:stroke-(--mutiny-selection)"
+                          data-testid={`sheet-callout-shortcut-${it.id}`}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            activate(entry.viewport.id)
+                            setSelection({ kind: 'item', id: it.id })
+                          }}
+                        >
+                          <title>{`${headInfo.top}/${headInfo.bottom} ${headInfo.viewName} — Double-click to edit callout extents right on the sheet`}</title>
+                        </polygon>,
+                      ]
+                    })
+                  })}
+                </g>
+              )}
               {boundary && (
                 <g data-testid="boundary-sketch">
                   {(() => {
-                    const pts = boundary.points.map((p, i) => (drag?.kind === 'boundary-vertex' && drag.index === i ? drag.to : p))
+                    const n = boundary.points.length
+                    let edgeDx = 0
+                    let edgeDy = 0
+                    let edgeI0 = -1
+                    let edgeI1 = -1
+                    if (drag?.kind === 'boundary-edge' && n >= 3) {
+                      edgeI0 = drag.index
+                      edgeI1 = (edgeI0 + 1) % n
+                      const ep0 = boundary.points[edgeI0]!
+                      const ep1 = boundary.points[edgeI1]!
+                      const ex = ep1.x - ep0.x
+                      const ey = ep1.y - ep0.y
+                      const elen = Math.hypot(ex, ey)
+                      if (elen > 1e-3) {
+                        const nx = -ey / elen
+                        const ny = ex / elen
+                        const proj = (drag.to.x - drag.from.x) * nx + (drag.to.y - drag.from.y) * ny
+                        edgeDx = nx * proj
+                        edgeDy = ny * proj
+                      }
+                    }
+                    const pts = boundary.points.map((p, i) => {
+                      if (drag?.kind === 'boundary-vertex' && drag.index === i) return drag.to
+                      if (drag?.kind === 'boundary-edge' && (i === edgeI0 || i === edgeI1)) return { x: p.x + edgeDx, y: p.y + edgeDy }
+                      return p
+                    })
                     const z = Math.max(zoom, 0.25)
-                    const r = 1.1 / z
+                    const r = 1.15 / z
                     return (
                       <>
-                        <polygon points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke={PRIMARY} strokeWidth={0.5 / z} strokeDasharray={`${2 / z} ${1 / z}`} pointerEvents="none" />
+                        {/* Soft white halo over the underlying original callout border so the editable P-line stands out cleanly */}
+                        {boundary.kind === 'callout' && (
+                          <polygon points={boundary.points.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#ffffff" strokeOpacity={0.82} strokeWidth={2.0 / z} pointerEvents="none" />
+                        )}
+                        <polygon points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill={boundary.kind === 'callout' ? PRIMARY : 'none'} fillOpacity={boundary.kind === 'callout' ? 0.08 : 0} stroke={PRIMARY} strokeWidth={0.6 / z} strokeDasharray={`${2.2 / z} ${1.1 / z}`} pointerEvents="none" />
+                        {/* Direct edge-slide bars: drag any whole edge in or out like a wall */}
+                        {pts.map((p, i) => {
+                          const q = pts[(i + 1) % pts.length] ?? p
+                          const horiz = Math.abs(q.y - p.y) < Math.abs(q.x - p.x) * 0.25
+                          const vert = Math.abs(q.x - p.x) < Math.abs(q.y - p.y) * 0.25
+                          return (
+                            <line
+                              key={`e${i}`}
+                              x1={p.x}
+                              y1={p.y}
+                              x2={q.x}
+                              y2={q.y}
+                              stroke="transparent"
+                              strokeWidth={3.2 / z}
+                              className={horiz ? 'cursor-ns-resize' : vert ? 'cursor-ew-resize' : 'cursor-move'}
+                              data-testid={`boundary-edge-${i}`}
+                              onPointerDown={(e) => {
+                                if (e.button !== 0) return
+                                e.stopPropagation()
+                                const at = paperOf(e)
+                                if (!at) return
+                                startDrag(e, { kind: 'boundary-edge', index: i, from: at, to: at })
+                              }}
+                            >
+                              <title>Drag this edge in or out (snaps to walls &amp; grids)</title>
+                            </line>
+                          )
+                        })}
                         {pts.map((p, i) => {
                           const q = pts[(i + 1) % pts.length] ?? p
                           const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }
@@ -1606,7 +2246,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                             }}>
                               <circle cx={mid.x} cy={mid.y} r={r} fill="var(--mutiny-panel)" stroke={PRIMARY} strokeWidth={0.3 / z} />
                               <path d={`M ${mid.x - r * 0.6} ${mid.y} H ${mid.x + r * 0.6} M ${mid.x} ${mid.y - r * 0.6} V ${mid.y + r * 0.6}`} stroke={PRIMARY} strokeWidth={0.3 / z} />
-                              <title>Drag to add a corner here</title>
+                              <title>Drag to add a corner here (sculpt an L-shape or notch)</title>
                             </g>
                           )
                         })}
@@ -1628,7 +2268,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                               startDrag(e, { kind: 'boundary-vertex', index: i, to: p })
                             }}
                           >
-                            <title>Drag this corner; click it and press Delete to remove it</title>
+                            <title>Drag this corner (snaps to walls &amp; grids); click it and press Delete to remove it</title>
                           </rect>
                         ))}
                       </>
@@ -1636,11 +2276,93 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   })()}
                 </g>
               )}
-              {selectedItem && selectedIds.length === 1 && tool === 'select' && !draftInput.active && !noteEdit && !moveDelta && !boundary && (
+              {selectedItem && selectedIds.length === 1 && tool === 'select' && !draftInput.active && !noteEdit && !moveDelta && !boundary && !plineSketch && (
                 <g data-testid="annotation-grips">
+                  {drag?.kind === 'grip' &&
+                    selectedItem.shape === 'callout' &&
+                    drag.id === selectedItem.id &&
+                    (() => {
+                      const preview = calloutBoundaryAfterGrip(selectedItem, drag.grip, toStored(drag.to))
+                      if (!preview || !selectedItem.callout) return null
+                      const pts = preview.boundary.map(toPaperPoint)
+                      const headPaper = toPaperPoint(preview.head)
+                      const anchorPt = calloutLeaderAnchor(pts, headPaper)
+                      const live = calloutHead(model, selectedItem.callout)
+                      const z = Math.max(zoom, 0.25)
+                      const d = anchorPt ? Math.hypot(anchorPt.x - headPaper.x, anchorPt.y - headPaper.y) : 0
+                      const edgePt =
+                        anchorPt && d > HEAD_RADIUS_MM
+                          ? { x: headPaper.x + ((anchorPt.x - headPaper.x) * HEAD_RADIUS_MM) / d, y: headPaper.y + ((anchorPt.y - headPaper.y) * HEAD_RADIUS_MM) / d }
+                          : null
+                      return (
+                        <g pointerEvents="none" data-testid="callout-grip-preview">
+                          <polygon points={pts.map((q) => `${q.x},${q.y}`).join(' ')} fill={PRIMARY} fillOpacity={0.08} stroke={PRIMARY} strokeWidth={0.55 / z} strokeDasharray={`${3 / z} ${1.5 / z}`} />
+                          {anchorPt && edgePt && <line x1={anchorPt.x} y1={anchorPt.y} x2={edgePt.x} y2={edgePt.y} stroke={PRIMARY} strokeWidth={0.45 / z} />}
+                          <circle cx={headPaper.x} cy={headPaper.y} r={HEAD_RADIUS_MM} fill="#ffffff" fillOpacity={0.94} stroke={PRIMARY} strokeWidth={0.55 / z} />
+                          <line x1={headPaper.x - HEAD_RADIUS_MM} y1={headPaper.y} x2={headPaper.x + HEAD_RADIUS_MM} y2={headPaper.y} stroke={PRIMARY} strokeWidth={0.35 / z} />
+                          <text x={headPaper.x} y={headPaper.y - 1.2} fontSize={2.4} fontWeight="bold" textAnchor="middle" fill={PRIMARY} fontFamily="Helvetica, Arial, sans-serif">
+                            {live.top}
+                          </text>
+                          <text x={headPaper.x} y={headPaper.y + 3.0} fontSize={2.2} textAnchor="middle" fill={PRIMARY} fontFamily="Helvetica, Arial, sans-serif">
+                            {live.bottom}
+                          </text>
+                        </g>
+                      )
+                    })()}
                   {annotationGrips(model, annotatedView, selectedItem, toPaperPoint).map((g) => {
                     const at = drag?.kind === 'grip' && drag.grip.key === g.key ? drag.to : g.at
-                    const r = 1.1 / Math.max(zoom, 0.25)
+                    const z = Math.max(zoom, 0.25)
+                    const r = 1.2 / z
+                    const sw = 0.42 / z
+                    const onGripDown = (e: React.PointerEvent<SVGElement>) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      if (!canEdit) {
+                        toast.error(blockedReason)
+                        return
+                      }
+                      startDrag(e, { kind: 'grip', id: selectedItem.id, grip: g, to: g.at })
+                    }
+                    if (g.kind === 'callout-edge' || g.kind === 'callout-poly-edge') {
+                      const w = g.axis === 'y' ? r * 3.0 : r * 1.4
+                      const h = g.axis === 'y' ? r * 1.4 : r * 3.0
+                      return (
+                        <rect
+                          key={g.key}
+                          x={at.x - w / 2}
+                          y={at.y - h / 2}
+                          width={w}
+                          height={h}
+                          rx={0.4 / z}
+                          fill={PRIMARY}
+                          stroke="var(--mutiny-panel)"
+                          strokeWidth={sw}
+                          className={canEdit ? (g.axis === 'y' ? 'cursor-ns-resize' : g.axis === 'x' ? 'cursor-ew-resize' : 'cursor-move') : 'cursor-not-allowed'}
+                          data-testid={`grip-${g.key}`}
+                          onPointerDown={onGripDown}
+                        >
+                          <title>{canEdit ? g.label : blockedReason}</title>
+                        </rect>
+                      )
+                    }
+                    if (g.kind === 'callout-head') {
+                      return (
+                        <circle
+                          key={g.key}
+                          cx={at.x}
+                          cy={at.y}
+                          r={r * 1.15}
+                          fill={PRIMARY}
+                          stroke="var(--mutiny-panel)"
+                          strokeWidth={sw}
+                          className={canEdit ? 'cursor-grab' : 'cursor-not-allowed'}
+                          data-testid={`grip-${g.key}`}
+                          onPointerDown={onGripDown}
+                        >
+                          <title>{canEdit ? g.label : blockedReason}</title>
+                        </circle>
+                      )
+                    }
                     return (
                       <rect
                         key={g.key}
@@ -1650,23 +2372,100 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                         height={r * 2}
                         fill={g.follows ? PRIMARY : 'var(--mutiny-panel)'}
                         stroke={PRIMARY}
-                        strokeWidth={0.4 / Math.max(zoom, 0.25)}
-                        className={canEdit ? 'cursor-grab' : 'cursor-not-allowed'}
+                        strokeWidth={sw}
+                        className={canEdit ? (g.kind === 'callout-corner' || g.kind === 'callout-vertex' ? 'cursor-move' : 'cursor-grab') : 'cursor-not-allowed'}
                         data-testid={`grip-${g.key}`}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return
-                          e.stopPropagation()
-                          if (!canEdit) {
-                            toast.error(blockedReason)
-                            return
-                          }
-                          startDrag(e, { kind: 'grip', id: selectedItem.id, grip: g, to: g.at })
-                        }}
+                        onPointerDown={onGripDown}
                       >
                         <title>{canEdit ? g.label : blockedReason}</title>
                       </rect>
                     )
                   })}
+                </g>
+              )}
+              {plineSketch && (
+                <g pointerEvents="none" data-testid="callout-pline-sketch">
+                  {plineSketch.points.length >= 2 && (
+                    <polygon
+                      points={[...plineSketch.points, ...(plineSketch.hover ? [plineSketch.hover] : [])].map((q) => `${q.x},${q.y}`).join(' ')}
+                      fill={PRIMARY}
+                      fillOpacity={0.08}
+                      stroke={PRIMARY}
+                      strokeWidth={0.55 / Math.max(zoom, 0.25)}
+                      strokeDasharray="3 1.5"
+                    />
+                  )}
+                  {plineSketch.points.length >= 1 && plineSketch.hover && (
+                    <line
+                      x1={plineSketch.points[plineSketch.points.length - 1]!.x}
+                      y1={plineSketch.points[plineSketch.points.length - 1]!.y}
+                      x2={plineSketch.hover.x}
+                      y2={plineSketch.hover.y}
+                      stroke={PRIMARY}
+                      strokeWidth={0.6 / Math.max(zoom, 0.25)}
+                    />
+                  )}
+                  {plineSketch.points.map((pt, i) => {
+                    const z = Math.max(zoom, 0.25)
+                    const closing = i === 0 && plineSketch.points.length >= 3 && plineSketch.hover && Math.hypot(plineSketch.hover.x - pt.x, plineSketch.hover.y - pt.y) <= 4 / z
+                    return closing ? (
+                      <circle key={i} cx={pt.x} cy={pt.y} r={2.2 / z} fill="var(--mutiny-panel)" stroke="#16a34a" strokeWidth={0.6 / z} />
+                    ) : (
+                      <rect key={i} x={pt.x - 1.1 / z} y={pt.y - 1.1 / z} width={2.2 / z} height={2.2 / z} fill={i === 0 ? PRIMARY : 'var(--mutiny-panel)'} stroke={PRIMARY} strokeWidth={0.4 / z} />
+                    )
+                  })}
+                </g>
+              )}
+              {activeSnap && (
+                <g pointerEvents="none" data-testid="graphics-snap-indicator">
+                  {activeSnap.guideLine && (
+                    <line
+                      x1={activeSnap.guideLine[0].x}
+                      y1={activeSnap.guideLine[0].y}
+                      x2={activeSnap.guideLine[1].x}
+                      y2={activeSnap.guideLine[1].y}
+                      stroke={PRIMARY}
+                      strokeOpacity={0.75}
+                      strokeWidth={0.35 / Math.max(zoom, 0.25)}
+                      strokeDasharray="2 1.5"
+                    />
+                  )}
+                  {activeSnap.kind === 'intersection' ? (
+                    <polygon
+                      points={(() => {
+                        const r = 1.8 / Math.max(zoom, 0.25)
+                        const { x, y } = activeSnap.at
+                        return `${x},${y - r} ${x + r},${y} ${x},${y + r} ${x - r},${y}`
+                      })()}
+                      fill="none"
+                      stroke="#0ea5e9"
+                      strokeWidth={0.5 / Math.max(zoom, 0.25)}
+                    />
+                  ) : activeSnap.kind === 'corner' ? (
+                    <rect
+                      x={activeSnap.at.x - 1.5 / Math.max(zoom, 0.25)}
+                      y={activeSnap.at.y - 1.5 / Math.max(zoom, 0.25)}
+                      width={3.0 / Math.max(zoom, 0.25)}
+                      height={3.0 / Math.max(zoom, 0.25)}
+                      fill="none"
+                      stroke="#0ea5e9"
+                      strokeWidth={0.5 / Math.max(zoom, 0.25)}
+                    />
+                  ) : (
+                    <circle cx={activeSnap.at.x} cy={activeSnap.at.y} r={1.6 / Math.max(zoom, 0.25)} fill="none" stroke="#0ea5e9" strokeWidth={0.45 / Math.max(zoom, 0.25)} />
+                  )}
+                  <text
+                    x={activeSnap.at.x + 2.4 / Math.max(zoom, 0.25)}
+                    y={activeSnap.at.y - 2.0 / Math.max(zoom, 0.25)}
+                    fontSize={2.4 / Math.max(zoom, 0.25)}
+                    fontFamily="sans-serif"
+                    fill="#0369a1"
+                    stroke="white"
+                    strokeWidth={0.7 / Math.max(zoom, 0.25)}
+                    paintOrder="stroke"
+                  >
+                    {activeSnap.label}
+                  </text>
                 </g>
               )}
               {tool === 'select' && tagElbows.grip}
@@ -1729,6 +2528,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                 calloutId,
                 name: input.name,
                 box: { min: calloutDraft.a, max: calloutDraft.b },
+                ...(calloutDraft.polygon ? { polygon: calloutDraft.polygon } : {}),
                 scale: input.scale,
                 head: calloutDraft.head,
                 ...(input.label ? { label: input.label } : {}),
@@ -1742,7 +2542,8 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
             }}
             onPlace={(callout) => {
               const id = newId('callout')
-              if (send({ type: 'add_drawing_item', itemId: id, ownerId, shape: 'callout', points: [calloutDraft.a, calloutDraft.b, calloutDraft.head], callout }, 'add a callout')) setSelection({ kind: 'item', id })
+              const spec = calloutDraft.polygon ? { ...callout, boundary: calloutDraft.polygon } : callout
+              if (send({ type: 'add_drawing_item', itemId: id, ownerId, shape: 'callout', points: [calloutDraft.a, calloutDraft.b, calloutDraft.head], callout: spec }, 'add a callout')) setSelection({ kind: 'item', id })
               setCalloutDraft(null)
             }}
           />
@@ -1777,6 +2578,9 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
             blockedReason={blockedReason}
             onChange={(callout) => send({ type: 'update_drawing_item', itemId: selectedItem.id, callout }, 'change what the callout refers to')}
             onOpenView={onOpenView}
+            onEditBoundary={() => startBoundary(selectedItem.id)}
+            onSketchBoundary={() => startCalloutPlineSketch(selectedItem.id)}
+            onResetRectangle={() => resetCalloutRectangle(selectedItem.id)}
             onDelete={() => {
               if (send({ type: 'delete_drawing_item', itemId: selectedItem.id }, 'delete')) setSelection(null)
             }}
@@ -1942,11 +2746,20 @@ function ViewportFrame({
   const w = rect.max.x - rect.min.x
   const h = rect.max.y - rect.min.y
   const cropShown = view.props?.cropView !== false && view.props?.showCropBox !== false
+  const cropPolyPaper =
+    cropShown && view.props?.cropPolygon && view.props.cropPolygon.length >= 3 && !framing
+      ? view.props.cropPolygon.map((pt) => {
+          const p = modelToPaper(entry.frame, pt)
+          return { x: p.x + dx, y: p.y + dy }
+        })
+      : null
   return (
     <g data-testid={`viewport-${view.name}`} data-frame={`${rect.min.x.toFixed(1)},${rect.min.y.toFixed(1)},${w.toFixed(1)},${h.toFixed(1)}`}>
-      {cropShown && !dimmed && (
+      {cropShown && !dimmed && (cropPolyPaper ? (
+        <polygon points={cropPolyPaper.map((q) => `${q.x},${q.y}`).join(' ')} fill="none" stroke={PRIMARY} strokeOpacity={0.55} strokeWidth={0.4} strokeDasharray="2 1" pointerEvents="none" data-testid={`crop-boundary-${view.name}`} />
+      ) : (
         <rect x={rect.min.x} y={rect.min.y} width={w} height={h} fill="none" stroke={PRIMARY} strokeOpacity={0.45} strokeWidth={0.3} strokeDasharray="2 1" pointerEvents="none" data-testid={`crop-boundary-${view.name}`} />
-      )}
+      ))}
       {!dimmed && <AnnotationCropRegion rect={rect} props={view.props} testId={`annotation-crop-${view.name}`} />}
       {!isActive && (
         <rect
@@ -2371,7 +3184,7 @@ function SectionMarkerLinks({
 }) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [drag, setDrag] = useState<{
-    readonly kind: 'sec-head' | 'sec-tail' | 'sec-line' | 'grid-start' | 'grid-end' | 'grid-line' | 'level-left' | 'level-right' | 'vp-title' | 'vp-rule' | 'vp-north'
+    readonly kind: 'sec-head' | 'sec-tail' | 'sec-line' | 'grid-start' | 'grid-end' | 'grid-line' | 'level-left' | 'level-right' | 'vp-title' | 'vp-rule' | 'vp-north' | 'callout-head'
     readonly id: string
     readonly pointerId: number
     readonly originPaper: Vec2
@@ -2439,12 +3252,18 @@ function SectionMarkerLinks({
     return out
   }, [model, views])
 
-  /** Live callout bubbles (`shape === 'callout'`) inside every visible view: single-click the head bubble to jump to the target sheet/view. */
+  /** Live callout bubbles (`shape === 'callout'`) inside every visible view: click to jump to the target sheet/view, OR drag directly to move the callout bubble & leader. */
   const calloutHeads = useMemo(() => {
     const index = documentIndex(model)
     const out: Array<{
       readonly key: string
+      readonly item: DrawingItem
+      readonly frame: ViewFrame
+      readonly view: ViewElement
+      readonly boundaryPaper: readonly Vec2[]
       readonly head: Vec2
+      readonly top: string
+      readonly bottom: string
       readonly targetViewId: string
       readonly sheetId: string | null
       readonly label: string
@@ -2456,12 +3275,22 @@ function SectionMarkerLinks({
         if (!target || target.kind !== 'view' || target.deleted) continue
         const live = calloutHead(model, item.callout)
         const head = modelToPaper(frame, item.points[2])
+        const poly = calloutBoundaryPolygon(item) ?? []
+        const boundaryPaper = poly.map((q) => modelToPaper(frame, q))
         out.push({
           key: `callout:${view.id}:${item.id}`,
+          item,
+          frame,
+          view,
+          boundaryPaper,
           head,
+          top: live.top,
+          bottom: live.bottom,
           targetViewId: target.id,
           sheetId: live.sheetId,
-          label: live.sheetId ? `Click to open Sheet ${live.bottom} — ${target.name}` : `Click to open ${target.name}`,
+          label: live.sheetId
+            ? `Click to open Sheet ${live.bottom} — ${target.name} (or drag bubble to move)`
+            : `Click to open ${target.name} (or drag bubble to move)`,
         })
       }
     }
@@ -2785,26 +3614,80 @@ function SectionMarkerLinks({
         )
       })}
 
-      {/* Clickable callout head bubbles (`shape === 'callout'`) -> jump directly to enlarged plan / detail sheet */}
-      {calloutHeads.map((c) => (
-        <circle
-          key={c.key}
-          cx={c.head.x}
-          cy={c.head.y}
-          r={HEAD_RADIUS_MM + 0.5}
-          data-testid="callout-head-link"
-          className="cursor-pointer fill-transparent stroke-transparent hover:fill-primary/15 hover:stroke-primary/80 transition-colors"
-          strokeWidth={0.7}
-          onPointerDown={(e) => {
-            if (e.button !== 0 || e.shiftKey) return
-            e.stopPropagation()
-            if (c.sheetId && onOpenSheet) onOpenSheet(c.sheetId)
-            else onOpenView(c.targetViewId)
-          }}
-        >
-          <title>{c.label}</title>
-        </circle>
-      ))}
+      {/* Callout head bubbles (`shape === 'callout'`): click to open target sheet/view, OR drag directly to move the bubble with live smart leader */}
+      {calloutHeads.map((c) => {
+        const dragging = drag?.kind === 'callout-head' && drag.id === c.item.id
+        const cx = dragging && drag ? c.head.x + (drag.curPaper.x - drag.originPaper.x) : c.head.x
+        const cy = dragging && drag ? c.head.y + (drag.curPaper.y - drag.originPaper.y) : c.head.y
+        const liveAnchor = dragging && drag?.moved ? calloutLeaderAnchor(c.boundaryPaper, { x: cx, y: cy }) : null
+        const d = liveAnchor ? Math.hypot(liveAnchor.x - cx, liveAnchor.y - cy) : 0
+        const edgePt =
+          liveAnchor && d > HEAD_RADIUS_MM
+            ? { x: cx + ((liveAnchor.x - cx) * HEAD_RADIUS_MM) / d, y: cy + ((liveAnchor.y - cy) * HEAD_RADIUS_MM) / d }
+            : null
+        return (
+          <g key={c.key}>
+            {dragging && drag?.moved && (
+              <g className="pointer-events-none">
+                {liveAnchor && edgePt && <line x1={liveAnchor.x} y1={liveAnchor.y} x2={edgePt.x} y2={edgePt.y} stroke={PRIMARY} strokeWidth={0.5} />}
+                <circle cx={cx} cy={cy} r={HEAD_RADIUS_MM} fill="#ffffff" fillOpacity={0.94} stroke={PRIMARY} strokeWidth={0.65} />
+                <line x1={cx - HEAD_RADIUS_MM} y1={cy} x2={cx + HEAD_RADIUS_MM} y2={cy} stroke={PRIMARY} strokeWidth={0.35} />
+                <text x={cx} y={cy - 1.2} fontSize={2.4} fontWeight="bold" textAnchor="middle" fill={PRIMARY} fontFamily="Helvetica, Arial, sans-serif">
+                  {c.top}
+                </text>
+                <text x={cx} y={cy + 3.0} fontSize={2.2} textAnchor="middle" fill={PRIMARY} fontFamily="Helvetica, Arial, sans-serif">
+                  {c.bottom}
+                </text>
+              </g>
+            )}
+            <circle
+              cx={cx}
+              cy={cy}
+              r={HEAD_RADIUS_MM + 0.5}
+              data-testid="callout-head-link"
+              className="cursor-pointer fill-transparent stroke-transparent hover:fill-primary/15 hover:stroke-primary/80 transition-colors"
+              strokeWidth={0.7}
+              onPointerDown={(e) => {
+                if (e.button !== 0 || e.shiftKey) return
+                e.stopPropagation()
+                const pt = paperOf(e)
+                if (!pt || !canEdit) {
+                  if (c.sheetId && onOpenSheet) onOpenSheet(c.sheetId)
+                  else onOpenView(c.targetViewId)
+                  return
+                }
+                e.currentTarget.setPointerCapture(e.pointerId)
+                setDrag({ kind: 'callout-head', id: c.item.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: c.frame, view: c.view })
+              }}
+              onPointerMove={(e) => {
+                if (!drag || drag.kind !== 'callout-head' || drag.id !== c.item.id || e.pointerId !== drag.pointerId) return
+                const pt = paperOf(e)
+                if (!pt) return
+                const dist = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                setDrag({ ...drag, curPaper: pt, moved: drag.moved || dist > 1.4 })
+              }}
+              onPointerUp={(e) => {
+                if (!drag || drag.kind !== 'callout-head' || drag.id !== c.item.id || e.pointerId !== drag.pointerId) return
+                e.stopPropagation()
+                const wasMoved = drag.moved
+                const nextPaper = { x: c.head.x + (drag.curPaper.x - drag.originPaper.x), y: c.head.y + (drag.curPaper.y - drag.originPaper.y) }
+                setDrag(null)
+                if (!wasMoved) {
+                  if (c.sheetId && onOpenSheet) onOpenSheet(c.sheetId)
+                  else onOpenView(c.targetViewId)
+                  return
+                }
+                const nextModel = paperToModel(c.frame, nextPaper)
+                const pts = c.item.points.map((p, i) => (i === 2 ? { x: Math.round(nextModel.x * 10) / 10, y: Math.round(nextModel.y * 10) / 10 } : p))
+                submit({ type: 'update_drawing_item', itemId: c.item.id, points: pts, ...(c.item.callout ? { callout: c.item.callout } : {}) }, 'move callout bubble')
+              }}
+              onLostPointerCapture={() => setDrag(null)}
+            >
+              <title>{c.label}</title>
+            </circle>
+          </g>
+        )
+      })}
 
       {/* Revit sheet viewport titles: drag title block to move anywhere on sheet, drag right-end blue dot to resize title line, click back-ref bubble to jump back */}
       {viewportTitles.map((vt) => {

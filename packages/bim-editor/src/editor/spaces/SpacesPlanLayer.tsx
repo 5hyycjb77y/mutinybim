@@ -269,37 +269,52 @@ export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel
   const tracedCorners = traceOver && isCalibrated(traceOver) && tracePage.state === 'ready' ? underlayCorners(traceOver.calibration, tracePage.value.width, tracePage.value.height).map(toPaper) : []
   const r = traceHitRect(view.paperRect, tracedCorners, TRACE_HIT_MARGIN_MM)
   const liveArea = outline.length >= 3 ? polygonAreaFt2(outline) : null
+  const crop = view.paperRect
+  const spacesClipId = `spaces-crop-${view.view.id}`
+  // Show the green space-boundary overlay only while a Space tool is active or a space is selected —
+  // never flood normal plan/sheet editing with green polygons or duplicate room labels (views.ts already draws draggable masked room/space labels).
+  const showSpaceOverlay = mode !== null || selectedSpaceId != null
+  const planShowsRooms = !(view.view.props?.hiddenCategories ?? []).includes('rooms')
 
   return (
     <g data-testid="spaces-plan-layer" data-level={levelId ?? ''}>
+      <defs>
+        <clipPath id={spacesClipId}>
+          <rect x={crop.min.x} y={crop.min.y} width={Math.max(0, crop.max.x - crop.min.x)} height={Math.max(0, crop.max.y - crop.min.y)} />
+        </clipPath>
+      </defs>
       {underlays.map((u) => (
         <UnderlayPicture key={u.id} projectId={projectId} underlay={u} view={view} z={z} tracing={draw !== null} />
       ))}
-      {spaces.map((s) => {
-        const polys = spaceOutlines(model.elements, s)
-        if (polys.length === 0) return null
-        const first = polys[0] ?? []
-        const centre = first.reduce((acc, p) => ({ x: acc.x + p.x / first.length, y: acc.y + p.y / first.length }), { x: 0, y: 0 })
-        const c = toPaper(centre)
-        const selected = s.id === selectedSpaceId
-        return (
-          <g key={s.id} pointerEvents="none" data-testid="space-outline" data-space={s.id}>
-            {polys.map((poly, i) => (
-              <polygon key={i} points={poly.map((p) => { const q = toPaper(p); return `${q.x},${q.y}` }).join(' ')} fill={SPACE_FILL} stroke={PRIMARY} strokeWidth={selected ? 0.5 : 0.25} strokeDasharray={selected ? undefined : '1.2 0.6'} />
-            ))}
-            {!taggedSpaceIds.has(s.id) ? (
-              <text x={c.x} y={c.y} fontSize={2.2} textAnchor="middle" fill="currentColor">
-                {spaceLabel(s)}
-              </text>
-            ) : null}
-          </g>
-        )
-      })}
-      {separators.map((l) => {
-        const a = toPaper(l.start)
-        const b = toPaper(l.end)
-        return <line key={l.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PRIMARY} strokeWidth={0.3} strokeDasharray="1.6 0.8" pointerEvents="none" data-testid="space-separator" data-separator={l.id} />
-      })}
+      {showSpaceOverlay ? (
+        <g clipPath={draw ? undefined : `url(#${spacesClipId})`}>
+          {spaces.map((s) => {
+            const polys = spaceOutlines(model.elements, s)
+            if (polys.length === 0) return null
+            const first = polys[0] ?? []
+            const centre = first.reduce((acc, p) => ({ x: acc.x + p.x / first.length, y: acc.y + p.y / first.length }), { x: 0, y: 0 })
+            const c = toPaper(centre)
+            const selected = s.id === selectedSpaceId
+            return (
+              <g key={s.id} pointerEvents="none" data-testid="space-outline" data-space={s.id}>
+                {polys.map((poly, i) => (
+                  <polygon key={i} points={poly.map((p) => { const q = toPaper(p); return `${q.x},${q.y}` }).join(' ')} fill={SPACE_FILL} stroke={PRIMARY} strokeWidth={selected ? 0.5 : 0.25} strokeDasharray={selected ? undefined : '1.2 0.6'} />
+                ))}
+                {!taggedSpaceIds.has(s.id) && !planShowsRooms ? (
+                  <text x={c.x} y={c.y} fontSize={2.2} textAnchor="middle" fill="currentColor">
+                    {spaceLabel(s)}
+                  </text>
+                ) : null}
+              </g>
+            )
+          })}
+          {separators.map((l) => {
+            const a = toPaper(l.start)
+            const b = toPaper(l.end)
+            return <line key={l.id} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={PRIMARY} strokeWidth={0.3} strokeDasharray="1.6 0.8" pointerEvents="none" data-testid="space-separator" data-separator={l.id} />
+          })}
+        </g>
+      ) : null}
       {review ? <ProposalGhosts proposals={review.proposals} label={review.label ?? 'Room'} toPaper={toPaper} /> : null}
       {mode?.kind === 'from_walls' && levelId ? <WallsRoomTool model={model} levelId={levelId} view={view} z={z} toPaper={toPaper} paperOf={paperOf} submit={submit} hint={hint} onDrawn={onDrawn} onCancel={onCancel} /> : null}
       {mode?.kind === 'separator' && levelId && onSeparatorLine ? <SeparatorTool model={model} levelId={levelId} view={view} z={z} toPaper={toPaper} paperOf={paperOf} hint={hint} onLine={onSeparatorLine} onCancel={onCancel} /> : null}

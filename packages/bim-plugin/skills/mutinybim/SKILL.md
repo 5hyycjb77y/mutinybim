@@ -60,9 +60,17 @@ commands, one undo step) or **part types**. The core tools are:
    function, a command or the reads: it costs far less than a failed
    preview. Fix every finding and read the warnings.
 5. **`bim_run_script`**. A failure names the script's line ("Line 14: Step 3
-   (route_run) was refused: …"). Tell the person in plain words what the
+   (route_run) was refused: …"). Pass `clashes: true` (touched hard, self,
+   clearance, dedicated-space, and ceiling clashes) or `clashes: { scope:
+   "touched" | "level" | "all", types: ["hard", "self", "soft", "clearance",
+   "dedicated_space", "ceiling", "placement", "connectors"], min_severity:
+   "error" | "warning", detail: "summary" | "compact" | "full",
+   tolerance_in, soft_clearance_in, structure_clearance_in, max_findings }`
+   for immediate clash feedback on the previewed edits without saving. Inside
+   a script, `checks.clashes(ctx, spec)` and `checks.clashReport(ctx, spec)`
+   support the same filters. Tell the person in plain words what the
    preview does: how many things it creates, changes and deletes, the label,
-   any check that failed; for part types, each part and its connectors.
+   any check or clash that surfaced; for part types, each part and its connectors.
 6. **Approve.** Only when the status is `previewed`, call the tool in
    `apply_with.tool` with `apply_with.args` **unchanged** (`bim_apply_output`
    for edits, `bim_save_part_type` for parts, with `save_as` filled in). It
@@ -112,7 +120,8 @@ single calls. Use a family's single tools for one or two edits.
   pipe ones too (`plumbing_gas.sweat`, `plumbing_gas.threaded`, …).
 - `building.level`, `building.walls`, `building.floor`, `building.door`,
   `building.window`, `building.space`, `building.spaceInWalls`,
-  `building.ceiling` (outline and height as `units.*` values).
+  `building.ceiling` (outline, height, and optional real-scale ACT `grid`: `{ preset: "2x4" | "2x2" }` or custom `spacingX`/`spacingY`, `origin`, `rotationDeg`),
+  `building.ceilingTileCenter` (snaps 2'×4' troffers to full tile centers and 2'×2' HVAC diffusers/grilles via `{ deviceWidth: units.in(24), deviceDepth: units.in(24) }` inside 2'×4' bays).
 - **Level arguments are level ids** (from `building.level` or
   `ctx.model.levels()` with `reads.levels: true`). The kit's helpers also take
   the name of exactly one level the script read; raw `ctx.edit` commands take

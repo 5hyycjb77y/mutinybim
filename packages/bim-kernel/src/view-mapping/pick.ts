@@ -30,11 +30,11 @@ import { kindRowOf } from "../kinds/rows";
  */
 
 /** Kinds a person can select in a drawing (annotations belong to the drafting tools). */
-const PICKABLE = new Set<BimElement["kind"]>(["run_segment", "run_fitting", "part", "wall", "column", "opening", "room", "space", "grid"]);
+const PICKABLE = new Set<BimElement["kind"]>(["run_segment", "run_fitting", "part", "wall", "column", "opening", "room", "space", "ceiling", "grid"]);
 /** Drawn only in plans (a section draws their cut through solids, which these don't have). */
-const PLAN_ONLY = new Set<BimElement["kind"]>(["opening", "room", "space", "grid"]);
+const PLAN_ONLY = new Set<BimElement["kind"]>(["opening", "room", "space", "ceiling", "grid"]);
 /** Picked only when nothing else is under the pointer (they cover whole rooms and floors). */
-const BACKGROUND = new Set<BimElement["kind"]>(["room", "space", "grid"]);
+const BACKGROUND = new Set<BimElement["kind"]>(["room", "space", "ceiling", "grid"]);
 /** Changes to these never change what a drawing can pick. */
 const INERT = new Set<BimElement["kind"]>(["view", "viewport", "sheet", "drawing_item", "mep_system", "tag", "dimension"]);
 
@@ -57,6 +57,8 @@ export interface Footprint {
   readonly kind: BimElement["kind"];
   /** Convex outline (counter-clockwise), drawing frame. A strip's is its swept box. */
   readonly poly: readonly Vec2[];
+  /** Cutout polygons inside `poly` (e.g. stairwell holes in a ceiling) excluded from interior hits. */
+  readonly holes?: ReadonlyArray<readonly Vec2[]>;
   /** A straight run's centreline and half-width; picks by distance to the line. */
   readonly strip: { readonly a: Vec2; readonly b: Vec2; readonly half: number } | null;
   readonly min: Vec2;
@@ -260,10 +262,24 @@ function footprintOf(b: Build, el: BimElement): Footprint | null {
       if (el.outline.length < 3) return null;
       const pts = el.outline.map((q) => at(q.x, q.y, mapping.floorMm));
       return make(
-        hull2(pts.map((q) => ({ x: q.u, y: q.v }))),
+        pts.map((q) => ({ x: q.u, y: q.v })),
         mapping.floorMm,
         mapping.floorMm,
       );
+    }
+    case "ceiling": {
+      if (b.view.viewType !== "ceiling_plan" || el.outline.length < 3) return null;
+      const z = (b.levelZ.get(el.levelId) ?? mapping.floorMm) + (el.heightMm ?? 2700);
+      const pts = el.outline.map((q) => at(q.x, q.y, z));
+      const holes = el.holes
+        ?.filter((h) => h.length >= 3)
+        .map((h) => h.map((q) => at(q.x, q.y, z)).map((q) => ({ x: q.u, y: q.v })));
+      const fp = make(
+        pts.map((q) => ({ x: q.u, y: q.v })),
+        z,
+        z,
+      );
+      return holes && holes.length > 0 ? { ...fp, holes } : fp;
     }
     case "space": {
       let best: readonly Vec2[] | null = null;
@@ -278,7 +294,7 @@ function footprintOf(b: Build, el: BimElement): Footprint | null {
       if (!best || best.length < 3) return null;
       const pts = best.map((q) => at(q.x, q.y, mapping.floorMm));
       return make(
-        hull2(pts.map((q) => ({ x: q.u, y: q.v }))),
+        pts.map((q) => ({ x: q.u, y: q.v })),
         mapping.floorMm,
         mapping.floorMm,
       );
@@ -356,6 +372,9 @@ function shownFilter(model: ModelState, view: ViewElement): (el: BimElement) => 
   return (el) => {
     if (!PICKABLE.has(el.kind) && !rowPicks(el.kind)) return false;
     if (el.kind === "space") {
+      if (level && el.levelId !== level.id) return false;
+    } else if (el.kind === "ceiling") {
+      if (view.viewType !== "ceiling_plan") return false;
       if (level && el.levelId !== level.id) return false;
     } else if (names && !names.has((el.partition ?? DEFAULT_PARTITION).level) && !reached?.has(el.id)) {
       return false;
@@ -518,25 +537,30 @@ function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
 }
 
-function insideConvex(p: Vec2, poly: readonly Vec2[]): boolean {
+/** Even-odd ray-casting point-in-polygon (supports both convex and concave/L-shaped rooms, spaces, and ceilings). */
+function insidePoly(p: Vec2, poly: readonly Vec2[]): boolean {
   if (poly.length < 3) return false;
-  let sign = 0;
-  for (let i = 0; i < poly.length; i++) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const a = poly[i] as Vec2;
-    const b = poly[(i + 1) % poly.length] as Vec2;
-    const c = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-    if (c === 0) continue;
-    const s = c > 0 ? 1 : -1;
-    if (sign === 0) sign = s;
-    else if (s !== sign) return false;
+    const b = poly[j] as Vec2;
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
   }
-  return true;
+  return inside;
 }
 
-/** Distance from a drawing point to the footprint (0 inside). */
+/** Distance from a drawing point to the footprint (0 inside, excluding any interior cutout holes). */
 export function footprintDistance(f: Footprint, p: Vec2): number {
   if (f.strip) return Math.max(0, distToSegment(p, f.strip.a, f.strip.b) - f.strip.half);
-  if (insideConvex(p, f.poly)) return 0;
+  if (insidePoly(p, f.poly)) {
+    const hole = f.holes?.find((h) => insidePoly(p, h));
+    if (!hole) return 0;
+    let best = Infinity;
+    for (let i = 0; i < hole.length; i++) best = Math.min(best, distToSegment(p, hole[i] as Vec2, hole[(i + 1) % hole.length] as Vec2));
+    return best;
+  }
   let best = Infinity;
   for (let i = 0; i < f.poly.length; i++) best = Math.min(best, distToSegment(p, f.poly[i] as Vec2, f.poly[(i + 1) % f.poly.length] as Vec2));
   return best;
@@ -590,7 +614,7 @@ function touchesRect(f: Footprint, r: Rect): boolean {
   const inR = (q: Vec2) => q.x >= r.min.x && q.x <= r.max.x && q.y >= r.min.y && q.y <= r.max.y;
   if (f.poly.some(inR)) return true;
   const corners = [r.min, { x: r.max.x, y: r.min.y }, r.max, { x: r.min.x, y: r.max.y }];
-  if (corners.some((c) => insideConvex(c, f.poly))) return true;
+  if (corners.some((c) => insidePoly(c, f.poly))) return true;
   for (let i = 0; i < f.poly.length; i++) {
     const a = f.poly[i] as Vec2;
     const b = f.poly[(i + 1) % f.poly.length] as Vec2;

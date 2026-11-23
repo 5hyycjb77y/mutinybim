@@ -2,12 +2,27 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { DETAIL_LINE_STYLES, detailComponent, detailLineStyleOf, documentIndex, lineStyleFor, type BatchCommand, type DetailLineStyleId, type DrawingItem, type ModelState, type ViewCommand } from '@permitzip/bim-kernel'
+import { DETAIL_LINE_STYLES, HATCH_PATTERNS, detailComponent, detailLineStyleOf, documentIndex, lineStyleFor, type BatchCommand, type DetailLineStyleId, type DrawingItem, type HatchPattern, type ModelState, type RegionFill, type ViewCommand } from '@permitzip/bim-kernel'
 import { Button } from '../../../ui/button'
 import { Field, FieldDescription, FieldLabel } from '../../../ui/field'
 import { Input } from '../../../ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select'
+import { Switch } from '../../../ui/switch'
 import { newId } from '../types'
+
+const REGION_HATCH_LABEL: Record<HatchPattern, string> = {
+  solid: 'Solid fill',
+  diagonal: 'Diagonal',
+  diagonal_reverse: 'Diagonal (reverse)',
+  crosshatch: 'Crosshatch',
+  horizontal: 'Horizontal',
+  vertical: 'Vertical',
+  dots: 'Dots',
+  concrete: 'Concrete',
+  earth: 'Earth',
+  insulation_rigid: 'Rigid insulation',
+  masonry: 'Masonry',
+}
 
 /**
  * Drawn items selected in a drawing (one, or several with Shift+click): line
@@ -105,6 +120,53 @@ export function DetailSelectionProperties({
             </SelectContent>
           </Select>
         </Field>
+      )}
+      {n === 1 && first.shape === 'region' && (
+        <>
+          <Field>
+            <FieldLabel htmlFor="detail-region-hatch">Fill pattern</FieldLabel>
+            <Select
+              value={first.fill?.masking ? 'masking' : (first.fill?.pattern ?? 'diagonal')}
+              disabled={!canEdit || first.pinned === true}
+              onValueChange={(v) => {
+                const nextFill: RegionFill =
+                  v === 'masking'
+                    ? { pattern: 'solid', grey: 1, masking: true, boundary: false }
+                    : { pattern: v as HatchPattern, boundary: first.fill?.boundary ?? true, ...(first.fill?.spacingMm ? { spacingMm: first.fill.spacingMm } : {}) }
+                send({ type: 'update_drawing_item', itemId: first.id, fill: nextFill }, 'change the fill pattern')
+              }}
+            >
+              <SelectTrigger id="detail-region-hatch" size="sm" data-testid="detail-region-hatch">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="masking">Masking region (opaque white)</SelectItem>
+                  {HATCH_PATTERNS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {REGION_HATCH_LABEL[p]}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          {!first.fill?.masking && (
+            <Field orientation="horizontal">
+              <FieldLabel htmlFor="detail-region-boundary">Show boundary lines</FieldLabel>
+              <Switch
+                id="detail-region-boundary"
+                checked={first.fill?.boundary !== false}
+                disabled={!canEdit || first.pinned === true}
+                onCheckedChange={(checked) => {
+                  const base: RegionFill = first.fill ?? { pattern: 'diagonal' }
+                  send({ type: 'update_drawing_item', itemId: first.id, fill: { ...base, boundary: checked } }, checked ? 'show region boundary' : 'hide region boundary')
+                }}
+                data-testid="detail-region-boundary"
+              />
+            </Field>
+          )}
+        </>
       )}
       {n === 1 && first.shape === 'region' && onEditBoundary && (
         <Field>

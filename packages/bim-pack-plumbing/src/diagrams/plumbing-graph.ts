@@ -10,7 +10,8 @@ import { plumbingTrees } from "./plumbing-topology";
  * they sit, and every fixture at the end of its pipe (plumbing-topology.ts).
  * A system fed from a fixture of another system drawn here (hot water from the
  * water heater on the cold line) continues from that fixture, as one riser.
- * Same engine as the electrical one-line and riser: only the graph is plumbing's.
+ * Vent systems stay cleanly rooted at their roof terminal (VTR) so `layoutDwvRiser`
+ * merges sanitary drains (down) and vents (up) onto each shared physical fixture once.
  */
 
 type Elements = Readonly<Record<string, BimElement>>;

@@ -31,6 +31,7 @@ export const LIGHTING_FIXTURE_SCHEDULE: ScheduleDefinitionV2 = {
     field("circuit", "CIRCUIT", { hideWhenEmpty: true }),
     field("load", "LOAD (VA)", { total: true, hideWhenEmpty: true }),
     field("room", "ROOM", { hideWhenEmpty: true }),
+    param("cut_sheet", "CUT SHEET"),
   ],
   filters: [],
   sort: [{ path: "mark", direction: "asc" }],

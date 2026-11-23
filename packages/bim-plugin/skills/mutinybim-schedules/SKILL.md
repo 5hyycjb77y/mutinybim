@@ -91,10 +91,15 @@ required; the rest default (no filters, no groups, list presentation).
   later library change never alters a drawn sheet.
 - **Templates.** A firm schedule template is a definition saved in the
   library: `bim_schedule_define` with `template: "<item id>"` and a `name`.
+- **Clickable cut-sheet links.** Any text/parameter cell whose value uses
+  `label|https://...` (or a bare `https://...` URL, e.g. `cut_sheet: "2GTL4 PDF|https://..."`)
+  renders as a clickable hyperlink in the schedule table, sheet SVG, and exported PDF.
+  Long cells wrap automatically across lines instead of truncating with `...`.
 - **Forms.** Panel, switchboard, feeder, connection type, equipment connection
   and gas schedules print as forms: `form: { kind, panel, template_name,
   nec_edition }` instead of a definition. Their cells come from the model
-  (circuits, loads); never type a load into one. `bim_library` `read` id
+  (circuits, loads); never type a load into one. Double-clicking a panel
+  schedule on a sheet opens the live Panel View editor. `bim_library` `read` id
   `form:panel` shows the template, its field paths and the template language;
   `form.template` replaces a schedule's template.
 

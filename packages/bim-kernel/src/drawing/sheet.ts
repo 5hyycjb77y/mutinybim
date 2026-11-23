@@ -71,6 +71,10 @@ export type Primitive =
       readonly fontFamily?: string;
       /** Opaque paper-white background mask behind the text so crossing linework stays broken and readable. */
       readonly mask?: boolean;
+      /** Vertical alignment of `at.y`: `"baseline"` (default) or `"middle"` (vertically centered on `at.y`, ideal for inline run codes). */
+      readonly vAlign?: "baseline" | "middle";
+      /** Optional clickable http(s) URL (e.g. a manufacturer cut sheet link in a schedule cell). */
+      readonly href?: string;
     } & Pick<PrimitiveStyle, "color">);
 
 /** A font a scene's text uses besides the standard sheet font: its id, family, weight and the file the writers load. */

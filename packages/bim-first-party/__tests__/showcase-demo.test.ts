@@ -12,7 +12,7 @@
  * - Renders all 12 Arch D construction sheets cleanly via `buildSheetSceneFor`
  * - Leaves the legacy `createDemoModel("f-a-demo")` mechanical fixture untouched
  */
-import { buildSheetSceneFor, elementValues, evaluateDiagram, resolveElementMaterial, sceneToSvg, validateModel } from "@permitzip/bim-kernel";
+import { buildSheetSceneFor, ceilingGridCellCenter, elementValues, evaluateDiagram, resolveElementMaterial, sceneToSvg, TILE_2FT_MM, TILE_4FT_MM, validateModel } from "@permitzip/bim-kernel";
 import { evaluateEgressPhotometrics, evaluateNormalPhotometrics } from "@permitzip/bim-pack-electrical";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { plumbingDiagramGraph } from "@permitzip/bim-pack-plumbing";
@@ -38,13 +38,41 @@ describe("createShowcaseDemoModel", () => {
     expect(count("run_segment")).toBeGreaterThanOrEqual(45);
     expect(count("service_link")).toBeGreaterThanOrEqual(12);
 
-    // Cut-sheet commercial equipment, fixtures & millwork resolve smooth non-ribbed PBR materials
-    for (const id of ["rtu-1", "ef-1", "wh-1", "wc-101", "lav-101", "ks-101", "sd-1", "lt-4", "wp-1", "vanity-l1", "cafe-island-l1"]) {
+    // Cut-sheet commercial equipment, fixtures & millwork resolve smooth non-ribbed PBR materials (solid or metallic sheet metal)
+    for (const id of ["rtu-1", "ef-1", "gv-1", "wh-1", "wc-101", "lav-101", "ks-101", "sd-1", "lt-4", "wp-1", "vanity-l1", "cafe-island-l1"]) {
       const el = model.elements[id];
       expect(el).toBeDefined();
       const mat = el ? resolveElementMaterial(model, el) : null;
       expect(mat?.id).toBeTruthy();
-      expect(mat?.pattern).toBe("solid");
+      expect(["solid", "metal"]).toContain(mat?.pattern);
+    }
+
+    // Real-scale 2'×4' ACT ceiling tile grid on Studio 104 cloud: troffers (2'×4') & diffusers (2'×2') seat squarely inside tiles
+    const studioCloud = model.elements["clg-l1-studio"];
+    expect(studioCloud?.kind).toBe("ceiling");
+    if (studioCloud?.kind === "ceiling") {
+      expect(studioCloud.grid).toEqual({
+        spacingXMm: TILE_4FT_MM,
+        spacingYMm: TILE_2FT_MM,
+        origin: { x: Math.round(36 * 304.8), y: Math.round(2 * 304.8) },
+        rotationDeg: 0,
+      });
+      for (const trofferId of ["lt-4", "lt-5", "lt-6", "lt-7"]) {
+        const p = model.elements[trofferId];
+        expect(p?.kind).toBe("part");
+        if (p?.kind === "part" && studioCloud.grid) {
+          const snapped = ceilingGridCellCenter(studioCloud.grid, p.position);
+          expect(Math.hypot(snapped.x - p.position.x, snapped.y - p.position.y)).toBeLessThanOrEqual(2);
+        }
+      }
+      for (const airId of ["sd-1", "sd-2", "rg-1"]) {
+        const p = model.elements[airId];
+        expect(p?.kind).toBe("part");
+        if (p?.kind === "part" && studioCloud.grid) {
+          const snapped = ceilingGridCellCenter(studioCloud.grid, p.position, { deviceWidthMm: TILE_2FT_MM, deviceDepthMm: TILE_2FT_MM });
+          expect(Math.hypot(snapped.x - p.position.x, snapped.y - p.position.y)).toBeLessThanOrEqual(2);
+        }
+      }
     }
   });
 
@@ -145,7 +173,7 @@ describe("createShowcaseDemoModel", () => {
     }
   });
 
-  it("renders all 13 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
+  it("renders all 15 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
     const sheets = active.filter((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet");
     expect(sheets.map((s) => s.number).sort()).toEqual([
       "A-101",
@@ -154,7 +182,9 @@ describe("createShowcaseDemoModel", () => {
       "A-104",
       "A-201",
       "A-301",
+      "A-302",
       "E-101",
+      "E-102",
       "E-201",
       "E-202",
       "M-101",
@@ -180,6 +210,10 @@ describe("createShowcaseDemoModel", () => {
       const svg = sceneToSvg(scene);
       expect(svg).toContain("<svg");
       expect(svg).not.toContain("?? DIMENSION REFERENCE MISSING");
+      if (sh.number === "E-201") {
+        expect(svg.replace(/\u00a0/g, " ")).toContain("AFC 42 KA");
+        expect(svg).toContain("<a ");
+      }
       if (sh.number === "E-202") {
         expect(svg).toContain("PHOTOMETRICS (NORMAL)");
         expect(svg).toContain("EGRESS LIGHTING (NFPA 101)");
@@ -202,7 +236,6 @@ describe("createShowcaseDemoModel", () => {
     for (const w of waterRoots) expect(hasService(w, "vent")).toBe(false);
     expect(sanitaryRoots.some((r) => hasService(r, "vent"))).toBe(true);
   });
-
   it("keeps legacy createDemoModel('f-a-demo') intact for existing fixtures and E2E specs", () => {
     const legacy = createDemoModel("f-a-demo");
     const legacyEls = elementValues(legacy.elements).filter((el) => !("deleted" in el && el.deleted));

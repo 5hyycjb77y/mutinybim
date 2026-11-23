@@ -86,8 +86,8 @@ export function RunMoveForm({ element: el, canEdit, onCommand }: { element: RunS
     const mm = (ft: number) => Math.round(ft * MM_PER_FT * 1000) / 1000
     const plain: Command = { type: 'drag_run', elementId: el.id, delta: { x: mm(x), y: mm(y), z: mm(z) } }
     const refused = onCommand(plain)
-    // Only a plan move can be pulled back past an elbow; a rise alone has no other way to go.
-    const flipped = refused && (Math.abs(x) >= 0.001 || Math.abs(y) >= 0.001) ? onCommand({ ...plain, reroute: true }) : refused
+    // Try reroute on any refused move (flips elbows or auto-jogs around anchored equipment/trunks in X, Y, or Z).
+    const flipped = refused ? onCommand({ ...plain, reroute: true }) : null
     setError(refused && flipped ? flipped : null)
     if (!refused || !flipped) {
       setEast('')
@@ -95,9 +95,24 @@ export function RunMoveForm({ element: el, canEdit, onCommand }: { element: RunS
       setUp('')
     }
   }
+  const quickMove = (dxMm: number, dyMm: number, dzMm: number) => {
+    const plain: Command = { type: 'drag_run', elementId: el.id, delta: { x: dxMm, y: dyMm, z: dzMm } }
+    const refused = onCommand(plain)
+    const flipped = refused ? onCommand({ ...plain, reroute: true }) : null
+    setError(refused && flipped ? flipped : null)
+  }
+  const STEP_MM = 152.4 // 6" (fits standard 90° jogs cleanly)
   return (
     <form onSubmit={submit} className="flex flex-col gap-2" data-testid="run-move">
       <Separator />
+      <div className="grid grid-cols-3 gap-1" role="group" aria-label="Quick move 6 inches" data-testid="run-quick-move">
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(-STEP_MM, 0, 0)}>← 6&quot; W</Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(0, STEP_MM, 0)}>↑ 6&quot; N</Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(STEP_MM, 0, 0)}>→ 6&quot; E</Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(0, 0, STEP_MM)}>▲ 6&quot; Up</Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(0, -STEP_MM, 0)}>↓ 6&quot; S</Button>
+        <Button type="button" size="sm" variant="outline" className="h-7 px-1.5 text-xs" disabled={!canEdit} onClick={() => quickMove(0, 0, -STEP_MM)}>▼ 6&quot; Dn</Button>
+      </div>
       <div className="grid grid-cols-3 gap-2">
         <Field>
           <FieldLabel htmlFor={`${id}-e`}>Move east (ft)</FieldLabel>

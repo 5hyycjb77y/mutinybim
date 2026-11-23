@@ -247,7 +247,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - textSize?: number
 - dim?: { kind: "linear"|"aligned"|"angular"|"radial"|"diameter"|"arc_length"|"spot_elevation"|"spot_coordinate"; direction?: "horizontal"|"vertical"; chain?: "continuous"|"baseline"; refs?: { elementId: string; anchor: "start"|"end"|"mid"|"center"|"insertion"|"edge_left"|"edge_right"; index?: number } | null[]; offsetMm: number; textOverride?: string; prefix?: string; suffix?: string; style?: { units?: "ft_in"|"in"|"mm"|"m"; roundTo?: number; terminator?: "tick"|"arrow"|"dot"; textSizeMm?: number } }
 - tag?: { elementId: string; template: "auto"|"duct_size"|"duct_size_insulation"|"pipe_size"|"pipe_size_insulation"|"mark"|"air_terminal"|"equipment"|"fixture"|"fields"|"gas_pipe"|"name_number"; fields?: string[]; leader: boolean; leaderOverride?: boolean; mask?: boolean; textSizeMm?: number; styleId?: string; elbow?: "auto" | { x: number; y: number } }
-- callout?: { viewId: string; label?: string }
+- callout?: { viewId: string; label?: string; boundary?: { x: number; y: number }[]; showLabel?: boolean }
 - lineStyle?: { weight?: "thin"|"medium"|"wide"|"heavy"; pattern?: "solid"|"dashed"|"hidden"|"center"|"phantom"|"dotted" }
 - closed?: boolean
 - ccw?: boolean
@@ -382,7 +382,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 
 ## create_ceiling
 
-- ceilings: { ceilingId: string; levelId: string; spaceId?: string; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][]; form?: "flat"|"sloped"|"cloud"|"soffit"|"open_to_structure"; heightMm: number; reference?: { x: number; y: number }; slope?: { directionDeg: number; pitch: number }; role?: string; classId?: string; typeId?: string }[]
+- ceilings: { ceilingId: string; levelId: string; spaceId?: string; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][]; form?: "flat"|"sloped"|"cloud"|"soffit"|"open_to_structure"; heightMm: number; reference?: { x: number; y: number }; slope?: { directionDeg: number; pitch: number }; role?: string; classId?: string; typeId?: string; grid?: { spacingXMm: number; spacingYMm: number; origin?: {…}; rotationDeg?: number } }[]
 
 ## create_element
 
@@ -499,6 +499,9 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - titleBlockRow?: { id: string; revision: number; name: string; definition: { schema: 1; paperName: string; paperMm: {…}; marginsMm: {…}; stripWidthMm: number; colors: {…}; fonts: {…}; lines: {…}; slots: {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…}[] } }
 - fields?: object
 - revisions?: { number: string; date: string; description: string }[]
+- discipline?: string
+- group?: string
+- sortOrder?: number
 
 ## create_space
 
@@ -556,7 +559,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - name: string
 - viewType: "floor_plan"|"ceiling_plan"|"section"|"elevation"|"three_d"|"detail"|"schedule"
 - crop?: { min: { x: number; y: number }; max: { x: number; y: number } }
-- props?: { level?: string; levelElevationMm?: number; scale?: number; cutHeightMm?: number; viewDepthMm?: number; viewBottomMm?: number | null; viewTopMm?: number | null; discipline?: string|null; hiddenCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"[]; hiddenDraftingCategories?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"[]; references?: object; linkedHiddenLines?: boolean; linkedMinObjectMm?: number; detailLevel?: "coarse"|"medium"|"fine"; showLineCodes?: boolean; symbolScale?: number; visualStyle?: "wireframe"|"hidden_line"|"shaded"|"shaded_edges"; showHiddenLines?: boolean; hiddenLineCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"[]; lineWeights?: object; categoryOverrides?: object; cutPattern?: "cross"|"solid"|"hatch"; section?: { start: {…}; end: {…}; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean }; cropView?: boolean; showCropBox?: boolean; annotationCrop?: boolean; annotationCropOffsetMm?: number; levelLeftExtMm?: number; levelRightExtMm?: number; phaseId?: string; phaseFilterId?: string; groupDisplay?: object; orientation?: "plan_north"|"true_north"|"working_angle"; workingAngleDeg?: number | null; projection?: "perspective"|"orthographic"; schedule?: { category: "mechanical_equipment"|"air_terminal"|"duct_accessory"|"pipe_accessory"|"plumbing_fixture"|"electrical_equipment"|"electrical_device"|"lighting_fixture"|"generic"|"sheet_list"|"duct"|"pipe"; title?: string; columns: {…}[]; sort?: {…}[]; filters?: {…}[]; level?: string; itemize?: boolean; textSizeMm?: number; emptyText?: string }; formSchedule?: { kind: string; elementId?: string; template: {…}; rules?: string; textSizeMm?: number; emptyText?: string; templateSource?: {…} }; scheduleV2?: { name: string; source: {…} | {…} | {…}; columns: {…} | {…} | {…} | {…} | {…}[]; filters: {…}[]; sort: {…}[]; groups: {…}[]; grandTotals: boolean; itemize: boolean; presentation: {…} | {…}; display: {…}; pins?: {…}[] }; diagram?: { kind: string; hints?: {…} } }
+- props?: { level?: string; levelElevationMm?: number; scale?: number; cutHeightMm?: number; viewDepthMm?: number; viewBottomMm?: number | null; viewTopMm?: number | null; discipline?: string|null; hiddenCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"|"opening_tags"[]; hiddenDraftingCategories?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"[]; references?: object; linkedHiddenLines?: boolean; linkedMinObjectMm?: number; detailLevel?: "coarse"|"medium"|"fine"; showLineCodes?: boolean; offsetStackedRuns?: boolean; showReferenceDisciplines?: string[]; symbolScale?: number; visualStyle?: "wireframe"|"hidden_line"|"shaded"|"shaded_edges"; showHiddenLines?: boolean; hiddenLineCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"|"opening_tags"[]; lineWeights?: object; categoryOverrides?: object; cutPattern?: "cross"|"solid"|"hatch"; section?: { start: {…}; end: {…}; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean; referencingViewId?: string; showInDisciplines?: string[] }; cropView?: boolean; cropPolygon?: { x: number; y: number }[] | null; showCropBox?: boolean; annotationCrop?: boolean; annotationCropOffsetMm?: number; levelLeftExtMm?: number; levelRightExtMm?: number; phaseId?: string; phaseFilterId?: string; groupDisplay?: object; orientation?: "plan_north"|"true_north"|"working_angle"; workingAngleDeg?: number | null; projection?: "perspective"|"orthographic"; schedule?: { category: "mechanical_equipment"|"air_terminal"|"duct_accessory"|"pipe_accessory"|"plumbing_fixture"|"electrical_equipment"|"electrical_device"|"lighting_fixture"|"generic"|"sheet_list"|"duct"|"pipe"; title?: string; columns: {…}[]; sort?: {…}[]; filters?: {…}[]; level?: string; itemize?: boolean; textSizeMm?: number; emptyText?: string }; formSchedule?: { kind: string; elementId?: string; template: {…}; rules?: string; textSizeMm?: number; emptyText?: string; templateSource?: {…} }; scheduleV2?: { name: string; source: {…} | {…} | {…}; columns: {…} | {…} | {…} | {…} | {…}[]; filters: {…}[]; sort: {…}[]; groups: {…}[]; grandTotals: boolean; itemize: boolean; presentation: {…} | {…}; display: {…}; pins?: {…}[] }; diagram?: { kind: string; hints?: {…} } }
 
 ## create_zone
 
@@ -700,6 +703,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - role?: string | null
 - classId?: string
 - typeId?: string | null
+- grid?: { spacingXMm: number; spacingYMm: number; origin?: { x: number; y: number }; rotationDeg?: number } | null
 
 ## edit_construction_stage
 
@@ -1415,6 +1419,9 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - titleBlockRow?: { id: string; revision: number; name: string; definition: { schema: 1; paperName: string; paperMm: {…}; marginsMm: {…}; stripWidthMm: number; colors: {…}; fonts: {…}; lines: {…}; slots: {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…} | {…}[] } } | null
 - fields?: object
 - revisions?: { number: string; date: string; description: string }[]
+- discipline?: string | null
+- group?: string | null
+- sortOrder?: number|null
 
 ## set_slope
 
@@ -1481,6 +1488,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 
 - viewId: string
 - crop?: { min: { x: number; y: number }; max: { x: number; y: number } }
+- cropPolygon?: { x: number; y: number }[] | null
 - fit?: true
 - cropView?: boolean
 - showCropBox?: boolean
@@ -1488,14 +1496,14 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - annotationCropOffsetMm?: number
 - levelLeftExtMm?: number
 - levelRightExtMm?: number
-- section?: { start: { x: number; y: number }; end: { x: number; y: number }; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean }
+- section?: { start: { x: number; y: number }; end: { x: number; y: number }; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean; referencingViewId?: string; showInDisciplines?: string[] }
 - farClipMm?: number
 - keepViewportCenter?: boolean
 
 ## set_view_properties
 
 - viewId: string
-- props: { level?: string; levelElevationMm?: number; scale?: number; cutHeightMm?: number; viewDepthMm?: number; viewBottomMm?: number | null; viewTopMm?: number | null; discipline?: string|null; hiddenCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"[]; hiddenDraftingCategories?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"[]; references?: object; linkedHiddenLines?: boolean; linkedMinObjectMm?: number; detailLevel?: "coarse"|"medium"|"fine"; showLineCodes?: boolean; symbolScale?: number; visualStyle?: "wireframe"|"hidden_line"|"shaded"|"shaded_edges"; showHiddenLines?: boolean; hiddenLineCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"[]; lineWeights?: object; categoryOverrides?: object; cutPattern?: "cross"|"solid"|"hatch"; section?: { start: {…}; end: {…}; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean }; cropView?: boolean; showCropBox?: boolean; annotationCrop?: boolean; annotationCropOffsetMm?: number; levelLeftExtMm?: number; levelRightExtMm?: number; phaseId?: string; phaseFilterId?: string; groupDisplay?: object; orientation?: "plan_north"|"true_north"|"working_angle"; workingAngleDeg?: number | null; projection?: "perspective"|"orthographic"; schedule?: { category: "mechanical_equipment"|"air_terminal"|"duct_accessory"|"pipe_accessory"|"plumbing_fixture"|"electrical_equipment"|"electrical_device"|"lighting_fixture"|"generic"|"sheet_list"|"duct"|"pipe"; title?: string; columns: {…}[]; sort?: {…}[]; filters?: {…}[]; level?: string; itemize?: boolean; textSizeMm?: number; emptyText?: string }; formSchedule?: { kind: string; elementId?: string; template: {…}; rules?: string; textSizeMm?: number; emptyText?: string; templateSource?: {…} }; scheduleV2?: { name: string; source: {…} | {…} | {…}; columns: {…} | {…} | {…} | {…} | {…}[]; filters: {…}[]; sort: {…}[]; groups: {…}[]; grandTotals: boolean; itemize: boolean; presentation: {…} | {…}; display: {…}; pins?: {…}[] }; diagram?: { kind: string; hints?: {…} } }
+- props: { level?: string; levelElevationMm?: number; scale?: number; cutHeightMm?: number; viewDepthMm?: number; viewBottomMm?: number | null; viewTopMm?: number | null; discipline?: string|null; hiddenCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"|"opening_tags"[]; hiddenDraftingCategories?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"[]; references?: object; linkedHiddenLines?: boolean; linkedMinObjectMm?: number; detailLevel?: "coarse"|"medium"|"fine"; showLineCodes?: boolean; offsetStackedRuns?: boolean; showReferenceDisciplines?: string[]; symbolScale?: number; visualStyle?: "wireframe"|"hidden_line"|"shaded"|"shaded_edges"; showHiddenLines?: boolean; hiddenLineCategories?: "duct"|"duct_fitting"|"pipe"|"air_terminal"|"equipment"|"walls"|"doors_windows"|"rooms"|"grids"|"structure"|"tags"|"dimensions"|"electrical_devices"|"lighting_fixtures"|"electrical_equipment"|"insulation"|"opening_tags"[]; lineWeights?: object; categoryOverrides?: object; cutPattern?: "cross"|"solid"|"hatch"; section?: { start: {…}; end: {…}; direction: 1 | -1; depthMm: number; headExtMm?: number; tailExtMm?: number; splitGap?: boolean; referencingViewId?: string; showInDisciplines?: string[] }; cropView?: boolean; cropPolygon?: { x: number; y: number }[] | null; showCropBox?: boolean; annotationCrop?: boolean; annotationCropOffsetMm?: number; levelLeftExtMm?: number; levelRightExtMm?: number; phaseId?: string; phaseFilterId?: string; groupDisplay?: object; orientation?: "plan_north"|"true_north"|"working_angle"; workingAngleDeg?: number | null; projection?: "perspective"|"orthographic"; schedule?: { category: "mechanical_equipment"|"air_terminal"|"duct_accessory"|"pipe_accessory"|"plumbing_fixture"|"electrical_equipment"|"electrical_device"|"lighting_fixture"|"generic"|"sheet_list"|"duct"|"pipe"; title?: string; columns: {…}[]; sort?: {…}[]; filters?: {…}[]; level?: string; itemize?: boolean; textSizeMm?: number; emptyText?: string }; formSchedule?: { kind: string; elementId?: string; template: {…}; rules?: string; textSizeMm?: number; emptyText?: string; templateSource?: {…} }; scheduleV2?: { name: string; source: {…} | {…} | {…}; columns: {…} | {…} | {…} | {…} | {…}[]; filters: {…}[]; sort: {…}[]; groups: {…}[]; grandTotals: boolean; itemize: boolean; presentation: {…} | {…}; display: {…}; pins?: {…}[] }; diagram?: { kind: string; hints?: {…} } }
 - crop?: { min: { x: number; y: number }; max: { x: number; y: number } }
 - keepViewportCenter?: boolean
 
@@ -1617,7 +1625,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - text?: string
 - dim?: { kind: "linear"|"aligned"|"angular"|"radial"|"diameter"|"arc_length"|"spot_elevation"|"spot_coordinate"; direction?: "horizontal"|"vertical"; chain?: "continuous"|"baseline"; refs?: { elementId: string; anchor: "start"|"end"|"mid"|"center"|"insertion"|"edge_left"|"edge_right"; index?: number } | null[]; offsetMm: number; textOverride?: string; prefix?: string; suffix?: string; style?: { units?: "ft_in"|"in"|"mm"|"m"; roundTo?: number; terminator?: "tick"|"arrow"|"dot"; textSizeMm?: number } }
 - tag?: { elementId: string; template: "auto"|"duct_size"|"duct_size_insulation"|"pipe_size"|"pipe_size_insulation"|"mark"|"air_terminal"|"equipment"|"fixture"|"fields"|"gas_pipe"|"name_number"; fields?: string[]; leader: boolean; leaderOverride?: boolean; mask?: boolean; textSizeMm?: number; styleId?: string; elbow?: "auto" | { x: number; y: number } }
-- callout?: { viewId: string; label?: string }
+- callout?: { viewId: string; label?: string; boundary?: { x: number; y: number }[]; showLabel?: boolean }
 - lineStyle?: { weight?: "thin"|"medium"|"wide"|"heavy"; pattern?: "solid"|"dashed"|"hidden"|"center"|"phantom"|"dotted" }
 - closed?: boolean
 - ccw?: boolean

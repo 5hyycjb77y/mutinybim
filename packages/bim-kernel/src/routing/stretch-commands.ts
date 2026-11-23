@@ -191,7 +191,8 @@ function splitRun(model: ModelState, cmd: Extract<StretchCommand, { type: "split
 
 // ------------------------------------------------------------------ resize a stretch
 
-const BODY_FITTINGS: ReadonlySet<RunFitting["fittingType"]> = new Set(["elbow", "offset", "cap"]);
+const ELBOW_FITTING_TYPE = "elbow" as const;
+const BODY_FITTINGS: ReadonlySet<RunFitting["fittingType"]> = new Set([ELBOW_FITTING_TYPE, "offset", "cap"]);
 const TAKEOFFS: ReadonlySet<RunFitting["fittingType"]> = new Set(["tap", "tee", "wye"]);
 
 function widthOf(size: RunSize): number {
@@ -493,7 +494,7 @@ function fittingsTakingLength(elements: Readonly<Record<string, BimElement>>, se
     const cut = end === "start" ? piece.cutStart : piece.cutEnd;
     const link = seg.links[end];
     const f = link ? elements[link.elementId] : undefined;
-    if (cut > 0.5 && f?.kind === "run_fitting") names.push(f.fittingType === "elbow" ? `${f.angleDeg ?? 90}° elbow` : runLabel(elements, f));
+    if (cut > 0.5 && f?.kind === "run_fitting") names.push(f.fittingType === ELBOW_FITTING_TYPE ? `${f.angleDeg ?? 90}° elbow` : runLabel(elements, f));
   }
   return { names: [...new Set(names)], needMm: piece.cutStart + piece.cutEnd };
 }
@@ -506,7 +507,7 @@ function flipLeg(ctx: Ctx, seg: RunSegment): void {
     const link = seg.links[end];
     if (!link) continue;
     const other = current(ctx, link.elementId);
-    if (other.kind !== "run_fitting" || other.fittingType !== "elbow" || other.host || other.ports.length !== 2) {
+    if (other.kind !== "run_fitting" || other.fittingType !== ELBOW_FITTING_TYPE || other.host || other.ports.length !== 2) {
       refuse("unsupported_geometry", `The ${name} would run backwards into the ${runLabelOrPart(ctx, other)}, which can't turn the other way; drag it less`, [seg.id, other.id]);
     }
     const ports = other.ports.map((p) => (p.id === link.port ? { ...p, direction: p3(-p.direction.x, -p.direction.y, -p.direction.z) } : p));
@@ -525,8 +526,200 @@ function runLabelOrPart(ctx: Ctx, el: BimElement): string {
   return el.id;
 }
 
+/**
+ * When a perpendicular drag on a straight segment hits an anchored part or a
+ * hosted takeoff fitting that cannot move off its trunk, insert a clean 90°
+ * jog (two elbows + connecting straight leg along `d`) at the blocked end(s)
+ * so the segment moves freely while staying connected.
+ */
+function tryAutoJogDrag(model: ModelState, cmd: DragCommand): ExecuteResult | null {
+  if (!cmd.reroute || cmd.grip) return null;
+  const rawEl = model.elements[cmd.elementId];
+  if (rawEl?.kind !== "run_segment") return null;
+  const d = round3(p3(cmd.delta.x, cmd.delta.y, cmd.delta.z));
+  const dist = len3(d);
+  if (dist < model.settings.minStraightMm) return null;
+  const u = segmentAxis(rawEl);
+  if (Math.abs(dot3(u, scale3(d, 1 / dist))) > 1e-3) return null;
+
+  const blockedEnds: Array<"start" | "end"> = [];
+  for (const end of ["start", "end"] as const) {
+    const link = rawEl.links[end];
+    if (!link) continue;
+    const neighbor = model.elements[link.elementId];
+    if (!neighbor) continue;
+    const canJog =
+      neighbor.kind === "part" ||
+      neighbor.kind === "run_segment" ||
+      (neighbor.kind === "run_fitting" && (neighbor.host !== undefined || neighbor.fittingType === "transition"));
+    if (!canJog) continue;
+    const probeCtx = newCtx(model, "jog-probe");
+    const probe = new RunPropagator(probeCtx.reader, probeCtx.working, probeCtx.touched, new Set([rawEl.id]));
+    try {
+      probe.translateInto(link, d);
+    } catch (err) {
+      if (err instanceof KernelError && (err.code === "anchored_would_move" || err.code === "unsupported_geometry")) {
+        blockedEnds.push(end);
+      }
+    }
+  }
+  if (blockedEnds.length === 0) return null;
+
+  // Deterministic full-ID hash + collision-free suffix so long segment IDs and multi-step batch_edits never collide.
+  let h = 2166136261;
+  for (let i = 0; i < rawEl.id.length; i++) {
+    h ^= rawEl.id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const basePrefix = `jog-${rawEl.id.slice(0, 16)}-${(h >>> 0).toString(36)}-r${model.revision}`;
+  let prefix = basePrefix;
+  let attempt = 0;
+  while (model.elements[`${prefix}-s1`] !== undefined || model.elements[`${prefix}-f1`] !== undefined) {
+    attempt += 1;
+    prefix = `${basePrefix}-${attempt}`;
+  }
+  const ctx = newCtx(model, prefix);
+  const seg = segment(ctx, rawEl.id);
+  const sys = systemOf(ctx, seg);
+  const rules = systemRules(sys.systemKind);
+  const uJog = scale3(d, 1 / dist);
+  const movedStart = round3(add3(seg.start, d));
+  const movedEnd = round3(add3(seg.end, d));
+  const prop = new RunPropagator(ctx.reader, ctx.working, ctx.touched, new Set([seg.id]));
+
+  const nextLinks: { start?: PortRef; end?: PortRef } = {
+    ...(seg.links.start ? { start: seg.links.start } : {}),
+    ...(seg.links.end ? { end: seg.links.end } : {}),
+  };
+
+  for (const end of ["start", "end"] as const) {
+    const link = seg.links[end];
+    if (!link) continue;
+    if (!blockedEnds.includes(end)) {
+      prop.translateInto(link, d);
+      continue;
+    }
+    const pOld = end === "start" ? seg.start : seg.end;
+    const pNew = end === "start" ? movedStart : movedEnd;
+    const uOut = end === "start" ? scale3(u, -1) : u;
+    const jogSegId = newId(ctx, "s");
+    const elbow1Id = newId(ctx, "f");
+    const elbow2Id = newId(ctx, "f");
+
+    const choice = chooseFitting(sys, ELBOW_FITTING_TYPE, seg.domain, [seg.size, seg.size], 90, undefined);
+    const label = fittingLabel(ELBOW_FITTING_TYPE, rules, null, 90);
+    const inheritedPartition = seg.partition ? { partition: seg.partition } : {};
+    const elbow1: RunFitting = {
+      id: elbow1Id,
+      kind: "run_fitting",
+      domain: seg.domain,
+      levelId: seg.levelId,
+      ...inheritedPartition,
+      systemId: seg.systemId,
+      version: 0,
+      authoredRev: {},
+      fittingType: ELBOW_FITTING_TYPE,
+      label,
+      position: round3(pOld),
+      angleDeg: 90,
+      ports: [
+        { id: "a", position: round3(pOld), direction: round3(uOut), size: seg.size, link },
+        { id: "b", position: round3(pOld), direction: round3(uJog), size: seg.size, link: { elementId: jogSegId, port: "start" } },
+      ],
+      ...choice.fields,
+    };
+    const elbow2: RunFitting = {
+      id: elbow2Id,
+      kind: "run_fitting",
+      domain: seg.domain,
+      levelId: seg.levelId,
+      ...inheritedPartition,
+      systemId: seg.systemId,
+      version: 0,
+      authoredRev: {},
+      fittingType: ELBOW_FITTING_TYPE,
+      label,
+      position: round3(pNew),
+      angleDeg: 90,
+      ports: [
+        { id: "a", position: round3(pNew), direction: round3(scale3(uJog, -1)), size: seg.size, link: { elementId: jogSegId, port: "end" } },
+        { id: "b", position: round3(pNew), direction: round3(scale3(uOut, -1)), size: seg.size, link: { elementId: seg.id, port: end } },
+      ],
+      ...choice.fields,
+    };
+    const jogSeg: RunSegment = {
+      id: jogSegId,
+      kind: "run_segment",
+      domain: seg.domain,
+      levelId: seg.levelId,
+      ...inheritedPartition,
+      systemId: seg.systemId,
+      version: 0,
+      authoredRev: {},
+      start: round3(pOld),
+      end: round3(pNew),
+      size: seg.size,
+      flow: seg.flow,
+      links: {
+        start: { elementId: elbow1Id, port: "b" },
+        end: { elementId: elbow2Id, port: "a" },
+      },
+      branches: [],
+      ...(seg.insulation ? { insulation: seg.insulation } : {}),
+    };
+    const neighbor = current(ctx, link.elementId);
+    const updatedNeighbor = withLink(neighbor, link.port, { elementId: elbow1Id, port: "a" });
+    if (!updatedNeighbor) return null;
+    put(ctx, updatedNeighbor);
+    put(ctx, elbow1);
+    put(ctx, jogSeg);
+    put(ctx, elbow2);
+    nextLinks[end] = { elementId: elbow2Id, port: "b" };
+  }
+
+  // Move hosted branches along with `seg` and push `d` into their downstream legs.
+  for (const bid of seg.branches) {
+    const b = current(ctx, bid);
+    if (b.kind !== "run_fitting") continue;
+    put(ctx, {
+      ...b,
+      position: round3(add3(b.position, d)),
+      ports: b.ports.map((p) => ({ ...p, position: round3(add3(p.position, d)) })),
+    });
+    for (const p of b.ports) if (p.link) prop.translateInto(p.link, d);
+  }
+
+  put(ctx, { ...seg, start: movedStart, end: movedEnd, links: nextLinks });
+
+  for (const id of ctx.touched) {
+    const piece = ctx.working[id];
+    if (piece?.kind !== "run_segment") continue;
+    const length = len3(sub3(piece.end, piece.start));
+    if (length < model.settings.minStraightMm) {
+      refuse("min_straight_length", `That would shrink the ${runLabel(ctx.working, piece)} to ${feet(length)}; the shortest straight piece is ${model.settings.minStraightMm} mm`, [piece.id]);
+    }
+    const room = roomForFittings(ctx.working, piece);
+    if (room) refuse("min_straight_length", `That would leave the ${runLabel(ctx.working, piece)} too short: it ${room}`, [piece.id]);
+  }
+
+  const name = runLabel(model.elements, rawEl);
+  return finish(ctx.reader, ctx.working, ctx.touched, [], () => [], {
+    summary: [`Offset the ${name} ${feet(dist)} with ${plural(blockedEnds.length, "90° jog")}`],
+  });
+}
+
 function dragRun(model: ModelState, cmd: DragCommand): ExecuteResult {
-  const { ctx, el, d } = propagateDrag(model, cmd);
+  let propagated: { ctx: Ctx; el: RunSegment | RunFitting; d: RunPoint };
+  try {
+    propagated = propagateDrag(model, cmd);
+  } catch (err) {
+    if (cmd.reroute && err instanceof KernelError && (err.code === "anchored_would_move" || err.code === "unsupported_geometry")) {
+      const jogged = tryAutoJogDrag(model, cmd);
+      if (jogged) return jogged;
+    }
+    throw err;
+  }
+  const { ctx, el, d } = propagated;
   const tol = model.settings.connectorToleranceMm;
   const flipped: string[] = [];
   for (const id of [...ctx.touched]) {

@@ -25,6 +25,18 @@ export interface CeilingSlope {
   readonly pitch: number;
 }
 
+/** A ceiling tile grid: exact real-scale tile dimensions, origin, and rotation in model coordinates (mm). */
+export interface CeilingGrid {
+  /** Tile width along the grid's local X axis, mm (e.g. 1219.2 for 4', 609.6 for 2'). */
+  readonly spacingXMm: number;
+  /** Tile depth along the grid's local Y axis, mm (e.g. 609.6 for 2'). */
+  readonly spacingYMm: number;
+  /** Grid origin in model XY, mm (defaults to { x: 0, y: 0 }). */
+  readonly origin?: Vec2;
+  /** Grid rotation counter-clockwise from east, degrees (default 0; 90 rotates 2×4 tiles north-south). */
+  readonly rotationDeg?: number;
+}
+
 export interface Ceiling extends ModelElementBase, ElementCore {
   readonly kind: "ceiling";
   readonly levelId: ElementId;
@@ -43,6 +55,8 @@ export interface Ceiling extends ModelElementBase, ElementCore {
   readonly slope?: CeilingSlope;
   /** Its surface role (`SURFACE_ROLE_POINT`). Absent: `ceiling`. */
   readonly role?: string;
+  /** Optional explicit tile grid (spacing, origin, rotation) for ACT/grid ceilings; absent derives from material hatch. */
+  readonly grid?: CeilingGrid;
 }
 
 /**

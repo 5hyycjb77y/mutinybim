@@ -24,9 +24,9 @@ Input: `project_id`?, `model_id`?, `level`?, `zone`?, `script`?, `selection`?, `
 
 ### bim_run_script
 
-Preview: run a script on this thread's sealed machine (no network, 1 GB, 30 s, 2 MB) and check its output. Saves nothing; returns what would change, apply_with and script_id (send the id, not the text, next time).
+Preview: run a script on this thread's sealed machine (no network, 1 GB, 30 s, 2 MB) and check its output. Saves nothing; returns what would change, optional configurable clash feedback (clashes), apply_with and script_id (send the id, not the text, next time).
 
-Input: `project_id`?, `model_id`?, `level`?, `zone`?, `script`, `values`?, `selection`?
+Input: `project_id`?, `model_id`?, `level`?, `zone`?, `script`, `values`?, `selection`?, `clashes`?
 
 ### bim_apply_output
 

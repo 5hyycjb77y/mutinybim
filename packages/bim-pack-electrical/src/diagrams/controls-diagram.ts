@@ -216,7 +216,7 @@ function collectControlZones(elements: Elements): {
       key,
       label,
       isEmergencyOnly,
-      room: [...rooms].slice(0, 2).join(" / ") || "GENERAL",
+      room: [...rooms].join(" / ") || "GENERAL",
       protocol: protocol || "line_voltage",
       circuits: [...circuits].sort(),
       panels: [...zonePanels.values()],
@@ -300,8 +300,27 @@ function rectPoly(nodeId: string, x: number, y: number, w: number, h: number, we
   };
 }
 
-function textBox(nodeId: string, x: number, yTop: number, widthMm: number, lines: readonly OneLineTextLine[], align: "left" | "center" = "center"): OneLineItem {
-  return { nodeId, shape: "text", at: { x, y: yTop }, widthMm, lines, align };
+function textBox(nodeId: string, x: number, yTop: number, widthMm: number, lines: readonly OneLineTextLine[], align: "left" | "center" = "center", mask = false): OneLineItem {
+  return { nodeId, shape: "text", at: { x, y: yTop }, widthMm, lines, align, ...(mask ? { mask: true } : {}) };
+}
+
+/** Wrap a room list cleanly onto multiple lines (no ellipsis truncation). */
+function wrapLabelLines(text: string, maxChars: number): OneLineTextLine[] {
+  if (text.length <= maxChars) return [{ text }];
+  const parts = text.split(/\s*\/\s*/);
+  const out: string[] = [];
+  let cur = "";
+  for (const part of parts) {
+    const next = cur ? `${cur} / ${part}` : part;
+    if (cur && next.length > maxChars) {
+      out.push(cur);
+      cur = part;
+    } else {
+      cur = next;
+    }
+  }
+  if (cur) out.push(cur);
+  return out.map((t) => ({ text: t }));
 }
 
 /** Lay out the live lighting controls schematic diagram in drawing mm (y up). */
@@ -317,23 +336,24 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
     return { items, extent: { min: { x: 0, y: 0 }, max: { x: 0, y: 0 } }, nodes, ranges, entries };
   }
 
-  const COL_W = 54;
+  const COL_W = 58;
   const COL_GAP = 10;
   const totalW = zones.length * COL_W + Math.max(0, zones.length - 1) * COL_GAP;
   const originX = 0;
 
-  // Vertical tiers (y up, drawing mm):
-  //   Loads box:      y = 0 .. 28
-  //   Control wire:   y = 28 .. 46
-  //   Controller box: y = 46 .. 74
-  //   Feed wire:      y = 74 .. 92
-  //   Panel bus bar:  y = 92 .. 110
-  //   Title:          y = 124
+  // Compute max room-header line count so multi-room zones never truncate or crowd controllers.
+  const roomLineLists = zones.map((z) => wrapLabelLines(z.room.toUpperCase(), 24));
+  const maxRoomLines = Math.max(1, ...roomLineLists.map((l) => l.length));
+  const headerH = 8.5 + maxRoomLines * 4.2;
+
+  // Individual home-run lanes between the panel bus bar and the control zone cards so home runs never collapse onto one line.
+  const laneStep = 3.2;
+  const laneBandH = Math.max(16, (zones.length + 1) * laneStep + 8);
   const LOAD_Y = 0;
   const LOAD_H = 26;
   const CTRL_Y = 46;
-  const CTRL_H = 31;
-  const BUS_Y = 97;
+  const CTRL_H = headerH + 19;
+  const BUS_Y = CTRL_Y + CTRL_H + laneBandH;
   const BUS_H = 16;
 
   // Title banner
@@ -344,12 +364,12 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
   // Top tier: feeding panel bus bar(s)
   const panelList = panels.length > 0 ? panels : [{ id: "bus:lighting" as ElementId, name: "LIGHTING PANEL", ratings: "277/480V" }];
   const busSpan = Math.max(COL_W, (totalW - (panelList.length - 1) * 10) / panelList.length);
-  const panelCenterX = new Map<string, number>();
+  const panelBounds = new Map<string, { readonly left: number; readonly right: number; readonly cx: number }>();
 
   panelList.forEach((p, idx) => {
     const px = originX + idx * (busSpan + 10);
     const cx = px + busSpan / 2;
-    panelCenterX.set(p.id, cx);
+    panelBounds.set(p.id, { left: px, right: px + busSpan, cx });
     const startIdx = items.length;
     items.push(rectPoly(p.id, px, BUS_Y, busSpan, BUS_H, "heavy"));
     // Bold horizontal bus bar stroke inside the panel header.
@@ -362,17 +382,24 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
     nodes.push({ id: p.id, name: p.name, center: { x: cx, y: BUS_Y + BUS_H / 2 }, depth: 0, kind: "panelboard" });
   });
 
-  // Main horizontal distribution feeder rail below the panels
-  const RAIL_Y = BUS_Y - 8;
-  if (zones.length > 1) {
-    const firstColCx = originX + COL_W / 2;
-    const lastColCx = originX + (zones.length - 1) * (COL_W + COL_GAP) + COL_W / 2;
-    items.push({ nodeId: "rail:power", shape: "line", points: [{ x: firstColCx, y: RAIL_Y }, { x: lastColCx, y: RAIL_Y }], weight: "medium" });
-  }
-  panelList.forEach((p) => {
-    const cx = panelCenterX.get(p.id) ?? originX + totalW / 2;
-    items.push({ nodeId: p.id, shape: "line", points: [{ x: cx, y: BUS_Y }, { x: cx, y: RAIL_Y }], weight: "medium" });
+  // Assign each zone its own distinct breaker tap X on its feeding panel's bottom bus so individual home runs stay distinct.
+  const panelZones = new Map<string, number[]>();
+  zones.forEach((z, idx) => {
+    const pid = z.panels[0]?.id ?? panelList[0]!.id;
+    const list = panelZones.get(pid) ?? [];
+    list.push(idx);
+    panelZones.set(pid, list);
   });
+  const zoneTapX = new Map<number, number>();
+  for (const [pid, idxs] of panelZones.entries()) {
+    const b = panelBounds.get(pid) ?? { left: originX, right: originX + totalW, cx: originX + totalW / 2 };
+    const margin = 8;
+    const avail = Math.max(8, b.right - b.left - margin * 2);
+    idxs.forEach((zIdx, k) => {
+      const tx = idxs.length === 1 ? b.cx : b.left + margin + (avail * k) / (idxs.length - 1);
+      zoneTapX.set(zIdx, Math.round(tx * 100) / 100);
+    });
+  }
 
   // Per-zone columns
   zones.forEach((z, idx) => {
@@ -382,25 +409,44 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
     const startIdx = items.length;
     const dashedCtrl = z.protocol !== "line_voltage" || z.controllers.length > 0;
 
-    // Drop from power rail to controller/zone block
-    items.push({ nodeId, shape: "line", points: [{ x: cx, y: RAIL_Y }, { x: cx, y: CTRL_Y + CTRL_H }], weight: "thin" });
-    const cktTag = z.circuits.slice(0, 2).join(", ") || "CKT TBD";
-    items.push(textBox(nodeId, x + 2, RAIL_Y - 1.2, COL_W - 4, [{ text: cktTag }], "center"));
+    // Individual branch home run from dedicated breaker terminal on panel bus down to zone card
+    const tapX = zoneTapX.get(idx) ?? cx;
+    const laneY = BUS_Y - 4 - (idx + 1) * laneStep;
+    const cardTop = CTRL_Y + CTRL_H;
+    // Small breaker terminal tick inside panel bottom
+    items.push({ nodeId, shape: "line", points: [{ x: tapX, y: BUS_Y + 3.5 }, { x: tapX, y: BUS_Y }], weight: "medium" });
+    if (Math.abs(tapX - cx) < 0.8) {
+      items.push({ nodeId, shape: "line", points: [{ x: cx, y: BUS_Y }, { x: cx, y: cardTop }], weight: "thin" });
+    } else {
+      items.push({
+        nodeId,
+        shape: "polyline",
+        points: [
+          { x: tapX, y: BUS_Y },
+          { x: tapX, y: laneY },
+          { x: cx, y: laneY },
+          { x: cx, y: cardTop },
+        ],
+        weight: "thin",
+      });
+    }
+    const cktTag = z.circuits.join(", ") || "CKT TBD";
+    const cktW = Math.min(COL_W - 4, Math.max(18, oneLineTextWidth([{ text: cktTag }]) + 4));
+    // Opaque-masked circuit badge centered cleanly above the zone card so linework never strikes through it
+    items.push(textBox(nodeId, cx - cktW / 2, cardTop + 5.8, cktW, [{ text: cktTag }], "center", true));
 
     // Tier 2: Control Zone / Controller card
     items.push(rectPoly(nodeId, x, CTRL_Y, COL_W, CTRL_H, z.isEmergencyOnly ? "heavy" : "medium", z.isEmergencyOnly));
-    // Header divider (room for bold zone label + room/area line without overlapping controllers below)
-    const headerH = 12.5;
+    // Header divider (dynamic height so wrapped multi-room labels never collide with controllers below)
     items.push({ nodeId, shape: "line", points: [{ x, y: CTRL_Y + CTRL_H - headerH }, { x: x + COL_W, y: CTRL_Y + CTRL_H - headerH }], weight: "thin" });
-    const roomUpper = z.room.toUpperCase();
-    const shortRoom = roomUpper.length > 26 ? `${roomUpper.slice(0, 24).trimEnd()}…` : roomUpper;
+    const roomLines = roomLineLists[idx] ?? [{ text: z.room.toUpperCase() }];
     items.push(
       textBox(
         nodeId,
         x + 2,
         CTRL_Y + CTRL_H - 1.5,
         COL_W - 4,
-        [{ text: z.label, bold: true }, { text: shortRoom }],
+        [{ text: z.label, bold: true }, ...roomLines],
         "center",
       ),
     );
@@ -425,7 +471,7 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
     // Protocol badge oval centered on the control drop
     const badgeY = (CTRL_Y + LOAD_Y + LOAD_H) / 2;
     const badgeText = z.isEmergencyOnly ? "EM FEED" : (PROTOCOL_LABELS[z.protocol] ?? "CTRL");
-    items.push({ nodeId, shape: "oval", center: { x: cx, y: badgeY }, widthMm: Math.max(18, oneLineTextWidth([{ text: badgeText }]) + 6), heightMm: 6.2, text: badgeText });
+    items.push({ nodeId, shape: "oval", center: { x: cx, y: badgeY }, widthMm: Math.max(18, oneLineTextWidth([{ text: badgeText }]) + 6), heightMm: 6.2, text: badgeText, mask: true });
 
     // Tier 3: Controlled loads block
     items.push(rectPoly(nodeId, x, LOAD_Y, COL_W, LOAD_H, "medium"));

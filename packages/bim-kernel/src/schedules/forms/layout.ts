@@ -3,7 +3,7 @@ import type { Primitive } from "../../drawing/sheet";
 import type { ModelState, Vec2 } from "../../types";
 import { evaluateFormSchedule, type EvaluatedForm, type FormAlign, type FormGrid } from "./evaluate";
 import type { FormScheduleDefinition } from "./types";
-import { scheduleEmptyRow } from "../schedule";
+import { parseScheduleCellLink, scheduleEmptyRow } from "../schedule";
 
 /**
  * A form schedule on paper: stacked sections the full width of the widest
@@ -68,6 +68,42 @@ function stretch(widths: readonly number[], to: number): number[] {
   return s > 0 && s < to ? widths.map((w) => (w * to) / s) : [...widths];
 }
 
+/** Word-wrap form cell text to fit column width without ellipsis truncation (up to 4 lines). */
+function wrapFormCell(text: string, width: number, size: number, bold: boolean): string[] {
+  const link = parseScheduleCellLink(text);
+  const shown = link ? link.label : text;
+  const room = width - PAD_MM * 2 + FIT_SLACK_MM;
+  if (!shown || measure(shown, size, bold) <= room) return [shown];
+  const words = shown.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return [shown];
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (line && measure(next, size, bold) > room && lines.length < 3) {
+      lines.push(line);
+      line = w;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function rowHeightsFor(headings: readonly string[], rows: readonly (readonly string[])[], widths: readonly number[], rowH: number, t: number): readonly number[] {
+  const lead = t * 1.38;
+  const all = [headings, ...rows];
+  return all.map((cells, i) => {
+    const bold = i === 0;
+    let maxL = 1;
+    cells.forEach((c, j) => {
+      if (!c) return;
+      const lines = wrapFormCell(c, widths[j] ?? MIN_COL_MM, t, bold);
+      if (lines.length > maxL) maxL = lines.length;
+    });
+    return rowH + (maxL - 1) * lead;
+  });
+}
+
 export interface FormTable {
   readonly form: EvaluatedForm;
   readonly textSize: number;
@@ -109,16 +145,19 @@ export function formTable(model: Pick<ModelState, "elements">, def: FormSchedule
   const width = Math.max(natural, sideBySide ? sum(summaryNatural) + totalsWidth : Math.max(sum(summaryNatural), totalsWidth));
   const gridWidths = stretch(gridNatural, width);
   const summaryWidths = sideBySide ? summaryNatural : stretch(summaryNatural, width);
-  const summaryRows = form.summary ? 1 + form.summary.rows.length : 0;
   // A list with nothing to list says so; a panel's slot grid always has its slots.
   const placeholder = def.template.body.layout === "rows" && form.grid.headings.length > 0 && form.grid.rows.length === 0 && !form.problem ? scheduleEmptyRow(def.emptyText) : null;
   const totalsRows = form.totals.length;
+  const gridRowHeights = form.grid.headings.length > 0 ? rowHeightsFor(form.grid.headings, form.grid.rows, gridWidths, rowHeight, t) : [];
+  const summaryRowHeights = form.summary ? rowHeightsFor(form.summary.headings, form.summary.rows, summaryWidths, rowHeight, t) : [];
+  const summaryH = sum(summaryRowHeights);
+  const totalsH = totalsRows * rowHeight;
   const heights = {
     title: titleHeight,
     problem: form.problem ? rowHeight * 1.2 : 0,
     header: form.header.length > 0 ? Math.ceil(form.header.length / cols) * rowHeight : 0,
-    grid: form.grid.headings.length > 0 ? rowHeight * (1 + form.grid.rows.length + (placeholder ? 1 : 0)) : 0,
-    summary: (sideBySide ? Math.max(summaryRows, totalsRows) : summaryRows + totalsRows) * rowHeight,
+    grid: form.grid.headings.length > 0 ? sum(gridRowHeights) + (placeholder ? rowHeight : 0) : 0,
+    summary: sideBySide ? Math.max(summaryH, totalsH) : summaryH + totalsH,
     notes: form.notes.length * rowHeight * 0.85,
     footer: form.footer ? rowHeight : 0,
   };
@@ -148,17 +187,41 @@ function textAt(prims: Primitive[], text: string, x: number, w: number, y: numbe
 function table(prims: Primitive[], x0: number, y0: number, widths: readonly number[], headings: readonly string[], rows: readonly (readonly string[])[], aligns: readonly FormAlign[], rowH: number, t: number, splitAt: number | null): number {
   const w = sum(widths);
   const lines = [headings, ...rows];
-  const bottom = y0 + rowH * lines.length;
+  const rowHs = rowHeightsFor(headings, rows, widths, rowH, t);
+  const lead = t * 1.38;
+  let y = y0;
   lines.forEach((cells, i) => {
-    const y = y0 + rowH * i;
+    const rh = rowHs[i] ?? rowH;
     if (i > 0) prims.push({ kind: "line", a: { x: x0, y }, b: { x: x0 + w, y }, pen: i === 1 ? "medium" : "thin" });
     let x = x0;
     cells.forEach((c, j) => {
       const cw = widths[j] ?? MIN_COL_MM;
-      if (c) textAt(prims, c, x, cw, y + rowH / 2 + t / 2, t, i === 0 ? "center" : (aligns[j] ?? "center"), i === 0);
+      if (c) {
+        const align: FormAlign = i === 0 ? "center" : (aligns[j] ?? "center");
+        const bold = i === 0;
+        const link = parseScheduleCellLink(c);
+        const wrapped = wrapFormCell(c, cw, t, bold);
+        const firstY = y + rh / 2 + t / 2 - ((wrapped.length - 1) * lead) / 2;
+        const anchor = align === "left" ? "start" : align === "right" ? "end" : "middle";
+        const tx = align === "left" ? x + PAD_MM : align === "right" ? x + cw - PAD_MM : x + cw / 2;
+        wrapped.forEach((ln, k) => {
+          if (!ln) return;
+          prims.push({
+            kind: "text",
+            at: { x: tx, y: firstY + k * lead },
+            text: fit(ln, cw, t, bold),
+            size: t,
+            anchor,
+            bold,
+            ...(link ? { href: link.href } : {}),
+          });
+        });
+      }
       x += cw;
     });
+    y += rh;
   });
+  const bottom = y;
   let x = x0;
   widths.slice(0, -1).forEach((cw, j) => {
     x += cw;

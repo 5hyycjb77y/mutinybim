@@ -214,9 +214,10 @@ export function layoutPipingIsometric(roots: readonly DiagramNode[], pipes: read
       const branch = j.legs.find((li, i) => !j.legs.some((lj, k) => k !== i && li.dir.x * lj.dir.x + li.dir.y * lj.dir.y < -0.9));
       const main = j.legs.find((l) => l !== branch);
       if (branch && main) {
-        const pB = round({ x: j.at2.x + branch.dir.x * (TICK_OFFSET_MM * 1.4), y: j.at2.y + branch.dir.y * (TICK_OFFSET_MM * 1.4) });
-        const pM = round({ x: j.at2.x + main.dir.x * (TICK_OFFSET_MM * 1.4), y: j.at2.y + main.dir.y * (TICK_OFFSET_MM * 1.4) });
-        items.push({ shape: "line", points: [pB, pM], weight: "thin", nodeId: branch.nodeId });
+        const sweep = TICK_OFFSET_MM * 2.1;
+        const pB = round({ x: j.at2.x + branch.dir.x * sweep, y: j.at2.y + branch.dir.y * sweep });
+        const pM = round({ x: j.at2.x + main.dir.x * sweep, y: j.at2.y + main.dir.y * sweep });
+        items.push({ shape: "line", points: [pB, pM], weight: "medium", nodeId: branch.nodeId });
       }
     }
   }
@@ -249,10 +250,17 @@ export function layoutPipingIsometric(roots: readonly DiagramNode[], pipes: read
   };
 
   // Fixtures, devices and the source placed first so pipe size/load labels route cleanly around fixture names.
+  // Deduplicate shared physical fixtures (`elementId`) across systems (e.g. sanitary + vent, or CW + HW) so each fixture is labeled ONCE on the isometric.
+  const seenIsoElements = new Set<string>();
   for (const n of all) {
     if (!n.at || n.role === "branch" || n.elementId === null) continue;
-    // Suppress generic "OPEN END" noise on connected stubs/vents when other named terminals exist.
-    if (n.name === "OPEN END") continue;
+    // Suppress generic "OPEN END" and "CAP" noise on connected stubs/vents when other named terminals exist.
+    const upperName = n.name.toUpperCase();
+    if (upperName === "OPEN END" || upperName === "CAP") continue;
+    if (n.role === "terminal") {
+      if (seenIsoElements.has(n.elementId)) continue;
+      seenIsoElements.add(n.elementId);
+    }
     const c = P(n.at);
     const r = n.role === "device" ? 1.1 : 1.5;
     items.push({ shape: "polyline", points: [round({ x: c.x - r, y: c.y }), round({ x: c.x, y: c.y + r }), round({ x: c.x + r, y: c.y }), round({ x: c.x, y: c.y - r })], closed: true, weight: "medium", nodeId: n.id });
@@ -265,7 +273,7 @@ export function layoutPipingIsometric(roots: readonly DiagramNode[], pipes: read
       if (Math.hypot(at.x - base.x, at.y - base.y) > 3.0) {
         items.push({ shape: "line", points: [round({ x: c.x + r, y: c.y }), round({ x: at.x - 0.5, y: at.y - h / 2 })], weight: "thin", nodeId: n.id });
       }
-      items.push({ shape: "text", at, widthMm: w, lines, nodeId: n.id, role: "equipment" });
+      items.push({ shape: "text", at, widthMm: w, lines, nodeId: n.id, role: "equipment", mask: true });
     }
     nodesOut.push({ id: n.id, kind: n.kind, name: n.name, center: c, depth: 0 });
   }
@@ -300,7 +308,7 @@ export function layoutPipingIsometric(roots: readonly DiagramNode[], pipes: read
     const w = 13;
     const h = oneLineTextHeight(lines, w);
     const at = placeLabel({ x: mid.x + 1.0, y: mid.y + h + 0.6 }, w, h);
-    items.push({ shape: "text", at, widthMm: w, lines, nodeId: `pipe:${best.id}`, role: "device" });
+    items.push({ shape: "text", at, widthMm: w, lines, nodeId: `pipe:${best.id}`, role: "device", mask: true });
   }
 
   return { items, extent: oneLineItemsExtent(items), nodes: nodesOut, pipes: refs, scale };

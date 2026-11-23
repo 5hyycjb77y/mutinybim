@@ -28,7 +28,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.space`](#buildingspace): A space (room) with its number and name, on a level; returns its id.
 - [`building.level`](#buildinglevel): A level at an elevation; returns its id.
 - [`building.spaceInWalls`](#buildingspaceinwalls): A room found from the walls around a point: the kernel traces the enclosure and refuses an open room in words; returns the space's id.
-- [`building.ceiling`](#buildingceiling): A ceiling on a level at a height above it (`form`: flat ACT grid, soffit with vertical fascia skirt, cloud, sloped, or open_to_structure) with optional `material` and `holes`; returns its id.
+- [`building.ceiling`](#buildingceiling): A ceiling on a level at a height above it (`form`: flat ACT grid, soffit with vertical fascia skirt, cloud, sloped, or open_to_structure) with optional real-scale ACT `grid` (`preset: "2x4" | "2x2"` or custom `spacingX`/`spacingY`, `origin`, `rotationDeg`), `material`, and `holes`; returns its id.
+- [`building.ceilingTileCenter`](#buildingceilingtilecenter): Snaps a plan point to the exact center of the nearest real-scale ACT ceiling tile cell (full cell for 2'×4' LED troffers, or pass `{ deviceWidth: units.in(24), deviceDepth: units.in(24) }` for 2'×2' HVAC diffusers/grilles seated squarely inside half of a 2'×4' bay).
 - [`building.room`](#buildingroom): A room (number, name, outline) on a level: what receptacle spacing, room schedules and room circuit templates read.
 - [`building.surfacesAt`](#buildingsurfacesat): The floor or roof under an element or point, the ceiling and roof over it, and the structure above, each with its elevation and height above the floor (mm).
 - [`building.levelSyncPlan`](#buildinglevelsyncplan): What matching the model's levels to a linked model's storeys would do (add, update, match, unchanged), changing nothing.
@@ -630,13 +631,13 @@ export default defineScript({
 
 ## building.ceiling
 
-A ceiling on a level at a height above it (`form`: flat ACT grid, soffit with vertical fascia skirt, cloud, sloped, or open_to_structure) with optional `material` and `holes`; returns its id.
+A ceiling on a level at a height above it (`form`: flat ACT grid, soffit with vertical fascia skirt, cloud, sloped, or open_to_structure) with optional real-scale ACT `grid` (`preset: "2x4" | "2x2"` or custom `spacingX`/`spacingY`, `origin`, `rotationDeg`), `material`, and `holes`; returns its id.
 
 ```ts
-ceiling(ctx: ScriptContext, spec: { level: string; outline: readonly PlanPoint[]; height: Measure; space?: string; form?: "flat" | "sloped" | "cloud" | "soffit" | "open_to_structure"; holes?: readonly (readonly PlanPoint[])[]; slope?: { directionDeg: number; pitch: number }; reference?: PlanPoint; typeId?: string; material?: string; id?: string }): string
+ceiling(ctx: ScriptContext, spec: { level: string; outline: readonly PlanPoint[]; height: Measure; space?: string; form?: "flat" | "sloped" | "cloud" | "soffit" | "open_to_structure"; grid?: CeilingGridSpec; holes?: readonly (readonly PlanPoint[])[]; slope?: { directionDeg: number; pitch: number }; reference?: PlanPoint; typeId?: string; material?: string; id?: string }): string
 ```
 
-Topics: ceiling, ceilings, ceiling height, sloped ceiling, soffit, cloud, acoustic tile, gypsum ceiling, reflected ceiling
+Topics: ceiling, ceilings, ceiling height, ceiling grid, ceiling tile, 2x4, 2x2, sloped ceiling, soffit, cloud, acoustic tile, gypsum ceiling, reflected ceiling
 
 <details><summary>Example script</summary>
 
@@ -650,8 +651,38 @@ export default defineScript({
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
     const office = building.spaceInWalls(ctx, { level: "L1", inside: { x: units.ft(15), y: units.ft(10) }, number: "101", name: "Office" });
     const inside = [{ x: units.ft(1), y: units.ft(1) }, { x: units.ft(29), y: units.ft(1) }, { x: units.ft(29), y: units.ft(19) }, { x: units.ft(1), y: units.ft(19) }];
-    const ceiling = building.ceiling(ctx, { level: "L1", space: office, form: "soffit", material: "architecture.gypsum_partition", outline: inside, height: units.ft(9) });
+    const ceiling = building.ceiling(ctx, { level: "L1", space: office, form: "flat", grid: { preset: "2x4", origin: { x: units.ft(1), y: units.ft(1) } }, material: "architecture.act_ceiling", outline: inside, height: units.ft(9) });
     ctx.report("Ceiling", ceiling);
+  },
+});
+```
+
+</details>
+
+## building.ceilingTileCenter
+
+Snaps a plan point to the exact center of the nearest real-scale ACT ceiling tile cell (full cell for 2'×4' LED troffers, or pass `{ deviceWidth: units.in(24), deviceDepth: units.in(24) }` for 2'×2' HVAC diffusers/grilles seated squarely inside half of a 2'×4' bay). Pass a ceiling id or `CeilingGridSpec`.
+
+```ts
+ceilingTileCenter(ctx: ScriptContext, ceilingOrGrid: string | CeilingGridSpec, near: PlanPoint, opts?: { deviceWidth?: Measure; deviceDepth?: Measure }): PlanPoint
+```
+
+Topics: ceiling grid, ceiling tile, snap to tile, troffer, diffuser, register, 2x4, 2x2, rcp, reflected ceiling
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const grid = { preset: "2x4" as const, origin: { x: units.ft(2), y: units.ft(2) } };
+    const trofferAt = building.ceilingTileCenter(ctx, grid, { x: units.ft(8), y: units.ft(6) });
+    const diffuserAt = building.ceilingTileCenter(ctx, grid, { x: units.ft(14), y: units.ft(6) }, { deviceWidth: units.in(24), deviceDepth: units.in(24) });
+    ctx.report("Tile centers", `troffer=${trofferAt.x.value}mm diffuser=${diffuserAt.x.value}mm`);
   },
 });
 ```

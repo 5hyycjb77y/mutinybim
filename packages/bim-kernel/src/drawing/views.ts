@@ -58,6 +58,7 @@ import { PATTERN_DASH, categoryOf, drawDetailItem } from "../annotation/detailin
 import type { SheetRevision } from "../documents";
 import type { RunFitting } from "../routing/types";
 import { PartLabelIndex, drawPartSymbol, drawRunFitting, drawRunSegment, isSingleLineRun, partPlanOutline, systemLine, type TextDrawStyle } from "./runs";
+import { flexPoints } from "../routing/flex";
 import { INSULATION_DASH, insulationSectionCuts } from "./insulation";
 import { insulationHiddenInView } from "../view-categories";
 import { elementCategoryChain, elementLook, elementViewCategory } from "../categories/element";
@@ -69,12 +70,13 @@ import { cameraProjector, projectSolidInBox } from "./view3d-drawing";
 import { boxAabb, boxKeepPlanes, boxOverRect, elementFloorMm, viewCropBox3d } from "../view3d";
 import { drawViewGraphics } from "../layout/view-graphics-point";
 import { drawCallout, drawElevationMark, drawSectionMark, drawViewTitleBubble, gridBubbleEndpoints, planReferenceViews, referencingSheet, viewportTitleLayout } from "../annotation/callouts";
+import { clipPolygonToPieces, clipSegmentToPolygon, decomposePolygonConvex, pointInPolygon, type ConvexClipPiece } from "./polygon-clip";
 import { typicalCopiesOf } from "../organization/typicals";
 import { fieldBlockTextBlock, type FrozenBlocks } from "../blocks/sheet-block";
 import { renderFieldBlock } from "../blocks/render";
 import type { PartInstance } from "../types";
 import type { Ceiling } from "../ceilings/types";
-import { ceilingForm, ceilingHeightAtPoint, ceilingRole, ceilingSlope } from "../ceilings/read";
+import { ceilingForm, ceilingGrid, ceilingHeightAtPoint, ceilingRole, ceilingSlope, TILE_2FT_MM, TILE_4FT_MM } from "../ceilings";
 
 /**
  * Drawing views and sheets from the model's view, sheet, viewport and drawing
@@ -173,9 +175,15 @@ interface Painter {
   /** Model window in the view's drawing frame: linework is clipped to it. */
   readonly min: Vec2;
   readonly max: Vec2;
+  /** Optional custom polygonal crop boundary (model mm, >= 3 vertices) when `view.props.cropPolygon` is active. */
+  readonly clipPoly?: readonly Vec2[];
+  /** Precomputed convex decomposition of `clipPoly` for fast fill clipping. */
+  readonly clipPieces?: readonly ConvexClipPiece[];
   /** Where notes, tags and dimension text may sit: the window, or past it by the annotation crop offset. */
   readonly noteMin: Vec2;
   readonly noteMax: Vec2;
+  /** True when annotation crop lets labels reach past `clipPoly`. */
+  readonly annotationCropReach: number;
   /** The plan crop (3D views filter what they draw by it). */
   readonly crop: Rect;
   readonly scale: number;
@@ -192,14 +200,18 @@ function painter(prims: Primitive[], fills: Primitive[], tags: TagPlacement[], f
   const min = sub(frame.modelCenter, half);
   const max = add(frame.modelCenter, half);
   const reach = view.props?.annotationCrop ? (view.props.annotationCropOffsetMm ?? DEFAULT_ANNOTATION_CROP_OFFSET_MM) * frame.scale : 0;
+  const rawPoly = view.props?.cropView !== false && view.props?.cropPolygon && view.props.cropPolygon.length >= 3 ? view.props.cropPolygon : undefined;
+  const clipPieces = rawPoly ? decomposePolygonConvex(rawPoly) : undefined;
   return {
     prims,
     fills,
     tags,
     min,
     max,
+    ...(rawPoly && clipPieces && clipPieces.length > 0 ? { clipPoly: rawPoly, clipPieces } : {}),
     noteMin: { x: min.x - reach, y: min.y - reach },
     noteMax: { x: max.x + reach, y: max.y + reach },
+    annotationCropReach: reach,
     crop,
     scale: frame.scale,
     toPaper: (p) => modelToPaper(frame, p),
@@ -212,6 +224,13 @@ function lineIn(p: Painter, a: Vec2, b: Vec2, pen: Pen, tone: Tone, explicitDash
   const dash = explicitDash ?? p.dash;
   const clipped = clipSegment(a, b, p.min, p.max);
   if (!clipped) return;
+  if (p.clipPoly) {
+    for (const seg of clipSegmentToPolygon(clipped[0], clipped[1], p.clipPoly)) {
+      const prim: Primitive = { kind: "line", a: p.toPaper(seg[0]), b: p.toPaper(seg[1]), pen, ...(tone !== "ink" ? { tone } : {}), ...(dash ? { dash } : {}) };
+      p.prims.push(prim);
+    }
+    return;
+  }
   const prim: Primitive = { kind: "line", a: p.toPaper(clipped[0]), b: p.toPaper(clipped[1]), pen, ...(tone !== "ink" ? { tone } : {}), ...(dash ? { dash } : {}) };
   p.prims.push(prim);
 }
@@ -220,8 +239,8 @@ function circleIn(p: Painter, center: Vec2, radius: number, pen: Pen, tone: Tone
   if (radius <= 0) return;
   if (center.x + radius < p.min.x || center.x - radius > p.max.x || center.y + radius < p.min.y || center.y - radius > p.max.y) return;
   const dash = explicitDash ?? p.dash;
-  // When the circle straddles the crop boundary, clip as fine segments so nothing extends past the crop box.
-  if (center.x - radius < p.min.x || center.x + radius > p.max.x || center.y - radius < p.min.y || center.y + radius > p.max.y) {
+  // When the circle straddles the crop boundary (or when a polygonal crop is active), clip as fine segments so nothing extends past the crop.
+  if (p.clipPoly || center.x - radius < p.min.x || center.x + radius > p.max.x || center.y - radius < p.min.y || center.y + radius > p.max.y) {
     const steps = 28;
     for (let i = 0; i < steps; i++) {
       const a0 = (i / steps) * Math.PI * 2;
@@ -234,14 +253,23 @@ function circleIn(p: Painter, center: Vec2, radius: number, pen: Pen, tone: Tone
 }
 
 function inside(p: Painter, at: Vec2): boolean {
-  return at.x >= p.noteMin.x && at.x <= p.noteMax.x && at.y >= p.noteMin.y && at.y <= p.noteMax.y;
+  if (at.x < p.noteMin.x || at.x > p.noteMax.x || at.y < p.noteMin.y || at.y > p.noteMax.y) return false;
+  if (p.clipPoly && !pointInPolygon(at, p.clipPoly, p.annotationCropReach > 0 ? p.annotationCropReach : 1e-3)) return false;
+  return true;
 }
 
 /** The whole printed text (not just where it starts) lies where notes may sit, so nothing prints past the crop. */
 function textFits(p: Painter, at: Vec2, text: string, size: number, anchor: "start" | "middle" | "end"): boolean {
   const w = text.length * size * TEXT_WIDTH_PER_CHAR * p.scale;
   const x0 = anchor === "start" ? at.x : anchor === "middle" ? at.x - w / 2 : at.x - w;
-  return x0 >= p.noteMin.x && x0 + w <= p.noteMax.x && at.y >= p.noteMin.y && at.y + size * p.scale <= p.noteMax.y;
+  if (x0 < p.noteMin.x || x0 + w > p.noteMax.x || at.y < p.noteMin.y || at.y + size * p.scale > p.noteMax.y) return false;
+  if (p.clipPoly) {
+    const cx = x0 + w / 2;
+    const cy = at.y + (size * p.scale) / 2;
+    const tol = p.annotationCropReach > 0 ? p.annotationCropReach : 1e-3;
+    if (!pointInPolygon({ x: cx, y: cy }, p.clipPoly, tol)) return false;
+  }
+  return true;
 }
 
 /** Rotated centered text bounding-box check against the painter's annotation crop. */
@@ -253,7 +281,9 @@ function rotatedTextFits(p: Painter, at: Vec2, text: string, size: number, model
   const s = Math.abs(Math.sin(rad));
   const hx = c * halfW + s * halfH;
   const hy = s * halfW + c * halfH;
-  return at.x - hx >= p.noteMin.x && at.x + hx <= p.noteMax.x && at.y - hy >= p.noteMin.y && at.y + hy <= p.noteMax.y;
+  if (at.x - hx < p.noteMin.x || at.x + hx > p.noteMax.x || at.y - hy < p.noteMin.y || at.y + hy > p.noteMax.y) return false;
+  if (p.clipPoly && !pointInPolygon(at, p.clipPoly, p.annotationCropReach > 0 ? p.annotationCropReach : 1e-3)) return false;
+  return true;
 }
 
 function textIn(p: Painter, at: Vec2, text: string, size: number, anchor: "start" | "middle" | "end", tone: Tone, boldOrStyle: boolean | TextDrawStyle = false): void {
@@ -616,10 +646,18 @@ function clipPolyToWindow(poly: readonly Vec2[], min: Vec2, max: Vec2): Vec2[] {
   return out;
 }
 
+function clipFillToPainter(p: Painter, poly: readonly Vec2[]): Vec2[][] {
+  const rectClipped = clipPolyToWindow(poly, p.min, p.max);
+  if (rectClipped.length < 3) return [];
+  if (!p.clipPieces) return [rectClipped];
+  // Tiny sub-pixel overlap on internal partition diagonals only (0.04 paper mm) prevents anti-aliasing hairline seams while outer crop edges stay exact.
+  return clipPolygonToPieces(rectClipped, p.clipPieces, 0.04 * p.scale);
+}
+
 function fillIn(p: Painter, poly: readonly Vec2[], grey: number, tone: Tone): void {
-  const clipped = clipPolyToWindow(poly, p.min, p.max);
-  if (clipped.length < 3) return;
-  p.fills.push({ kind: "fill", points: clipped.map((q) => p.toPaper(q)), grey, ...(tone !== "ink" ? { tone } : {}) });
+  for (const piece of clipFillToPainter(p, poly)) {
+    p.fills.push({ kind: "fill", points: piece.map((q) => p.toPaper(q)), grey, ...(tone !== "ink" ? { tone } : {}) });
+  }
 }
 
 /** Front faces filled farthest first, so nearer surfaces cover farther ones. */
@@ -712,6 +750,38 @@ function seedPartLabelObstacles(
         }
       }
       onPart?.(el, look);
+    } else if (el.kind === "room" && categoryLook(view, "rooms").visible) {
+      if (!shownAs(el).visible || el.outline.length < 3) continue;
+      const rs = resolveTextStyle(model, "space_label");
+      const raw = `${el.name} ${el.number}`;
+      const label = rs ? (rs.uppercase ? raw.toUpperCase() : raw) : `${el.name.toUpperCase()} ${el.number}`;
+      const sizeMm = rs?.textSizeMm ?? 2.5;
+      const halfW = (label.length * sizeMm * 0.34 + 1.0) * frame.scale;
+      const halfH = (sizeMm * 0.72 + 0.8) * frame.scale;
+      const c = centroidOf(el.outline);
+      takenPartBoxes.add({ min: { x: c.x - halfW, y: c.y - halfH }, max: { x: c.x + halfW, y: c.y + halfH } });
+    }
+  }
+  const level = viewModelLevel(model, view.props?.level, view.props?.levelElevationMm);
+  if (level && categoryLook(view, "rooms").visible) {
+    for (const space of spacesOnLevel(model.elements, level.id)) {
+      if (leftOutOfDisciplineView(view, space) || !shownAs(space).visible) continue;
+      let outline: readonly Vec2[] | null = null;
+      let area = -1;
+      for (const o of spaceOutlines(model.elements, space)) {
+        const a = outlineAreaMm2(o);
+        if (a > area) {
+          outline = o;
+          area = a;
+        }
+      }
+      if (!outline || outline.length < 3) continue;
+      const c = centroidOf(outline);
+      if (!inside(p, c)) continue;
+      const label = [space.name.toUpperCase(), space.number].filter((x) => x.trim() !== "").join(" ");
+      const halfW = (label.length * 2.5 * 0.34 + 1.0) * frame.scale;
+      const halfH = (2.5 * 0.72 + 0.8) * frame.scale;
+      takenPartBoxes.add({ min: { x: c.x - halfW, y: c.y - halfH }, max: { x: c.x + halfW, y: c.y + halfH } });
     }
   }
 }
@@ -727,10 +797,12 @@ function drawPlan(
 ): number {
   const ceiling = view.viewType === "ceiling_plan";
   const tagsShown = categoryLook(view, "tags").visible;
+  const openingTagsShown = tagsShown && categoryLook(view, "opening_tags").visible;
   // An element tagged in this view shows its tag, not the plan's own size label as well.
   const taggedHere = new Set((documentIndex(model).itemsByOwner.get(view.id) ?? []).flatMap((i) => (i.tag && !i.deleted ? [i.tag.elementId] : [])));
   const pending: PendingLine[] = [];
   const pendingInline: { at: Vec2; text: string; size: number; tone: Tone; paperDeg: number; owner: string }[] = [];
+  const pendingRunLabels: { at: Vec2; text: string; size: number; anchor: "start" | "middle" | "end"; tone: Tone; style?: TextDrawStyle }[] = [];
   const bodies: BimElement[] = [];
   const floor = viewFloor(model, view);
   const shownAs = organizationDisplay(model, view);
@@ -747,22 +819,44 @@ function drawPlan(
   const own = levelElements(model, view);
   const symScale = view.props?.symbolScale ?? 1;
   const deferredParts: { readonly el: PartInstance; readonly tone: Tone; readonly planSymbol: boolean | null; readonly detail: DetailLevel; readonly projectionPen: (pen: Pen) => Pen; readonly elementDash: readonly number[] | undefined }[] = [];
-  const isBackgroundPart = (el: PartInstance, topZ: number | undefined): boolean => {
+  const isBackgroundPart = (el: PartInstance, topZ: number | undefined, maxRunNear: number): boolean => {
+    // In a floor plan looking down (higher z = closer to eye), ANY part physically below overhead
+    // double-line runs (including ceiling-mounted devices below overhead runs AND floor devices)
+    // draws behind those runs and clips cleanly via splitHidden.
+    if (topZ !== undefined && Number.isFinite(maxRunNear)) {
+      return topZ < maxRunNear - 1;
+    }
     if (el.host?.kind === "wall_face") return false;
-    if (el.host?.kind === "element" && model.elements[el.host.elementId]?.kind === "ceiling") return false;
     return (el.offsetMm ?? 0) < 2000 && (topZ === undefined || topZ < floor + 2200);
   };
   const drawPartList = (list: typeof deferredParts, occlude?: { readonly index: FaceIndex; readonly top: ReadonlyMap<string, number> }): number => {
     const startIdx = list.length > 0 ? p.prims.length : -1;
     for (const dp of list) {
       const near = occlude ? occlude.top.get(dp.el.id) : undefined;
+      const partCat = elementViewCategory(model.elements, dp.el);
+      const showHidden = display.dashed(partCat);
+      const ignoreSelf = (f: Face) => f.owner === dp.el.id;
       const partLine =
         occlude && near !== undefined
           ? (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => {
-              const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occlude.index, () => near);
+              const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occlude.index, () => near, ignoreSelf);
               for (const [q0, q1] of split.visible) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
+              if (showHidden) {
+                for (const [q0, q1] of split.hidden) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, "thin", dp.tone, HIDDEN_DASH);
+              }
             }
           : (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
+      const partCircle =
+        occlude && near !== undefined
+          ? (c: Vec2, r: number, pen: Pen) => {
+              const steps = 24;
+              for (let i = 0; i < steps; i++) {
+                const a0 = (i / steps) * Math.PI * 2;
+                const a1 = ((i + 1) / steps) * Math.PI * 2;
+                partLine({ x: c.x + r * Math.cos(a0), y: c.y + r * Math.sin(a0) }, { x: c.x + r * Math.cos(a1), y: c.y + r * Math.sin(a1) }, pen);
+              }
+            }
+          : (c: Vec2, r: number, pen: Pen) => circleIn(p, c, r, dp.projectionPen(pen), dp.tone, dp.elementDash);
       drawPartSymbol(
         model,
         dp.el,
@@ -774,8 +868,12 @@ function drawPlan(
           scale: frame.scale,
           symbolScale: symScale,
           showMark: tagsShown && !taggedHere.has(dp.el.id),
-          fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) }),
-          circle: (c, r, pen) => circleIn(p, c, r, dp.projectionPen(pen), dp.tone, dp.elementDash),
+          fill: (pts, grey) => {
+            for (const piece of clipFillToPainter(p, pts)) {
+              p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) });
+            }
+          },
+          circle: partCircle,
           takenBoxes: takenPartBoxes,
         },
       );
@@ -810,6 +908,113 @@ function drawPlan(
   if (hasPartLabels) {
     seedPartLabelObstacles(model, view, p, frame, display, shownAs, candidates, takenPartBoxes, symScale);
   }
+  // Pre-compute 2D plan-only visual offsets for vertically stacked single-line runs and crossing-gap breaks
+  // (keeps 3D geometry strictly as-installed while keeping overlapping lines legible on plans).
+  const runOffsets = new Map<string, Vec2>();
+  const runCrossingGaps = new Map<string, Array<readonly [number, number]>>();
+  if (!ceiling && view.props?.offsetStackedRuns !== false) {
+    interface SingleRunInfo {
+      readonly el: Extract<BimElement, { kind: "run_segment" }>;
+      readonly a: Vec2;
+      readonly b: Vec2;
+      readonly u: Vec2;
+      readonly n: Vec2;
+      readonly len: number;
+      readonly z: number;
+    }
+    const singleRuns: SingleRunInfo[] = [];
+    for (const el of candidates) {
+      if (el.kind !== "run_segment" || el.flex) continue;
+      if (leftOutOfDisciplineView(view, el)) continue;
+      const dx = el.end.x - el.start.x;
+      const dy = el.end.y - el.start.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 10) continue;
+      const look = elementLook(model, view, el);
+      if (!look.visible || !shownAs(el).visible) continue;
+      const effDetail = look.detailLevel ?? display.detail;
+      if (!isSingleLineRun(el.domain, el.size, effDetail, look.singleLineBelowMm)) continue;
+      const u = { x: dx / len, y: dy / len };
+      const n = { x: -u.y, y: u.x };
+      const z = (reached.get(el.id) ?? floor) + (el.start.z + el.end.z) / 2;
+      singleRuns.push({ el, a: { x: el.start.x, y: el.start.y }, b: { x: el.end.x, y: el.end.y }, u, n, len, z });
+    }
+    const offsetStepMm = 1.6 * frame.scale;
+    const stackTolMm = Math.max(85, 1.5 * frame.scale);
+    const assigned = new Set<string>();
+    for (let i = 0; i < singleRuns.length; i++) {
+      const r0 = singleRuns[i]!;
+      if (assigned.has(r0.el.id)) continue;
+      const group: SingleRunInfo[] = [r0];
+      for (let j = i + 1; j < singleRuns.length; j++) {
+        const r1 = singleRuns[j]!;
+        if (assigned.has(r1.el.id) || r1.el.systemId === r0.el.systemId) continue;
+        const dot = r0.u.x * r1.u.x + r0.u.y * r1.u.y;
+        if (Math.abs(dot) < 0.985) continue;
+        const perpDist = Math.abs((r1.a.x - r0.a.x) * r0.n.x + (r1.a.y - r0.a.y) * r0.n.y);
+        if (perpDist > stackTolMm) continue;
+        const t1a = (r1.a.x - r0.a.x) * r0.u.x + (r1.a.y - r0.a.y) * r0.u.y;
+        const t1b = (r1.b.x - r0.a.x) * r0.u.x + (r1.b.y - r0.a.y) * r0.u.y;
+        const lo = Math.max(0, Math.min(t1a, t1b));
+        const hi = Math.min(r0.len, Math.max(t1a, t1b));
+        if (hi - lo < 120) continue;
+        group.push(r1);
+      }
+      if (group.length > 1) {
+        group.sort((x, y) => y.z - x.z || x.el.systemId.localeCompare(y.el.systemId));
+        const slots = [0, 1, -1, 2, -2];
+        group.forEach((item, idx) => {
+          assigned.add(item.el.id);
+          const s = slots[idx] ?? idx;
+          if (s !== 0) {
+            runOffsets.set(item.el.id, { x: r0.n.x * s * offsetStepMm, y: r0.n.y * s * offsetStepMm });
+          }
+        });
+      }
+    }
+    const gapHalfMm = 1.25 * frame.scale;
+    for (let i = 0; i < singleRuns.length; i++) {
+      const r0 = singleRuns[i]!;
+      const o0 = runOffsets.get(r0.el.id);
+      const a0 = o0 ? add(r0.a, o0) : r0.a;
+      const b0 = o0 ? add(r0.b, o0) : r0.b;
+      const dx0 = b0.x - a0.x;
+      const dy0 = b0.y - a0.y;
+      for (let j = i + 1; j < singleRuns.length; j++) {
+        const r1 = singleRuns[j]!;
+        if (Math.abs(r0.z - r1.z) < 25) continue;
+        const o1 = runOffsets.get(r1.el.id);
+        const a1 = o1 ? add(r1.a, o1) : r1.a;
+        const b1 = o1 ? add(r1.b, o1) : r1.b;
+        const dx1 = b1.x - a1.x;
+        const dy1 = b1.y - a1.y;
+        const denom = dx0 * dy1 - dy0 * dx1;
+        if (Math.abs(denom) < 1e-2) continue;
+        const t0 = ((a1.x - a0.x) * dy1 - (a1.y - a0.y) * dx1) / denom;
+        const t1 = ((a1.x - a0.x) * dy0 - (a1.y - a0.y) * dx0) / denom;
+        if (t0 <= 0.04 || t0 >= 0.96 || t1 <= 0.04 || t1 >= 0.96) continue;
+        const lower = r0.z < r1.z ? r0 : r1;
+        const tLow = r0.z < r1.z ? t0 : t1;
+        const dt = gapHalfMm / Math.max(1, lower.len);
+        const list = runCrossingGaps.get(lower.el.id) ?? [];
+        list.push([tLow - dt, tLow + dt]);
+        runCrossingGaps.set(lower.el.id, list);
+      }
+    }
+  }
+  const fittingOffsetOf = (f: RunFitting): Vec2 | undefined => {
+    if (f.host) {
+      const o = runOffsets.get(f.host.segmentId);
+      if (o) return o;
+    }
+    for (const pt of f.ports) {
+      if (pt.link) {
+        const o = runOffsets.get(pt.link.elementId);
+        if (o) return o;
+      }
+    }
+    return undefined;
+  };
   for (const el of candidates) {
     if (leftOutOfDisciplineView(view, el)) continue;
     const look = elementLook(model, view, el);
@@ -838,7 +1043,8 @@ function drawPlan(
     const elGraphicsCtx = look.detailLevel ? { ...graphicsCtx, detail: look.detailLevel } : graphicsCtx;
     const graphics = planGraphicsOf(el, elGraphicsCtx);
     if (graphics) {
-      const showLabel = tagsShown && !taggedHere.has(el.id);
+      const isOpening = el.kind === "opening" || elementViewCategory(model.elements, el) === "doors_windows";
+      const showLabel = (isOpening ? openingTagsShown : tagsShown) && !taggedHere.has(el.id);
       drawPlanGraphics(p, el, graphics, { line, screened: lineToned("halftone") }, tone, showLabel, look.lineWeights.cut ?? (el.kind === "wall" ? "medium" : "heavy"));
       continue;
     }
@@ -859,31 +1065,25 @@ function drawPlan(
       }
       case "opening": {
         const half = el.width / 2;
-        textIn(p, el.position, el.mark, 2, "middle", tone);
+        if (openingTagsShown && !taggedHere.has(el.id)) textIn(p, el.position, el.mark, 2, "middle", tone);
         lineIn(p, add(el.position, { x: -half, y: 0 }), add(el.position, { x: half, y: 0 }), "thin", tone);
         break;
       }
       case "room": {
         if (tagsShown && !taggedHere.has(el.id)) {
           const rs = resolveTextStyle(model, "space_label");
-          const label = `${el.name} ${el.number}`;
-          textIn(
-            p,
-            centroidOf(el.outline),
-            rs ? (rs.uppercase ? label.toUpperCase() : label) : `${el.name.toUpperCase()} ${el.number}`,
-            rs?.textSizeMm ?? 2.5,
-            "middle",
-            tone,
-            rs
-              ? {
-                  bold: rs.bold,
-                  italic: rs.italic,
-                  fontFamily: rs.fontFamily,
-                  mask: rs.mask,
-                  color: rs.color,
-                }
-              : false,
-          );
+          const sz = rs?.textSizeMm ?? 2.5;
+          const styleObj = rs
+            ? { bold: rs.bold, italic: rs.italic, fontFamily: rs.fontFamily, mask: rs.mask ?? true, color: rs.color }
+            : { mask: true };
+          const fmt = (s: string) => (rs ? (rs.uppercase ? s.toUpperCase() : s) : s.toUpperCase());
+          const lines = [el.name.trim(), el.number.trim()].filter((s) => s !== "").map(fmt);
+          const center = centroidOf(el.outline);
+          const stepWorld = (sz + 1.2) * p.scale;
+          lines.forEach((line, i) => {
+            const dy = ((lines.length - 1) / 2 - i) * stepWorld;
+            textIn(p, { x: center.x, y: center.y + dy }, line, sz, "middle", tone, styleObj);
+          });
         }
         break;
       }
@@ -900,6 +1100,7 @@ function drawPlan(
       }
       case "grid": {
         // Revit/AIA structural grid: chain-dash line extending past the crop box into the annotation margin with circular white-masked grid bubble.
+        if (p.clipPoly && clipSegmentToPolygon(el.start, el.end, p.clipPoly).length === 0) break;
         const geo = gridBubbleEndpoints(el.start, el.end, p.scale, p.min, p.max, p.toPaper);
         if (!geo) break;
         p.prims.push({ kind: "line", a: geo.pA, b: geo.pB, pen: "thin", tone: tone === "ink" ? "halftone" : tone, dash: [6, 1.5, 1, 1.5] });
@@ -910,7 +1111,7 @@ function drawPlan(
             ring.push({ x: c.x + geo.radius * Math.cos(ang), y: c.y + geo.radius * Math.sin(ang) });
           }
           p.prims.push({ kind: "fill", points: ring, grey: 1 });
-          for (let i = 0; i < ring.length; i++) p.prims.push({ kind: "line", a: ring[i]!, b: ring[(i + 1) % ring.length]!, pen: "thin", tone });
+          p.prims.push({ kind: "circle", at: c, r: geo.radius, pen: "thin", tone });
           p.prims.push({ kind: "text", at: { x: c.x, y: c.y + 1.05 }, text: el.label, size: 2.8, anchor: "middle", bold: true, tone });
         };
         drawBubble(geo.bubbleA);
@@ -941,10 +1142,10 @@ function drawPlan(
       }
       case "run_segment": {
         const label = tagsShown && !taggedHere.has(el.id)
-          ? (at: Vec2, text: string, size: number) => {
+          ? (at: Vec2, text: string, size: number, anchor?: "start" | "middle" | "end", style?: TextDrawStyle) => {
               if (!inside(p, at)) return;
               p.tags.push({ elementId: el.id, ref: "centerline_mid", text, at: p.toPaper(at) });
-              textIn(p, at, text, size, "middle", tone);
+              pendingRunLabels.push({ at, text, size, anchor: anchor ?? "middle", tone, style: style ?? { mask: true } });
             }
           : null;
         const effectiveDetail = look.detailLevel ?? display.detail;
@@ -960,7 +1161,7 @@ function drawPlan(
               if (body) {
                 pendingInline.push({ at, text, size, tone, paperDeg, owner: el.id });
               } else {
-                p.prims.push({ kind: "text", at: p.toPaper(at), text, size, anchor: "middle", ...(tone !== "ink" ? { tone } : {}), ...(paperDeg ? { rotate: -paperDeg } : {}) });
+                p.prims.push({ kind: "text", at: p.toPaper(at), text, size, anchor: "middle", vAlign: "middle", mask: true, ...(tone !== "ink" ? { tone } : {}), ...(paperDeg ? { rotate: -paperDeg } : {}) });
               }
               return true;
             }
@@ -970,6 +1171,8 @@ function drawPlan(
           const fDetail = fLook.detailLevel ?? display.detail;
           return isSingleLineRun(f.domain, f.ports[0]?.size ?? el.size, fDetail, fLook.singleLineBelowMm);
         };
+        const displayOffset = runOffsets.get(el.id);
+        const crossingGaps = runCrossingGaps.get(el.id);
         drawRunSegment(model, el, line, label, frame.scale, {
           detail: effectiveDetail,
           singleLineBelowMm: look.singleLineBelowMm,
@@ -977,16 +1180,23 @@ function drawPlan(
           singleLinePen: el.domain === "duct" ? "wide" : "medium",
           clipBounds: { min: p.min, max: p.max },
           fittingIsSingleLine,
+          circle: (c, r, pen) => circleIn(p, c, r, projectionPen(pen), tone),
+          ...(displayOffset ? { displayOffset } : {}),
+          ...(crossingGaps ? { crossingGaps } : {}),
+          takenBoxes: takenPartBoxes,
         });
         drawLoadPoints(model, el.id, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), frame.scale);
         break;
       }
       case "run_fitting": {
         const effectiveDetail = look.detailLevel ?? display.detail;
+        const displayOffset = fittingOffsetOf(el);
         drawRunFitting(model, el, line, effectiveDetail === "fine", frame.scale, {
           detail: effectiveDetail,
           singleLineBelowMm: look.singleLineBelowMm,
           singleLinePen: el.domain === "duct" ? "wide" : "medium",
+          circle: (c, r, pen) => circleIn(p, c, r, projectionPen(pen), tone),
+          ...(displayOffset ? { displayOffset } : {}),
         });
         drawLoadPoints(model, el.id, line, (at, text, size) => textIn(p, at, text, size, "middle", tone), frame.scale);
         break;
@@ -998,7 +1208,7 @@ function drawPlan(
         break;
       case "ceiling":
         // Looking up: a ceiling draws in a ceiling plan only (a floor plan's cut is below it).
-        if (ceiling) drawCeilingOnPlan(p, el, look.lineWeights.projection ?? "medium", tone, model);
+        if (ceiling) drawCeilingOnPlan(p, el, look.lineWeights.projection ?? "medium", tone, model, tagsShown && !taggedHere.has(el.id));
         break;
       default:
         break;
@@ -1010,12 +1220,17 @@ function drawPlan(
   // Hidden lines: element bodies seen from above (below for a ceiling plan).
   const style = display.style;
   const emitInline = (t: { at: Vec2; text: string; size: number; tone: Tone; paperDeg: number }) => {
-    p.prims.push({ kind: "text", at: p.toPaper(t.at), text: t.text, size: t.size, anchor: "middle", ...(t.tone !== "ink" ? { tone: t.tone } : {}), ...(t.paperDeg ? { rotate: -t.paperDeg } : {}) });
+    p.prims.push({ kind: "text", at: p.toPaper(t.at), text: t.text, size: t.size, anchor: "middle", vAlign: "middle", mask: true, ...(t.tone !== "ink" ? { tone: t.tone } : {}), ...(t.paperDeg ? { rotate: -t.paperDeg } : {}) });
+  };
+  const emitRunLabels = () => {
+    for (const rl of pendingRunLabels) textIn(p, rl.at, rl.text, rl.size, rl.anchor, rl.tone, rl.style);
   };
   if (!hidesEdges(style) && !fillsFaces(style)) {
     for (const l of pending) lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
     for (const t of pendingInline) emitInline(t);
-    return flushParts();
+    const idx = flushParts();
+    emitRunLabels();
+    return idx;
   }
   const projector = planProjector(ceiling);
   const index = new FaceIndex(cellFor(p.min.x, p.min.y, p.max.x, p.max.y));
@@ -1039,11 +1254,16 @@ function drawPlan(
     tones.set(el.id, shownAs(el).halftone ? "halftone" : toneFor(model, view, el));
   }
   if (fillsFaces(style)) fillFaces(p, faces, (o) => roles.get(o) ?? "mep", (o) => tones.get(o) ?? "ink");
-  if (!drawsEdges(style)) return flushParts();
+  if (!drawsEdges(style)) {
+    const idx = flushParts();
+    emitRunLabels();
+    return idx;
+  }
   // In hidden-line plan mode (not ceiling plans) with double-line overhead runs, draw lower floor-level parts first
   // (geometrically clipped against overhead runs via splitHidden) so background linework never bleeds through.
   // When there are no double-line overhead runs, keep the normal deferred-part draw order.
   const maskedRunOwners = new Set<string>();
+  let maxRunNear = -Infinity;
   if (hidesEdges(style) && !ceiling) {
     for (const el of bodies) {
       if (el.kind === "run_segment" || el.kind === "run_fitting") {
@@ -1051,20 +1271,55 @@ function drawPlan(
         if (!size || (size.shape !== "rect" && size.shape !== "round" && size.shape !== "oval")) continue;
         const elLook = elementLook(model, view, el);
         const effDetail = elLook.detailLevel ?? display.detail;
-        if (!isSingleLineRun(el.domain, size, effDetail, elLook.singleLineBelowMm)) maskedRunOwners.add(el.id);
+        if (!isSingleLineRun(el.domain, size, effDetail, elLook.singleLineBelowMm)) {
+          maskedRunOwners.add(el.id);
+          const rn = top.get(el.id);
+          if (rn !== undefined && rn > maxRunNear) maxRunNear = rn;
+        }
       }
     }
   }
-  const bgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => isBackgroundPart(dp.el, top.get(dp.el.id))) : [];
-  const fgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => !isBackgroundPart(dp.el, top.get(dp.el.id))) : deferredParts;
+  const bgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => isBackgroundPart(dp.el, top.get(dp.el.id), maxRunNear)) : [];
+  const fgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => !isBackgroundPart(dp.el, top.get(dp.el.id), maxRunNear)) : deferredParts;
   const bgStart = bgParts.length > 0 ? drawPartList(bgParts, { index, top }) : -1;
+  // Exact local 3D depth along curved/sloped flex runs so a drop collar below an overhead main never pokes above that main.
+  const flexNearAt = (el: Extract<BimElement, { kind: "run_segment" }>, u: number, v: number): number => {
+    const pts = flexPoints(el);
+    const elFloor = reached.get(el.id) ?? floor;
+    const r = (el.size.shape === "round" ? el.size.diameter : 200) / 2;
+    let bestZ = el.end.z;
+    let bestD2 = Infinity;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const p0 = pts[i]!;
+      const p1 = pts[i + 1]!;
+      const dx = p1.x - p0.x;
+      const dy = p1.y - p0.y;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 > 1e-6 ? Math.max(0, Math.min(1, ((u - p0.x) * dx + (v - p0.y) * dy) / len2)) : 0;
+      const qx = p0.x + dx * t;
+      const qy = p0.y + dy * t;
+      const d2 = (u - qx) * (u - qx) + (v - qy) * (v - qy);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestZ = p0.z + (p1.z - p0.z) * t;
+      }
+    }
+    const worldZ = elFloor + bestZ + (ceiling ? -r : r);
+    return ceiling ? -worldZ : worldZ;
+  };
   for (const l of pending) {
     if (!hidesEdges(style)) {
       lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
       continue;
     }
-    const near = top.get(l.owner) ?? Infinity;
-    const split = splitHidden({ u: l.a.x, v: l.a.y, near }, { u: l.b.x, v: l.b.y, near }, index, () => near);
+    const ownerEl = model.elements[l.owner];
+    const fallbackNear = ownerEl?.kind === "opening" ? floor + ownerEl.height : Infinity;
+    const near = top.get(l.owner) ?? fallbackNear;
+    const isFlexRun = ownerEl?.kind === "run_segment" && Boolean(ownerEl.flex);
+    const near0 = isFlexRun ? flexNearAt(ownerEl, l.a.x, l.a.y) : near;
+    const near1 = isFlexRun ? flexNearAt(ownerEl, l.b.x, l.b.y) : near;
+    const edgeNear = isFlexRun ? (t: number) => near0 + (near1 - near0) * t : () => near;
+    const split = splitHidden({ u: l.a.x, v: l.a.y, near: near0 }, { u: l.b.x, v: l.b.y, near: near1 }, index, edgeNear, (f) => f.owner === l.owner);
     for (const [a, b] of split.visible) lineIn(p, { x: a.u, y: a.v }, { x: b.u, y: b.v }, l.pen, l.tone, l.dash);
     if (display.dashed(l.category)) for (const [a, b] of split.hidden) lineIn(p, { x: a.u, y: a.v }, { x: b.u, y: b.v }, "thin", l.tone, HIDDEN_DASH);
   }
@@ -1078,6 +1333,7 @@ function drawPlan(
     if (vis.visible.length > 0) emitInline(t);
   }
   const fgStart = drawPartList(fgParts);
+  emitRunLabels();
   return bgStart >= 0 ? bgStart : fgStart;
 }
 
@@ -1107,11 +1363,13 @@ function drawPlanGraphics(
         const line = screened ? lines.screened : lines.line;
         if (g.form === "polyline" && g.closed && g.fill && g.points.length >= 3) {
           const grey = fillHexToGrey(g.fill);
-          const clipped = clipPolyToWindow(g.points, p.min, p.max);
-          if (clipped.length >= 3) {
+          const pieces = clipFillToPainter(p, g.points);
+          if (pieces.length > 0) {
             // Paint wall cut poché & white masks inline into `p.prims` so walls always mask underlying slab/ceiling centerlines cleanly.
             if (grey >= 0.995 || el.kind === "wall") {
-              p.prims.push({ kind: "fill", points: clipped.map((q) => p.toPaper(q)), grey, ...(grey < 0.995 && (screened ? "halftone" : tone) !== "ink" ? { tone: screened ? "halftone" : tone } : {}) });
+              for (const piece of pieces) {
+                p.prims.push({ kind: "fill", points: piece.map((q) => p.toPaper(q)), grey, ...(grey < 0.995 && (screened ? "halftone" : tone) !== "ink" ? { tone: screened ? "halftone" : tone } : {}) });
+              }
             } else {
               fillIn(p, g.points, grey, screened ? "halftone" : tone);
             }
@@ -1201,7 +1459,11 @@ function drawPlanConnections(
       scale: p.scale,
       symbolScale: symScale,
       showMark: tagsShown,
-      fill: (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) }),
+      fill: (pts, grey) => {
+        for (const piece of clipFillToPainter(p, pts)) {
+          p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) });
+        }
+      },
       circle: (c, r, pen) => circleIn(p, c, r, pen, tone),
       takenBoxes: takenPartBoxes,
     });
@@ -1231,22 +1493,42 @@ function drawPlanConnections(
  * sloped plane adds an arrow up its slope with the rise ("UP 3 IN 12"). A
  * cloud and exposed structure draw dashed: they are not a closed lid.
  */
-function drawCeilingOnPlan(p: Painter, c: Ceiling, pen: Pen, tone: Tone, model?: ModelState): void {
+function drawCeilingOnPlan(p: Painter, c: Ceiling, pen: Pen, tone: Tone, model?: ModelState, showLabel = true): void {
   if (c.outline.length < 3) return;
   const role = ceilingRole(c);
   const form = ceilingForm(c);
   const dash = form === "cloud" || form === "open_to_structure" ? [3, 1.5] : undefined;
   polygonIn(p, c.outline, pen, tone, dash ?? p.dash);
   for (const hole of c.holes ?? []) if (hole.length >= 3) polygonIn(p, hole, "thin", tone);
-  // Subtle ACT ceiling tile grid on flat ceilings (2'x4' = 610x1219 mm or 2'x2' = 610x610 mm).
-  if (form === "flat") {
+  // Real-scale ACT ceiling tile grid on flat or cloud ceilings (explicit `c.grid` with origin/rotation, else exact 2'×4' = 1219.2×609.6 mm or 2'×2' = 609.6×609.6 mm from material hatch).
+  if (form === "flat" || (form === "cloud" && c.grid)) {
+    const explicit = ceilingGrid(c);
     const mat = model ? resolveElementMaterial(model, c) : null;
     const hatch = mat?.surfaceHatch ?? "grid_600x1200";
-    if (hatch === "grid_600" || hatch === "grid_600x1200") {
-      const stepX = hatch === "grid_600" ? 610 : 1219;
-      const stepY = 610;
-      const xs = c.outline.map((q) => q.x);
-      const ys = c.outline.map((q) => q.y);
+    const resolved = explicit
+      ?? (hatch === "grid_600"
+        ? { spacingXMm: TILE_2FT_MM, spacingYMm: TILE_2FT_MM, origin: { x: 0, y: 0 }, rotationDeg: 0 }
+        : hatch === "grid_600x1200"
+          ? { spacingXMm: TILE_4FT_MM, spacingYMm: TILE_2FT_MM, origin: { x: 0, y: 0 }, rotationDeg: 0 }
+          : null);
+    if (resolved) {
+      const { spacingXMm: stepX, spacingYMm: stepY, origin, rotationDeg } = resolved;
+      const rad = (rotationDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const toLocal = (q: Vec2): Vec2 => {
+        const dx = q.x - origin.x;
+        const dy = q.y - origin.y;
+        return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+      };
+      const toWorld = (q: Vec2): Vec2 => ({
+        x: origin.x + q.x * cos - q.y * sin,
+        y: origin.y + q.x * sin + q.y * cos,
+      });
+      const localPoly = c.outline.map(toLocal);
+      const localHoles = (c.holes ?? []).map((h) => h.map(toLocal));
+      const xs = localPoly.map((q) => q.x);
+      const ys = localPoly.map((q) => q.y);
       const minX = Math.min(...xs);
       const maxX = Math.max(...xs);
       const minY = Math.min(...ys);
@@ -1254,19 +1536,19 @@ function drawCeilingOnPlan(p: Painter, c: Ceiling, pen: Pen, tone: Tone, model?:
       const maxLines = 120;
       if ((maxX - minX) / stepX <= maxLines && (maxY - minY) / stepY <= maxLines) {
         const gridTone: Tone = tone === "ink" ? "halftone" : "screened";
-        const drawClipped = (a: Vec2, b: Vec2): void => {
+        const drawClippedLocal = (a: Vec2, b: Vec2): void => {
           const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-          if (!pointInPoly2D(mid, c.outline)) return;
-          for (const h of c.holes ?? []) if (h.length >= 3 && pointInPoly2D(mid, h)) return;
-          lineIn(p, a, b, "thin", gridTone);
+          if (!pointInPoly2D(mid, localPoly)) return;
+          for (const h of localHoles) if (h.length >= 3 && pointInPoly2D(mid, h)) return;
+          lineIn(p, toWorld(a), toWorld(b), "thin", gridTone);
         };
-        for (let x = Math.ceil(minX / stepX) * stepX; x < maxX; x += stepX) {
-          const ysHit = polyScanIntersections(c.outline, "x", x);
-          for (let i = 0; i + 1 < ysHit.length; i += 2) drawClipped({ x, y: ysHit[i]! }, { x, y: ysHit[i + 1]! });
+        for (let x = Math.ceil(minX / stepX) * stepX; x < maxX - 1e-3; x += stepX) {
+          const ysHit = polyScanIntersections(localPoly, "x", x);
+          for (let i = 0; i + 1 < ysHit.length; i += 2) drawClippedLocal({ x, y: ysHit[i]! }, { x, y: ysHit[i + 1]! });
         }
-        for (let y = Math.ceil(minY / stepY) * stepY; y < maxY; y += stepY) {
-          const xsHit = polyScanIntersections(c.outline, "y", y);
-          for (let i = 0; i + 1 < xsHit.length; i += 2) drawClipped({ x: xsHit[i]!, y }, { x: xsHit[i + 1]!, y });
+        for (let y = Math.ceil(minY / stepY) * stepY; y < maxY - 1e-3; y += stepY) {
+          const xsHit = polyScanIntersections(localPoly, "y", y);
+          for (let i = 0; i + 1 < xsHit.length; i += 2) drawClippedLocal({ x: xsHit[i]!, y }, { x: xsHit[i + 1]!, y });
         }
       }
     }
@@ -1274,7 +1556,7 @@ function drawCeilingOnPlan(p: Painter, c: Ceiling, pen: Pen, tone: Tone, model?:
   const mid = centroidOf(c.outline);
   const height = ceilingHeightAtPoint(c, mid);
   const words = form === "open_to_structure" ? "OPEN TO STRUCTURE" : `${role.id === "ceiling" ? "" : `${role.label.toUpperCase()} `}${ftInPlan(height)}`;
-  textIn(p, mid, words, 2.5, "middle", tone);
+  if (showLabel) textIn(p, mid, words, 2.5, "middle", tone, { mask: true });
   const slope = ceilingSlope(c);
   if (!slope) return;
   const a = (slope.directionDeg * Math.PI) / 180;
@@ -1349,8 +1631,21 @@ function drawSpaceLabels(model: ModelState, view: ViewElement, p: Painter, shown
       }
     }
     if (!outline || outline.length < 3) continue;
-    const text = [space.name.toUpperCase(), space.number].filter((x) => x.trim() !== "").join(" ");
-    if (text) textIn(p, centroidOf(outline), text, 2.5, "middle", shown.halftone ? "halftone" : lookTone(look, disciplineTone(view, space)));
+    const rs = resolveTextStyle(model, "space_label");
+    const sz = rs?.textSizeMm ?? 2.5;
+    const fmt = (s: string) => (rs ? (rs.uppercase ? s.toUpperCase() : s) : s.toUpperCase());
+    const lines = [space.name.trim(), space.number.trim()].filter((x) => x !== "").map(fmt);
+    if (lines.length === 0) continue;
+    const spaceTone = shown.halftone ? "halftone" : lookTone(look, disciplineTone(view, space));
+    const styleObj = rs
+      ? { bold: rs.bold, italic: rs.italic, fontFamily: rs.fontFamily, mask: rs.mask ?? true, color: rs.color }
+      : { mask: true };
+    const center = centroidOf(outline);
+    const stepWorld = (sz + 1.2) * p.scale;
+    lines.forEach((line, i) => {
+      const dy = ((lines.length - 1) / 2 - i) * stepWorld;
+      textIn(p, { x: center.x, y: center.y + dy }, line, sz, "middle", spaceTone, styleObj);
+    });
   }
 }
 
@@ -1593,9 +1888,8 @@ function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: 
   }
   // Pass 2: unified building cut poché fill over internal seam lines (preserves crisp outer heavy contours).
   for (const f of archCutFills) {
-    const clipped = clipPolyToWindow(f.poly, p.min, p.max);
-    if (clipped.length >= 3) {
-      p.prims.push({ kind: "fill", points: clipped.map((q) => p.toPaper(q)), grey: ROLE_GREY.architecture - 0.1, ...(f.tone !== "ink" ? { tone: f.tone } : {}) });
+    for (const piece of clipFillToPainter(p, f.poly)) {
+      p.prims.push({ kind: "fill", points: piece.map((q) => p.toPaper(q)), grey: ROLE_GREY.architecture - 0.1, ...(f.tone !== "ink" ? { tone: f.tone } : {}) });
     }
   }
 }
@@ -1946,10 +2240,23 @@ function drawItemsInModel(p: Painter, items: readonly DrawingItem[], model: Mode
     if (!look.visible) continue;
     const from = p.prims.length;
     drawItemInModel(p, item, a, b, ctx, window, model);
-    if (look.halftone !== true) continue;
+    let makeHalftone = look.halftone === true;
+    // Preserve host-category / discipline halftone when a room/space or underlay element is tagged (so moving a halftoned room label stays halftoned).
+    if (!makeHalftone && item.shape === "tag" && item.tag) {
+      const host = model.elements[item.tag.elementId];
+      if (host) {
+        if (host.kind === "space" || host.kind === "room") {
+          const roomLook = categoryLook(view, "rooms");
+          if (roomLook.halftone === true || disciplineTone(view, host) === "halftone") makeHalftone = true;
+        } else if (toneFor(model, view, host) === "halftone") {
+          makeHalftone = true;
+        }
+      }
+    }
+    if (!makeHalftone) continue;
     for (let i = from; i < p.prims.length; i++) {
       const prim = p.prims[i];
-      if (prim) p.prims[i] = halftoned(prim);
+      if (prim && !(prim.kind === "fill" && prim.grey >= 0.99)) p.prims[i] = halftoned(prim);
     }
   }
 }
@@ -2431,8 +2738,12 @@ export interface AutoPartMarkHit {
   readonly at: Vec2;
   /** Paper bounding box of the auto-placed mark, mm. */
   readonly box: { readonly min: Vec2; readonly max: Vec2 };
-  /** Paper point of the part's insertion origin, mm. */
+  /** Paper point of the host element's origin/anchor, mm. */
   readonly partAt: Vec2;
+  /** Tag template to promote into on drag (default `"mark"` for parts/ceilings, `"auto"` for rooms/spaces/runs). */
+  readonly template?: "mark" | "auto";
+  /** Whether pulling far from `partAt` should auto-attach a leader (false for room/space/ceiling labels). */
+  readonly allowLeader?: boolean;
 }
 
 /**
@@ -2478,6 +2789,74 @@ export function planAutoPartMarks(model: ModelState, view: ViewElement, frame: V
         });
       },
     });
+  }
+  // Also make untagged room, space, ceiling, and run-size labels directly draggable into movable masked tags.
+  const pushHit = (id: string, text: string, modelAt: Vec2, sizeMm: number, template: "mark" | "auto", allowLeader: boolean) => {
+    if (!text || !inside(p, modelAt)) return;
+    const at = toPaper(modelAt);
+    const halfW = Math.max(sizeMm * 0.8, text.length * sizeMm * 0.36) + 0.8;
+    const halfH = sizeMm * 0.72 + 0.6;
+    hits.push({
+      partId: id,
+      text,
+      at,
+      box: { min: { x: at.x - halfW, y: at.y - halfH }, max: { x: at.x + halfW, y: at.y + halfH } },
+      partAt: at,
+      template,
+      allowLeader,
+    });
+  };
+  const ceilingView = view.viewType === "ceiling_plan";
+  const level = viewModelLevel(model, view.props?.level, view.props?.levelElevationMm);
+  if (level && categoryLook(view, "rooms").visible) {
+    for (const space of spacesOnLevel(model.elements, level.id)) {
+      if (taggedHere.has(space.id) || leftOutOfDisciplineView(view, space)) continue;
+      if (!shownAs(space).visible) continue;
+      let outline: readonly Vec2[] | null = null;
+      let area = -1;
+      for (const o of spaceOutlines(model.elements, space)) {
+        const a = outlineAreaMm2(o);
+        if (a > area) {
+          outline = o;
+          area = a;
+        }
+      }
+      if (!outline || outline.length < 3) continue;
+      const text = [space.name.toUpperCase(), space.number].filter((x) => x.trim() !== "").join(" ");
+      pushHit(space.id, text, centroidOf(outline), 2.5, "auto", false);
+    }
+  }
+  for (const el of candidates) {
+    if (taggedHere.has(el.id) || leftOutOfDisciplineView(view, el)) continue;
+    const look = elementLook(model, view, el);
+    if (!look.visible || !shownAs(el).visible) continue;
+    if (el.kind === "room") {
+      const rs = resolveTextStyle(model, "space_label");
+      const raw = `${el.name} ${el.number}`;
+      const text = rs ? (rs.uppercase ? raw.toUpperCase() : raw) : `${el.name.toUpperCase()} ${el.number}`;
+      pushHit(el.id, text, centroidOf(el.outline), rs?.textSizeMm ?? 2.5, "auto", false);
+    } else if (el.kind === "ceiling" && ceilingView && el.outline.length >= 3) {
+      const mid = centroidOf(el.outline);
+      const role = ceilingRole(el);
+      const form = ceilingForm(el);
+      const height = ceilingHeightAtPoint(el, mid);
+      const text = form === "open_to_structure" ? "OPEN TO STRUCTURE" : `${role.id === "ceiling" ? "" : `${role.label.toUpperCase()} `}${ftInPlan(height)}`;
+      pushHit(el.id, text, mid, 2.5, "mark", false);
+    } else if (el.kind === "run_segment") {
+      const effectiveDetail = look.detailLevel ?? display.detail;
+      drawRunSegment(
+        model,
+        el,
+        noop,
+        (at, text, size) => pushHit(el.id, text, at, size, "auto", true),
+        frame.scale,
+        {
+          detail: effectiveDetail,
+          singleLineBelowMm: look.singleLineBelowMm,
+          takenBoxes: taken,
+        },
+      );
+    }
   }
   return hits;
 }

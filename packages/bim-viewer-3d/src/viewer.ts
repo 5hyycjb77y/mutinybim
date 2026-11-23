@@ -17,7 +17,7 @@ import { ifcPlacementToScene, kernelToScene, MM, sceneToKernel, toColumnMajor, t
 import { robustCore } from "./framing";
 import { DEFAULT_ELEVATIONS, modelSolids, routeJoinSolids, type ElevationRules, type RenderGroup, type Solid } from "./native-geometry";
 import { batchMeshSolids, batchOwnerAt, type MeshBatch } from "./mesh-batches";
-import { buildStudioEnvironment, cleanEdgesGeometry, ensureBoxUVs, inflateAlongNormals, proceduralMaterialMaps } from "./procedural-textures";
+import { applyCeilingGridUVs, buildStudioEnvironment, cleanEdgesGeometry, ensureBoxUVs, inflateAlongNormals, proceduralMaterialMaps } from "./procedural-textures";
 import { materialOf, parseHexColor, type MaterialPattern } from "@permitzip/bim-kernel";
 import { readReferenceItem, type ReferenceItemProperties } from "./item-properties";
 import { nearestTurn, type Orientation, type PlanRectMm } from "./orientation";
@@ -117,7 +117,7 @@ const GROUP_STYLE: Record<RenderGroup, { color: number; roughness: number; metal
   duct: { color: 0x2f7fd8, roughness: 0.45, metalness: 0.35 },
   duct_fitting: { color: 0x2569b8, roughness: 0.45, metalness: 0.35 },
   terminal: { color: 0xe9eef5, roughness: 0.6, metalness: 0.1 },
-  equipment: { color: 0x5b6b7a, roughness: 0.55, metalness: 0.4 },
+  equipment: { color: 0xb8c2cc, roughness: 0.24, metalness: 0.82 },
   pipe: { color: 0x2ea86b, roughness: 0.4, metalness: 0.3 },
   electrical: { color: 0xd9a21b, roughness: 0.5, metalness: 0.2 },
   sprinkler: { color: 0xd8463b, roughness: 0.45, metalness: 0.3 },
@@ -1122,7 +1122,7 @@ export class ModelViewer3D {
         group === "wall" ? "gypsum" : group === "slab" ? "concrete" : group === "filler" ? "wood" : undefined;
       const pattern = matDef?.pattern ?? defaultPattern;
       const colorHex = `#${color.toString(16).padStart(6, "0")}`;
-      const maps = pattern && opacity === undefined ? proceduralMaterialMaps(pattern, colorHex) : null;
+      const maps = pattern && opacity === undefined ? proceduralMaterialMaps(pattern, colorHex, materialId) : null;
       const mat = new THREE.MeshStandardMaterial({
         color: maps ? 0xffffff : color,
         roughness,
@@ -1213,7 +1213,19 @@ export class ModelViewer3D {
 
   private drawSolid(s: Solid, material: THREE.Material, outline: boolean, dashedEdges = false) {
     const geometry = solidGeometry(s);
-    ensureBoxUVs(geometry);
+    const modelEl = this.lastAuthored?.view.elements[s.elementId];
+    if (modelEl?.kind === "ceiling") {
+      const grid = modelEl.grid ?? { spacingXMm: 1219.2, spacingYMm: 609.6 };
+      // Mesh vertices are local to `s.center` (Three.js metres where kernelX = x*1000, kernelY = -z*1000);
+      // convert the kernel world grid origin into mesh-local mm so 3D tile joints match the RCP and snapped devices.
+      const localOrigin = {
+        x: (grid.origin?.x ?? 0) - s.center[0] * 1000,
+        y: (grid.origin?.y ?? 0) + s.center[2] * 1000,
+      };
+      applyCeilingGridUVs(geometry, { ...grid, origin: localOrigin });
+    } else {
+      ensureBoxUVs(geometry);
+    }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = s.group !== "glazing" && s.group !== "mounting_plane";
     mesh.receiveShadow = true;

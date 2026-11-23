@@ -4,6 +4,8 @@ import {
   DEFAULT_SETTINGS,
   elementValues,
   executeCommand,
+  TILE_2FT_MM,
+  TILE_4FT_MM,
   withUpgradePolicy,
   type Command,
   type ModelState,
@@ -21,8 +23,9 @@ import {
   SHOWCASE_CONF_TABLE,
   SHOWCASE_DIFFUSER,
   SHOWCASE_DOWNLIGHT_6,
-  SHOWCASE_EXHAUST_FAN,
   SHOWCASE_EXTERIOR_SCONCE,
+  SHOWCASE_GRAVITY_HOOD,
+  SHOWCASE_INLINE_FAN,
   SHOWCASE_KITCHENETTE_COUNTER,
   SHOWCASE_LAV_UNDERMOUNT,
   SHOWCASE_PART_TYPES,
@@ -140,6 +143,7 @@ const MECH_HIDE_NON_HVAC = {
   pipe: { visible: false },
   electrical_devices: { visible: false },
   lighting_fixtures: { visible: false },
+  opening_tags: { visible: false },
   "mep.electrical_equipment": { visible: false },
   "mep.plumbing_fixture": { visible: false },
 } as const;
@@ -150,8 +154,19 @@ const ELEC_POWER_HIDE = {
   air_terminal: { visible: false },
   pipe: { visible: false },
   lighting_fixtures: { visible: false },
+  opening_tags: { visible: false },
   "electrical.lighting_control": { visible: false },
   "mep.mechanical_equipment": { visible: false },
+} as const;
+
+const ELEC_POWER_L2_HIDE = {
+  duct: { visible: false },
+  duct_fitting: { visible: false },
+  air_terminal: { visible: false },
+  pipe: { visible: false },
+  lighting_fixtures: { visible: false },
+  opening_tags: { visible: false },
+  "electrical.lighting_control": { visible: false },
 } as const;
 
 const ELEC_LTG_HIDE = {
@@ -159,6 +174,20 @@ const ELEC_LTG_HIDE = {
   duct_fitting: { visible: false },
   air_terminal: { visible: false },
   pipe: { visible: false },
+  opening_tags: { visible: false },
+  "mep.mechanical_equipment": { visible: false },
+  "mep.electrical_equipment": { visible: false },
+  "mep.plumbing_fixture": { visible: false },
+  "electrical.receptacle": { visible: false },
+  "electrical.lighting_control": { visible: false },
+} as const;
+
+const ELEC_CTRL_HIDE = {
+  duct: { visible: false },
+  duct_fitting: { visible: false },
+  air_terminal: { visible: false },
+  pipe: { visible: false },
+  opening_tags: { visible: false },
   "mep.mechanical_equipment": { visible: false },
   "mep.electrical_equipment": { visible: false },
   "mep.plumbing_fixture": { visible: false },
@@ -171,6 +200,7 @@ const PLUMB_WATER_HIDE = {
   air_terminal: { visible: false },
   electrical_devices: { visible: false },
   lighting_fixtures: { visible: false },
+  opening_tags: { visible: false },
   "mep.mechanical_equipment": { visible: false },
   "mep.electrical_equipment": { visible: false },
   "service:sanitary": { visible: false },
@@ -183,6 +213,7 @@ const PLUMB_DWV_HIDE = {
   air_terminal: { visible: false },
   electrical_devices: { visible: false },
   lighting_fixtures: { visible: false },
+  opening_tags: { visible: false },
   "mep.mechanical_equipment": { visible: false },
   "mep.electrical_equipment": { visible: false },
   "service:domestic_cold_water": { visible: false },
@@ -359,26 +390,34 @@ function buildShowcase(modelId: string): ModelState {
     ...opening("win-103", "L1", "w-l1-n-east", "window", 5.5 * FT, 8 * FT, 6 * FT, "W103", { "architecture.window_partitioning": "TRIPLE_PANEL_VERTICAL", "architecture.sill_height": Math.round(2.5 * FT) }),
     ...opening("win-104", "L1", "w-l1-e-solid", "window", 4 * FT, 4.5 * FT, 6.5 * FT, "W104", { "architecture.window_partitioning": "SINGLE_PANEL", "architecture.sill_height": Math.round(2.5 * FT) }),
 
-    // Level 1 Ceilings (9'-6" ACT Cloud in Studio 104 + 9'-6" GWB Soffit in Reception/Break 103 + 9'-0" GWB in Restroom 102)
+    // Level 1 Ceilings (9'-6" real-scale 2'×4' ACT Cloud in Studio 104 + 9'-6" GWB Soffit in Reception/Break 103 + 9'-0" GWB in Restroom 102)
     // Leaves a generous 1'-10" clear commercial MEP plenum (9'-6" to 11'-4") for ductwork & flex drops!
+    // Explicit 2'×4' (1219.2 × 609.6 mm) ACT grid aligned to (36', 2') so every 2×4 troffer and 2×2 diffuser drops dead-center in real tiles.
     {
       type: "create_ceiling",
       ceilings: [
-        { ceilingId: "clg-l1-studio", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "cloud", outline: [pt(35.5 * FT, 2.0 * FT), pt(54.5 * FT, 2.0 * FT), pt(54.5 * FT, 19.5 * FT), pt(35.5 * FT, 19.5 * FT)] },
+        {
+          ceilingId: "clg-l1-studio",
+          levelId: "L1",
+          heightMm: Math.round(9.5 * FT),
+          form: "cloud",
+          outline: [pt(36.0 * FT, 2.0 * FT), pt(54.0 * FT, 2.0 * FT), pt(54.0 * FT, 20.0 * FT), pt(36.0 * FT, 20.0 * FT)],
+          grid: { spacingXMm: TILE_4FT_MM, spacingYMm: TILE_2FT_MM, origin: pt(36.0 * FT, 2.0 * FT), rotationDeg: 0 },
+        },
         { ceilingId: "clg-l1-reception", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "soffit", outline: [pt(W_WEST + 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 19.8 * FT), pt(W_WEST + 4 * IN, 19.8 * FT)] },
         { ceilingId: "clg-l1-restroom", levelId: "L1", heightMm: Math.round(9.0 * FT), form: "flat", outline: [pt(6 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, D_ALL - 6 * IN), pt(6 * IN, D_ALL - 6 * IN)] },
       ],
     },
     { type: "set_element_values", elementIds: ["clg-l1-studio"], values: { "material.id": "architecture.act_ceiling" } },
-    { type: "set_element_values", elementIds: ["clg-l1-reception", "clg-l1-restroom"], values: { "material.id": "architecture.stucco_white" } },
+    { type: "set_element_values", elementIds: ["clg-l1-reception", "clg-l1-restroom"], values: { "material.id": "architecture.gypsum_partition" } },
 
-    // Code-Compliant 180° U-Turn Oak Stair (L1 → L2, rises into L2 Mezzanine Loft!)
+    // Code-Compliant 180° U-Turn Oak Stair (L1 → L2, rises cleanly inside stairwell 20.5'..33.2' with zero wall penetration!)
     {
       type: "create_element",
       kind: "architecture.stair",
       elementId: "stair-main",
       levelId: "L1",
-      placement: { kind: "line", start: pt(23.5 * FT, 25.8 * FT), end: pt(30.5 * FT, 25.8 * FT) },
+      placement: { kind: "line", start: pt(21.4 * FT, 25.7 * FT), end: pt(28.4 * FT, 25.7 * FT) },
       size: { widthMm: Math.round(3.25 * FT) },
       values: {
         "architecture.stair_form": "u_shape",
@@ -542,7 +581,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "tbl-studio-2", typeId: SHOWCASE_WORKTABLE.id, levelId: "L1", position: pt(50.0 * FT, 6.5 * FT), rotationDeg: 0, mark: "" },
     { type: "place_part", partId: "tbl-studio-3", typeId: SHOWCASE_WORKTABLE.id, levelId: "L1", position: pt(40.0 * FT, 17.5 * FT), rotationDeg: 0, mark: "" },
     { type: "place_part", partId: "tbl-studio-4", typeId: SHOWCASE_WORKTABLE.id, levelId: "L1", position: pt(50.0 * FT, 16.5 * FT), rotationDeg: 0, mark: "" },
-    { type: "place_part", partId: "tbl-plotter-l1", typeId: SHOWCASE_WORKTABLE.id, levelId: "L1", position: pt(51.5 * FT, 26.2 * FT), rotationDeg: 0, mark: "" },
+    { type: "place_part", partId: "tbl-plotter-l1", typeId: SHOWCASE_WORKTABLE.id, levelId: "L1", position: pt(51.5 * FT, 25.5 * FT), rotationDeg: 0, mark: "" },
     { type: "place_part", partId: "tbl-conf-l2", typeId: SHOWCASE_CONF_TABLE.id, levelId: "L2", position: pt(9.0 * FT, 10.0 * FT), rotationDeg: 0, mark: "" },
   ]);
 
@@ -557,25 +596,26 @@ function buildShowcase(modelId: string): ModelState {
   const CEILING_Z = Math.round(9.5 * FT);
 
   m = runCmds(m, [
-    // Packaged RTU-1 on East flat parapet roof (L2 = 12'-0") + Spun Aluminum EF-1 on Roof (22'-0"+3'-6") over restroom chase
+    // Packaged RTU-1 on East flat parapet roof (L2 = 12'-0") + IMC 306.5 compliant indoor inline EF-1 (Greenheck CSP-B150) discharging up through passive spun-aluminum roof gravity hood GV-1 seated flush on sloped roof!
     { type: "place_part", partId: "rtu-1", typeId: SHOWCASE_RTU.id, levelId: "L2", position: pt(48.5 * FT, 16.0 * FT), offsetMm: 0, mark: "RTU-1", values: { circuit: "HP-1-1,3,5", serves: "Studio & Reception", room: "East Roof" } },
-    { type: "place_part", partId: "ef-1", typeId: SHOWCASE_EXHAUST_FAN.id, levelId: "ROOF", position: pt(11.5 * FT, 21.15 * FT), offsetMm: Math.round(3.5 * FT), mark: "EF-1", values: { circuit: "LP-1-7", serves: "Restrooms 102 & 202", room: "Upper Roof" } },
+    { type: "place_part", partId: "ef-1", typeId: SHOWCASE_INLINE_FAN.id, levelId: "L2", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(12.2 * FT), mark: "EF-1", values: { circuit: "LP-1-7", serves: "Restrooms 102 & 202", room: "Restroom 202 Ceiling Plenum (Indoor)" } },
+    { type: "place_part", partId: "gv-1", typeId: SHOWCASE_GRAVITY_HOOD.id, levelId: "ROOF", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(4.4 * FT), mark: "GV-1", values: { serves: "EF-1 Exhaust Discharge", room: "Upper Roof" } },
 
-    // 4 Titus TMS 24×24 louvered supply diffusers (ALL within 6 ft SMACNA flex reach of sa-main, symmetrically aligned along Y = 6'-6"!)
-    { type: "place_part", partId: "sd-1", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(45.0 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "SD-1", values: { airflow: 450, room: "Design Studio 104" } },
-    { type: "place_part", partId: "sd-2", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(42.5 * FT, 14.5 * FT), offsetMm: CEILING_Z, mark: "SD-2", values: { airflow: 450, room: "Design Studio 104" } },
+    // 4 Titus TMS 24×24 louvered supply diffusers (Studio SD-1/SD-2 seated dead-center in exact 2'×2' half-tiles of the 2'×4' ACT cloud, ALL connected via real 8" flex!)
+    { type: "place_part", partId: "sd-1", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(45.0 * FT, 5.0 * FT), offsetMm: CEILING_Z, mark: "SD-1", values: { airflow: 450, room: "Design Studio 104" } },
+    { type: "place_part", partId: "sd-2", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(43.0 * FT, 15.0 * FT), offsetMm: CEILING_Z, mark: "SD-2", values: { airflow: 450, room: "Design Studio 104" } },
     { type: "place_part", partId: "sd-3", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(23.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "SD-3", values: { airflow: 400, room: "Reception & Break 103" } },
     { type: "place_part", partId: "sd-4", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(29.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "SD-4", values: { airflow: 400, room: "Reception & Break 103" } },
 
-    // 2 Return Grilles (4.35 ft south of ra-main -> balanced 1,700 CFM connected via taps + curved 12" flex!)
-    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(38.0 * FT, 12.2 * FT), offsetMm: CEILING_Z, mark: "RG-1", values: { airflow: 1000 } },
-    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(28.5 * FT, 12.5 * FT), offsetMm: CEILING_Z, mark: "RG-2", values: { airflow: 700 } },
+    // 2 Return Grilles (RG-1 dead-center in Studio ACT 2'×2' half-tile at (39', 13'), clear north of sa-main at 10.5' and 5 ft south of ra-main at 18.0'!)
+    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(39.0 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "RG-1", values: { airflow: 1000 } },
+    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(28.5 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "RG-2", values: { airflow: 700 } },
 
-    // Stacked Restroom Exhaust Grilles (L1 & L2 connected to real vertical shaft riser up to EF-1!)
-    { type: "place_part", partId: "eg-2", typeId: eg.id, levelId: "L1", position: pt(11.5 * FT, 23.2 * FT), offsetMm: Math.round(9.0 * FT), mark: "EG-2", values: { airflow: 150 } },
-    { type: "place_part", partId: "eg-1", typeId: eg.id, levelId: "L2", position: pt(11.5 * FT, 23.2 * FT), offsetMm: Math.round(9.0 * FT), mark: "EG-1", values: { airflow: 150 } },
+    // Stacked Restroom Exhaust Grilles (L1 9'-0" & L2 8'-6" over open restroom aisle north of vanity — zero clash with L-3/vanity!)
+    { type: "place_part", partId: "eg-2", typeId: eg.id, levelId: "L1", position: pt(11.6 * FT, 25.2 * FT), offsetMm: Math.round(9.0 * FT), mark: "EG-2", values: { airflow: 150 } },
+    { type: "place_part", partId: "eg-1", typeId: eg.id, levelId: "L2", position: pt(10.2 * FT, 23.5 * FT), offsetMm: Math.round(8.5 * FT), mark: "EG-1", values: { airflow: 150 } },
 
-    // Supply Air: vertical drop from RTU-1 curb supply connector (47.12', 15.21') → 16"×10" trunk at 10'-8" along Y = 10.5'
+    // Supply Air: vertical drop from RTU-1 curb supply connector (47.12', 15.21') → 16"×10" trunk at 10'-8" (Y = 10.5') with 2" external duct wrap insulation!
     {
       type: "route_run",
       idPrefix: "sa-main",
@@ -583,12 +623,13 @@ function buildShowcase(modelId: string): ModelState {
       domain: "duct",
       size: { shape: "rect", width: 16 * IN, height: 10 * IN },
       elevationMm: PLENUM_Z,
+      insulation: { kind: "wrap", thicknessMm: Math.round(2 * IN) },
       system: SA_SYS,
       from: { kind: "part", partId: "rtu-1", connectorId: "supply" },
       points: [pt(47.12 * FT, 10.5 * FT), pt(22.0 * FT, 10.5 * FT)],
     },
 
-    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → 16"×12" trunk straight west at 10'-8"
+    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → 16"×12" trunk at Y = 19.35' with 2" external duct wrap!
     {
       type: "route_run",
       idPrefix: "ra-main",
@@ -596,35 +637,48 @@ function buildShowcase(modelId: string): ModelState {
       domain: "duct",
       size: { shape: "rect", width: 16 * IN, height: 12 * IN },
       elevationMm: PLENUM_Z,
+      insulation: { kind: "wrap", thicknessMm: Math.round(2 * IN) },
       system: RA_SYS,
       from: { kind: "part", partId: "rtu-1", connectorId: "return" },
-      points: [pt(27.0 * FT, 16.85 * FT)],
+      points: [pt(47.12 * FT, 19.35 * FT), pt(27.0 * FT, 19.35 * FT)],
     },
 
-    // Exhaust Air: vertical 8" round shaft riser from EF-1 on Roof (22'-0"+3'-6") straight into L1 EG-2 + L2 branch into EG-1!
+    // Exhaust Air: indoor inline EF-1 in Restroom 202 ceiling plenum (100% clear of walls & D203) → straight L2 plenum header to EG-1 + branch drop to L1 EG-2 + vertical roof discharge to GV-1!
+    {
+      type: "route_run",
+      idPrefix: "ea-l2",
+      levelId: "L2",
+      domain: "duct",
+      size: { shape: "round", diameter: 8 * IN },
+      elevationMm: Math.round(10.3 * FT),
+      system: EA_SYS,
+      from: { kind: "part", partId: "ef-1", connectorId: "inlet" },
+      points: [pt(13.0 * FT, 23.5 * FT), pt(10.2 * FT, 23.5 * FT)],
+      to: { kind: "part", partId: "eg-1", connectorId: "neck" },
+    },
     {
       type: "route_run",
       idPrefix: "ea-stack",
-      levelId: "L1",
+      levelId: "L2",
       domain: "duct",
-      size: { shape: "round", diameter: 8 * IN },
-      elevationMm: Math.round(10.8 * FT),
+      size: { shape: "round", diameter: 6 * IN },
+      elevationMm: Math.round(10.3 * FT),
       system: EA_SYS,
-      from: { kind: "part", partId: "ef-1", connectorId: "exhaust" },
-      points: [pt(11.5 * FT, 21.15 * FT), pt(11.5 * FT, 23.2 * FT)],
+      from: { kind: "run_branch", segmentId: "ea-l2-s2" },
+      points: [pt(11.6 * FT, 23.5 * FT), pt(11.6 * FT, 25.2 * FT)],
       to: { kind: "part", partId: "eg-2", connectorId: "neck" },
     },
     {
       type: "route_run",
-      idPrefix: "ea-l2",
-      levelId: "L1",
+      idPrefix: "ea-disch",
+      levelId: "L2",
       domain: "duct",
-      size: { shape: "round", diameter: 6 * IN },
-      elevationMm: H1 + Math.round(11.2 * FT),
+      size: { shape: "round", diameter: 8 * IN },
+      elevationMm: Math.round(13.5 * FT),
       system: EA_SYS,
-      from: { kind: "run_branch", segmentId: "ea-stack-s1" },
-      points: [pt(11.5 * FT, 21.15 * FT), pt(11.5 * FT, 23.2 * FT)],
-      to: { kind: "part", partId: "eg-1", connectorId: "neck" },
+      from: { kind: "part", partId: "ef-1", connectorId: "discharge" },
+      points: [],
+      to: { kind: "part", partId: "gv-1", connectorId: "throat" },
     },
   ]);
 
@@ -646,18 +700,19 @@ function buildShowcase(modelId: string): ModelState {
   const DCW_SYS = { id: "sys-dcw", kind: "domestic_cold_water" as const, name: "Domestic Cold Water" };
   const DHW_SYS = { id: "sys-dhw", kind: "domestic_hot_water" as const, name: "Domestic Hot Water" };
 
-  const Y_SAN = Y_WET - 0.5 * FT; // 4" under-slab sanitary trunk 6" south of wet wall -> clean closet-bend wye clearance!
+  const Y_SAN = Y_WET - 1.0 * FT; // 4" under-slab sanitary trunk 12" south of wet wall -> clean horizontal plan separation from vent chase!
+  const Y_VENT = Y_WET - 2 * IN; // 2" vent headers inside 8" wet chase (10" north of SAN, 6" south of lavatory face!)
   const Y_WATER = 14.0 * FT; // Street domestic water service separated 6'-6" horizontally from sanitary sewer/manhole (IPC 603.2 >= 5'-0"!) & clear of E-W section cut!
   m = runCmds(m, [
-    // Exterior Site Utilities + MEP Room Water Service Entry (ZERO water/sewer clash!)
-    { type: "place_part", partId: "mtr-1", typeId: waterMeter.id, levelId: "L1", position: pt(-6.0 * FT, Y_WATER), offsetMm: 0, mark: "MTR-1", values: { room: "Site West" } },
+    // Exterior Site Utilities + MEP Room Water Service Entry (buried below 8" slab at -350 mm, ZERO water/sewer clash!)
+    { type: "place_part", partId: "mtr-1", typeId: waterMeter.id, levelId: "L1", position: pt(-6.0 * FT, Y_WATER), offsetMm: -350, mark: "MTR-1", values: { room: "Site West" } },
     { type: "place_part", partId: "rpz-1", typeId: rpz.id, levelId: "L1", position: pt(1.6 * FT, Y_WATER), offsetMm: Math.round(3.0 * FT), mark: "RPZ-1", values: { room: "MEP / Electrical 101" } },
     { type: "place_part", partId: "wh-1", typeId: SHOWCASE_WATER_HEATER.id, levelId: "L1", position: pt(13.5 * FT, 18.0 * FT), offsetMm: 0, mark: "WH-1", values: { room: "MEP / Electrical 101", circuit: "HP-1-2,4,6" } },
     { type: "place_part", partId: "et-1", typeId: expTank.id, levelId: "L1", position: pt(15.6 * FT, 18.8 * FT), offsetMm: Math.round(4.5 * FT), mark: "ET-1", values: { room: "MEP / Electrical 101" } },
     { type: "place_part", partId: "mh-1", typeId: manhole.id, levelId: "L1", position: pt(-10.0 * FT, Y_SAN), offsetMm: -545, rotationDeg: 180, mark: "MH-1", values: { room: "Public Sewer" } },
     // Exterior Floor Cleanout at grade (z = 0) with parametric 21" riser neck extending straight down into the sloped 4" sanitary lateral!
     { type: "place_part", partId: "fco-1", typeId: floorCo.id, levelId: "L1", position: pt(-3.0 * FT, Y_SAN), offsetMm: 0, mark: "FCO-1", values: { room: "Exterior West", riser_height: 530 } },
-    { type: "place_part", partId: "vtr-1", typeId: vtr.id, levelId: "ROOF", position: pt(9.5 * FT, Y_WET - 4 * IN), offsetMm: Math.round(3.5 * FT), mark: "VTR-1", values: { room: "Upper Roof" } },
+    { type: "place_part", partId: "vtr-1", typeId: vtr.id, levelId: "ROOF", position: pt(9.5 * FT, Y_VENT), offsetMm: Math.round(3.5 * FT), mark: "VTR-1", values: { room: "Upper Roof" } },
 
     // Level 1 Restroom 102 commercial fixtures (aligned with vanity-l1 cutouts at 11.0' & 14.6')
     { type: "place_part", partId: "wc-101", typeId: SHOWCASE_WC_COMMERCIAL.id, levelId: "L1", position: pt(4.0 * FT, Y_WET_NORTH_FACE), rotationDeg: 0, mark: "WC-1", values: { room: "Restroom 102", accessible: true } },
@@ -674,14 +729,14 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lav-201", typeId: SHOWCASE_LAV_UNDERMOUNT.id, levelId: "L2", position: pt(11.0 * FT, Y_WET_NORTH_FACE), rotationDeg: 0, mark: "L-3", values: { room: "Restroom 202" } },
     { type: "place_part", partId: "lav-202", typeId: SHOWCASE_LAV_UNDERMOUNT.id, levelId: "L2", position: pt(14.6 * FT, Y_WET_NORTH_FACE), rotationDeg: 0, mark: "L-4", values: { room: "Restroom 202" } },
 
-    // ---- DOMESTIC COLD WATER (Street Main → Exterior MTR-1 → RPZ-1 → Straight L1 & L2 Wet Chase Headers at 520 mm!) ----
+    // ---- DOMESTIC COLD WATER (Buried Under-Slab Street Main at -350 mm → MTR-1 → Slab Sleeve Riser → RPZ-1 → Straight L1 & L2 Wet Chase Headers!) ----
     {
       type: "route_run",
       idPrefix: "dcw-street",
       levelId: "L1",
       domain: "pipe",
       size: copper(2),
-      elevationMm: 0,
+      elevationMm: -350,
       system: DCW_SYS,
       points: [pt(-10.0 * FT, Y_WATER)],
       to: { kind: "part", partId: "mtr-1", connectorId: "in" },
@@ -695,7 +750,7 @@ function buildShowcase(modelId: string): ModelState {
       system: DCW_SYS,
       from: { kind: "part", partId: "mtr-1", connectorId: "out" },
       points: [
-        { x: Math.round(0.1 * FT), y: Math.round(Y_WATER), elevationMm: 0 },
+        { x: Math.round(0.1 * FT), y: Math.round(Y_WATER), elevationMm: -350 },
         { x: Math.round(0.1 * FT), y: Math.round(Y_WATER), elevationMm: Math.round(3.0 * FT) },
       ],
       to: { kind: "part", partId: "rpz-1", connectorId: "in" },
@@ -849,7 +904,7 @@ function buildShowcase(modelId: string): ModelState {
       to: { kind: "part", partId: "lav-201", connectorId: "cw" },
     },
 
-    // ---- DOMESTIC HOT WATER (WH-1 → Straight L1 & L2 Wet Chase Headers at 520 mm + KS-1) ----
+    // ---- DOMESTIC HOT WATER (WH-1 → Straight L1 & L2 Wet Chase Headers at 700 mm, staggered 7" above DCW 520 mm -> ZERO CW/HW clash!) ----
     {
       type: "route_run",
       idPrefix: "dhw-main",
@@ -861,15 +916,17 @@ function buildShowcase(modelId: string): ModelState {
       from: { kind: "part", partId: "wh-1", connectorId: "hw" },
       points: [
         { x: Math.round(13.5 * FT) + 102, y: Math.round(20.1 * FT), elevationMm: Math.round(6.0 * FT) },
-        { x: Math.round(13.5 * FT) + 102, y: Math.round(20.1 * FT), elevationMm: 520 },
-        { x: Math.round(16.6 * FT), y: Math.round(20.1 * FT), elevationMm: 520 },
-        { x: Math.round(16.6 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 520 },
+        { x: Math.round(13.5 * FT) + 102, y: Math.round(20.1 * FT), elevationMm: 700 },
+        { x: Math.round(16.6 * FT), y: Math.round(20.1 * FT), elevationMm: 700 },
+        { x: Math.round(16.6 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 700 },
+        { x: Math.round(17.8 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 700 },
+        { x: Math.round(17.8 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 520 },
       ],
       to: { kind: "part", partId: "ks-101", connectorId: "hw" },
     },
   ]);
 
-  const dhwL1EW = findSeg(m, "dhw-main", (s) => Math.abs(s.start.z - 520) < 20 && Math.abs(s.end.x - s.start.x) > 500);
+  const dhwL1EW = findSeg(m, "dhw-main", (s) => Math.abs(s.start.z - 700) < 20 && Math.abs(s.end.x - s.start.x) > 500);
   const dhwL1NS = findSeg(m, "dhw-main", (s) => Math.abs(s.start.z - Math.round(6.0 * FT)) < 20 && Math.abs(s.end.y - s.start.y) > 200);
   m = runCmds(m, [
     {
@@ -894,10 +951,14 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: copper(0.5),
-      elevationMm: 520,
+      elevationMm: 700,
       system: DHW_SYS,
       from: { kind: "run_branch", segmentId: dhwL1EW },
-      points: [{ x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: 520 }],
+      points: [
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: 700 },
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: 700 },
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: 520 },
+      ],
       to: { kind: "part", partId: "lav-102", connectorId: "hw" },
     },
     {
@@ -906,21 +967,23 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: copper(0.75),
-      elevationMm: 520,
+      elevationMm: 700,
       system: DHW_SYS,
       from: { kind: "run_branch", segmentId: dhwL1EW },
       points: [
-        { x: Math.round(15.6 * FT), y: Math.round(20.1 * FT), elevationMm: 520 },
-        { x: Math.round(15.6 * FT), y: Math.round(19.3 * FT), elevationMm: 520 },
-        { x: Math.round(15.6 * FT), y: Math.round(19.3 * FT), elevationMm: H1 + 520 },
-        { x: Math.round(15.6 * FT), y: Math.round(20.1 * FT), elevationMm: H1 + 520 },
-        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 520 },
+        { x: Math.round(15.6 * FT), y: Math.round(20.1 * FT), elevationMm: 700 },
+        { x: Math.round(15.6 * FT), y: Math.round(19.3 * FT), elevationMm: 700 },
+        { x: Math.round(15.6 * FT), y: Math.round(19.3 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(15.6 * FT), y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 520 },
       ],
       to: { kind: "part", partId: "lav-201", connectorId: "hw" },
     },
   ]);
 
-  const dhwL2EW = findSeg(m, "dhw-riser", (s) => Math.abs(s.start.z - (H1 + 520)) < 20 && Math.abs(s.end.x - s.start.x) > 500);
+  const dhwL2EW = findSeg(m, "dhw-riser", (s) => Math.abs(s.start.z - (H1 + 700)) < 20 && Math.abs(s.end.x - s.start.x) > 500);
   m = runCmds(m, [
     {
       type: "route_run",
@@ -928,10 +991,14 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: copper(0.5),
-      elevationMm: H1 + 520,
+      elevationMm: H1 + 700,
       system: DHW_SYS,
       from: { kind: "run_branch", segmentId: dhwL2EW },
-      points: [{ x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 520 }],
+      points: [
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 700 },
+        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 520 },
+      ],
       to: { kind: "part", partId: "lav-202", connectorId: "hw" },
     },
 
@@ -1123,7 +1190,7 @@ function buildShowcase(modelId: string): ModelState {
       to: { kind: "run_branch", segmentId: sanL2Header() },
     },
 
-    // ---- VENT STACK (3" VTR-1 through Roof + 2" L1 & L2 Re-Vent Headers integrated with Sanitary Fixtures!) ----
+    // ---- IPC 912 HORIZONTAL WET VENTING (3" VTR-1 + L1 & L2 2" Horizontal Branch Vents at 5'-0" AFF serving Lavatories L-1..L-4 + KS-1; WCs wet-vented via lavatory drains per IPC 912!) ----
     {
       type: "route_run",
       idPrefix: "vent-stack",
@@ -1132,36 +1199,80 @@ function buildShowcase(modelId: string): ModelState {
       size: pvc(3),
       elevationMm: Math.round(4.5 * FT),
       system: VENT_SYS,
-      points: [{ x: Math.round(9.5 * FT), y: Math.round(Y_WET - 4 * IN) }],
+      points: [{ x: Math.round(9.5 * FT), y: Math.round(Y_VENT) }],
       to: { kind: "part", partId: "vtr-1", connectorId: "v" },
     },
+    // L1 Horizontal Branch Vent (Vent Stack 9.5' → LAV-101, LAV-102, KS-101; cleanly offset north of SAN trunk!)
     {
       type: "route_run",
-      idPrefix: "vent-l1",
+      idPrefix: "vent-l1-east",
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
       elevationMm: Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: "vent-stack-s1" },
-      points: [pt(9.5 * FT, Y_WET - 4 * IN), pt(17.5 * FT, Y_WET - 4 * IN), pt(17.5 * FT, 15.0 * FT)],
+      points: [pt(9.5 * FT, Y_VENT), pt(17.5 * FT, Y_VENT), pt(17.5 * FT, 15.0 * FT)],
       to: { kind: "part", partId: "ks-101", connectorId: "v" },
     },
   ]);
 
+  const ventL1EastSeg = findSeg(m, "vent-l1-east", (s) => Math.abs(s.end.x - s.start.x) > 500);
   const ventUpperSeg = findSeg(m, "vent-stack", (s) => Math.max(s.start.z, s.end.z) > H1 + 6 * FT);
   m = runCmds(m, [
+    // L1 lavatory dry vents (2" L-1 wet-venting L1 bathroom-group WCs per IPC 912 + 1-1/2" L-2)
     {
       type: "route_run",
-      idPrefix: "vent-l2",
+      idPrefix: "vent-lav101",
+      levelId: "L1",
+      domain: "pipe",
+      size: pvc(2),
+      elevationMm: Math.round(5.0 * FT),
+      system: VENT_SYS,
+      from: { kind: "run_branch", segmentId: ventL1EastSeg },
+      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE)],
+      to: { kind: "part", partId: "lav-101", connectorId: "v" },
+    },
+    {
+      type: "route_run",
+      idPrefix: "vent-lav102",
+      levelId: "L1",
+      domain: "pipe",
+      size: pvc(1.5),
+      elevationMm: Math.round(5.0 * FT),
+      system: VENT_SYS,
+      from: { kind: "run_branch", segmentId: ventL1EastSeg },
+      points: [pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE)],
+      to: { kind: "part", partId: "lav-102", connectorId: "v" },
+    },
+    // L2 Horizontal Branch Vent at L2 + 5'-0" AFF (serving L-3 & L-4, wet-venting L2 bathroom-group WCs per IPC 912!)
+    {
+      type: "route_run",
+      idPrefix: "vent-l2-east",
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
       elevationMm: H1 + Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: ventUpperSeg },
-      points: [pt(9.5 * FT, Y_WET - 4 * IN), pt(14.6 * FT, Y_WET - 4 * IN)],
+      points: [pt(9.5 * FT, Y_VENT), pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE)],
       to: { kind: "part", partId: "lav-202", connectorId: "v" },
+    },
+  ]);
+
+  const ventL2EastSeg = findSeg(m, "vent-l2-east", (s) => Math.abs(s.end.x - s.start.x) > 500);
+  m = runCmds(m, [
+    {
+      type: "route_run",
+      idPrefix: "vent-lav201",
+      levelId: "L1",
+      domain: "pipe",
+      size: pvc(2),
+      elevationMm: H1 + Math.round(5.0 * FT),
+      system: VENT_SYS,
+      from: { kind: "run_branch", segmentId: ventL2EastSeg },
+      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE)],
+      to: { kind: "part", partId: "lav-201", connectorId: "v" },
     },
   ]);
 
@@ -1170,26 +1281,31 @@ function buildShowcase(modelId: string): ModelState {
   //                 Zero-clash coordinated lighting + bronze exterior wall sconces!
   // =========================================================================
   m = runCmds(m, [
-    // Distribution gear inside MEP / Electrical Room 101 (w-l1-core side: 1 faces WEST into MEP 101; side: -1 faces EAST into Reception 103)
-    { type: "place_part", partId: "mdp", typeId: swb.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(14 * FT), side: -1 }, mark: "MDP" },
-    { type: "place_part", partId: "hp-1", typeId: hpnl.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(8.5 * FT), side: -1 }, mark: "HP-1" },
-    { type: "place_part", partId: "t-1", typeId: xfmr.id, levelId: "L1", position: pt(12.5 * FT, 3.0 * FT), mark: "T-1" },
-    { type: "place_part", partId: "lp-1", typeId: lpnl.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(10.5 * FT), side: 1 }, mark: "LP-1" },
+    // Distribution gear inside MEP / Electrical Room 101 — cleanly south of domestic water service / RPZ-1 (Y = 14.0') per NEC 110.26(E)!
+    { type: "place_part", partId: "mdp", typeId: swb.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(4.2 * FT), side: -1 }, mark: "MDP", values: { available_fault_current: 42000, aic: 65000 } },
+    { type: "place_part", partId: "hp-1", typeId: hpnl.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(9.2 * FT), side: -1 }, mark: "HP-1", values: { aic: 42000 } },
+    { type: "place_part", partId: "t-1", typeId: xfmr.id, levelId: "L1", position: pt(12.5 * FT, 3.0 * FT), mark: "T-1", values: { impedance_pct: 4.5 } },
+    { type: "place_part", partId: "lp-1", typeId: lpnl.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(10.5 * FT), side: 1 }, mark: "LP-1", values: { aic: 22000 } },
 
-    // Wall-face NEC-spaced receptacles (mounted on the room-facing side, clear of windows & lavatory marks!)
-    { type: "place_part", partId: "rec-101", typeId: gfci.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(3.5 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "GFCI-M1" },
+    // Wall-face NEC-spaced receptacles (mounted on the room-facing side, clear of MDP/HP-1, windows & lavatory marks!)
+    { type: "place_part", partId: "rec-101", typeId: gfci.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-w", stationMm: Math.round(1.5 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "GFCI-M1" },
     { type: "place_part", partId: "rec-102", typeId: gfci.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-wet", stationMm: Math.round(16.6 * FT), side: 1 }, offsetMm: Math.round(44 * IN), mark: "GFCI-R1" },
     { type: "place_part", partId: "rec-103", typeId: gfci.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(12.2 * FT), side: -1 }, offsetMm: Math.round(44 * IN), mark: "GFCI-K1" },
     { type: "place_part", partId: "rec-104", typeId: gfci.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(17.8 * FT), side: -1 }, offsetMm: Math.round(44 * IN), mark: "GFCI-K2" },
     { type: "place_part", partId: "rec-105", typeId: rec.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(3.0 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "R-01" },
     { type: "place_part", partId: "rec-106", typeId: rec.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-studio-div", stationMm: Math.round(5.5 * FT), side: 1 }, offsetMm: Math.round(18 * IN), mark: "R-02" },
     { type: "place_part", partId: "rec-107", typeId: rec.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-studio-div", stationMm: Math.round(17.5 * FT), side: 1 }, offsetMm: Math.round(18 * IN), mark: "R-03" },
-    { type: "place_part", partId: "rec-108", typeId: quad.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-studio-div", stationMm: Math.round(5.5 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "Q-01" },
+    // Stagger Q-01 to station 8.2' on east face so it never collides with R-02 (5.5' on west face)!
+    { type: "place_part", partId: "rec-108", typeId: quad.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-studio-div", stationMm: Math.round(8.2 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "Q-01" },
     { type: "place_part", partId: "rec-109", typeId: quad.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-studio-div", stationMm: Math.round(17.5 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "Q-02" },
     { type: "place_part", partId: "rec-110", typeId: rec.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-e-solid", stationMm: Math.round(1.2 * FT), side: 1 }, offsetMm: Math.round(18 * IN), mark: "R-04" },
     // R-05 placed cleanly east of W103 (W103 is centered at station 5.5' w/ 8' width -> 1.5'..9.5', so station 11.2' is completely clear!)
     { type: "place_part", partId: "rec-111", typeId: rec.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-n-east", stationMm: Math.round(11.2 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "R-05" },
     { type: "place_part", partId: "rec-112", typeId: quad.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-print-w", stationMm: Math.round(4.0 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "Q-03" },
+    // Level 2 Conference 201 & Mezzanine Loft 203 convenience receptacles
+    { type: "place_part", partId: "rec-201", typeId: rec.id, levelId: "L2", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l2-core", stationMm: Math.round(6.0 * FT), side: 1 }, offsetMm: Math.round(18 * IN), mark: "R-201" },
+    { type: "place_part", partId: "rec-202", typeId: quad.id, levelId: "L2", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l2-core", stationMm: Math.round(16.0 * FT), side: -1 }, offsetMm: Math.round(18 * IN), mark: "Q-201" },
+    { type: "place_part", partId: "rec-203", typeId: gfci.id, levelId: "L2", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l2-wet", stationMm: Math.round(16.4 * FT), side: 1 }, offsetMm: Math.round(44 * IN), mark: "GFCI-R2" },
 
     // Lighting Control Devices (0-10V dimmers, 3-way travelers, ceiling occupancy sensor, exterior photocell/timeclock)
     { type: "place_part", partId: "sw-a1", typeId: swD.id, levelId: "L1", position: pt(0, 0), host: { kind: "wall_face", elementId: "w-l1-core", stationMm: Math.round(21.5 * FT), side: -1 }, offsetMm: Math.round(44 * IN), mark: "SW-A1", values: { switch_leg: "a", control_type: "0-10v" } },
@@ -1217,26 +1333,26 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-kit-2", typeId: linearPendant.id, levelId: "L1", position: pt(19.4 * FT, 17.0 * FT), offsetMm: Math.round(7.5 * FT), rotationDeg: 90, mark: "F3-6", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F3" } },
     { type: "place_part", partId: "lt-isl-1", typeId: linearPendant.id, levelId: "L1", position: pt(26.5 * FT, 9.5 * FT), offsetMm: Math.round(7.5 * FT), rotationDeg: 0, mark: "F3-7", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F3" } },
 
-    // Zone B — Design Studio 104 2×4 volumetric LED troffers centered in ACT cloud (ZERO clash with SD-1/SD-2/RG-1/col-2/D106!)
-    { type: "place_part", partId: "lt-4", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(38.5 * FT, 4.0 * FT), offsetMm: CEILING_Z, mark: "F2-1", values: { switch_leg: "b", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
-    { type: "place_part", partId: "lt-5", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(51.5 * FT, 4.0 * FT), offsetMm: CEILING_Z, mark: "F2-2", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
-    { type: "place_part", partId: "lt-21", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(45.0 * FT, 2.5 * FT), offsetMm: CEILING_Z, mark: "F2-3", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
-    { type: "place_part", partId: "lt-22", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(51.5 * FT, 11.5 * FT), offsetMm: CEILING_Z, mark: "F2-4", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
-    { type: "place_part", partId: "lt-6", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(38.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F2-5", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
-    { type: "place_part", partId: "lt-7", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(51.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F2-6", values: { switch_leg: "b", control_type: "0-10v", emergency: true, emergency_mode: "switched", type_mark: "F2E" } },
-    { type: "place_part", partId: "lt-23", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(45.0 * FT, 18.0 * FT), offsetMm: CEILING_Z, mark: "F2-7", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
+    // Zone B — Design Studio 104 2×4 volumetric LED troffers seated DEAD-CENTER in exact 2'×4' ACT cloud tiles (origin 36', 2')!
+    { type: "place_part", partId: "lt-4", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(38.0 * FT, 5.0 * FT), offsetMm: CEILING_Z, mark: "F2-1", values: { switch_leg: "b", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
+    { type: "place_part", partId: "lt-5", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(50.0 * FT, 5.0 * FT), offsetMm: CEILING_Z, mark: "F2-2", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
+    { type: "place_part", partId: "lt-21", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(42.0 * FT, 3.0 * FT), offsetMm: CEILING_Z, mark: "F2-3", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
+    { type: "place_part", partId: "lt-22", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(50.0 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "F2-4", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
+    { type: "place_part", partId: "lt-6", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(38.0 * FT, 17.0 * FT), offsetMm: CEILING_Z, mark: "F2-5", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
+    { type: "place_part", partId: "lt-7", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(50.0 * FT, 17.0 * FT), offsetMm: CEILING_Z, mark: "F2-6", values: { switch_leg: "b", control_type: "0-10v", emergency: true, emergency_mode: "switched", type_mark: "F2E" } },
+    { type: "place_part", partId: "lt-23", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(46.0 * FT, 19.0 * FT), offsetMm: CEILING_Z, mark: "F2-7", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
     { type: "place_part", partId: "lt-24", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(40.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F2-8", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
     // Print / Plotter 105 centered troffer (8'-6" ACT ceiling for task illuminance >= 20 fc)
     { type: "place_part", partId: "lt-8", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(51.5 * FT, 24.5 * FT), offsetMm: Math.round(8.5 * FT), mark: "F2-9", values: { switch_leg: "b", control_type: "0-10v", type_mark: "F2" } },
 
-    // Zone C — MEP Room 101 evenly spaced working-aisle troffers + Restroom 102 downlights (clear of EG-2 at 11.5, 23.2!)
+    // Zone C — MEP Room 101 evenly spaced working-aisle troffers + Restroom 102 downlights (clear of EG-2 at 11.6, 25.2!)
     { type: "place_part", partId: "lt-9", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(9.0 * FT, 4.5 * FT), offsetMm: Math.round(10.5 * FT), mark: "F2-10", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F2" } },
     { type: "place_part", partId: "lt-10", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(9.0 * FT, 11.0 * FT), offsetMm: Math.round(10.5 * FT), mark: "F2-11", values: { switch_leg: "c", control_type: "line_voltage", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-9b", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L1", position: pt(9.0 * FT, 17.5 * FT), offsetMm: Math.round(10.5 * FT), mark: "F2-12", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F2" } },
     { type: "place_part", partId: "lt-11", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(3.5 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-12", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
-    { type: "place_part", partId: "lt-11b", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(8.0 * FT, 25.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-13", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
-    { type: "place_part", partId: "lt-12b", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(13.2 * FT, 26.0 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-14", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
-    { type: "place_part", partId: "lt-12", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(16.2 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-15", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-11b", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(7.5 * FT, 25.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-13", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-12b", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(14.8 * FT, 26.0 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-14", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-12", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(16.6 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-15", values: { switch_leg: "c", control_type: "line_voltage", type_mark: "F1" } },
 
     // Level 2 — Conference 201 direct/indirect linear pendants, Restroom 202 downlights, Mezzanine Loft 203 troffers + Exit/EM Combo
     { type: "place_part", partId: "lt-201", typeId: linearPendant.id, levelId: "L2", position: pt(5.5 * FT, 6.0 * FT), offsetMm: Math.round(8.5 * FT), mark: "F3-1", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F3" } },
@@ -1245,8 +1361,8 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-204", typeId: linearPendant.id, levelId: "L2", position: pt(12.5 * FT, 15.0 * FT), offsetMm: Math.round(8.5 * FT), mark: "F3-4", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F3" } },
     { type: "place_part", partId: "lt-205", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(3.5 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-16", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
     { type: "place_part", partId: "lt-206", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(8.0 * FT, 25.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-17", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
-    { type: "place_part", partId: "lt-207", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(13.2 * FT, 26.0 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-18", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
-    { type: "place_part", partId: "lt-208", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(16.2 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-19", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-207", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(14.8 * FT, 26.0 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-18", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-208", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(16.6 * FT, 24.5 * FT), offsetMm: Math.round(9.0 * FT), mark: "F1-19", values: { switch_leg: "e", control_type: "line_voltage", type_mark: "F1" } },
     { type: "place_part", partId: "lt-209", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(22.0 * FT, 5.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-13", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "switched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-210", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(30.0 * FT, 5.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-14", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F2" } },
     { type: "place_part", partId: "lt-211", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(22.0 * FT, 14.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-15", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F2" } },
@@ -1313,10 +1429,10 @@ function buildShowcase(modelId: string): ModelState {
       values: { "electrical.photometric_profile": "exterior_wall_pack_led", "electrical.emergency_mode": "none", "electrical.lld": 0.9, "electrical.ldd": 0.9 },
     },
 
-    // Electrical Feeders (MDP → HP-1, MDP → T-1 → LP-1)
-    { type: "create_service_link", linkId: "fdr-hp1", sourceId: "mdp", positions: [1, 3, 5], electrical: { ratingA: 225 }, description: "Feeder to Panel HP-1 (480Y/277V)", members: [{ elementId: "hp-1" }] },
-    { type: "create_service_link", linkId: "fdr-t1", sourceId: "mdp", positions: [2, 4, 6], electrical: { ratingA: 125 }, description: "Feeder to 75 kVA Transformer T-1", members: [{ elementId: "t-1" }] },
-    { type: "create_service_link", linkId: "fdr-lp1", sourceId: "t-1", description: "Secondary Feeder to Panel LP-1 (208Y/120V)", members: [{ elementId: "lp-1" }] },
+    // Electrical Feeders (MDP → HP-1, MDP → T-1 → LP-1) with NEC-sized copper conductors (live 3D length & AFC auto-calculated!)
+    { type: "create_service_link", linkId: "fdr-hp1", sourceId: "mdp", positions: [1, 3, 5], electrical: { ratingA: 225, conductors: { sets: 1, phaseSize: "4/0", neutralSize: "4/0", groundSize: "4", material: "cu" } }, description: "Feeder to Panel HP-1 (480Y/277V)", members: [{ elementId: "hp-1" }] },
+    { type: "create_service_link", linkId: "fdr-t1", sourceId: "mdp", positions: [2, 4, 6], electrical: { ratingA: 125, conductors: { sets: 1, phaseSize: "1", groundSize: "6", material: "cu" } }, description: "Feeder to 75 kVA Transformer T-1", members: [{ elementId: "t-1" }] },
+    { type: "create_service_link", linkId: "fdr-lp1", sourceId: "t-1", electrical: { ratingA: 225, conductors: { sets: 1, phaseSize: "4/0", neutralSize: "4/0", groundSize: "4", material: "cu" } }, description: "Secondary Feeder to Panel LP-1 (208Y/120V)", members: [{ elementId: "lp-1" }] },
 
     // Panel HP-1 (480Y/277V) Branch Circuits — EVERY heavy MEP & lighting load circuited!
     { type: "create_service_link", linkId: "ckt-hp-rtu", sourceId: "hp-1", positions: [1, 3, 5], electrical: { ratingA: 25 }, description: "RTU-1 (Carrier 50FC-A06 5-Ton Packaged Unit)", members: [{ elementId: "rtu-1" }] },
@@ -1330,7 +1446,8 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_service_link", linkId: "ckt-lp-gfci", sourceId: "lp-1", positions: [1], electrical: { ratingA: 20 }, description: "Kitchenette, Restroom & MEP GFCI Receptacles", members: [{ elementId: "rec-101" }, { elementId: "rec-102" }, { elementId: "rec-103" }, { elementId: "rec-104" }] },
     { type: "create_service_link", linkId: "ckt-lp-rec", sourceId: "lp-1", positions: [3], electrical: { ratingA: 20 }, description: "Reception & Perimeter Convenience Receptacles", members: [{ elementId: "rec-105" }, { elementId: "rec-106" }, { elementId: "rec-107" }, { elementId: "rec-110" }, { elementId: "rec-111" }] },
     { type: "create_service_link", linkId: "ckt-lp-studio", sourceId: "lp-1", positions: [5], electrical: { ratingA: 20 }, description: "Design Studio Workstations & Plotter Dedicated Quads", members: [{ elementId: "rec-108" }, { elementId: "rec-109" }, { elementId: "rec-112" }] },
-    { type: "create_service_link", linkId: "ckt-lp-ef1", sourceId: "lp-1", positions: [7], electrical: { ratingA: 15 }, description: "EF-1 (Greenheck G-085 Restroom Roof Exhaust Fan)", members: [{ elementId: "ef-1" }] },
+    { type: "create_service_link", linkId: "ckt-lp-ef1", sourceId: "lp-1", positions: [7], electrical: { ratingA: 15 }, description: "EF-1 (Greenheck CSP-B150 Indoor Inline Exhaust Fan)", members: [{ elementId: "ef-1" }] },
+    { type: "create_service_link", linkId: "ckt-lp-l2", sourceId: "lp-1", positions: [9], electrical: { ratingA: 20 }, description: "Level 2 Conference, Mezzanine & Restroom 202 Receptacles", members: [{ elementId: "rec-201" }, { elementId: "rec-202" }, { elementId: "rec-203" }] },
   ]);
 
   // =========================================================================
@@ -1367,15 +1484,91 @@ function buildShowcase(modelId: string): ModelState {
       },
     },
 
-    // ---- Architectural Views & Sheets (A-101 .. A-301) ----
-    { type: "create_view", viewId: "view-plan-l1", name: "Level 1 — Floor Plan", viewType: "floor_plan", crop: { min: pt(-4 * FT, -7 * FT), max: pt(W_ALL + 4 * FT, D_ALL + 4 * FT) }, props: { level: "Level 1", scale: 48, discipline: "architecture", categoryOverrides: ARCH_HIDE_MEP } },
+    // ---- Architectural Views & Sheets (A-101 .. A-302) ----
+    { type: "create_view", viewId: "view-plan-l1", name: "Level 1 — Floor Plan", viewType: "floor_plan", crop: { min: pt(-11 * FT, -11 * FT), max: pt(W_ALL + 11 * FT, D_ALL + 11 * FT) }, props: { level: "Level 1", scale: 48, discipline: "architecture", categoryOverrides: ARCH_HIDE_MEP } },
     { type: "create_view", viewId: "view-plan-l2", name: "Level 2 — Floor Plan", viewType: "floor_plan", crop: { min: pt(-4 * FT, -7 * FT), max: pt(W_ALL + 4 * FT, D_ALL + 4 * FT) }, props: { level: "Level 2", scale: 64, discipline: "architecture", categoryOverrides: ARCH_HIDE_MEP } },
     { type: "create_view", viewId: "view-enlarged-rr", name: "Enlarged Restroom 202", viewType: "floor_plan", crop: { min: pt(-1 * FT, 19.5 * FT), max: pt(19 * FT, 29 * FT) }, props: { level: "Level 2", scale: 24, discipline: "architecture", categoryOverrides: ARCH_HIDE_MEP } },
+    // Live parametric enlarged-plan callout box on Level 2 Floor Plan referencing Enlarged Restroom 202 (2 / A-102)
+    { type: "add_drawing_item", itemId: "co-rr-l2", ownerId: "view-plan-l2", shape: "callout", points: [pt(-0.5 * FT, 19.5 * FT), pt(18.5 * FT, 28.5 * FT), pt(-3.0 * FT, 29.8 * FT)], callout: { viewId: "view-enlarged-rr", showLabel: false } },
     { type: "create_view", viewId: "view-rcp-l1", name: "Level 1 — Reflected Ceiling Plan", viewType: "ceiling_plan", crop: { min: pt(-2 * FT, -2 * FT), max: pt(W_ALL + 2 * FT, D_ALL + 2 * FT) }, props: { level: "Level 1", scale: 48, discipline: "architecture", categoryOverrides: RCP_HIDE_NON_CEILING } },
-    { type: "create_view", viewId: "view-sec-ew", name: "Building Section — East-West", viewType: "section", crop: { min: pt(-4 * FT, -3 * FT), max: pt(W_ALL + 6 * FT, 30 * FT) }, props: { scale: 64, discipline: "architecture", section: { start: pt(-4 * FT, 11.5 * FT), end: pt(W_ALL + 4 * FT, 11.5 * FT), depthMm: Math.round(18 * FT), direction: 1 } } },
-    { type: "create_view", viewId: "view-sec-ns", name: "Building Section — North-South", viewType: "section", crop: { min: pt(-4 * FT, -3 * FT), max: pt(D_ALL + 6 * FT, 30 * FT) }, props: { scale: 64, discipline: "architecture", section: { start: pt(24 * FT, -4 * FT), end: pt(24 * FT, D_ALL + 4 * FT), depthMm: Math.round(22 * FT), direction: -1 } } },
-    { type: "create_view", viewId: "view-elev-south", name: "South Elevation", viewType: "elevation", crop: { min: pt(-6 * FT, -1 * FT), max: pt(W_ALL + 6 * FT, 30 * FT) }, props: { scale: 64, discipline: "architecture", categoryOverrides: { pipe: { visible: false } }, section: { start: pt(-6 * FT, -10 * FT), end: pt(W_ALL + 6 * FT, -10 * FT), depthMm: Math.round(45 * FT), direction: 1 } } },
-    { type: "create_view", viewId: "view-elev-east", name: "East Elevation", viewType: "elevation", crop: { min: pt(-6 * FT, -1 * FT), max: pt(D_ALL + 6 * FT, 30 * FT) }, props: { scale: 64, discipline: "architecture", categoryOverrides: { pipe: { visible: false } }, section: { start: pt(W_ALL + 10 * FT, -6 * FT), end: pt(W_ALL + 10 * FT, D_ALL + 6 * FT), depthMm: Math.round(65 * FT), direction: 1 } } },
+    {
+      type: "create_view",
+      viewId: "view-sec-ew",
+      name: "Building Section — East-West",
+      viewType: "section",
+      crop: { min: pt(-2 * FT, -3 * FT), max: pt(W_ALL + 14 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { detailLevel: "fine" } },
+        section: { start: pt(-4 * FT, 11.5 * FT), end: pt(W_ALL + 4 * FT, 11.5 * FT), depthMm: Math.round(18 * FT), direction: 1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-sec-ns",
+      name: "Building Section — North-South",
+      viewType: "section",
+      crop: { min: pt(-2 * FT, -3 * FT), max: pt(D_ALL + 14 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { detailLevel: "fine" } },
+        section: { start: pt(24 * FT, -4 * FT), end: pt(24 * FT, D_ALL + 4 * FT), depthMm: Math.round(22 * FT), direction: -1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-elev-south",
+      name: "South Elevation",
+      viewType: "elevation",
+      crop: { min: pt(-2 * FT, -1 * FT), max: pt(W_ALL + 16 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { visible: false } },
+        section: { start: pt(-6 * FT, -8 * FT), end: pt(W_ALL + 6 * FT, -8 * FT), depthMm: Math.round(45 * FT), direction: 1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-elev-east",
+      name: "East Elevation",
+      viewType: "elevation",
+      crop: { min: pt(-2 * FT, -1 * FT), max: pt(D_ALL + 16 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { visible: false } },
+        section: { start: pt(W_ALL + 8 * FT, -6 * FT), end: pt(W_ALL + 8 * FT, D_ALL + 6 * FT), depthMm: Math.round(68 * FT), direction: 1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-elev-north",
+      name: "North Elevation",
+      viewType: "elevation",
+      crop: { min: pt(-2 * FT, -1 * FT), max: pt(W_ALL + 16 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { visible: false } },
+        section: { start: pt(W_ALL + 6 * FT, D_ALL + 8 * FT), end: pt(-6 * FT, D_ALL + 8 * FT), depthMm: Math.round(45 * FT), direction: 1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-elev-west",
+      name: "West Elevation",
+      viewType: "elevation",
+      crop: { min: pt(-2 * FT, -1 * FT), max: pt(D_ALL + 16 * FT, 31 * FT) },
+      props: {
+        scale: 64,
+        discipline: "architecture",
+        categoryOverrides: { pipe: { visible: false } },
+        section: { start: pt(-8 * FT, D_ALL + 6 * FT), end: pt(-8 * FT, -6 * FT), depthMm: Math.round(68 * FT), direction: 1, referencingViewId: "view-plan-l1", showInDisciplines: ["architecture"] },
+      },
+    },
 
     {
       type: "create_view",
@@ -1402,31 +1595,36 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_view", viewId: "view-sched-windows", name: "Window Schedule", viewType: "schedule", props: { scheduleV2: WINDOW_SCHEDULE } },
     { type: "create_view", viewId: "view-sched-walls", name: "Wall Type Schedule", viewType: "schedule", props: { scheduleV2: WALL_TYPES_SCHEDULE } },
 
-    { type: "create_sheet", sheetId: "sheet-a101", number: "A-101", name: "LEVEL 1 ARCHITECTURAL FLOOR PLAN" },
+    { type: "create_sheet", sheetId: "sheet-a101", number: "A-101", name: "LEVEL 1 ARCHITECTURAL FLOOR PLAN", discipline: "architecture", group: "Architectural", sortOrder: 101 },
     { type: "place_viewport", viewportId: "vp-plan-l1", sheetId: "sheet-a101", viewId: "view-plan-l1", center: { x: 410, y: 305 } },
 
-    { type: "create_sheet", sheetId: "sheet-a102", number: "A-102", name: "LEVEL 2 PLAN & ENLARGED RESTROOM" },
+    { type: "create_sheet", sheetId: "sheet-a102", number: "A-102", name: "LEVEL 2 PLAN & ENLARGED RESTROOM", discipline: "architecture", group: "Architectural", sortOrder: 102 },
     { type: "place_viewport", viewportId: "vp-plan-l2", sheetId: "sheet-a102", viewId: "view-plan-l2", center: { x: 235, y: 305 } },
     { type: "place_viewport", viewportId: "vp-enlarged-rr", sheetId: "sheet-a102", viewId: "view-enlarged-rr", center: { x: 615, y: 305 } },
 
-    { type: "create_sheet", sheetId: "sheet-a103", number: "A-103", name: "ARCHITECTURAL SCHEDULES" },
+    { type: "create_sheet", sheetId: "sheet-a103", number: "A-103", name: "ARCHITECTURAL SCHEDULES", discipline: "architecture", group: "Architectural", sortOrder: 103 },
     { type: "place_viewport", viewportId: "vp-sched-rooms", sheetId: "sheet-a103", viewId: "view-sched-rooms", center: { x: 225, y: 175 } },
     { type: "place_viewport", viewportId: "vp-sched-doors", sheetId: "sheet-a103", viewId: "view-sched-doors", center: { x: 225, y: 420 } },
     { type: "place_viewport", viewportId: "vp-sched-windows", sheetId: "sheet-a103", viewId: "view-sched-windows", center: { x: 605, y: 175 } },
     { type: "place_viewport", viewportId: "vp-sched-walls", sheetId: "sheet-a103", viewId: "view-sched-walls", center: { x: 605, y: 420 } },
 
-    { type: "create_sheet", sheetId: "sheet-a104", number: "A-104", name: "REFLECTED CEILING PLAN" },
+    { type: "create_sheet", sheetId: "sheet-a104", number: "A-104", name: "REFLECTED CEILING PLAN", discipline: "architecture", group: "Architectural", sortOrder: 104 },
     { type: "place_viewport", viewportId: "vp-rcp-l1", sheetId: "sheet-a104", viewId: "view-rcp-l1", center: { x: 410, y: 305 } },
 
-    { type: "create_sheet", sheetId: "sheet-a201", number: "A-201", name: "BUILDING SECTIONS" },
+    { type: "create_sheet", sheetId: "sheet-a201", number: "A-201", name: "BUILDING SECTIONS", discipline: "architecture", group: "Architectural", sortOrder: 201 },
     { type: "place_viewport", viewportId: "vp-sec-ew", sheetId: "sheet-a201", viewId: "view-sec-ew", center: { x: 390, y: 185 } },
     { type: "place_viewport", viewportId: "vp-sec-ns", sheetId: "sheet-a201", viewId: "view-sec-ns", center: { x: 390, y: 430 } },
 
-    { type: "create_sheet", sheetId: "sheet-a301", number: "A-301", name: "EXTERIOR ELEVATIONS" },
+    { type: "create_sheet", sheetId: "sheet-a301", number: "A-301", name: "EXTERIOR ELEVATIONS — SOUTH & EAST", discipline: "architecture", group: "Architectural", sortOrder: 301 },
     { type: "place_viewport", viewportId: "vp-elev-south", sheetId: "sheet-a301", viewId: "view-elev-south", center: { x: 390, y: 185 } },
     { type: "place_viewport", viewportId: "vp-elev-east", sheetId: "sheet-a301", viewId: "view-elev-east", center: { x: 390, y: 430 } },
 
+    { type: "create_sheet", sheetId: "sheet-a302", number: "A-302", name: "EXTERIOR ELEVATIONS — NORTH & WEST", discipline: "architecture", group: "Architectural", sortOrder: 302 },
+    { type: "place_viewport", viewportId: "vp-elev-north", sheetId: "sheet-a302", viewId: "view-elev-north", center: { x: 390, y: 185 } },
+    { type: "place_viewport", viewportId: "vp-elev-west", sheetId: "sheet-a302", viewId: "view-elev-west", center: { x: 390, y: 430 } },
+
     // ---- Mechanical Views & Sheets (M-101 + M-201) ----
+    // Separate Rooftop Unit Schedule, Exhaust Fan Schedule (only relevant columns per equipment type!), and Type-Based Air Device Schedule!
     {
       type: "create_view",
       viewId: "view-mech-l1",
@@ -1443,18 +1641,71 @@ function buildShowcase(modelId: string): ModelState {
       crop: { min: pt(-2 * FT, -2 * FT), max: pt(W_ALL + 2 * FT, D_ALL + 2 * FT) },
       props: { level: "Level 2", scale: 64, discipline: "mechanical", visualStyle: "hidden_line", categoryOverrides: MECH_HIDE_NON_HVAC },
     },
-    { type: "create_view", viewId: "view-sched-air", name: "Air Device Schedule", viewType: "schedule", props: { scheduleV2: AIR_DEVICE_SCHEDULE } },
-    { type: "create_view", viewId: "view-sched-mech-eq", name: "Mechanical Equipment Schedule", viewType: "schedule", props: { scheduleV2: MECHANICAL_EQUIPMENT_SCHEDULE } },
+    {
+      type: "create_view",
+      viewId: "view-sched-air",
+      name: "Air Device Schedule (By Type)",
+      viewType: "schedule",
+      props: {
+        scheduleV2: {
+          ...AIR_DEVICE_SCHEDULE,
+          name: "AIR DEVICE SCHEDULE (BY TYPE)",
+          itemize: false,
+          groups: [],
+          columns: [
+            { id: "type_name", kind: "field", path: "type_name", heading: "TYPE" },
+            { id: "family", kind: "field", path: "family", heading: "DESCRIPTION" },
+            { id: "count", kind: "field", path: "count", heading: "QTY", total: true },
+            { id: "neck_diameter", kind: "parameter", path: "neck_diameter", heading: "NECK", hideWhenEmpty: true },
+            { id: "face_size", kind: "parameter", path: "face_size", heading: "FACE", hideWhenEmpty: true },
+            { id: "vendor.manufacturer", kind: "field", path: "vendor.manufacturer", heading: "MANUFACTURER", hideWhenEmpty: true },
+            { id: "vendor.model", kind: "field", path: "vendor.model", heading: "MODEL", hideWhenEmpty: true },
+          ],
+          sort: [{ path: "type_name", direction: "asc" }],
+        },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-sched-rtu",
+      name: "Rooftop Unit Schedule",
+      viewType: "schedule",
+      props: {
+        scheduleV2: {
+          ...MECHANICAL_EQUIPMENT_SCHEDULE,
+          name: "ROOFTOP UNIT SCHEDULE",
+          filters: [{ path: "mark", op: "contains", value: "RTU" }],
+          columns: MECHANICAL_EQUIPMENT_SCHEDULE.columns.filter((c) => c.id !== "own.exhaust_cfm"),
+        },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-sched-ef",
+      name: "Exhaust Fan Schedule",
+      viewType: "schedule",
+      props: {
+        scheduleV2: {
+          ...MECHANICAL_EQUIPMENT_SCHEDULE,
+          name: "EXHAUST FAN SCHEDULE",
+          filters: [{ path: "mark", op: "contains", value: "EF" }],
+          columns: MECHANICAL_EQUIPMENT_SCHEDULE.columns.filter(
+            (c) => c.id !== "own.cooling_capacity" && c.id !== "own.heating_capacity" && c.id !== "own.cfm" && c.id !== "own.outdoor_cfm" && c.id !== "vendor.curb_size",
+          ),
+        },
+      },
+    },
     { type: "create_view", viewId: "view-diag-air", name: "Live Air Schematic", viewType: "detail", props: { diagram: { kind: "air_schematic" } } },
-    { type: "create_sheet", sheetId: "sheet-m101", number: "M-101", name: "MECHANICAL HVAC PLAN & SCHEDULES" },
-    { type: "place_viewport", viewportId: "vp-mech-l1", sheetId: "sheet-m101", viewId: "view-mech-l1", center: { x: 245, y: 205 } },
-    { type: "place_viewport", viewportId: "vp-sched-air", sheetId: "sheet-m101", viewId: "view-sched-air", center: { x: 635, y: 205 } },
-    { type: "place_viewport", viewportId: "vp-sched-mech-eq", sheetId: "sheet-m101", viewId: "view-sched-mech-eq", center: { x: 410, y: 465 } },
-    { type: "create_sheet", sheetId: "sheet-m201", number: "M-201", name: "ROOF PLAN & AIR SCHEMATIC" },
+    { type: "create_sheet", sheetId: "sheet-m101", number: "M-101", name: "MECHANICAL HVAC PLAN & SCHEDULES", discipline: "mechanical", group: "Mechanical", sortOrder: 401 },
+    { type: "place_viewport", viewportId: "vp-mech-l1", sheetId: "sheet-m101", viewId: "view-mech-l1", center: { x: 245, y: 195 } },
+    { type: "place_viewport", viewportId: "vp-sched-air", sheetId: "sheet-m101", viewId: "view-sched-air", center: { x: 635, y: 185 } },
+    { type: "place_viewport", viewportId: "vp-sched-rtu", sheetId: "sheet-m101", viewId: "view-sched-rtu", center: { x: 410, y: 395 } },
+    { type: "place_viewport", viewportId: "vp-sched-ef", sheetId: "sheet-m101", viewId: "view-sched-ef", center: { x: 410, y: 515 } },
+    { type: "create_sheet", sheetId: "sheet-m201", number: "M-201", name: "ROOF PLAN & AIR SCHEMATIC", discipline: "mechanical", group: "Mechanical", sortOrder: 402 },
     { type: "place_viewport", viewportId: "vp-mech-roof", sheetId: "sheet-m201", viewId: "view-mech-roof", center: { x: 245, y: 305 } },
     { type: "place_viewport", viewportId: "vp-diag-air", sheetId: "sheet-m201", viewId: "view-diag-air", center: { x: 620, y: 305 } },
 
-    // ---- Electrical Views & Sheets (E-101 Consolidated Power+Lighting+Panels + E-201 One-Line+Controls+Schedules) ----
+    // ---- Electrical Views & Sheets (E-101 L1 & L2/Roof Power + Panels; E-102 Separate Lighting & Controls Plans; E-201 One-Line + Controls Diagram + Schedules) ----
     {
       type: "create_view",
       viewId: "view-elec-power",
@@ -1471,23 +1722,51 @@ function buildShowcase(modelId: string): ModelState {
     },
     {
       type: "create_view",
+      viewId: "view-elec-power-l2",
+      name: "Level 2 & Roof — Electrical Power Plan",
+      viewType: "floor_plan",
+      crop: { min: pt(-2 * FT, -2 * FT), max: pt(W_ALL + 2 * FT, D_ALL + 2 * FT) },
+      props: {
+        level: "Level 2",
+        scale: 96,
+        discipline: "electrical",
+        categoryOverrides: ELEC_POWER_L2_HIDE,
+        circuitGraphics: { hashMarksOn: "home_runs" },
+      },
+    },
+    {
+      type: "create_view",
       viewId: "view-elec-ltg",
-      name: "Level 1 — Lighting & Controls Plan",
+      name: "Level 1 — Lighting Plan",
       viewType: "ceiling_plan",
       crop: { min: pt(-4 * FT, -4 * FT), max: pt(W_ALL + 4 * FT, D_ALL + 4 * FT) },
       props: {
         level: "Level 1",
-        scale: 96,
+        scale: 64,
         discipline: "electrical",
         categoryOverrides: ELEC_LTG_HIDE,
-        circuitGraphics: { hashMarksOn: "home_runs_and_switch_legs" },
+        circuitGraphics: { hashMarksOn: "home_runs", switchLegs: false },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "view-elec-ctrl",
+      name: "Level 1 — Lighting Controls Plan",
+      viewType: "ceiling_plan",
+      crop: { min: pt(-4 * FT, -4 * FT), max: pt(W_ALL + 4 * FT, D_ALL + 4 * FT) },
+      props: {
+        level: "Level 1",
+        scale: 64,
+        discipline: "electrical",
+        categoryOverrides: ELEC_CTRL_HIDE,
+        circuitGraphics: { hashMarksOn: "home_runs_and_switch_legs", showCircuits: false, switchLegs: true },
       },
     },
     { type: "create_view", viewId: "view-sched-hp1", name: "Panel HP-1 Schedule (480Y/277V)", viewType: "schedule", props: { formSchedule: { kind: "panel", elementId: "hp-1", template: builtinFormTemplate("panel"), rules: "nec-2023" } } },
     { type: "create_view", viewId: "view-sched-lp1", name: "Panel LP-1 Schedule (208Y/120V)", viewType: "schedule", props: { formSchedule: { kind: "panel", elementId: "lp-1", template: builtinFormTemplate("panel"), rules: "nec-2023" } } },
     { type: "create_view", viewId: "view-sched-lctrl", name: "Lighting Controls Schedule", viewType: "schedule", props: { formSchedule: { kind: "lighting_controls", template: builtinFormTemplate("lighting_controls") } } },
     { type: "create_view", viewId: "view-sched-ltg", name: "Lighting Fixture Schedule", viewType: "schedule", props: { scheduleV2: LIGHTING_FIXTURE_SCHEDULE } },
-    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showWarnings: true } } } },
+    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
     {
       type: "create_view",
       viewId: "view-controls",
@@ -1507,17 +1786,21 @@ function buildShowcase(modelId: string): ModelState {
       },
     },
 
-    { type: "create_sheet", sheetId: "sheet-e101", number: "E-101", name: "POWER, LIGHTING & PANELS" },
+    { type: "create_sheet", sheetId: "sheet-e101", number: "E-101", name: "POWER PLANS & PANEL SCHEDULES", discipline: "electrical", group: "Electrical", sortOrder: 501 },
     { type: "place_viewport", viewportId: "vp-elec-power", sheetId: "sheet-e101", viewId: "view-elec-power", center: { x: 225, y: 175 } },
-    { type: "place_viewport", viewportId: "vp-elec-ltg", sheetId: "sheet-e101", viewId: "view-elec-ltg", center: { x: 225, y: 425 } },
+    { type: "place_viewport", viewportId: "vp-elec-power-l2", sheetId: "sheet-e101", viewId: "view-elec-power-l2", center: { x: 225, y: 425 } },
     { type: "place_viewport", viewportId: "vp-sched-hp1", sheetId: "sheet-e101", viewId: "view-sched-hp1", center: { x: 615, y: 185 } },
     { type: "place_viewport", viewportId: "vp-sched-lp1", sheetId: "sheet-e101", viewId: "view-sched-lp1", center: { x: 615, y: 425 } },
 
-    { type: "create_sheet", sheetId: "sheet-e201", number: "E-201", name: "ONE-LINE, CONTROLS & SCHEDULES" },
+    { type: "create_sheet", sheetId: "sheet-e102", number: "E-102", name: "LIGHTING & CONTROLS PLANS", discipline: "electrical", group: "Electrical", sortOrder: 502 },
+    { type: "place_viewport", viewportId: "vp-elec-ltg", sheetId: "sheet-e102", viewId: "view-elec-ltg", center: { x: 230, y: 305 } },
+    { type: "place_viewport", viewportId: "vp-elec-ctrl", sheetId: "sheet-e102", viewId: "view-elec-ctrl", center: { x: 600, y: 305 } },
+
+    { type: "create_sheet", sheetId: "sheet-e201", number: "E-201", name: "ONE-LINE, CONTROLS & SCHEDULES", discipline: "electrical", group: "Electrical", sortOrder: 503 },
     { type: "place_viewport", viewportId: "vp-oneline", sheetId: "sheet-e201", viewId: "view-oneline", center: { x: 225, y: 185 } },
     { type: "place_viewport", viewportId: "vp-controls", sheetId: "sheet-e201", viewId: "view-controls", center: { x: 605, y: 185 } },
-    { type: "place_viewport", viewportId: "vp-sched-lctrl", sheetId: "sheet-e201", viewId: "view-sched-lctrl", center: { x: 225, y: 440 } },
-    { type: "place_viewport", viewportId: "vp-sched-ltg", sheetId: "sheet-e201", viewId: "view-sched-ltg", center: { x: 605, y: 440 } },
+    { type: "place_viewport", viewportId: "vp-sched-lctrl", sheetId: "sheet-e201", viewId: "view-sched-lctrl", center: { x: 200, y: 440 } },
+    { type: "place_viewport", viewportId: "vp-sched-ltg", sheetId: "sheet-e201", viewId: "view-sched-ltg", center: { x: 565, y: 440 } },
 
     // ---- Sheet E-202: Photometrics & Life-Safety Egress Compliance Plans + Schedules ----
     {
@@ -1564,20 +1847,62 @@ function buildShowcase(modelId: string): ModelState {
       viewType: "schedule",
       props: { formSchedule: { kind: "egress_lighting_compliance", template: builtinFormTemplate("egress_lighting_compliance") } },
     },
-    { type: "create_sheet", sheetId: "sheet-e202", number: "E-202", name: "PHOTOMETRICS & EGRESS COMPLIANCE" },
+    { type: "create_sheet", sheetId: "sheet-e202", number: "E-202", name: "PHOTOMETRICS & EGRESS COMPLIANCE", discipline: "electrical", group: "Electrical", sortOrder: 504 },
     { type: "place_viewport", viewportId: "vp-elec-photometrics", sheetId: "sheet-e202", viewId: "view-elec-photometrics", center: { x: 235, y: 175 } },
     { type: "place_viewport", viewportId: "vp-elec-egress", sheetId: "sheet-e202", viewId: "view-elec-egress", center: { x: 235, y: 445 } },
     { type: "place_viewport", viewportId: "vp-sched-photometrics", sheetId: "sheet-e202", viewId: "view-sched-photometrics", center: { x: 635, y: 185 } },
     { type: "place_viewport", viewportId: "vp-sched-egress", sheetId: "sheet-e202", viewId: "view-sched-egress", center: { x: 635, y: 430 } },
 
-    // ---- Plumbing Views & Sheets (P-101 Domestic Water + Riser + Schedule; P-102 Sanitary/Vent + Riser + Isometric) ----
+    // ---- Plumbing Views & Sheets (P-101 Overall Water + Enlarged Wet Core + Riser + Schedule; P-102 Overall DWV + Enlarged DWV + Riser + Isometric) ----
     {
       type: "create_view",
       viewId: "view-plumb-water-l1",
-      name: "Level 1 — Domestic Water Plan",
+      name: "Level 1 — Overall Domestic Water Plan",
       viewType: "floor_plan",
-      crop: { min: pt(-12 * FT, 9 * FT), max: pt(23 * FT, D_ALL + 2 * FT) },
-      props: { level: "Level 1", scale: 48, discipline: "plumbing", categoryOverrides: PLUMB_WATER_HIDE },
+      crop: { min: pt(-12 * FT, -2 * FT), max: pt(W_ALL + 2 * FT, D_ALL + 3 * FT) },
+      props: { level: "Level 1", scale: 96, discipline: "plumbing", categoryOverrides: PLUMB_WATER_HIDE },
+    },
+    // Live L-shape P-line callout & polygonal crop on P-101 wrapping Restroom 102 + MEP Room 101 + Break Room KS-1 while excluding dry corridor/stairwell!
+    {
+      type: "create_view",
+      viewId: "view-plumb-water-enlarged",
+      name: "Enlarged L1 — Water Core",
+      viewType: "floor_plan",
+      crop: { min: pt(-0.5 * FT, 11.5 * FT), max: pt(22.5 * FT, D_ALL + 1.0 * FT) },
+      props: {
+        level: "Level 1",
+        scale: 48,
+        discipline: "plumbing",
+        categoryOverrides: PLUMB_WATER_HIDE,
+        cropPolygon: [
+          pt(-0.5 * FT, 11.5 * FT),
+          pt(22.5 * FT, 11.5 * FT),
+          pt(22.5 * FT, 20.0 * FT),
+          pt(19.5 * FT, 20.0 * FT),
+          pt(19.5 * FT, D_ALL + 1.0 * FT),
+          pt(-0.5 * FT, D_ALL + 1.0 * FT),
+        ],
+      },
+    },
+    // Live L-shape P-line callout on Overall Water Plan pointing to Enlarged Domestic Water Wet Core
+    {
+      type: "add_drawing_item",
+      itemId: "co-water-l1",
+      ownerId: "view-plumb-water-l1",
+      shape: "callout",
+      points: [pt(-0.5 * FT, 11.5 * FT), pt(22.5 * FT, D_ALL + 1.0 * FT), pt(25.0 * FT, D_ALL + 2.5 * FT)],
+      callout: {
+        viewId: "view-plumb-water-enlarged",
+        showLabel: false,
+        boundary: [
+          pt(-0.5 * FT, 11.5 * FT),
+          pt(22.5 * FT, 11.5 * FT),
+          pt(22.5 * FT, 20.0 * FT),
+          pt(19.5 * FT, 20.0 * FT),
+          pt(19.5 * FT, D_ALL + 1.0 * FT),
+          pt(-0.5 * FT, D_ALL + 1.0 * FT),
+        ],
+      },
     },
     {
       type: "create_view",
@@ -1595,20 +1920,31 @@ function buildShowcase(modelId: string): ModelState {
       props: { diagram: { kind: "plumbing_riser", hints: { systemKinds: ["domestic_cold_water", "domestic_hot_water"] } } },
     },
     { type: "create_view", viewId: "view-sched-plumb", name: "Plumbing Fixture Schedule", viewType: "schedule", props: { scheduleV2: plumbingScheduleDef } },
-    { type: "create_sheet", sheetId: "sheet-p101", number: "P-101", name: "DOMESTIC WATER PLANS & RISER" },
-    { type: "place_viewport", viewportId: "vp-water-l1", sheetId: "sheet-p101", viewId: "view-plumb-water-l1", center: { x: 205, y: 185 } },
-    { type: "place_viewport", viewportId: "vp-water-l2", sheetId: "sheet-p101", viewId: "view-plumb-water-l2", center: { x: 205, y: 430 } },
-    { type: "place_viewport", viewportId: "vp-riser-water", sheetId: "sheet-p101", viewId: "view-plumb-riser-water", center: { x: 585, y: 190 } },
+    { type: "create_sheet", sheetId: "sheet-p101", number: "P-101", name: "DOMESTIC WATER PLANS & RISER", discipline: "plumbing", group: "Plumbing", sortOrder: 601 },
+    { type: "place_viewport", viewportId: "vp-water-l1", sheetId: "sheet-p101", viewId: "view-plumb-water-l1", center: { x: 185, y: 140 } },
+    { type: "place_viewport", viewportId: "vp-water-enlarged", sheetId: "sheet-p101", viewId: "view-plumb-water-enlarged", center: { x: 165, y: 335 } },
+    { type: "place_viewport", viewportId: "vp-water-l2", sheetId: "sheet-p101", viewId: "view-plumb-water-l2", center: { x: 165, y: 500 } },
+    { type: "place_viewport", viewportId: "vp-riser-water", sheetId: "sheet-p101", viewId: "view-plumb-riser-water", center: { x: 615, y: 185 } },
     { type: "place_viewport", viewportId: "vp-sched-plumb", sheetId: "sheet-p101", viewId: "view-sched-plumb", center: { x: 590, y: 445 } },
 
     {
       type: "create_view",
       viewId: "view-plumb-dwv-l1",
-      name: "Level 1 — Sanitary & Vent Plan",
+      name: "Level 1 — Overall Sanitary & Vent Plan",
       viewType: "floor_plan",
-      crop: { min: pt(-13 * FT, 11 * FT), max: pt(23 * FT, D_ALL + 2 * FT) },
+      crop: { min: pt(-13 * FT, -2 * FT), max: pt(W_ALL + 2 * FT, D_ALL + 3 * FT) },
+      props: { level: "Level 1", scale: 96, discipline: "plumbing", categoryOverrides: PLUMB_DWV_HIDE },
+    },
+    {
+      type: "create_view",
+      viewId: "view-plumb-dwv-enlarged",
+      name: "Enlarged L1 — DWV Core",
+      viewType: "floor_plan",
+      crop: { min: pt(-1 * FT, 11.5 * FT), max: pt(22 * FT, D_ALL + 1.5 * FT) },
       props: { level: "Level 1", scale: 48, discipline: "plumbing", categoryOverrides: PLUMB_DWV_HIDE },
     },
+    // Live callout box on Overall Sanitary & Vent Plan pointing to Enlarged Sanitary & Vent Wet Core
+    { type: "add_drawing_item", itemId: "co-dwv-l1", ownerId: "view-plumb-dwv-l1", shape: "callout", points: [pt(-0.5 * FT, 12.0 * FT), pt(21.5 * FT, D_ALL + 1 * FT), pt(25.0 * FT, D_ALL + 2.5 * FT)], callout: { viewId: "view-plumb-dwv-enlarged", showLabel: false } },
     {
       type: "create_view",
       viewId: "view-plumb-dwv-l2",
@@ -1631,10 +1967,11 @@ function buildShowcase(modelId: string): ModelState {
       viewType: "detail",
       props: { diagram: { kind: "plumbing_isometric", hints: { systemKinds: ["sanitary", "vent"] } } },
     },
-    { type: "create_sheet", sheetId: "sheet-p102", number: "P-102", name: "SANITARY & VENT PLANS & ISO" },
-    { type: "place_viewport", viewportId: "vp-dwv-l1", sheetId: "sheet-p102", viewId: "view-plumb-dwv-l1", center: { x: 205, y: 185 } },
-    { type: "place_viewport", viewportId: "vp-dwv-l2", sheetId: "sheet-p102", viewId: "view-plumb-dwv-l2", center: { x: 205, y: 430 } },
-    { type: "place_viewport", viewportId: "vp-riser-dwv", sheetId: "sheet-p102", viewId: "view-plumb-riser-dwv", center: { x: 585, y: 175 } },
+    { type: "create_sheet", sheetId: "sheet-p102", number: "P-102", name: "SANITARY & VENT PLANS & ISO", discipline: "plumbing", group: "Plumbing", sortOrder: 602 },
+    { type: "place_viewport", viewportId: "vp-dwv-l1", sheetId: "sheet-p102", viewId: "view-plumb-dwv-l1", center: { x: 185, y: 140 } },
+    { type: "place_viewport", viewportId: "vp-dwv-enlarged", sheetId: "sheet-p102", viewId: "view-plumb-dwv-enlarged", center: { x: 165, y: 335 } },
+    { type: "place_viewport", viewportId: "vp-dwv-l2", sheetId: "sheet-p102", viewId: "view-plumb-dwv-l2", center: { x: 165, y: 500 } },
+    { type: "place_viewport", viewportId: "vp-riser-dwv", sheetId: "sheet-p102", viewId: "view-plumb-riser-dwv", center: { x: 615, y: 175 } },
     { type: "place_viewport", viewportId: "vp-plumb-iso", sheetId: "sheet-p102", viewId: "view-plumb-iso", center: { x: 605, y: 435 } },
   ]);
 

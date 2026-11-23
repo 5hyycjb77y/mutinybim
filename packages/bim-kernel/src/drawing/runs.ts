@@ -138,6 +138,14 @@ export interface RunDrawOptions {
   readonly clipBounds?: { readonly min: Vec2; readonly max: Vec2 };
   /** Optional resolver for a connected fitting's own single-line decision (handles mismatched category overrides). */
   readonly fittingIsSingleLine?: (f: RunFitting) => boolean;
+  /** Optional 2D plan-only perpendicular display offset (model mm) for separating vertically stacked single-line runs without moving 3D geometry. */
+  readonly displayOffset?: Vec2;
+  /** Optional normalized [t0, t1] break intervals along a single-line segment where a higher run crosses over it. */
+  readonly crossingGaps?: readonly (readonly [number, number])[];
+  /** Optional true vector circle callback for rise/drop transitions so circles never look faceted. */
+  readonly circle?: (center: Vec2, radius: number, pen: Pen) => void;
+  /** Optional shared obstacle index so run labels avoid colliding with marks and symbols. */
+  readonly takenBoxes?: PartLabelIndex;
 }
 
 const plan = (p: { x: number; y: number }): Vec2 => ({ x: p.x, y: p.y });
@@ -175,8 +183,12 @@ export function systemLine(model: ModelState, systemId: string): { readonly dash
   return { dash: style?.dash ? [...style.dash] : undefined, weight: style?.weight, lineCode: systemLineCode(model.elements, systemId) };
 }
 
-function circle(center: Vec2, r: number, line: LineFn, pen: Pen): void {
-  const n = 16;
+function circle(center: Vec2, r: number, line: LineFn, pen: Pen, circleFn?: (c: Vec2, radius: number, p: Pen) => void): void {
+  if (circleFn) {
+    circleFn(center, r, pen);
+    return;
+  }
+  const n = 24;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     const b = ((i + 1) / n) * Math.PI * 2;
@@ -184,9 +196,9 @@ function circle(center: Vec2, r: number, line: LineFn, pen: Pen): void {
   }
 }
 
-function riseDot(center: Vec2, r: number, line: LineFn, pen: Pen): void {
+function riseDot(center: Vec2, r: number, line: LineFn, pen: Pen, circleFn?: (c: Vec2, radius: number, p: Pen) => void): void {
   const dr = r * 0.34;
-  circle(center, dr, line, pen);
+  circle(center, dr, line, pen, circleFn);
   line({ x: center.x - dr, y: center.y }, { x: center.x + dr, y: center.y }, pen);
   line({ x: center.x, y: center.y - dr }, { x: center.x, y: center.y + dr }, pen);
 }
@@ -327,6 +339,68 @@ function drawSingleLineWithCode(a: Vec2, b: Vec2, pen: Pen, dash: number[] | und
   if (len - cursor > 1e-3) line(add(a, scale(u, cursor)), b, pen, dash);
 }
 
+/** Place a run size/flex label avoiding existing marks and symbols in `taken`. */
+function placeRunLabel(base: Vec2, text: string, sizeMm: number, scaleMmPerPaperMm: number, taken: PartLabelIndex): Vec2 {
+  const halfW = Math.max(sizeMm * 0.8, text.length * sizeMm * 0.36) * scaleMmPerPaperMm;
+  const halfH = sizeMm * 0.72 * scaleMmPerPaperMm;
+  const boxAt = (c: Vec2): PartLabelBox => ({ min: { x: c.x - halfW, y: c.y - halfH }, max: { x: c.x + halfW, y: c.y + halfH } });
+  const step = Math.max(halfH * 2.2, 4.0 * scaleMmPerPaperMm);
+  const candidates: Vec2[] = [
+    base,
+    { x: base.x, y: base.y + step },
+    { x: base.x, y: base.y - step },
+    { x: base.x + halfW * 1.2, y: base.y },
+    { x: base.x - halfW * 1.2, y: base.y },
+    { x: base.x + halfW * 1.2, y: base.y + step },
+    { x: base.x - halfW * 1.2, y: base.y - step },
+  ];
+  for (const c of candidates) {
+    const b = boxAt(c);
+    if (!taken.overlaps(b)) {
+      taken.add(b);
+      return c;
+    }
+  }
+  taken.add(boxAt(base));
+  return base;
+}
+
+/** Draw a single-line segment with optional crossing-gap breaks where higher runs pass over it. */
+function drawSingleLineWithGaps(
+  a: Vec2,
+  b: Vec2,
+  pen: Pen,
+  dash: number[] | undefined,
+  line: LineFn,
+  scaleMmPerPaperMm: number,
+  lineCode: string | undefined,
+  inlineText: InlineTextFn | undefined,
+  clipBounds: { readonly min: Vec2; readonly max: Vec2 } | undefined,
+  crossingGaps: readonly (readonly [number, number])[] | undefined,
+): void {
+  if (!crossingGaps || crossingGaps.length === 0) {
+    drawSingleLineWithCode(a, b, pen, dash, line, scaleMmPerPaperMm, lineCode, inlineText, clipBounds);
+    return;
+  }
+  const sorted = [...crossingGaps]
+    .map(([t0, t1]) => [Math.max(0, Math.min(1, t0)), Math.max(0, Math.min(1, t1))] as const)
+    .filter(([t0, t1]) => t1 > t0 + 1e-4)
+    .sort((x, y) => x[0] - y[0]);
+  const merged: Array<[number, number]> = [];
+  for (const [t0, t1] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && t0 <= last[1]) last[1] = Math.max(last[1], t1);
+    else merged.push([t0, t1]);
+  }
+  const lerp = (t: number): Vec2 => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  let cur = 0;
+  for (const [g0, g1] of merged) {
+    if (g0 > cur + 1e-4) drawSingleLineWithCode(lerp(cur), lerp(g0), pen, dash, line, scaleMmPerPaperMm, lineCode, inlineText, clipBounds);
+    cur = Math.max(cur, g1);
+  }
+  if (cur < 1 - 1e-4) drawSingleLineWithCode(lerp(cur), b, pen, dash, line, scaleMmPerPaperMm, lineCode, inlineText, clipBounds);
+}
+
 export function drawRunSegment(model: ModelState, seg: RunSegment, line: LineFn, label: TextFn | null, scaleMmPerPaperMm: number, opts?: RunDrawOptions): void {
   const detail = opts?.detail ?? "medium";
   const singleLineBelowMm = opts?.singleLineBelowMm ?? null;
@@ -334,11 +408,11 @@ export function drawRunSegment(model: ModelState, seg: RunSegment, line: LineFn,
   const w = singleLine ? sizeWidth(seg.size) : drawnWidth(seg.size);
   const { dash, weight } = systemLine(model, seg.systemId);
   const singlePen = weight ?? opts?.singleLinePen ?? "wide";
-  const a = plan(seg.start);
-  const b = plan(seg.end);
+  const off = singleLine ? opts?.displayOffset : undefined;
+  const a = off ? add(plan(seg.start), off) : plan(seg.start);
+  const b = off ? add(plan(seg.end), off) : plan(seg.end);
   if (seg.flex) {
     if (singleLine) {
-      // Single-line flex: draw its curved centreline.
       const pts = seg.flex.path;
       for (let i = 0; i + 1 < pts.length; i++) {
         const p0 = pts[i];
@@ -346,11 +420,25 @@ export function drawRunSegment(model: ModelState, seg: RunSegment, line: LineFn,
         if (p0 && p1) line(plan(p0), plan(p1), singlePen, dash);
       }
     } else {
-      // Flex: both edges along its curve with ticks across, labelled as flex.
+      // Flex: both edges along its curve with ticks across, plus round collar ring where it turns down into a device neck.
       for (const [p, q, what] of flexPlanLines(seg)) line(p, q, what === "edge" ? "medium" : "thin");
+      if (seg.end.z < seg.start.z - 50) {
+        const r = (seg.size.shape === "round" ? seg.size.diameter : 200) / 2;
+        circle(plan(seg.end), r, line, "medium", opts?.circle);
+      }
     }
     const mid = seg.flex.path[Math.floor(seg.flex.path.length / 2)] ?? seg.start;
-    if (label) label(add(plan(mid), { x: 0, y: (singleLine ? 0 : sizeWidth(seg.size) / 2) + 6 * scaleMmPerPaperMm }), `${sizeLabel(seg.size)} FLEX`, 2.5);
+    if (label) {
+      const txt = `${sizeLabel(seg.size)} FLEX`;
+      const tagSz = resolveTextStyle(model, "tag")?.textSizeMm ?? 2.4;
+      const fdx = Math.abs(seg.end.x - seg.start.x);
+      const fdy = Math.abs(seg.end.y - seg.start.y);
+      const pad = (singleLine ? 0 : sizeWidth(seg.size) / 2) + 4.5 * scaleMmPerPaperMm;
+      // Offset label perpendicular to the flex run's dominant plan direction so vertical runs don't collide with horizontal trunks.
+      const baseAt = fdy > fdx ? add(plan(mid), { x: pad + txt.length * 0.45 * tagSz * scaleMmPerPaperMm, y: 0 }) : add(plan(mid), { x: 0, y: pad });
+      const at = opts?.takenBoxes ? placeRunLabel(baseAt, txt, tagSz, scaleMmPerPaperMm, opts.takenBoxes) : baseAt;
+      label(at, txt, tagSz, "middle", { mask: true });
+    }
     return;
   }
   drawInsulationPlan(model, seg, line);
@@ -374,13 +462,24 @@ export function drawRunSegment(model: ModelState, seg: RunSegment, line: LineFn,
       });
       if (!ownedByFitting) {
         const pen = seg.domain === "duct" ? (weight ?? "medium") : singlePen;
-        circle(a, h, line, pen);
-        riseDot(a, h, line, "thin");
+        circle(a, h, line, pen, opts?.circle);
+        riseDot(a, h, line, "thin", opts?.circle);
       }
     } else {
-      circle(a, h, line, weight ?? "medium");
+      circle(a, h, line, weight ?? "medium", opts?.circle);
       const r = h * 0.7;
       line({ x: a.x - r, y: a.y - r }, { x: a.x + r, y: a.y + r }, "thin");
+    }
+    // Label full-storey vertical pipe stacks/risers (>= 1.8 m vertical span) cleanly on floor plans.
+    const dz = Math.abs(seg.end.z - seg.start.z);
+    if (label && singleLine && dz >= 1800) {
+      const code = opts?.lineCode ? ` ${opts.lineCode}` : "";
+      const dir = seg.end.z < seg.start.z ? "DN" : "UP";
+      const txt = `${sizeLabel(seg.size)}${code} ${dir}`;
+      const tagSz = Math.min(2.2, resolveTextStyle(model, "tag")?.textSizeMm ?? 2.2);
+      const baseAt = add(a, { x: h + (txt.length * 0.34 * tagSz + 2.5) * scaleMmPerPaperMm, y: 2.2 * scaleMmPerPaperMm });
+      const at = opts?.takenBoxes ? placeRunLabel(baseAt, txt, tagSz, scaleMmPerPaperMm, opts.takenBoxes) : baseAt;
+      label(at, txt, tagSz, "middle", { mask: true });
     }
     return;
   }
@@ -414,12 +513,15 @@ export function drawRunSegment(model: ModelState, seg: RunSegment, line: LineFn,
     const trimB = opts ? Math.min(runLen * 0.45, schematicEndTrimMm(model, seg, "end", scaleMmPerPaperMm, detail, singleLineBelowMm, opts.fittingIsSingleLine)) : 0;
     const pa = trimA > 0 ? add(a, scale(u, trimA)) : a;
     const pb = trimB > 0 ? add(b, scale(u, -trimB)) : b;
-    drawSingleLineWithCode(pa, pb, singlePen, dash, line, scaleMmPerPaperMm, opts?.lineCode, opts?.inlineText, opts?.clipBounds);
+    drawSingleLineWithGaps(pa, pb, singlePen, dash, line, scaleMmPerPaperMm, opts?.lineCode, opts?.inlineText, opts?.clipBounds, opts?.crossingGaps);
   }
   const run = Math.hypot(b.x - a.x, b.y - a.y);
   if (label && run / scaleMmPerPaperMm > 25) {
-    const at = add(scale(add(a, b), 0.5), scale(n, (!singleLine ? w / 2 : 0) + 6 * scaleMmPerPaperMm));
-    label(at, sizeLabel(seg.size), 2.5);
+    const txt = sizeLabel(seg.size);
+    const tagSz = resolveTextStyle(model, "tag")?.textSizeMm ?? 2.4;
+    const baseAt = add(scale(add(a, b), 0.5), scale(n, (!singleLine ? w / 2 : 0) + 6 * scaleMmPerPaperMm));
+    const at = opts?.takenBoxes ? placeRunLabel(baseAt, txt, tagSz, scaleMmPerPaperMm, opts.takenBoxes) : baseAt;
+    label(at, txt, tagSz, "middle", { mask: true });
   }
 }
 
@@ -460,8 +562,16 @@ function drawBody(model: ModelState, f: RunFitting, line: LineFn, vanes: boolean
  * sized in paper mm so elbows, tees, wyes, reducers, caps and rise/drop transitions
  * read crisply at every drawing scale instead of bare right angles.
  */
-function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, scaleMmPerPaperMm: number, defaultPen: Pen): void {
-  const p = plan(f.position);
+function drawSchematicFitting(
+  model: ModelState,
+  f: RunFitting,
+  line: LineFn,
+  scaleMmPerPaperMm: number,
+  defaultPen: Pen,
+  circleFn?: (c: Vec2, r: number, pen: Pen) => void,
+  displayOffset?: Vec2,
+): void {
+  const p = displayOffset ? add(plan(f.position), displayOffset) : plan(f.position);
   const { weight } = systemLine(model, f.systemId);
   const pen = weight ?? defaultPen;
   const tickHalf = SCHEMATIC_TICK_HALF_MM * scaleMmPerPaperMm;
@@ -500,11 +610,11 @@ function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, sc
         }
         return;
       }
-      // Vertical transition elbow (horizontal pipe turning UP or DOWN).
+      // Vertical transition elbow (horizontal run turning UP or DOWN).
       const vPort = !flatDir(pa.direction) ? pa : !flatDir(pb.direction) ? pb : null;
       const hPort = flatDir(pa.direction) ? pa : flatDir(pb.direction) ? pb : null;
-      circle(p, nodeR, line, pen);
-      if (vPort && vPort.direction.z > 0.5) riseDot(p, nodeR, line, "thin");
+      circle(p, nodeR, line, pen, circleFn);
+      if (vPort && vPort.direction.z > 0.5) riseDot(p, nodeR, line, "thin", circleFn);
       if (hPort) jointTick(p, unit(plan(hPort.direction)), nodeR + 0.5 * scaleMmPerPaperMm, tickHalf * 0.85, line);
       return;
     }
@@ -513,17 +623,17 @@ function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, sc
       const vPort = f.ports.find((pt) => !flatDir(pt.direction));
       const flatPorts = f.ports.filter((pt) => flatDir(pt.direction));
       if (vPort) {
-        circle(p, nodeR, line, pen);
-        if (vPort.direction.z > 0.5) riseDot(p, nodeR, line, "thin");
+        circle(p, nodeR, line, pen, circleFn);
+        if (vPort.direction.z > 0.5) riseDot(p, nodeR, line, "thin", circleFn);
         for (const pt of flatPorts) {
-          const pp = plan(pt.position);
+          const pp = displayOffset ? add(plan(pt.position), displayOffset) : plan(pt.position);
           if (Math.hypot(pp.x - p.x, pp.y - p.y) > 1) line(p, pp, pen);
           jointTick(p, unit(plan(pt.direction)), nodeR + 0.5 * scaleMmPerPaperMm, tickHalf * 0.85, line);
         }
         return;
       }
       for (const pt of flatPorts) {
-        const pp = plan(pt.position);
+        const pp = displayOffset ? add(plan(pt.position), displayOffset) : plan(pt.position);
         // Hosted branch ports sit on the trunk's outer face; bridge back to the single-line trunk centreline.
         if (Math.hypot(pp.x - p.x, pp.y - p.y) > 1) line(p, pp, pen);
         jointTick(pp, unit(plan(pt.direction)), offset, tickHalf, line);
@@ -575,10 +685,9 @@ function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, sc
         }
         const branchPt = add(p, scale(bd, sweepLen));
         const trunkPt = add(p, scale(trunkDir, sweepLen));
+        // Only draw the swept 45° diagonal (never a straight branch-to-trunk chord that turns a wye into a T+Y).
         line(branchPt, trunkPt, pen);
-        const pp = plan(pa.position);
-        if (Math.hypot(pp.x - branchPt.x, pp.y - branchPt.y) > 1) line(branchPt, pp, pen);
-        jointTick(pp, bd, sweepLen, tickHalf, line);
+        jointTick(p, bd, sweepLen, tickHalf, line);
         jointTick(p, trunkDir, sweepLen, tickHalf, line);
         jointTick(p, scale(trunkDir, -1), offset, tickHalf, line);
       }
@@ -661,7 +770,7 @@ function fittingSize(model: ModelState, f: RunFitting): RunSegment["size"] | und
   return undefined;
 }
 
-export function drawRunFitting(model: ModelState, f: RunFitting, line: LineFn, vanes = true, scaleMmPerPaperMm = 48, opts?: Pick<RunDrawOptions, "detail" | "singleLineBelowMm" | "singleLinePen">): void {
+export function drawRunFitting(model: ModelState, f: RunFitting, line: LineFn, vanes = true, scaleMmPerPaperMm = 48, opts?: Pick<RunDrawOptions, "detail" | "singleLineBelowMm" | "singleLinePen" | "circle" | "displayOffset">): void {
   drawInsulationPlan(model, f, line);
   const detail = opts?.detail ?? (vanes ? "fine" : "medium");
   const threshold = opts?.singleLineBelowMm ?? null;
@@ -694,7 +803,7 @@ export function drawRunFitting(model: ModelState, f: RunFitting, line: LineFn, v
   }
   const singleLine = opts !== undefined ? isSingleLineRun(f.domain, fittingSize(model, f), detail, threshold) : f.domain !== "duct";
   if (singleLine && opts !== undefined) {
-    drawSchematicFitting(model, f, line, scaleMmPerPaperMm, opts.singleLinePen ?? (f.domain === "duct" ? "wide" : "medium"));
+    drawSchematicFitting(model, f, line, scaleMmPerPaperMm, opts.singleLinePen ?? (f.domain === "duct" ? "wide" : "medium"), opts.circle, opts.displayOffset);
     return;
   }
   if (!singleLine && f.family !== undefined && drawBody(model, f, line, vanes)) return;
@@ -1064,28 +1173,65 @@ export function drawPartSymbol(
 /** Clearance zones draw dashed (paper mm), never as part of the part's body. */
 export const CLEARANCE_DASH: readonly number[] = [3, 1.5];
 
-/** A placed part's clearance zones in plan: a dashed outline each, named cleanly away from the part mark. */
+/** Wrap a clearance zone label onto lines that stay strictly inside its dashed outline. */
+function wrapClearanceText(label: string, maxWorldW: number, fontMm: number, viewScale: number): readonly string[] {
+  const charW = fontMm * 0.58 * viewScale;
+  const maxChars = Math.max(8, Math.floor((maxWorldW * 0.88) / Math.max(1, charW)));
+  if (label.length <= maxChars) return [label];
+  const words = label.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if (!cur) {
+      cur = w;
+    } else if (cur.length + 1 + w.length <= maxChars) {
+      cur = `${cur} ${w}`;
+    } else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** A placed part's clearance zones in plan: a dashed outline each, with wrapped text kept strictly inside the zone. */
 export function drawPartClearances(model: ModelState, part: PartInstance, line: LineFn, text: TextFn, viewScale = DEFAULT_SYMBOL_SCALE, takenBoxes?: PartLabelStore): void {
   for (const z of partClearances(model, part)) {
     const c = z.corners;
     for (let i = 0; i < 4; i++) line(c[i] ?? c[0], c[(i + 1) % 4] ?? c[0], "thin", [...CLEARANCE_DASH]);
     const label = z.name.toUpperCase();
-    const mid: Vec2 = { x: (c[0].x + c[2].x) / 2, y: (c[0].y + c[2].y) / 2 };
-    // Push the clearance label toward the outer side of the zone (away from the part origin) if the center collides.
-    const outDir = sub(mid, part.position);
-    const outLen = Math.hypot(outDir.x, outDir.y);
-    const candidates: Vec2[] = [mid];
-    if (outLen > 1) {
-      const u = scale(outDir, 1 / outLen);
-      candidates.push(add(mid, scale(u, outLen * 0.45)), add(mid, scale(u, outLen * 0.85)));
+    const xs = c.map((p) => p.x);
+    const ys = c.map((p) => p.y);
+    const zoneW = Math.max(1, Math.max(...xs) - Math.min(...xs));
+    const zoneH = Math.max(1, Math.max(...ys) - Math.min(...ys));
+    const mid: Vec2 = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+
+    // Choose a legible clearance text height that fits cleanly inside the dashed zone without spilling onto equipment or walls.
+    let fontMm = CLEARANCE_TEXT_MM;
+    let lines = wrapClearanceText(label, zoneW, fontMm, viewScale);
+    const maxLineH = () => lines.length * fontMm * 1.28 * viewScale;
+    while (fontMm > 1.25 && (maxLineH() > zoneH * 0.88 || lines.some((l) => l.length * fontMm * 0.58 * viewScale > zoneW * 0.94))) {
+      fontMm = Math.max(1.25, fontMm - 0.2);
+      lines = wrapClearanceText(label, zoneW, fontMm, viewScale);
     }
-    let at = mid;
+
+    const stepWorld = fontMm * 1.28 * viewScale;
+    const totalH = (lines.length - 1) * stepWorld;
+    // Offset down by ~0.35em so alphabetic-baseline text sits dead-center vertically inside the dashed clearance rectangle.
+    const baselineShift = fontMm * 0.35 * viewScale;
+    for (let i = 0; i < lines.length; i++) {
+      const p: Vec2 = { x: mid.x, y: mid.y + totalH / 2 - i * stepWorld - baselineShift };
+      text(p, lines[i]!, fontMm, "middle", { mask: true });
+    }
     if (takenBoxes) {
-      const clear = candidates.find((p) => !overlapsLabelStore(takenBoxes, worldTextBox(p, label, CLEARANCE_TEXT_MM, viewScale)));
-      at = clear ?? candidates[candidates.length - 1] ?? mid;
-      addLabelBox(takenBoxes, worldTextBox(at, label, CLEARANCE_TEXT_MM, viewScale));
+      const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), "");
+      const box = worldTextBox(mid, longest, fontMm, viewScale);
+      addLabelBox(takenBoxes, {
+        min: { x: box.min.x, y: mid.y - (totalH + fontMm * viewScale) / 2 },
+        max: { x: box.max.x, y: mid.y + (totalH + fontMm * viewScale) / 2 },
+      });
     }
-    text(at, label, CLEARANCE_TEXT_MM, "middle");
   }
 }
 

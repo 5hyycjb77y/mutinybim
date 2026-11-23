@@ -10,7 +10,7 @@ import { asElementId, type BimElement, type ElementId, type Level, type ModelSta
 import { CEILING_CLASS_ID, CEILINGS_NOT_YET, ceilingsWritable } from "./feature";
 import { ceilingForm, ceilingLabel, ceilingSlope, defaultRoleForForm, isCeiling, surfaceRoles } from "./read";
 import { ceilingStructureProblem, ftIn } from "./structure";
-import { KNOWN_CEILING_FORMS, type Ceiling, type CeilingForm, type CeilingSlope } from "./types";
+import { KNOWN_CEILING_FORMS, type Ceiling, type CeilingForm, type CeilingGrid, type CeilingSlope } from "./types";
 
 /**
  * Ceiling edits: the one path the ceiling plan's Ceiling tool, "Make a
@@ -33,6 +33,14 @@ const slope = z
     directionDeg: z.number().finite().min(-3600).max(3600),
     /** Rise over run (0.25 is 3 in 12). */
     pitch: z.number().finite().min(-10).max(10).refine((p) => p !== 0, "A slope needs a pitch; a flat ceiling has no slope"),
+  })
+  .strict();
+const grid = z
+  .object({
+    spacingXMm: z.number().finite().positive().max(20_000),
+    spacingYMm: z.number().finite().positive().max(20_000),
+    origin: vec2.optional(),
+    rotationDeg: z.number().finite().min(-3600).max(3600).optional(),
   })
   .strict();
 const registryId = z.string().max(REGISTRY_ID_MAX_LENGTH).regex(REGISTRY_ID_PATTERN, "an id such as ceiling or zz.baffle");
@@ -59,6 +67,8 @@ const ceilingInput = z
     classId: registryId.optional(),
     /** An element type (what it is made of). */
     typeId: id.optional(),
+    /** Optional explicit tile grid (spacing, origin, rotation) in mm. */
+    grid: grid.optional(),
   })
   .strict();
 
@@ -84,6 +94,8 @@ export const ceilingCommandSchemas = [
       classId: registryId.optional(),
       /** `null` clears the type. */
       typeId: id.nullable().optional(),
+      /** `null` clears the explicit tile grid (falls back to material hatch). */
+      grid: grid.nullable().optional(),
     })
     .strict(),
   z.object({ type: z.literal("delete_ceilings"), ceilingIds: z.array(id).min(1).max(500) }).strict(),
@@ -270,6 +282,7 @@ export function newCeiling(e: Edit, input: CeilingInput): Ceiling {
     ...(input.reference ? { reference: input.reference } : {}),
     ...(s ? { slope: s } : {}),
     ...(role !== undefined && role !== defaultRoleForForm(f) ? { role } : {}),
+    ...(input.grid ? { grid: input.grid } : {}),
   };
 }
 
@@ -323,7 +336,8 @@ function editCeiling(model: ModelState, command: Extract<CeilingCommand, { type:
   const role = command.role === null ? undefined : command.role !== undefined ? requireRole(command.role) : c.role;
   const reference = keep(command.reference, c.reference);
   const typeId = command.typeId === null ? undefined : command.typeId !== undefined ? requireType(e, command.typeId) : c.typeId;
-  const { spaceId: _s, holes: _h, slope: _sl, role: _r, reference: _ref, typeId: _t, classSource: priorClassSource, ...base } = c;
+  const nextGrid: CeilingGrid | undefined = keep(command.grid, c.grid);
+  const { spaceId: _s, holes: _h, slope: _sl, role: _r, reference: _ref, typeId: _t, grid: _g, classSource: priorClassSource, ...base } = c;
   // A class set by hand is the person's own, no longer the recognised one.
   const classSource = command.classId !== undefined ? undefined : priorClassSource;
   const next: Ceiling = {
@@ -340,6 +354,7 @@ function editCeiling(model: ModelState, command: Extract<CeilingCommand, { type:
     ...(reference ? { reference } : {}),
     ...(s ? { slope: s } : {}),
     ...(role !== undefined && role !== defaultRoleForForm(f) ? { role } : {}),
+    ...(nextGrid ? { grid: nextGrid } : {}),
   };
   if (ceilingFingerprint(next) === ceilingFingerprint(c)) refuse("invalid_value", `Nothing to change: ${ceilingLabel(c)} already reads that way`, [c.id]);
   put(e, next);

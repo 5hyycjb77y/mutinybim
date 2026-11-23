@@ -135,6 +135,7 @@ export * from "./part-model/clearance";
 export * from "./spatial";
 export * from "./commands/spatial";
 export * from "./annotation/callouts";
+export * from "./drawing/polygon-clip";
 export * from "./annotation/figures";
 export * from "./organization/typicals";
 export * from "./propose";

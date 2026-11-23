@@ -1,16 +1,43 @@
-import { dimensionPoints, endsOf, figureFrame, modifyCommand, resolveNote, type BatchCommand, type DrawingItem, type ModelState, type NoteLeader, type Vec2, type ViewCommand, type ViewElement } from '@permitzip/bim-kernel'
+import {
+  calloutBoundaryPolygon,
+  calloutSyncCommands,
+  dimensionPoints,
+  endsOf,
+  figureFrame,
+  modifyCommand,
+  resolveNote,
+  type BatchCommand,
+  type DrawingItem,
+  type ModelState,
+  type NoteLeader,
+  type Vec2,
+  type ViewCommand,
+  type ViewElement,
+} from '@permitzip/bim-kernel'
 import type { SnapPoint } from '../annotation-tools'
 
 /**
- * Grips on a selected dimension, tag, note or detail line: what each one is,
- * where it sits on paper, and the one command a drag on it sends. A
+ * Grips on a selected dimension, tag, note, callout or detail line: what each
+ * one is, where it sits on paper, and the command a drag on it sends. A
  * dimension's end that lands on a snap point follows it from then on; dragged
- * off one, it stops following. The offset grip moves the dimension line (or
- * an angle's arc). A detail line's or arc's end grip drags that end, and the
- * lines joined there come along (BIM drafting-view conventions).
+ * off one, it stops following. Callout corner, edge-extent and P-line vertex
+ * grips resize the callout AND atomically sync the referenced enlarged plan's
+ * crop box / polygonal crop region (Revit behavior).
  */
 
-export type GripKind = 'dim-point' | 'dim-offset' | 'tag-head' | 'leader-tip' | 'leader-elbow' | 'detail-end' | 'frame-corner'
+export type GripKind =
+  | 'dim-point'
+  | 'dim-offset'
+  | 'tag-head'
+  | 'leader-tip'
+  | 'leader-elbow'
+  | 'detail-end'
+  | 'frame-corner'
+  | 'callout-corner'
+  | 'callout-edge'
+  | 'callout-poly-edge'
+  | 'callout-vertex'
+  | 'callout-head'
 
 export interface Grip {
   readonly key: string
@@ -21,6 +48,8 @@ export interface Grip {
   /** A dimension point that follows something: drawn solid. */
   readonly follows: boolean
   readonly label: string
+  /** Edge axis for `callout-edge` grips ('x' moves east/west, 'y' moves north/south). */
+  readonly axis?: 'x' | 'y'
 }
 
 const dot = (a: Vec2, b: Vec2) => a.x * b.x + a.y * b.y
@@ -73,6 +102,54 @@ export function annotationGrips(model: ModelState, view: ViewElement | null, ite
     }
     return out
   }
+  if (item.shape === 'callout' && item.callout) {
+    const head = item.points[2]
+    if (item.callout.boundary && item.callout.boundary.length >= 3) {
+      const bnd = item.callout.boundary
+      bnd.forEach((pt, index) => {
+        out.push({ key: `v${index}`, kind: 'callout-vertex', index, at: toPaper(pt), follows: false, label: `Drag callout corner ${index + 1} (snaps to walls & grids)` })
+      })
+      // Direct edge-slide handles for every P-line edge (like dragging a wall in/out without opening Edit Boundary).
+      for (let i = 0; i < bnd.length; i++) {
+        const p0 = bnd[i]!
+        const p1 = bnd[(i + 1) % bnd.length]!
+        const dx = Math.abs(p1.x - p0.x)
+        const dy = Math.abs(p1.y - p0.y)
+        if (Math.hypot(dx, dy) < 25) continue
+        const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+        const axis: 'x' | 'y' | undefined = dy < dx * 0.2 ? 'y' : dx < dy * 0.2 ? 'x' : undefined
+        out.push({
+          key: `pe${i}`,
+          kind: 'callout-poly-edge',
+          index: i,
+          ...(axis ? { axis } : {}),
+          at: toPaper(mid),
+          follows: false,
+          label: 'Drag callout edge in or out (snaps to walls & grids)',
+        })
+      }
+    } else if (item.points[0] && item.points[1]) {
+      const a = item.points[0]
+      const b = item.points[1]
+      const min = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) }
+      const max = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) }
+      const midX = (min.x + max.x) / 2
+      const midY = (min.y + max.y) / 2
+      const corners = [min, { x: max.x, y: min.y }, max, { x: min.x, y: max.y }]
+      corners.forEach((c, index) => {
+        out.push({ key: `c${index}`, kind: 'callout-corner', index, at: toPaper(c), follows: false, label: 'Drag callout corner (snaps to walls & grids; syncs enlarged view crop)' })
+      })
+      // 4 Revit-style edge extent grips: 0=north(+y), 1=east(+x), 2=south(-y), 3=west(-x)
+      out.push(
+        { key: 'e0', kind: 'callout-edge', index: 0, axis: 'y', at: toPaper({ x: midX, y: max.y }), follows: false, label: 'Drag top extent (snaps to walls & grids)' },
+        { key: 'e1', kind: 'callout-edge', index: 1, axis: 'x', at: toPaper({ x: max.x, y: midY }), follows: false, label: 'Drag right extent (snaps to walls & grids)' },
+        { key: 'e2', kind: 'callout-edge', index: 2, axis: 'y', at: toPaper({ x: midX, y: min.y }), follows: false, label: 'Drag bottom extent (snaps to walls & grids)' },
+        { key: 'e3', kind: 'callout-edge', index: 3, axis: 'x', at: toPaper({ x: min.x, y: midY }), follows: false, label: 'Drag left extent (snaps to walls & grids)' },
+      )
+    }
+    if (head) out.push({ key: 'head', kind: 'callout-head', index: 0, at: toPaper(head), follows: true, label: 'Drag the callout bubble' })
+    return out
+  }
   if (item.shape === 'figure') {
     const frame = figureFrame(item.points)
     if (!frame) return out
@@ -88,6 +165,89 @@ export function annotationGrips(model: ModelState, view: ViewElement | null, ite
     })
   }
   return out
+}
+
+/** Compute the updated callout boundary polygon (in owner model mm) and head after dragging one callout grip to `storedTo`. */
+export function calloutBoundaryAfterGrip(
+  item: DrawingItem,
+  grip: Grip,
+  storedTo: Vec2,
+): { readonly boundary: Vec2[]; readonly head: Vec2; readonly headOnly: boolean } | null {
+  if (item.shape !== 'callout' || !item.callout) return null
+  const poly = calloutBoundaryPolygon(item)
+  if (!poly || poly.length < 3) return null
+  const currentHead = item.points[2] ?? poly[0]!
+  if (grip.kind === 'callout-head') return { boundary: poly, head: storedTo, headOnly: true }
+  if (grip.kind === 'callout-vertex') {
+    if (grip.index < 0 || grip.index >= poly.length) return null
+    return { boundary: poly.map((p, i) => (i === grip.index ? storedTo : p)), head: currentHead, headOnly: false }
+  }
+  if (grip.kind === 'callout-poly-edge') {
+    const i0 = grip.index
+    const i1 = (i0 + 1) % poly.length
+    const p0 = poly[i0]
+    const p1 = poly[i1]
+    if (!p0 || !p1) return null
+    const ex = p1.x - p0.x
+    const ey = p1.y - p0.y
+    const len = Math.hypot(ex, ey)
+    if (len < 1e-3) return null
+    // Project displacement onto the edge normal so horizontal/vertical edges slide cleanly orthogonally like walls.
+    const nx = -ey / len
+    const ny = ex / len
+    const midX = (p0.x + p1.x) / 2
+    const midY = (p0.y + p1.y) / 2
+    const proj = (storedTo.x - midX) * nx + (storedTo.y - midY) * ny
+    const dx = nx * proj
+    const dy = ny * proj
+    return {
+      boundary: poly.map((p, idx) => (idx === i0 || idx === i1 ? { x: p.x + dx, y: p.y + dy } : p)),
+      head: currentHead,
+      headOnly: false,
+    }
+  }
+  const [a, b] = item.points
+  if (!a || !b) return null
+  let minX = Math.min(a.x, b.x)
+  let maxX = Math.max(a.x, b.x)
+  let minY = Math.min(a.y, b.y)
+  let maxY = Math.max(a.y, b.y)
+  if (grip.kind === 'callout-corner') {
+    if (grip.index === 0) {
+      minX = storedTo.x
+      minY = storedTo.y
+    } else if (grip.index === 1) {
+      maxX = storedTo.x
+      minY = storedTo.y
+    } else if (grip.index === 2) {
+      maxX = storedTo.x
+      maxY = storedTo.y
+    } else if (grip.index === 3) {
+      minX = storedTo.x
+      maxY = storedTo.y
+    }
+  } else if (grip.kind === 'callout-edge') {
+    if (grip.index === 0) maxY = storedTo.y
+    else if (grip.index === 1) maxX = storedTo.x
+    else if (grip.index === 2) minY = storedTo.y
+    else if (grip.index === 3) minX = storedTo.x
+  } else {
+    return null
+  }
+  const loX = Math.min(minX, maxX)
+  const hiX = Math.max(minX, maxX)
+  const loY = Math.min(minY, maxY)
+  const hiY = Math.max(minY, maxY)
+  return {
+    boundary: [
+      { x: loX, y: loY },
+      { x: hiX, y: loY },
+      { x: hiX, y: hiY },
+      { x: loX, y: hiY },
+    ],
+    head: currentHead,
+    headOnly: false,
+  }
 }
 
 /** The command for dropping `grip` at paper point `to` (snapped to `snap` when it landed on one), null for no change, or why it can't. */
@@ -109,6 +269,22 @@ export function gripCommand(input: {
   const to = snap?.at ?? input.to
   if (Math.hypot(to.x - grip.at.x, to.y - grip.at.y) < 0.3) return null
   switch (grip.kind) {
+    case 'callout-head':
+    case 'callout-corner':
+    case 'callout-edge':
+    case 'callout-poly-edge':
+    case 'callout-vertex': {
+      const updated = calloutBoundaryAfterGrip(item, grip, toStored(to))
+      if (!updated) return null
+      if (updated.headOnly) {
+        const pts = item.points.map((p, i) => (i === 2 ? { x: Math.round(updated.head.x * 10) / 10, y: Math.round(updated.head.y * 10) / 10 } : p))
+        return { type: 'update_drawing_item', itemId: item.id, points: pts, ...(item.callout ? { callout: item.callout } : {}) }
+      }
+      const cmds = calloutSyncCommands(model, item, updated.boundary, updated.head)
+      if (typeof cmds === 'string') return cmds
+      if (cmds.length === 1 && cmds[0]) return cmds[0]
+      return { type: 'batch_documents', label: 'Resize callout and sync enlarged plan crop', commands: cmds }
+    }
     case 'dim-point': {
       const spec = item.dim
       if (!spec) return null

@@ -2069,8 +2069,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else requestDelete(toDelete.id)
         return
       }
-      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
-      if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
         if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
@@ -2078,6 +2076,10 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           setToolHint(session.nudgeSelection(ids, e.key, e.shiftKey))
           return
         }
+      }
+      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
+      if (showDrawing) return
+      if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if ((e.key === 'a' || e.key === 'A') && canEdit && selection?.kind === 'authored' && (selection.element.kind === 'run_segment' || selection.element.kind === 'run_fitting')) {
           e.preventDefault()
           routeLike(selection.element)
@@ -3591,6 +3593,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 blockedReason={blockedReason}
                 submit={submitWithUndo}
                 onOpenView={(id) => {
+                  const clickedView = index?.views.find((v) => v.id === id)
+                  const openPanel = sharedValue<(panelId: string) => void>(workflows.shared, 'openPanelView')
+                  if (clickedView?.props?.formSchedule?.kind === 'panel' && clickedView.props.formSchedule.elementId && openPanel) {
+                    openPanel(clickedView.props.formSchedule.elementId)
+                    return
+                  }
                   const from = openSheet?.id ?? null
                   openItem({ kind: 'view', id })
                   setReturnSheet(from)
@@ -3705,6 +3713,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 submit={submitWithUndo}
                 editBlocked={canEdit ? null : blockedReason}
                 onOpenSheet={(sheetId) => openItem({ kind: 'sheet', id: sheetId })}
+                onOpenPanel={sharedValue<(panelId: string) => void>(workflows.shared, 'openPanelView') ?? undefined}
               />
                 )}
               </ModelFromStore>

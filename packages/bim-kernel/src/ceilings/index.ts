@@ -3,6 +3,8 @@ export {
   CEILING_KIND,
   ceilingCovers,
   ceilingForm,
+  ceilingGrid,
+  ceilingGridCellCenter,
   ceilingHeightAtPoint,
   ceilingHeightRange,
   ceilingLabel,
@@ -15,6 +17,8 @@ export {
   isKnownCeilingForm,
   planeHeightAt,
   surfaceRoles,
+  TILE_2FT_MM,
+  TILE_4FT_MM,
 } from "./read";
 export { ceilingHeightAt, ceilingIndexBuilds, ceilingsAt, ceilingsOfSpace, ceilingsOnLevel, type CeilingHeightAt } from "./ceiling-index";
 export { CEILING_CLASS_ID, CEILING_CLASS_STEP, CEILINGS_NOT_YET, ceilingsWritable, upgradeCeilingClass } from "./feature";

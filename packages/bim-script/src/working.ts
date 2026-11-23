@@ -12,6 +12,7 @@ import type { ScriptContext } from "./context";
 interface Working {
   readonly model: () => ModelState;
   readonly packs: PackSet | undefined;
+  readonly touchedIds?: () => readonly string[];
 }
 
 const WORKING = new WeakMap<ScriptContext, Working>();
@@ -32,6 +33,13 @@ export function onWorking<T>(ctx: ScriptContext, helper: string, read: (model: M
   const w = WORKING.get(ctx);
   if (!w) throw new KitContextError(helper);
   return withPackSet(w.packs, () => read(w.model()));
+}
+
+/** Like `onWorking`, also supplying the element IDs created/edited so far by the running script. */
+export function onWorkingWithTouched<T>(ctx: ScriptContext, helper: string, read: (model: ModelState, touchedIds: readonly string[]) => T): T {
+  const w = WORKING.get(ctx);
+  if (!w) throw new KitContextError(helper);
+  return withPackSet(w.packs, () => read(w.model(), w.touchedIds ? w.touchedIds() : []));
 }
 
 /** Like `onWorking`, but undefined (no error) for a context with no working copy behind it (a test's hand-made one). */

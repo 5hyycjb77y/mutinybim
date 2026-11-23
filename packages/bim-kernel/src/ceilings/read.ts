@@ -2,7 +2,7 @@ import { isRegistryIdShape, rawRegistryWords } from "../ids";
 import { activePackSet } from "../packs/scope";
 import { containsPoint } from "../spaces/space-geometry";
 import type { BimElement, Vec2 } from "../types";
-import { KNOWN_CEILING_FORMS, SURFACE_ROLE_POINT, type Ceiling, type CeilingForm, type CeilingSlope, type SurfaceRoleDef } from "./types";
+import { KNOWN_CEILING_FORMS, SURFACE_ROLE_POINT, type Ceiling, type CeilingForm, type CeilingGrid, type CeilingSlope, type SurfaceRoleDef } from "./types";
 
 /**
  * Tolerant readers for stored ceilings (expand, then contract). A form or a
@@ -81,6 +81,48 @@ export function defaultRoleForForm(form: CeilingForm): string {
 /** The stored role id: the one it names, else its form's. */
 export function ceilingRoleId(c: Ceiling): string {
   return typeof c.role === "string" && c.role.length > 0 ? c.role : defaultRoleForForm(ceilingForm(c));
+}
+
+/** Exact imperial tile pitch constants (2 ft = 609.6 mm, 4 ft = 1219.2 mm). */
+export const TILE_2FT_MM = 609.6;
+export const TILE_4FT_MM = 1219.2;
+
+/** The stored tile grid of a ceiling when valid, else null. */
+export function ceilingGrid(c: Ceiling): Required<CeilingGrid> | null {
+  const g = c.grid;
+  if (!g || !Number.isFinite(g.spacingXMm) || g.spacingXMm <= 0 || !Number.isFinite(g.spacingYMm) || g.spacingYMm <= 0) return null;
+  const origin = g.origin && Number.isFinite(g.origin.x) && Number.isFinite(g.origin.y) ? g.origin : { x: 0, y: 0 };
+  const rotationDeg = typeof g.rotationDeg === "number" && Number.isFinite(g.rotationDeg) ? g.rotationDeg : 0;
+  return { spacingXMm: g.spacingXMm, spacingYMm: g.spacingYMm, origin, rotationDeg };
+}
+
+/**
+ * Snap a plan point to the exact center of the nearest tile cell (or half-cell
+ * when a square 2×2 device seats cleanly inside half of a 2×4 tile).
+ */
+export function ceilingGridCellCenter(
+  grid: Pick<CeilingGrid, "spacingXMm" | "spacingYMm" | "origin" | "rotationDeg">,
+  near: Vec2,
+  opts?: { readonly deviceWidthMm?: number; readonly deviceDepthMm?: number },
+): Vec2 {
+  const ox = grid.origin?.x ?? 0;
+  const oy = grid.origin?.y ?? 0;
+  const rad = ((grid.rotationDeg ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = near.x - ox;
+  const dy = near.y - oy;
+  const u = dx * cos + dy * sin;
+  const v = -dx * sin + dy * cos;
+  // A 2×2 device placed in a 2×4 ceiling grid seats cleanly in either 2×2 half of a 2×4 tile.
+  const cellX = opts?.deviceWidthMm && opts.deviceWidthMm <= grid.spacingXMm * 0.55 && grid.spacingXMm >= grid.spacingYMm * 1.8 ? grid.spacingXMm / 2 : grid.spacingXMm;
+  const cellY = opts?.deviceDepthMm && opts.deviceDepthMm <= grid.spacingYMm * 0.55 && grid.spacingYMm >= grid.spacingXMm * 1.8 ? grid.spacingYMm / 2 : grid.spacingYMm;
+  const su = (Math.floor(u / cellX) + 0.5) * cellX;
+  const sv = (Math.floor(v / cellY) + 0.5) * cellY;
+  return {
+    x: Math.round((ox + su * cos - sv * sin) * 10) / 10,
+    y: Math.round((oy + su * sin + sv * cos) * 10) / 10,
+  };
 }
 
 /** The surface roles in force: the built-ins and every role the model's add-ons contribute. */

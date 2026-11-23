@@ -42,20 +42,20 @@
       "length": 26061
     },
     "circuits.reference.v-default": {
-      "sha256": "ca6449a5fbedf2078a6238b56470ed5e583c4ed4cc7eee30ae4bb3468533877c",
-      "length": 53772
+      "sha256": "136727d7aa86b244a6c8e7282c7c26be3eff933901a471f96648e9ba0a9c2414",
+      "length": 53976
     },
     "circuits.reference.v-arcs": {
-      "sha256": "ca6449a5fbedf2078a6238b56470ed5e583c4ed4cc7eee30ae4bb3468533877c",
-      "length": 53772
+      "sha256": "136727d7aa86b244a6c8e7282c7c26be3eff933901a471f96648e9ba0a9c2414",
+      "length": 53976
     },
     "circuits.reference.v-orth": {
       "sha256": "cb8c9d3128df242573ff39a6a1b2cea17a78866ba4f9153de1145dbb326108c8",
       "length": 40103
     },
     "circuits.reference.v-numbers": {
-      "sha256": "fd60f8d7e5359e14c0fe2c8613e5b601f2ea83b2ce2ba040d645beb6762b3dfc",
-      "length": 49295
+      "sha256": "364550f0b773bcf2e04480d522314492d0826057ea67cb2346453a4a8a38cbc5",
+      "length": 50327
     },
     "circuits.reference.v-off": {
       "sha256": "74600e76aed885a109bd9e23cfee6181e7669138da86f66c541534c4f1b77e49",
@@ -66,40 +66,40 @@
       "length": 169
     },
     "plans.fullbim_xs.L01-Z1-view-a-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.fullbim_xs.L01-Z1-view-a-rcp": {
-      "sha256": "9dd48cb6f4a6d8c6de7c2a57bd3675ecacae790a63bf6dfd1bbb69359723ad8f",
-      "length": 1184806
+      "sha256": "669354f56f20d374309471647f3d8bc3c5b43098fb79dec8d7061d0994ba4b8a",
+      "length": 1128923
     },
     "plans.fullbim_xs.L01-Z1-view-a-sect": {
       "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "length": 2
     },
     "plans.fullbim_xs.L01-Z1-view-e-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.fullbim_xs.L01-Z1-view-fp-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.fullbim_xs.L01-Z1-view-m-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.fullbim_xs.L01-Z1-view-p-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.fullbim_xs.L01-Z1-view-s-plan": {
-      "sha256": "2ed925740035cd666fcc831f2af797f6ef9f2431a0ccc2c66b79c93f0cc5949f",
-      "length": 1168318
+      "sha256": "ff82a8f2827cd94978b83516c19efcd4711a0d4a97ee7c5f7689874a3f0a7a60",
+      "length": 1112435
     },
     "plans.synthetic.v-s": {
-      "sha256": "b5cb0a5239f3d04e0dde9fe79bef5086656baf38a4e5bbb385c4e40aa333ae0a",
-      "length": 136542
+      "sha256": "b840ed01b585aaf3f954e69b375c4d6d5438f1aa5dc0c0a197d00f825b5adb35",
+      "length": 136782
     },
     "sections.connection_types": {
       "sha256": "ead96f0d73425ca4cde285fabeabb590da0222a9fcdaf81dc2d519288583e92e",

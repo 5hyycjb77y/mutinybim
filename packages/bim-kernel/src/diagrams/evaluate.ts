@@ -142,7 +142,7 @@ function applyPins(layout: DiagramLayoutResult, roots: readonly DiagramNode[], p
   if (!pins || !layout.ranges) return items;
   const entries = new Map(Object.entries(layout.entries ?? {}));
   for (const n of diagramNodes({ roots })) {
-    const pin = pins[n.id];
+    const pin = pins[n.id] ?? (n.elementId ? pins[n.elementId] : undefined);
     const range = layout.ranges[n.id];
     if (!pin || !range || (pin.dx === 0 && pin.dy === 0)) continue;
     const d = { x: pin.dx, y: pin.dy };
@@ -157,8 +157,53 @@ function applyPins(layout: DiagramLayoutResult, roots: readonly DiagramNode[], p
       if (e) entries.set(id, shift(e, d));
     }
     if (entry) {
-      const midY = entry.y + d.y / 2;
-      items.push({ shape: "polyline", points: [round(entry), round({ x: entry.x, y: midY }), round({ x: entry.x + d.x, y: midY }), shift(entry, d)], weight: "medium", nodeId: n.id });
+      // Check if `entry` sits directly on a horizontal bus bar: slide the tap along the bus cleanly (no ugly Z-dogleg) and auto-expand the bus if dragged past its ends!
+      const movedEntry = shift(entry, d);
+      let busIndex = -1;
+      for (let i = 0; i < items.length; i++) {
+        if (i >= range[0] && i < range[1]) continue;
+        const it = items[i];
+        if (!it || it.shape !== "line") continue;
+        const [p0, p1] = it.points;
+        if (Math.abs(p0.y - p1.y) < 0.2 && Math.abs(p0.y - entry.y) < 0.35) {
+          const minX = Math.min(p0.x, p1.x);
+          const maxX = Math.max(p0.x, p1.x);
+          if (entry.x >= minX - 1.5 && entry.x <= maxX + 1.5) {
+            busIndex = i;
+            break;
+          }
+        }
+      }
+      if (busIndex >= 0) {
+        const bus = items[busIndex] as Extract<OneLineItem, { shape: "line" }>;
+        const b0 = bus.points[0];
+        const b1 = bus.points[1];
+        const leftIs0 = b0.x <= b1.x;
+        const curMinX = Math.min(b0.x, b1.x);
+        const curMaxX = Math.max(b0.x, b1.x);
+        const nextMinX = Math.min(curMinX, movedEntry.x - 4);
+        const nextMaxX = Math.max(curMaxX, movedEntry.x + 4);
+        if (nextMinX < curMinX - 0.05 || nextMaxX > curMaxX + 0.05) {
+          items[busIndex] = {
+            ...bus,
+            points: leftIs0
+              ? [round({ x: nextMinX, y: b0.y }), round({ x: nextMaxX, y: b1.y })]
+              : [round({ x: nextMaxX, y: b0.y }), round({ x: nextMinX, y: b1.y })],
+          };
+        }
+        // Only draw a clean vertical drop if moved vertically off the bus (zero horizontal Z-jog!).
+        if (Math.abs(d.y) > 0.25) {
+          items.push({ shape: "line", points: [round({ x: movedEntry.x, y: entry.y }), movedEntry], weight: "medium", nodeId: n.id });
+        }
+      } else {
+        const horiz = Math.abs(d.x) >= Math.abs(d.y);
+        const midX = entry.x + d.x / 2;
+        const midY = entry.y + d.y / 2;
+        const pts = horiz
+          ? [round(entry), round({ x: midX, y: entry.y }), round({ x: midX, y: entry.y + d.y }), movedEntry]
+          : [round(entry), round({ x: entry.x, y: midY }), round({ x: entry.x + d.x, y: midY }), movedEntry];
+        items.push({ shape: "polyline", points: pts, weight: "medium", nodeId: n.id });
+      }
     }
   }
   return items;
@@ -183,7 +228,7 @@ function sectionsFor(roots: readonly DiagramNode[], hints: DiagramHints): Diagra
   if (services.size > 1) {
     const walk = (n: DiagramNode, parentService: string | null) => {
       if (parentService !== null && n.service !== parentService && n.service !== "emergency") {
-        out.push({ id: `service:${n.id}`, label: `${n.service.toUpperCase()} SERVICE`, elementIds: diagramNodes({ roots: [n] }).map((x) => x.id) });
+        out.push({ id: `service:${n.id}`, label: `${n.service.replace(/_/g, " ").toUpperCase()} SERVICE`, elementIds: diagramNodes({ roots: [n] }).map((x) => x.id) });
         return;
       }
       for (const c of n.children) walk(c, n.service);
@@ -251,11 +296,44 @@ export function diagramTextKey(nodeId: string, role: string, ordinal: number): s
  * well away (clear of where it was). Returns the indices of moved items (they no longer count toward
  * their equipment's hit box) and every text block for picking.
  */
-function applyTextOffsets(items: OneLineItem[], offsets: DiagramHints["textOffsets"], elementOf: (nodeId: string) => ElementId | null): { moved: Set<number>; texts: Array<{ key: string; index: number; elementId: ElementId | null; text: string; moved: boolean }> } {
+function applyTextOffsets(
+  items: OneLineItem[],
+  offsets: DiagramHints["textOffsets"],
+  elementOf: (nodeId: string) => ElementId | null,
+  nodeCenters?: ReadonlyMap<string, Vec2>,
+): { moved: Set<number>; texts: Array<{ key: string; index: number; elementId: ElementId | null; text: string; moved: boolean }> } {
   const seen = new Map<string, number>();
   const moved = new Set<number>();
   const texts: Array<{ key: string; index: number; elementId: ElementId | null; text: string; moved: boolean }> = [];
   const count = items.length;
+  // Pre-compute non-text geometry anchor centers per nodeId so dragged labels point to the real node/segment, never empty space.
+  const geomAnchors = new Map<string, Vec2[]>();
+  for (let i = 0; i < count; i++) {
+    const g = items[i];
+    if (!g || g.shape === "text" || g.shape === "oval") continue;
+    let pt: Vec2 | null = null;
+    if (g.shape === "line") pt = { x: (g.points[0].x + g.points[1].x) / 2, y: (g.points[0].y + g.points[1].y) / 2 };
+    else if (g.shape === "polyline" && g.points.length > 0) {
+      const sx = g.points.reduce((a, q) => a + q.x, 0) / g.points.length;
+      const sy = g.points.reduce((a, q) => a + q.y, 0) / g.points.length;
+      pt = { x: sx, y: sy };
+    } else if (g.shape === "component") pt = g.at;
+    if (!pt) continue;
+    const arr = geomAnchors.get(g.nodeId) ?? [];
+    arr.push(pt);
+    geomAnchors.set(g.nodeId, arr);
+  }
+  const anchorFor = (nodeId: string, fallback: Vec2): Vec2 => {
+    const exactNode = nodeCenters?.get(nodeId);
+    if (exactNode) return exactNode;
+    const candidates = geomAnchors.get(nodeId) ?? geomAnchors.get(nodeId.replace(/:lbl:\d+$/, ""));
+    if (candidates && candidates.length > 0) {
+      return candidates.reduce((best, c) =>
+        Math.hypot(c.x - fallback.x, c.y - fallback.y) < Math.hypot(best.x - fallback.x, best.y - fallback.y) ? c : best,
+      );
+    }
+    return fallback;
+  };
   for (let i = 0; i < count; i++) {
     const it = items[i];
     if (!it || (it.shape !== "text" && it.shape !== "oval")) continue;
@@ -278,8 +356,9 @@ function applyTextOffsets(items: OneLineItem[], offsets: DiagramHints["textOffse
     // Still overlapping where it was: a leader would only run through its own words.
     if (there.min.x < home.max.x && home.min.x < there.max.x && there.min.y < home.max.y && home.min.y < there.max.y) continue;
     const homeCentre = { x: (home.min.x + home.max.x) / 2, y: (home.min.y + home.max.y) / 2 };
-    const from = boxEdge(there, homeCentre);
-    const to = boxEdge(home, { x: (there.min.x + there.max.x) / 2, y: (there.min.y + there.max.y) / 2 });
+    const realTarget = anchorFor(it.nodeId, homeCentre);
+    const from = boxEdge(there, realTarget);
+    const to = realTarget === homeCentre ? boxEdge(home, { x: (there.min.x + there.max.x) / 2, y: (there.min.y + there.max.y) / 2 }) : round(realTarget);
     if (Math.hypot(to.x - from.x, to.y - from.y) > 1) items.push({ shape: "line", points: [from, to], weight: "thin", nodeId: `text-leader:${key}` });
   }
   return { moved, texts };
@@ -344,13 +423,33 @@ function toDrawingItems(viewId: string, items: readonly OneLineItem[]): DrawingI
       case "polyline":
         out.push({ ...base(n++), shape: "polyline", points: [...item.points], lineStyle: { weight: item.weight, ...(item.dashed ? { pattern: "dashed" as const } : {}) }, ...(item.closed ? { closed: true } : {}) });
         break;
-      case "oval":
-        out.push({ ...base(n++), shape: "polyline", points: ovalOutline(item.center, item.widthMm, item.heightMm), closed: true, lineStyle: { weight: "thin" } });
+      case "oval": {
+        const pts = ovalOutline(item.center, item.widthMm, item.heightMm);
+        if (item.mask) out.push({ ...base(n++), shape: "region", points: pts, fill: { pattern: "solid", masking: true } });
+        out.push({ ...base(n++), shape: "polyline", points: pts, closed: true, lineStyle: { weight: "thin" } });
         out.push(note(n++, round({ x: item.center.x - item.widthMm / 2, y: item.center.y + ONE_LINE_TEXT_MM * 0.75 }), item.widthMm, ONE_LINE_TEXT_MM * 0.85, [{ runs: [{ text: item.text }], align: "center" }]));
         break;
-      case "text":
+      }
+      case "text": {
+        if (item.mask) {
+          const h = oneLineTextHeight(item.lines, item.widthMm);
+          const maxChars = item.lines.reduce((m, l) => Math.max(m, l.text.length), 0);
+          const tightW = Math.min(item.widthMm, Math.max(4, maxChars * ONE_LINE_TEXT_MM * 0.62));
+          const pad = 0.6;
+          const x0 = item.align === "center" ? item.at.x + (item.widthMm - tightW) / 2 - pad : item.at.x - pad;
+          const x1 = x0 + tightW + pad * 2;
+          const yTop = item.at.y + pad * 0.5;
+          const yBot = item.at.y - h - pad * 0.5;
+          out.push({
+            ...base(n++),
+            shape: "region",
+            points: [round({ x: x0, y: yBot }), round({ x: x1, y: yBot }), round({ x: x1, y: yTop }), round({ x: x0, y: yTop })],
+            fill: { pattern: "solid", masking: true },
+          });
+        }
         out.push(note(n++, item.at, item.widthMm, ONE_LINE_TEXT_MM, item.lines.map((l) => ({ runs: [{ text: l.text, ...(l.bold ? { bold: true } : {}) }], ...(item.align === "center" ? { align: "center" as const } : {}) }))));
         break;
+      }
     }
   }
   return out;
@@ -450,8 +549,13 @@ function evaluateUncached(elements: Elements, viewId: string, def: DiagramDefini
   drawSections(items, laid.serviceSections ? sectionsFor(roots, hints) : (hints.sections ?? []), laidOut, layout.ranges, { entries: layout.entries, orientation: def.kind === "one_line" ? (hints.orientation ?? "vertical") : null });
   const all = diagramNodes({ roots });
   const nodeElement = new Map(all.flatMap((n) => (n.elementId ? [[n.id, n.elementId] as const] : [])));
+  const nodeCenters = new Map<string, Vec2>();
+  for (const ln of layout.nodes) {
+    const pin = hints.pins?.[ln.id] ?? (nodeElement.get(ln.id) ? hints.pins?.[nodeElement.get(ln.id)!] : undefined);
+    nodeCenters.set(ln.id, pin ? shift(ln.center, { x: pin.dx, y: pin.dy }) : ln.center);
+  }
   // After the sections (a moved label doesn't stretch its service box), before the 3D boxes and warnings (they follow the text).
-  const { moved, texts } = applyTextOffsets(items, hints.textOffsets, (nodeId) => nodeElement.get(nodeId) ?? pipeRefs[nodeId]?.elementId ?? null);
+  const { moved, texts } = applyTextOffsets(items, hints.textOffsets, (nodeId) => nodeElement.get(nodeId) ?? pipeRefs[nodeId]?.elementId ?? null, nodeCenters);
   if (hints.style === "box3d") drawBoxes(items);
   if (hints.showWarnings !== false) drawWarnings(items, graph.warnings);
   const boxes: DiagramNodeBox[] = [];

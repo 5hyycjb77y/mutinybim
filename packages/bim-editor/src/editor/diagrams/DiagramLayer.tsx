@@ -62,6 +62,7 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
   const evaluation = useMemo(() => evaluateDiagram(model.elements, view), [model.elements, view])
   const [drag, setDrag] = useState<Drag | null>(null)
   const [hover, setHover] = useState<number | null>(null)
+  const [hoverText, setHoverText] = useState<string | null>(null)
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
   const index = useMemo(() => (evaluation ? diagramSelectionIndex(evaluation) : null), [evaluation])
   const lit = useMemo(() => new Set(index ? index.entriesFor(selectedIds).flatMap((e) => e.boxes) : []), [index, selectedIds])
@@ -90,14 +91,12 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
       if (!command) return
       const refusal = submit(command, `move the text "${d.name}" on ${view.name}`)
       if (refusal) toast.error(refusal)
-      else hint(`Moved "${d.name}". It still reads the model; Reset positions in the view's properties puts it back.`)
       return
     }
     const command = pinCommand(view, d.id, { x: b.x - a.x, y: b.y - a.y })
     if (!command) return
     const refusal = submit(command, `move ${d.name} on ${view.name}`)
     if (refusal) toast.error(refusal)
-    else hint(`Moved ${d.name} on this diagram. Reset positions in the view's properties puts it back.`)
   }
 
   // While a press is held the window follows the pointer, so a drag that leaves the box keeps going.
@@ -131,10 +130,8 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
   // Bigger boxes first, so a panel's own target sits over the bus of what feeds it (and a pipe over the floor it crosses).
   const boxes = evaluation.boxes.map((b, i) => ({ b, i })).sort((x, y) => (y.b.max.x - y.b.min.x) * (y.b.max.y - y.b.min.y) - (x.b.max.x - x.b.min.x) * (x.b.max.y - x.b.min.y) || x.i - y.i)
   const warned = new Set(evaluation.warnings.map((w) => w.elementId))
-  // Text of what is selected, and text that labels nothing in the model, can be dragged on its own.
-  // Text that labels nothing is a target only where it doesn't cover a piece of equipment or pipe (their clicks come first).
-  const overBox = (t: DiagramTextBox) => evaluation.boxes.some((b) => b.min.x < t.max.x && t.min.x < b.max.x && b.min.y < t.max.y && t.min.y < b.max.y)
-  const movableTexts = evaluation.texts.filter((t) => t.text.trim() !== '' && (t.elementId === null ? !overBox(t) : selected.has(t.elementId) || evaluation.boxes.some((b, i) => b.pipe && b.elementId === t.elementId && lit.has(i))))
+  // Every non-empty text label on a live diagram (equipment marks, duct/pipe/feeder tags, titles) is directly draggable in one gesture!
+  const movableTexts = evaluation.texts.filter((t) => t.text.trim() !== '')
   const startDrag = (e: React.PointerEvent<SVGRectElement>, d: Omit<Drag, 'from' | 'to' | 'root'>) => {
     // Left button only (a right-click opens the menu).
     if (e.button > 0) return
@@ -147,6 +144,8 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
   const textRect = (t: DiagramTextBox) => {
     const r = rectOf(t, toPaper)
     const live = drag?.textKey === t.key
+    const isHovered = hoverText === t.key
+    const isOwnerSelected = t.elementId !== null && (selected.has(t.elementId) || evaluation.boxes.some((b, i) => b.pipe && b.elementId === t.elementId && lit.has(i)))
     const offset = live && drag ? { x: drag.to.x - drag.from.x, y: drag.to.y - drag.from.y } : { x: 0, y: 0 }
     return (
       <rect
@@ -157,18 +156,20 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
         height={r.h + 1}
         rx={0.4}
         fill={PRIMARY}
-        fillOpacity={live ? 0.08 : 0}
+        fillOpacity={live ? 0.12 : isHovered ? 0.08 : 0}
         stroke={PRIMARY}
-        strokeWidth={0.3}
-        strokeDasharray="1 0.8"
-        strokeOpacity={live || t.moved ? 0.9 : 0.5}
+        strokeWidth={0.35}
+        strokeDasharray="1.2 0.8"
+        strokeOpacity={live || isHovered ? 0.95 : t.moved || isOwnerSelected ? 0.55 : 0}
         style={{ cursor: canEdit ? 'move' : 'default' }}
         data-testid="diagram-text"
         data-text-key={t.key}
         data-moved={t.moved ? 'true' : 'false'}
+        onPointerEnter={() => setHoverText(t.key)}
+        onPointerLeave={() => setHoverText((cur) => (cur === t.key ? null : cur))}
         onPointerDown={(e) => startDrag(e, { id: t.elementId ?? '', name: t.text, pipe: true, textKey: t.key })}
       >
-        <title>{`${t.text}: drag to move this text on the diagram; it keeps reading the model`}</title>
+        <title>{`${t.text}: drag to reposition this label on the diagram (stays live to the model)`}</title>
       </rect>
     )
   }

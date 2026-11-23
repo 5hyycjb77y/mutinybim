@@ -92,7 +92,7 @@ export const SHOWCASE_RTU: { readonly id: string; readonly definition: PartTypeD
     typeValues: {
       manufacturer: "Carrier",
       model: "50FC-A06",
-      "material_id": "architecture.equipment_enamel",
+      "material_id": "architecture.galvanized_steel",
       cooling_tons: 5,
       heating_mbh: 72,
       supply_cfm: 2000,
@@ -270,6 +270,168 @@ export const SHOWCASE_EXHAUST_FAN: { readonly id: string; readonly definition: P
       { kind: "circle", center: [0, 0], radius: 175, pen: "thin" },
       { kind: "line", from: [-215, -215], to: [215, 215], pen: "thin" },
       { kind: "line", from: [-215, 215], to: [215, -215], pen: "thin" },
+    ],
+    tagFields: ["mark"],
+    source: src(),
+  },
+};
+
+// =============================================================================
+// 2B. Greenheck CSP-B150 — Indoor Inline Cabinet Exhaust Fan (IMC 306.5 compliant)
+//     Mounted inside Mechanical Room 103 ceiling space with 36" service access;
+//     discharges vertically up through passive roof gravity hood GRS-8.
+// =============================================================================
+export const SHOWCASE_INLINE_FAN: { readonly id: string; readonly definition: PartTypeDefinition } = {
+  id: "showcase:ef-greenheck-csp-b150@1",
+  definition: {
+    familyName: "Exhaust fan, inline cabinet",
+    typeName: "Greenheck CSP-B150 (300 CFM, 120V/1Ø, Indoor)",
+    category: "mechanical_equipment",
+    description: "Acoustically lined indoor inline cabinet exhaust fan with 36\" bottom/front service clearance (IMC 306.3/306.5 compliant — keeps serviceable equipment off sloped roof).",
+    typeParams: [
+      txt("manufacturer", "Manufacturer"),
+      txt("model", "Model"),
+      txt("material_id", "Material"),
+      num("exhaust_cfm", "Exhaust airflow", "cfm"),
+      num("hp", "Motor HP", "none"),
+      num("voltage", "Voltage", "v"),
+      num("mca", "MCA", "a"),
+      num("mocp", "MOCP", "a"),
+      num("operating_weight", "Operating weight (lb)", "none"),
+      len("service_clearance", "Service clearance"),
+      txt("sequence_of_operation", "Sequence of operation"),
+    ],
+    typeValues: {
+      manufacturer: "Greenheck",
+      model: "CSP-B150",
+      "material_id": "architecture.galvanized_steel",
+      exhaust_cfm: 300,
+      hp: 0.17,
+      voltage: 120,
+      mca: 2.1,
+      mocp: 15,
+      operating_weight: 34,
+      service_clearance: 36 * IN,
+      sequence_of_operation: "Continuous during occupied hours; indoor serviceable access",
+    },
+    instanceParams: [txt("circuit", "Circuit"), txt("serves", "Serves"), txt("room", "Location")],
+    connectors: [
+      {
+        id: "inlet",
+        label: "Exhaust inlet",
+        domain: "duct",
+        systemKind: "exhaust_air",
+        position: [0, 0, -180],
+        direction: [0, 0, -1],
+        shape: "round",
+        diameter: 8 * IN,
+        flowDirection: "in",
+        flow: 300,
+      },
+      {
+        id: "discharge",
+        label: "Exhaust discharge",
+        domain: "duct",
+        systemKind: "exhaust_air",
+        position: [0, 0, 180],
+        direction: [0, 0, 1],
+        shape: "round",
+        diameter: 8 * IN,
+        flowDirection: "out",
+        flow: 300,
+      },
+      {
+        id: "power",
+        label: "Power",
+        domain: "electrical",
+        systemKind: "power",
+        position: [260, 0, 0],
+        direction: [1, 0, 0],
+        shape: "none",
+        voltage: 120,
+        poles: 1,
+        flow: 220,
+      },
+    ],
+    geometry: [
+      // Insulated galvanized steel inline fan cabinet (20" × 16" × 14" H)
+      { kind: "box", center: [0, 0, 0], size: [508, 406, 356] },
+      // Bottom 8" inlet collar & top 8" discharge collar
+      { kind: "cylinder", center: [0, 0, -195], radius: 102, height: 40, axis: "z" },
+      { kind: "cylinder", center: [0, 0, 195], radius: 102, height: 40, axis: "z" },
+      // Side junction box / disconnect
+      { kind: "box", center: [275, 0, 0], size: [42, 140, 180] },
+    ],
+    clearances: [
+      {
+        id: "service",
+        name: "Service Access Clearance",
+        purpose: "service_access",
+        face: "front",
+        depth: 36 * IN,
+        cite: "IMC 306.3",
+      },
+    ],
+    symbol: [
+      { kind: "rect", center: [0, 0], size: [508, 406], fill: "mask", pen: "medium" },
+      { kind: "circle", center: [0, 0], radius: 145, pen: "thin" },
+      { kind: "line", from: [-100, -100], to: [100, 100], pen: "thin" },
+      { kind: "line", from: [-100, 100], to: [100, -100], pen: "thin" },
+    ],
+    tagFields: ["mark"],
+    source: src(),
+  },
+};
+
+// =============================================================================
+// 2C. Greenheck GRS-8 — Passive Spun-Aluminum Roof Gravity Ventilator Hood (GV-1)
+//     Non-mechanical roof discharge hood (no motor/fall-protection trigger on 1:12 roof).
+// =============================================================================
+export const SHOWCASE_GRAVITY_HOOD: { readonly id: string; readonly definition: PartTypeDefinition } = {
+  id: "showcase:hood-greenheck-grs8@1",
+  definition: {
+    familyName: "Roof ventilator, gravity hood",
+    typeName: "Greenheck GRS-8 (Passive Relief / Exhaust Hood)",
+    category: "duct_accessory",
+    description: "Passive spun-aluminum roof gravity ventilator hood with birdscreen and backdraft damper (no roof-mounted motor).",
+    typeParams: [
+      txt("manufacturer", "Manufacturer"),
+      txt("model", "Model"),
+      txt("material_id", "Material"),
+      txt("curb_size", "Roof curb size"),
+    ],
+    typeValues: {
+      manufacturer: "Greenheck",
+      model: "GRS-8",
+      "material_id": "architecture.brushed_stainless",
+      curb_size: "16 x 16 in",
+    },
+    instanceParams: [txt("serves", "Serves"), txt("room", "Location")],
+    connectors: [
+      {
+        id: "throat",
+        label: "Throat inlet",
+        domain: "duct",
+        systemKind: "exhaust_air",
+        position: [0, 0, 0],
+        direction: [0, 0, -1],
+        shape: "round",
+        diameter: 8 * IN,
+        flowDirection: "in",
+        flow: 300,
+      },
+    ],
+    geometry: [
+      // 16"×16"×12" roof curb
+      { kind: "box", center: [0, 0, 152], size: [406, 406, 305] },
+      // Spun aluminum throat & weather dome (22" Ø)
+      { kind: "cylinder", center: [0, 0, 305 + 80], radius: 190, height: 160, axis: "z" },
+      { kind: "cylinder", center: [0, 0, 305 + 195], radius: 280, height: 105, axis: "z" },
+    ],
+    symbol: [
+      { kind: "rect", center: [0, 0], size: [406, 406], fill: "mask", pen: "thin" },
+      { kind: "circle", center: [0, 0], radius: 280, pen: "medium" },
+      { kind: "circle", center: [0, 0], radius: 150, pen: "thin" },
     ],
     tagFields: ["mark"],
     source: src(),
@@ -474,7 +636,6 @@ export const SHOWCASE_WC_COMMERCIAL: { readonly id: string; readonly definition:
     connectors: [
       { id: "w", label: "Waste", domain: "pipe", systemKind: "sanitary", position: [0, 305, 0], direction: [0, 0, -1], shape: "round", diameter: 3 * IN },
       { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", position: [-120, 0, 520], direction: [0, -1, 0], shape: "round", diameter: 1 * IN },
-      { id: "v", label: "Vent", domain: "pipe", systemKind: "vent", position: [0, 0, 900], direction: [0, 0, 1], shape: "round", diameter: 2 * IN },
     ],
     geometry: [
       // Contoured vitreous-china pedestal foot
@@ -688,6 +849,7 @@ export const SHOWCASE_TROFFER_2X4: { readonly id: string; readonly definition: P
       num("watts", "Input power", "w"),
       num("lumens", "Output", "lumens"),
       num("voltage", "Voltage", "v"),
+      txt("cut_sheet", "Cut sheet"),
     ],
     typeValues: {
       manufacturer: "Lithonia Lighting",
@@ -698,6 +860,7 @@ export const SHOWCASE_TROFFER_2X4: { readonly id: string; readonly definition: P
       watts: 32,
       lumens: 4000,
       voltage: 277,
+      cut_sheet: "2GTL4 PDF|https://lithonia.acuitybrands.com/products/detail/673764/lithonia-lighting/2gtl4-led",
     },
     instanceParams: [
       txt("circuit", "Circuit"),
@@ -745,6 +908,7 @@ export const SHOWCASE_DOWNLIGHT_6: { readonly id: string; readonly definition: P
       num("watts", "Input power", "w"),
       num("lumens", "Output", "lumens"),
       num("voltage", "Voltage", "v"),
+      txt("cut_sheet", "Cut sheet"),
     ],
     typeValues: {
       manufacturer: "Lithonia Lighting",
@@ -755,6 +919,7 @@ export const SHOWCASE_DOWNLIGHT_6: { readonly id: string; readonly definition: P
       watts: 15,
       lumens: 1500,
       voltage: 277,
+      cut_sheet: "LDN6 PDF|https://lithonia.acuitybrands.com/products/detail/655589/lithonia-lighting/ldn6",
     },
     instanceParams: [
       txt("circuit", "Circuit"),
@@ -803,6 +968,7 @@ export const SHOWCASE_EXTERIOR_SCONCE: { readonly id: string; readonly definitio
       num("watts", "Input power", "w"),
       num("lumens", "Output", "lumens"),
       num("voltage", "Voltage", "v"),
+      txt("cut_sheet", "Cut sheet"),
     ],
     typeValues: {
       manufacturer: "Lithonia Lighting",
@@ -813,6 +979,7 @@ export const SHOWCASE_EXTERIOR_SCONCE: { readonly id: string; readonly definitio
       watts: 12,
       lumens: 1200,
       voltage: 277,
+      cut_sheet: "WDGE2 PDF|https://lithonia.acuitybrands.com/products/detail/773440/lithonia-lighting/wdge2-led",
     },
     instanceParams: [
       txt("circuit", "Circuit"),
@@ -1011,6 +1178,8 @@ export const SHOWCASE_CONF_TABLE: { readonly id: string; readonly definition: Pa
 export const SHOWCASE_PART_TYPES = [
   SHOWCASE_RTU,
   SHOWCASE_EXHAUST_FAN,
+  SHOWCASE_INLINE_FAN,
+  SHOWCASE_GRAVITY_HOOD,
   SHOWCASE_DIFFUSER,
   SHOWCASE_WATER_HEATER,
   SHOWCASE_WC_COMMERCIAL,

@@ -1,6 +1,8 @@
 import { categoryOverridesWritable } from "../categories/feature";
+import { BUILDING_VIEW_DISCIPLINE } from "../categories/registry";
 import { documentIndex, type ViewCommand } from "../commands/views";
 import type { CalloutSpec, DrawingItem, ViewProps } from "../documents";
+import { cleanPolygon, isAxisAlignedRectPolygon, polygonBounds } from "../drawing/polygon-clip";
 import type { Primitive } from "../drawing/sheet";
 import { normalizeLevelName, viewLevelNames } from "../levels";
 import type { ModelState, Vec2, ViewElement } from "../types";
@@ -74,9 +76,7 @@ function drawSplitBubble(head: Vec2, r: number, live: CalloutHead, prims: Primit
   const ring = circlePoints(head, r);
   // White mask prevents model lines, cut lines, or filled pointer wedges from bleeding through the bubble.
   prims.push({ kind: "fill", points: ring, grey: 1 });
-  for (let i = 0; i < ring.length; i++) {
-    prims.push({ kind: "line", a: ring[i]!, b: ring[(i + 1) % ring.length]!, pen: "medium" });
-  }
+  prims.push({ kind: "circle", at: head, r, pen: "medium" });
   prims.push({ kind: "line", a: { x: head.x - r, y: head.y }, b: { x: head.x + r, y: head.y }, pen: "thin" });
   const topSize = fitBubbleText(live.top, r);
   const botSize = fitBubbleText(live.bottom, r);
@@ -135,27 +135,229 @@ function drawRoundedRect(min: Vec2, max: Vec2, radius: number, dash: readonly nu
   return corners.map((c) => c.anchor);
 }
 
-/** Draw a callout: rounded dashed box, leader from nearest corner to the split head bubble, and the view name. */
+/**
+ * Draw a Revit/NCS rounded-corner dashed closed polygon in paper mm.
+ * Every corner gets a smooth solid tangent fillet (clamped to 1/3 of each
+ * adjacent edge so short notches never invert) with dashed straight sides
+ * between fillets. Returns the corner anchor points for the callout leader.
+ */
+function drawRoundedPolygon(pts: readonly Vec2[], radius: number, dash: readonly number[], prims: Primitive[]): Vec2[] {
+  const n = pts.length;
+  if (n < 3) return [];
+  const arcSteps = 5;
+  const starts: Vec2[] = [];
+  const ends: Vec2[] = [];
+  const anchors: Vec2[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n]!;
+    const curr = pts[i]!;
+    const next = pts[(i + 1) % n]!;
+    const vx1 = prev.x - curr.x;
+    const vy1 = prev.y - curr.y;
+    const vx2 = next.x - curr.x;
+    const vy2 = next.y - curr.y;
+    const len1 = Math.hypot(vx1, vy1);
+    const len2 = Math.hypot(vx2, vy2);
+    if (len1 < 1e-3 || len2 < 1e-3) {
+      starts.push(curr);
+      ends.push(curr);
+      anchors.push(curr);
+      continue;
+    }
+    const u1 = { x: vx1 / len1, y: vy1 / len1 };
+    const u2 = { x: vx2 / len2, y: vy2 / len2 };
+    const dot = Math.max(-1, Math.min(1, u1.x * u2.x + u1.y * u2.y));
+    const angle = Math.acos(dot);
+    // Nearly collinear or hairpin: keep sharp corner cleanly.
+    if (angle < 0.15 || angle > Math.PI - 0.15) {
+      starts.push(curr);
+      ends.push(curr);
+      anchors.push(curr);
+      continue;
+    }
+    const halfTan = Math.tan(angle / 2);
+    const maxTrim = Math.min(len1 / 3, len2 / 3);
+    const trim = Math.min(radius / halfTan, maxTrim);
+    const r = trim * halfTan;
+    const pIn = { x: curr.x + u1.x * trim, y: curr.y + u1.y * trim };
+    const pOut = { x: curr.x + u2.x * trim, y: curr.y + u2.y * trim };
+    starts.push(pIn);
+    ends.push(pOut);
+
+    // Bisector points from vertex to fillet center at distance r / sin(angle / 2).
+    const bx = u1.x + u2.x;
+    const by = u1.y + u2.y;
+    const bLen = Math.hypot(bx, by) || 1;
+    const dist = r / Math.sin(angle / 2);
+    const cx = curr.x + (bx / bLen) * dist;
+    const cy = curr.y + (by / bLen) * dist;
+    const a0 = Math.atan2(pIn.y - cy, pIn.x - cx);
+    let a1 = Math.atan2(pOut.y - cy, pOut.x - cx);
+    let delta = a1 - a0;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    for (let s = 0; s < arcSteps; s++) {
+      const t0 = a0 + (delta * s) / arcSteps;
+      const t1 = a0 + (delta * (s + 1)) / arcSteps;
+      prims.push({
+        kind: "line",
+        a: { x: cx + r * Math.cos(t0), y: cy + r * Math.sin(t0) },
+        b: { x: cx + r * Math.cos(t1), y: cy + r * Math.sin(t1) },
+        pen: "medium",
+      });
+    }
+    const midA = a0 + delta / 2;
+    anchors.push({ x: cx + r * Math.cos(midA), y: cy + r * Math.sin(midA) });
+  }
+
+  // Straight dashed edges between adjacent fillets
+  for (let i = 0; i < n; i++) {
+    const a = ends[i]!;
+    const b = starts[(i + 1) % n]!;
+    if (Math.hypot(b.x - a.x, b.y - a.y) > 0.1) {
+      prims.push({ kind: "line", a, b, pen: "medium", dash });
+    }
+  }
+  return anchors;
+}
+
+/** Resolved closed boundary polygon of a callout in owner model mm (custom P-line boundary when set, else 4 rectangle corners). */
+export function calloutBoundaryPolygon(item: Pick<DrawingItem, "shape" | "points" | "callout">): Vec2[] | null {
+  if (item.shape !== "callout") return null;
+  if (item.callout?.boundary && item.callout.boundary.length >= 3) {
+    return item.callout.boundary.map((q) => ({ x: q.x, y: q.y }));
+  }
+  const [a, b] = item.points;
+  if (!a || !b) return null;
+  const min = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) };
+  const max = { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) };
+  return [
+    min,
+    { x: max.x, y: min.y },
+    max,
+    { x: min.x, y: max.y },
+  ];
+}
+
+/**
+ * Atomic command list to update a callout's boundary (rectangular OR custom
+ * L-shape / P-line polygon) and optionally sync its referenced enlarged plan
+ * view's crop box and polygonal crop region in lockstep (Revit behavior).
+ */
+export function calloutSyncCommands(
+  model: Pick<ModelState, "elements">,
+  item: DrawingItem,
+  nextBoundary: readonly Vec2[],
+  nextHead?: Vec2,
+  opts?: { readonly syncViewCrop?: boolean },
+): ViewCommand[] | string {
+  const spec = item.callout;
+  if (item.shape !== "callout" || !spec) return "Selected item is not a callout.";
+  const cleaned = cleanPolygon(nextBoundary, 0.5).map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 }));
+  const bounds = polygonBounds(cleaned);
+  if (cleaned.length < 3 || !bounds || bounds.max.x - bounds.min.x < 25.4 || bounds.max.y - bounds.min.y < 25.4) {
+    return "Callout boundary must span at least 1 in each way with at least three corners.";
+  }
+  const head = nextHead ? { x: Math.round(nextHead.x * 10) / 10, y: Math.round(nextHead.y * 10) / 10 } : (item.points[2] ?? { x: bounds.min.x, y: bounds.max.y });
+  const isRect = isAxisAlignedRectPolygon(cleaned, 1.0);
+  const { boundary: _oldBoundary, ...specBase } = spec;
+  const nextCallout: CalloutSpec = isRect ? specBase : { ...specBase, boundary: cleaned };
+  const commands: ViewCommand[] = [
+    {
+      type: "update_drawing_item",
+      itemId: item.id,
+      points: [bounds.min, bounds.max, head],
+      callout: nextCallout,
+    },
+  ];
+  if (opts?.syncViewCrop !== false) {
+    const target = model.elements[spec.viewId];
+    if (target?.kind === "view" && !target.deleted && (target.viewType === "floor_plan" || target.viewType === "ceiling_plan")) {
+      commands.push({
+        type: "set_view_crop",
+        viewId: target.id,
+        crop: { min: bounds.min, max: bounds.max },
+        cropPolygon: isRect ? null : cleaned,
+        cropView: true,
+        keepViewportCenter: true,
+      });
+    }
+  }
+  return commands;
+}
+
+/**
+ * Smart callout leader anchor on a closed boundary polygon (paper mm): picks the
+ * closest point along any boundary edge (snapping cleanly to edge midpoints when
+ * the head is near the middle of an edge, or corners/fillets when near a corner).
+ */
+export function calloutLeaderAnchor(boundary: readonly Vec2[], head: Vec2, cornerAnchors?: readonly Vec2[]): Vec2 | null {
+  if (boundary.length === 0) return null;
+  let bestPt: Vec2 | null = null;
+  let bestDist = Infinity;
+  const n = boundary.length;
+  for (let i = 0; i < n; i++) {
+    const a = boundary[i]!;
+    const b = boundary[(i + 1) % n]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-6) continue;
+    let t = Math.max(0, Math.min(1, ((head.x - a.x) * dx + (head.y - a.y) * dy) / len2));
+    // Gently prefer the exact midpoint when the projection is near the middle of an edge.
+    if (Math.abs(t - 0.5) < 0.16) t = 0.5;
+    const q = { x: a.x + dx * t, y: a.y + dy * t };
+    const dist = Math.hypot(q.x - head.x, q.y - head.y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPt = q;
+    }
+  }
+  if (cornerAnchors) {
+    for (const c of cornerAnchors) {
+      const dist = Math.hypot(c.x - head.x, c.y - head.y);
+      if (dist <= bestDist + 0.5) {
+        bestDist = dist;
+        bestPt = c;
+      }
+    }
+  }
+  return bestPt ?? boundary[0]!;
+}
+
+/** Draw a callout: rounded dashed box or custom P-line polygon, leader from smart edge/corner anchor to the split head bubble, and optional view name. */
 export function drawCallout(model: Pick<ModelState, "elements" | "connections">, item: DrawingItem, toPaper: (p: Vec2) => Vec2, prims: Primitive[]): boolean {
   const spec = item.callout;
   const [a, b, h] = item.points;
   if (!spec || !a || !b || !h) return false;
-  const p = toPaper(a);
-  const q = toPaper(b);
   const head = toPaper(h);
-  const min = { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y) };
-  const max = { x: Math.max(p.x, q.x), y: Math.max(p.y, q.y) };
-  const anchors = drawRoundedRect(min, max, CALLOUT_CORNER_MM, CALLOUT_DASH, prims);
-  const corner = anchors.reduce((best, c) => (Math.hypot(c.x - head.x, c.y - head.y) < Math.hypot(best.x - head.x, best.y - head.y) ? c : best), anchors[0]!);
-  const d = Math.hypot(corner.x - head.x, corner.y - head.y);
+  let anchors: Vec2[];
+  let boundaryPaper: Vec2[];
+  if (spec.boundary && spec.boundary.length >= 3) {
+    boundaryPaper = spec.boundary.map(toPaper);
+    anchors = drawRoundedPolygon(boundaryPaper, CALLOUT_CORNER_MM, CALLOUT_DASH, prims);
+  } else {
+    const p = toPaper(a);
+    const q = toPaper(b);
+    const min = { x: Math.min(p.x, q.x), y: Math.min(p.y, q.y) };
+    const max = { x: Math.max(p.x, q.x), y: Math.max(p.y, q.y) };
+    boundaryPaper = [min, { x: max.x, y: min.y }, max, { x: min.x, y: max.y }];
+    anchors = drawRoundedRect(min, max, CALLOUT_CORNER_MM, CALLOUT_DASH, prims);
+  }
+  if (anchors.length === 0) return false;
+  const anchorPt = calloutLeaderAnchor(boundaryPaper, head, anchors) ?? anchors[0]!;
+  const d = Math.hypot(anchorPt.x - head.x, anchorPt.y - head.y);
   if (d > HEAD_RADIUS_MM) {
     const t = HEAD_RADIUS_MM / d;
-    prims.push({ kind: "line", a: corner, b: { x: head.x + (corner.x - head.x) * t, y: head.y + (corner.y - head.y) * t }, pen: "thin" });
+    prims.push({ kind: "line", a: anchorPt, b: { x: head.x + (anchorPt.x - head.x) * t, y: head.y + (anchorPt.y - head.y) * t }, pen: "thin" });
   }
   const live = calloutHead(model, spec);
   drawSplitBubble(head, HEAD_RADIUS_MM, live, prims);
-  const name = live.viewName ? (live.resolved ? live.viewName : `${live.viewName} (NOT ON A SHEET)`) : "VIEW REMOVED";
-  prims.push({ kind: "text", at: { x: head.x + HEAD_RADIUS_MM + 2, y: head.y + NAME_TEXT_MM * 0.35 }, text: name, size: NAME_TEXT_MM, anchor: "start" });
+  if (spec.showLabel !== false) {
+    const name = live.viewName ? (live.resolved ? live.viewName : `${live.viewName} (NOT ON A SHEET)`) : "VIEW REMOVED";
+    prims.push({ kind: "text", at: { x: head.x + HEAD_RADIUS_MM + 2, y: head.y + NAME_TEXT_MM * 0.35 }, text: name, size: NAME_TEXT_MM, anchor: "start", mask: true });
+  }
   return true;
 }
 
@@ -377,12 +579,20 @@ export function planReferenceViews(model: Pick<ModelState, "elements" | "connect
   if (planView.viewType !== "floor_plan" && planView.viewType !== "ceiling_plan") return [];
   const cropOn = planView.props?.cropView !== false;
   const bounds: ModelClipBounds = { min: planView.cropMin, max: planView.cropMax };
+  const defaultDisc = BUILDING_VIEW_DISCIPLINE;
+  const planDisc = planView.props?.discipline ?? defaultDisc;
+  const allowedByPlan = planView.props?.showReferenceDisciplines;
   const out: ViewElement[] = [];
   for (const v of documentIndex(model).views) {
     if (v.deleted || (v.viewType !== "section" && v.viewType !== "elevation")) continue;
     const cut = v.props?.section;
     if (!cut) continue;
     if (!sameViewFloor(model, planView, v)) continue;
+    // Discipline reference filtering: a vertical view can scope which plan disciplines show its callout,
+    // and a plan can scope which vertical view disciplines it displays.
+    if (cut.showInDisciplines && cut.showInDisciplines.length > 0 && !cut.showInDisciplines.includes(planDisc)) continue;
+    const viewDisc = v.props?.discipline ?? defaultDisc;
+    if (allowedByPlan && !allowedByPlan.includes(viewDisc)) continue;
     if (cropOn) {
       if (v.viewType === "elevation") {
         const mid = { x: (cut.start.x + cut.end.x) / 2, y: (cut.start.y + cut.end.y) / 2 };
@@ -422,6 +632,12 @@ export function referencingSheet(model: Pick<ModelState, "elements" | "connectio
   };
 
   let fallback: ReferencingSheet | null = null;
+  // 0. Explicit configurable source view reference on a section or elevation (e.g. MEP section referring back to its MEP plan).
+  const explicitSourceId = view.props?.section?.referencingViewId;
+  if (explicitSourceId) {
+    const explicitHit = sheetOf(explicitSourceId);
+    if (explicitHit) return explicitHit;
+  }
   // 1. Explicit callout pointing at this view (enlarged plans, detail callouts) via indexed drawing items.
   for (const items of index.itemsByOwner.values()) {
     for (const el of items) {
@@ -568,8 +784,10 @@ export interface EnlargedPlanCommandInput {
   readonly viewId: string;
   readonly calloutId: string;
   readonly name: string;
-  /** Callout rectangle in model mm (also becomes the enlarged plan's crop box). */
-  readonly box: { readonly min: Vec2; readonly max: Vec2 };
+  /** Callout rectangle in model mm (also becomes the enlarged plan's crop box; optional when `polygon` is supplied). */
+  readonly box?: { readonly min: Vec2; readonly max: Vec2 };
+  /** Optional custom closed polygon boundary (L-shape / P-line in model mm, >= 3 vertices); sets both the callout outline and the enlarged plan's polygonal crop region. */
+  readonly polygon?: readonly Vec2[];
   /** Enlarged scale ratio (e.g. 48 = 1/4"=1'-0", 24 = 1/2"=1'-0"). Defaults to 24 if parent is <= 48, else 48. */
   readonly scale?: number;
   /** Optional head label overriding the automatic detail number. */
@@ -585,8 +803,9 @@ export interface EnlargedPlanCommandInput {
 /**
  * Revit-style enlarged plan creation as one atomic step list: creates a
  * cropped plan view on the same level at enlarged scale (inheriting the parent
- * plan's discipline and display settings) and places a live parametric callout
- * bubble on the parent plan pointing to it.
+ * plan's discipline and display settings, with rectangular OR custom polygonal
+ * L-shape / P-line crop) and places a live parametric callout bubble on the
+ * parent plan pointing to it.
  */
 export function enlargedPlanCommands(model: Pick<ModelState, "elements">, input: EnlargedPlanCommandInput): ViewCommand[] | string {
   const parent = model.elements[input.parentViewId];
@@ -594,8 +813,13 @@ export function enlargedPlanCommands(model: Pick<ModelState, "elements">, input:
   if (parent.viewType !== "floor_plan" && parent.viewType !== "ceiling_plan") {
     return `"${parent.name}" is a ${parent.viewType.replace("_", " ")}; enlarged plans are created from a floor plan or ceiling plan.`;
   }
-  const min = { x: Math.min(input.box.min.x, input.box.max.x), y: Math.min(input.box.min.y, input.box.max.y) };
-  const max = { x: Math.max(input.box.min.x, input.box.max.x), y: Math.max(input.box.min.y, input.box.max.y) };
+  const cleanedPoly = input.polygon ? cleanPolygon(input.polygon, 0.5).map((q) => ({ x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10 })) : null;
+  const useCustomPoly = cleanedPoly !== null && cleanedPoly.length >= 3 && !isAxisAlignedRectPolygon(cleanedPoly, 1.0);
+  const polyBounds = cleanedPoly ? polygonBounds(cleanedPoly) : null;
+  const rawBox = input.box ?? polyBounds;
+  if (!rawBox) return "Give either a box or a polygon of at least three corners for the enlarged plan.";
+  const min = { x: Math.min(rawBox.min.x, rawBox.max.x), y: Math.min(rawBox.min.y, rawBox.max.y) };
+  const max = { x: Math.max(rawBox.min.x, rawBox.max.x), y: Math.max(rawBox.min.y, rawBox.max.y) };
   if (max.x - min.x < 25.4 || max.y - min.y < 25.4) return "The enlarged plan box needs a width and height of at least 1 in.";
   const parentProps = parent.props ?? {};
   const parentScale = parentProps.scale ?? 96;
@@ -625,6 +849,7 @@ export function enlargedPlanCommands(model: Pick<ModelState, "elements">, input:
     ...(parentProps.groupDisplay ? { groupDisplay: { ...parentProps.groupDisplay } } : {}),
     ...(parentProps.references ? { references: { ...parentProps.references } } : {}),
     cropView: true,
+    ...(useCustomPoly && cleanedPoly ? { cropPolygon: cleanedPoly } : {}),
   };
   return [
     {
@@ -641,7 +866,11 @@ export function enlargedPlanCommands(model: Pick<ModelState, "elements">, input:
       ownerId: parent.id,
       shape: "callout",
       points: [min, max, head],
-      callout: { viewId: input.viewId, ...(input.label?.trim() ? { label: input.label.trim() } : {}) },
+      callout: {
+        viewId: input.viewId,
+        ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+        ...(useCustomPoly && cleanedPoly ? { boundary: cleanedPoly } : {}),
+      },
     },
   ];
 }

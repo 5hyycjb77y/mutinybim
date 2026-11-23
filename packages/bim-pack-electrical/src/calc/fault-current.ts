@@ -234,20 +234,65 @@ function racewayOf(type: string | undefined): { readonly raceway: Raceway; reado
   return /pvc|hdpe|fiber|alum|nonmet/i.test(type) ? { raceway: "nonmagnetic", assumed: false } : /emt|imc|rmc|rgs|steel|gal/i.test(type) ? { raceway: "steel", assumed: false } : { raceway: "nonmagnetic", assumed: true };
 }
 
+/** How feeder length is obtained when `link.electrical.lengthFt` is not explicitly entered. */
+export type FeederLengthMode = "explicit" | "shortest" | "manhattan";
+
+export interface FaultCurrentOptions {
+  /**
+   * - `"explicit"` (default): use only `link.electrical.lengthFt` (absent -> 0 ft worst-case).
+   * - `"shortest"`: fall back to 3D straight-line ("as the crow flies") distance between equipment — conservative for fault current.
+   * - `"manhattan"`: fall back to 3D rectilinear (|Δx| + |Δy| + |Δz|) routing distance — conservative for voltage drop.
+   */
+  readonly lengthMode?: FeederLengthMode;
+}
+
+function partWorld3Mm(elements: ModelElements, part: PartInstance): { readonly x: number; readonly y: number; readonly z: number } | null {
+  if (part.planned !== undefined) return null;
+  const lvl = elements[part.levelId];
+  const baseZ = lvl?.kind === "level" ? lvl.elevationMm : 0;
+  return { x: part.position.x, y: part.position.y, z: baseZ + (part.offsetMm ?? 0) };
+}
+
+/**
+ * Estimate a feeder's length in feet from the 3D positions of its source and fed
+ * equipment when no explicit `lengthFt` is set. Returns null when either end is
+ * unplaced.
+ */
+export function estimatedFeederLengthFt(
+  elements: ModelElements,
+  sourceId: string,
+  targetId: string,
+  mode: Exclude<FeederLengthMode, "explicit"> = "shortest",
+): number | null {
+  const src = elements[sourceId];
+  const dst = elements[targetId];
+  if (src?.kind !== "part" || dst?.kind !== "part") return null;
+  const a = partWorld3Mm(elements, src);
+  const b = partWorld3Mm(elements, dst);
+  if (!a || !b) return null;
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  const dz = Math.abs(b.z - a.z);
+  const mm = mode === "manhattan" ? dx + dy + dz : Math.hypot(dx, dy, dz);
+  return mm / 304.8;
+}
+
 const faultCache = new WeakMap<ModelElements, Map<string, ModelFaultNode>>();
 
 /** Available fault current at a piece of distribution equipment (cached per model revision); null when it isn't distribution equipment. */
-export function faultCurrentAt(elements: ModelElements, partId: string): ModelFaultNode | null {
+export function faultCurrentAt(elements: ModelElements, partId: string, opts?: FaultCurrentOptions): ModelFaultNode | null {
+  const mode: FeederLengthMode = opts?.lengthMode ?? "explicit";
   let memo = faultCache.get(elements);
   if (!memo) {
     memo = new Map();
     faultCache.set(elements, memo);
   }
-  return nodeAt(elements, partId, memo, new Set());
+  return nodeAt(elements, partId, memo, new Set(), mode);
 }
 
-function nodeAt(elements: ModelElements, partId: string, memo: Map<string, ModelFaultNode>, visiting: Set<string>): ModelFaultNode | null {
-  const cached = memo.get(partId);
+function nodeAt(elements: ModelElements, partId: string, memo: Map<string, ModelFaultNode>, visiting: Set<string>, mode: FeederLengthMode): ModelFaultNode | null {
+  const cacheKey = mode === "explicit" ? partId : `${partId}::${mode}`;
+  const cached = memo.get(cacheKey);
   if (cached) return cached;
   const part = elements[partId];
   if (part?.kind !== "part") return null;
@@ -256,7 +301,7 @@ function nodeAt(elements: ModelElements, partId: string, memo: Map<string, Model
   const ratingA = interruptingRatingA(elements, part);
   const done = (availableA: number | null, trail: readonly string[], reason: string | null, chain: readonly string[] = [], entered = false): ModelFaultNode => {
     const node: ModelFaultNode = { elementId: partId, name: info.name, availableA, ratingA, passes: availableA === null || ratingA === null ? null : ratingA >= availableA - 0.5, entered, trail, chain, reason };
-    memo.set(partId, node);
+    memo.set(cacheKey, node);
     return node;
   };
   const entered = partNumber(elements, part, AVAILABLE_FAULT_PARAM);
@@ -266,7 +311,7 @@ function nodeAt(elements: ModelElements, partId: string, memo: Map<string, Model
   if (visiting.has(partId)) return done(null, [], `${info.name} is fed in a loop`);
   visiting.add(partId);
   const parentPart = elements[feeder.source.elementId];
-  const parent = nodeAt(elements, feeder.source.elementId, memo, visiting);
+  const parent = nodeAt(elements, feeder.source.elementId, memo, visiting, mode);
   visiting.delete(partId);
   if (!parent || parentPart?.kind !== "part") return done(null, [], `${info.name}'s feeder comes from something that isn't distribution equipment`);
   if (parent.availableA === null) return done(null, parent.trail, `Not known at ${parent.name}, which feeds it: ${parent.reason ?? "no value"}`);
@@ -290,7 +335,10 @@ function nodeAt(elements: ModelElements, partId: string, memo: Map<string, Model
   const voltageV = system.lineToLine;
   const feederName = serviceLinkName(elements, feeder);
   const construction = linkConstruction(elements, feeder);
-  const lengthFt = feeder.electrical?.lengthFt;
+  const explicitLen = feeder.electrical?.lengthFt;
+  const derivedLen = explicitLen === undefined && mode !== "explicit" ? estimatedFeederLengthFt(elements, feeder.source.elementId, partId, mode) : null;
+  const lengthFt = explicitLen ?? derivedLen ?? undefined;
+  const lengthNote = derivedLen !== null ? ` (estimated ${mode === "manhattan" ? "X+Y+Z" : "shortest 3D"})` : "";
   const conductors = construction.conductors;
   const size = conductors ? parseConductorSize(conductors.phaseSize) : null;
   if (lengthFt === undefined || !conductors || !size) {
@@ -303,10 +351,11 @@ function nodeAt(elements: ModelElements, partId: string, memo: Map<string, Model
   const rw = racewayOf(construction.feederType?.conduit?.type);
   const step = conductorFaultStep(startA, { lengthFt, size, material, raceway: rw.raceway, sets: conductors.sets, voltageV, phases });
   if (!step) return done(null, trail, `There is no C value for ${sizeLabel(size)} ${material} in ${rw.raceway} raceway, so ${feederName} can't be calculated`);
+  const displayLen = Math.round(lengthFt * 10) / 10;
   trail.push(
-    `Feeder ${feederName}: ${conductors.sets > 1 ? `${conductors.sets} sets of ` : ""}${sizeLabel(size)} ${material === "copper" ? "Cu" : "Al"} in ${rw.raceway === "steel" ? "steel" : "non-magnetic"} raceway${rw.assumed ? " (raceway not stated: non-magnetic, the higher fault current)" : ""}, ${lengthFt} ft, C = ${step.c.toLocaleString("en-US")}, ${voltageV} V ${phases}-phase: f = ${round(step.f, 4)}, M = ${round(step.m, 4)} → ${amps(step.availableA)}`,
+    `Feeder ${feederName}: ${conductors.sets > 1 ? `${conductors.sets} sets of ` : ""}${sizeLabel(size)} ${material === "copper" ? "Cu" : "Al"} in ${rw.raceway === "steel" ? "steel" : "non-magnetic"} raceway${rw.assumed ? " (raceway not stated: non-magnetic, the higher fault current)" : ""}, ${displayLen} ft${lengthNote}, C = ${step.c.toLocaleString("en-US")}, ${voltageV} V ${phases}-phase: f = ${round(step.f, 4)}, M = ${round(step.m, 4)} → ${amps(step.availableA)}`,
   );
-  chain.push(`${lengthFt} ft ${conductors.sets > 1 ? `${conductors.sets}×` : ""}${sizeLabel(size)} ${material === "copper" ? "Cu" : "Al"}`);
+  chain.push(`${displayLen} ft ${conductors.sets > 1 ? `${conductors.sets}×` : ""}${sizeLabel(size)} ${material === "copper" ? "Cu" : "Al"}`);
   return done(step.availableA, trail, null, chain);
 }
 

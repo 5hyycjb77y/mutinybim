@@ -250,6 +250,10 @@ export interface ScheduleTable {
   readonly headingHeight: number;
   readonly titleHeight: number;
   readonly rowHeight: number;
+  /** Per-row height (expands cleanly when any cell wraps to multiple lines; same as `rowHeight` for single-line rows). */
+  readonly rowHeights: readonly number[];
+  /** Pre-wrapped lines per [row][column] so printed schedules never truncate text with an ellipsis. */
+  readonly cellLines: readonly (readonly (readonly string[])[])[];
   readonly textSize: number;
   /** Paper mm. */
   readonly size: Vec2;
@@ -259,25 +263,50 @@ function measure(text: string, size: number, bold: boolean): number {
   return textWidth(bold ? "bold" : "regular", text, emForCapHeight(size)) * WIDTH_SAFETY;
 }
 
+/** Parse a schedule cell carrying a URL (`https://...` or `Label|https://...`) for clickable sheet links. */
+export function parseScheduleCellLink(raw: string): { readonly label: string; readonly href: string } | null {
+  const trimmed = raw.trim();
+  if (/^https?:\/\/\S+$/i.test(trimmed)) return { label: "CUT SHEET ↗", href: trimmed };
+  const bar = trimmed.indexOf("|");
+  if (bar > 0) {
+    const label = trimmed.slice(0, bar).trim();
+    const href = trimmed.slice(bar + 1).trim();
+    if (label && /^https?:\/\/\S+$/i.test(href)) return { label: `${label} ↗`, href };
+  }
+  return null;
+}
+
 /** Most lines a heading wraps to. */
 const HEADING_LINES = 2;
+/** Maximum lines a wrapped body cell expands to so every printed specification remains complete and readable. */
+const MAX_CELL_LINES = 5;
 
-/** A heading broken at spaces to fit its column, at most HEADING_LINES lines (the last may still be too wide). */
-function wrapHeading(heading: string, width: number, size: number): string[] {
-  const room = width - PAD_MM * 2;
-  if (measure(heading, size, true) <= room) return [heading];
-  const words = heading.split(/\s+/).filter(Boolean);
+/** Word-wrap text into lines fitting `width`, never truncating unless a single unbroken token exceeds the column. */
+function wrapCellText(text: string, width: number, size: number, bold: boolean, maxLines = MAX_CELL_LINES): string[] {
+  const link = parseScheduleCellLink(text);
+  const shown = link ? link.label : text;
+  const room = width - PAD_MM * 2 + 0.01;
+  if (!shown || measure(shown, size, bold) <= room) return [shown];
+  const words = shown.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return [shown];
   const lines: string[] = [];
   let line = "";
   for (const w of words) {
     const next = line ? `${line} ${w}` : w;
-    if (line && measure(next, size, true) > room && lines.length < HEADING_LINES - 1) {
+    if (line && measure(next, size, bold) > room && lines.length < maxLines - 1) {
       lines.push(line);
       line = w;
-    } else line = next;
+    } else {
+      line = next;
+    }
   }
   if (line) lines.push(line);
   return lines;
+}
+
+/** A heading broken at spaces to fit its column, at most HEADING_LINES lines (the last may still be too wide). */
+function wrapHeading(heading: string, width: number, size: number): string[] {
+  return wrapCellText(heading, width, size, true, HEADING_LINES);
 }
 
 /** Headings that still don't fit their column after wrapping, in plain words (empty: every heading fits). */
@@ -322,10 +351,12 @@ export function layoutScheduleTable(evaluated: EvaluatedSchedule, opts: Schedule
       if (style === "group") continue;
       const bold = style === "footer" || style === "total";
       const cell = row[i] ?? "";
-      const key = bold ? `\u0001${cell}` : cell;
+      const link = parseScheduleCellLink(cell);
+      const display = link ? link.label : cell;
+      const key = bold ? `\u0001${display}` : display;
       if (seen.has(key)) continue;
       seen.add(key);
-      longest = Math.max(longest, measure(cell, textSize, bold));
+      longest = Math.max(longest, measure(display, textSize, bold) + (link ? 4.5 : 0));
     }
     return Math.min(MAX_COL_MM, Math.max(MIN_COL_MM, longest + PAD_MM * 2));
   });
@@ -338,28 +369,47 @@ export function layoutScheduleTable(evaluated: EvaluatedSchedule, opts: Schedule
   const headingLines = evaluated.headings.map((h, i) => wrapHeading(h, widths[i] ?? MIN_COL_MM, textSize));
   const lineCount = Math.max(1, ...headingLines.map((l) => l.length));
   const headingHeight = rowHeight + (lineCount - 1) * textSize * 1.4;
-  const height = Math.max(25.4, titleHeight + headingHeight + rowHeight * Math.max(evaluated.rows.length, placeholder ? 1 : 0));
-  return { evaluated, placeholder, headingLines, headingHeight, columnWidths: widths, titleHeight, rowHeight, textSize, size: { x: Math.round(width * 100) / 100, y: Math.round(height * 100) / 100 } };
+  const lead = textSize * 1.38;
+  const cellLines: string[][][] = [];
+  const rowHeights: number[] = [];
+  evaluated.rows.forEach((cells, r) => {
+    const style = evaluated.rowStyles?.[r];
+    if (style === "group") {
+      const wrapped = wrapCellText(cells.join(""), width, textSize, true);
+      cellLines.push([wrapped]);
+      rowHeights.push(rowHeight + (wrapped.length - 1) * lead);
+      return;
+    }
+    const bold = style === "footer" || style === "total";
+    const rowWrapped = cells.map((cell, j) => wrapCellText(cell, widths[j] ?? MIN_COL_MM, textSize, bold));
+    const maxL = Math.max(1, ...rowWrapped.map((l) => l.length));
+    cellLines.push(rowWrapped);
+    rowHeights.push(rowHeight + (maxL - 1) * lead);
+  });
+  const bodyH = rowHeights.length > 0 ? rowHeights.reduce((a, b) => a + b, 0) : placeholder ? rowHeight : 0;
+  const height = Math.max(25.4, titleHeight + headingHeight + bodyH);
+  return { evaluated, placeholder, headingLines, headingHeight, columnWidths: widths, titleHeight, rowHeight, rowHeights, cellLines, textSize, size: { x: Math.round(width * 100) / 100, y: Math.round(height * 100) / 100 } };
 }
 
-/** Clip cell text to its column so a long value never runs into the next one. */
+/** Clip a single line to its column as a final guard for unbroken tokens. */
 function fit(text: string, width: number, size: number, bold: boolean): string {
-  if (measure(text, size, bold) <= width - PAD_MM * 2) return text;
+  if (measure(text, size, bold) <= width - PAD_MM * 2 + 0.01) return text;
   let out = text;
-  while (out.length > 1 && measure(`${out}…`, size, bold) > width - PAD_MM * 2) out = out.slice(0, -1);
+  while (out.length > 1 && measure(`${out}…`, size, bold) > width - PAD_MM * 2 + 0.01) out = out.slice(0, -1);
   return `${out}…`;
 }
 
 /** Draw the table with its top-left corner at `topLeft` (paper mm). */
 export function drawScheduleTable(prims: Primitive[], table: ScheduleTable, topLeft: Vec2): void {
-  const { evaluated, placeholder, headingLines, headingHeight, columnWidths, titleHeight, rowHeight, textSize } = table;
+  const { evaluated, placeholder, headingLines, headingHeight, columnWidths, titleHeight, rowHeight, rowHeights, cellLines, textSize } = table;
   const width = columnWidths.reduce((a, b) => a + b, 0);
   const x0 = topLeft.x;
   const y0 = topLeft.y;
   prims.push({ kind: "text", at: { x: x0 + width / 2, y: y0 + titleHeight * 0.68 }, text: evaluated.title, size: textSize * 1.2, anchor: "middle", bold: true });
   const gridTop = y0 + titleHeight;
   const bodyTop = gridTop + headingHeight;
-  const columnsBottom = bodyTop + rowHeight * evaluated.rows.length;
+  const totalBodyH = rowHeights.reduce((a, b) => a + b, 0);
+  const columnsBottom = bodyTop + totalBodyH;
   const bottom = columnsBottom + (placeholder ? rowHeight : 0);
   prims.push({ kind: "rect", at: { x: x0, y: y0 }, size: { x: width, y: bottom - y0 }, pen: "wide" });
   prims.push({ kind: "line", a: { x: x0, y: gridTop }, b: { x: x0 + width, y: gridTop }, pen: "medium" });
@@ -372,20 +422,42 @@ export function drawScheduleTable(prims: Primitive[], table: ScheduleTable, topL
     hx += w;
   });
   const styles = evaluated.rowStyles;
+  const lead = textSize * 1.38;
+  const rowTops: number[] = [];
+  let ry = bodyTop;
   evaluated.rows.forEach((cells, r) => {
-    const y = bodyTop + rowHeight * r;
+    const y = ry;
+    rowTops.push(y);
+    const rh = rowHeights[r] ?? rowHeight;
+    ry += rh;
     const style = styles?.[r];
     const strong = style === "group" || style === "footer" || style === "total";
     prims.push({ kind: "line", a: { x: x0, y }, b: { x: x0 + width, y }, pen: r === 0 || strong ? "medium" : "thin" });
     if (style === "group") {
-      prims.push({ kind: "text", at: { x: x0 + PAD_MM, y: y + rowHeight / 2 + textSize / 2 }, text: fit(cells.join(""), width, textSize, true), size: textSize, anchor: "start", bold: true });
+      const lines = cellLines[r]?.[0] ?? [cells.join("")];
+      const first = y + rh / 2 + textSize / 2 - ((lines.length - 1) * lead) / 2;
+      lines.forEach((line, k) => prims.push({ kind: "text", at: { x: x0 + PAD_MM, y: first + k * lead }, text: fit(line, width, textSize, true), size: textSize, anchor: "start", bold: true }));
       return;
     }
     const bold = style === "footer" || style === "total";
     let x = x0;
     cells.forEach((cell, j) => {
       const w = columnWidths[j] ?? MIN_COL_MM;
-      prims.push({ kind: "text", at: { x: x + w / 2, y: y + rowHeight / 2 + textSize / 2 }, text: fit(cell, w, textSize, bold), size: textSize, anchor: "middle", bold });
+      const link = parseScheduleCellLink(cell);
+      const lines = cellLines[r]?.[j] ?? [link ? link.label : cell];
+      const first = y + rh / 2 + textSize / 2 - ((lines.length - 1) * lead) / 2;
+      lines.forEach((line, k) => {
+        if (!line) return;
+        prims.push({
+          kind: "text",
+          at: { x: x + w / 2, y: first + k * lead },
+          text: fit(line, w, textSize, bold),
+          size: textSize,
+          anchor: "middle",
+          bold,
+          ...(link ? { href: link.href } : {}),
+        });
+      });
       x += w;
     });
   });
@@ -400,9 +472,10 @@ export function drawScheduleTable(prims: Primitive[], table: ScheduleTable, topL
     let from = gridTop;
     styles.forEach((style, r) => {
       if (style !== "group") return;
-      const y = bodyTop + rowHeight * r;
+      const y = rowTops[r] ?? bodyTop;
+      const rh = rowHeights[r] ?? rowHeight;
       if (y > from) spans.push([from, y]);
-      from = y + rowHeight;
+      from = y + rh;
     });
     if (columnsBottom > from) spans.push([from, columnsBottom]);
   }

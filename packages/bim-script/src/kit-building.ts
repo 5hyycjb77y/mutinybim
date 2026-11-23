@@ -2,10 +2,14 @@ import {
   BOUNDING_ELEMENT_POINT,
   MATERIAL_ID_KEY,
   OPENING_SILL_KEY,
+  TILE_2FT_MM,
+  TILE_4FT_MM,
   allMaterials,
   asElementId,
   assemblyThermalSummary,
   builtinPartType,
+  ceilingGrid,
+  ceilingGridCellCenter,
   nearestWallFace,
   planLevelSync,
   surfacesAt,
@@ -13,6 +17,8 @@ import {
   wallFaceSideToward,
   wallStationOf,
   type AssemblyThermalSummary,
+  type Ceiling,
+  type CeilingGrid,
   type Command,
   type LevelSyncPlan,
   type MaterialLayer,
@@ -22,7 +28,7 @@ import {
   type Wall,
 } from "@permitzip/bim-kernel";
 import { activePackSet } from "@permitzip/bim-kernel/packs";
-import { measureIn, type Measure } from "@permitzip/bim-units";
+import { measure, measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
 import { existingLevel, levelOf } from "./levels";
 import { ScriptReadError } from "./slice";
@@ -262,6 +268,35 @@ function storeysOf(ctx: ScriptContext, spec: LevelSyncSpec): SyncStorey[] {
   return spec.storeys.map((s) => ({ storeyId: s.storeyId, name: s.name, elevationMm: mm(s.elevation, `Storey ${s.name} elevation`), levelId: s.levelId ?? ctx.id("level") }));
 }
 
+/** Real-scale ACT ceiling tile grid definition: exact 2'×4' / 2'×2' preset or custom tile dimensions, with anchor origin and rotation. */
+export type CeilingGridSpec =
+  | {
+      /** Standard imperial tile pitch: `"2x4"` (48"×24" = 1219.2×609.6 mm) or `"2x2"` (24"×24" = 609.6×609.6 mm). */
+      readonly preset: "2x4" | "2x2";
+      readonly origin?: PlanPoint;
+      readonly rotationDeg?: number;
+    }
+  | {
+      readonly preset?: undefined;
+      /** Tile pitch along local X (e.g. `units.ft(4)` for a 2'×4' tile or `units.ft(2)` for 2'×2'). */
+      readonly spacingX: Measure;
+      /** Tile pitch along local Y (e.g. `units.ft(2)`). */
+      readonly spacingY: Measure;
+      readonly origin?: PlanPoint;
+      readonly rotationDeg?: number;
+    };
+
+function ceilingGridMm(spec: CeilingGridSpec): CeilingGrid {
+  const spacingXMm = "preset" in spec && spec.preset ? (spec.preset === "2x4" ? TILE_4FT_MM : TILE_2FT_MM) : mm((spec as { spacingX: Measure }).spacingX, "Ceiling grid spacingX");
+  const spacingYMm = "preset" in spec && spec.preset ? TILE_2FT_MM : mm((spec as { spacingY: Measure }).spacingY, "Ceiling grid spacingY");
+  return {
+    spacingXMm,
+    spacingYMm,
+    ...(spec.origin ? { origin: planMm(spec.origin, "Ceiling grid origin") } : {}),
+    ...(spec.rotationDeg !== undefined ? { rotationDeg: spec.rotationDeg } : {}),
+  };
+}
+
 /** A ceiling: its outline on plan and its height above the level. */
 export interface CeilingSpec {
   /** The level it is on: its id, or the name of exactly one level the script read. */
@@ -280,6 +315,8 @@ export interface CeilingSpec {
   readonly reference?: PlanPoint;
   /** Ceiling form: flat (drop/ACT), sloped, floating acoustic cloud, soffit, or open_to_structure. */
   readonly form?: "flat" | "sloped" | "cloud" | "soffit" | "open_to_structure";
+  /** Explicit real-scale ACT ceiling tile grid (`{ preset: "2x4" | "2x2" }` or custom `spacingX`/`spacingY`, `origin`, `rotationDeg`). */
+  readonly grid?: CeilingGridSpec;
   /** A ceiling type the model has (what it is made of: an acoustic tile, gypsum board). */
   readonly typeId?: string;
   /** Registered material id (from `building.materials()`), e.g. `"architecture.act_ceiling"` or `"architecture.gypsum_partition"`. */
@@ -637,7 +674,7 @@ export const building = {
     ctx.edit({ type: "create_space", spaces: [space] });
     return spaceId;
   },
-  /** A ceiling at a height above its level, flat or sloped; returns its id. Its type (what it is made of) is a ceiling type the model has. */
+  /** A ceiling at a height above its level, flat or sloped; returns its id. Pass `grid` for a real-scale configurable ACT tile grid (`2x4`, `2x2`, or custom pitch/origin/rotation). */
   ceiling(ctx: ScriptContext, spec: CeilingSpec): string {
     const ceilingId = spec.id ?? ctx.id("ceiling");
     const ceiling: CreateCeiling["ceilings"][number] = {
@@ -650,6 +687,7 @@ export const building = {
       ...(spec.holes ? { holes: spec.holes.map((h, i) => h.map((p, j) => planMm(p, `Hole ${i + 1} corner ${j + 1}`))) } : {}),
       ...(spec.slope ? { slope: spec.slope } : {}),
       ...(spec.reference ? { reference: planMm(spec.reference, "Height reference") } : {}),
+      ...(spec.grid ? { grid: ceilingGridMm(spec.grid) } : {}),
       ...(spec.typeId ? { typeId: spec.typeId } : {}),
     };
     ctx.edit({ type: "create_ceiling", ceilings: [ceiling] });
@@ -657,6 +695,34 @@ export const building = {
       ctx.edit({ type: "set_element_values", elementIds: [ceilingId], values: { [MATERIAL_ID_KEY]: spec.material } });
     }
     return ceilingId;
+  },
+  /**
+   * Snaps a plan point `near` to the exact center of the nearest real-scale ACT ceiling tile cell
+   * so 2'×4' LED troffers (full cell) and 2'×2' HVAC diffusers/grilles (pass `{ deviceWidth: units.in(24), deviceDepth: units.in(24) }`)
+   * seat cleanly inside T-bar grid tiles. Pass either a ceiling element id (already created or read) or a `CeilingGridSpec`.
+   */
+  ceilingTileCenter(
+    ctx: ScriptContext,
+    ceilingOrGrid: string | CeilingGridSpec,
+    near: PlanPoint,
+    opts?: { readonly deviceWidth?: Measure; readonly deviceDepth?: Measure },
+  ): PlanPoint {
+    let grid: CeilingGrid | null;
+    if (typeof ceilingOrGrid === "string") {
+      grid = onWorking(ctx, "building.ceilingTileCenter", (model) => {
+        const el = model.elements[ceilingOrGrid];
+        if (!el || el.kind !== "ceiling") throw new ScriptRunError(`No ceiling "${ceilingOrGrid}" in this run or what the script reads.`);
+        return ceilingGrid(el as Ceiling);
+      });
+      if (!grid) throw new ScriptRunError(`Ceiling "${ceilingOrGrid}" has no explicit tile grid; pass grid: { preset: "2x4" } on building.ceiling or pass a CeilingGridSpec.`);
+    } else {
+      grid = ceilingGridMm(ceilingOrGrid);
+    }
+    const p = ceilingGridCellCenter(grid, planMm(near, "Ceiling tile target"), {
+      ...(opts?.deviceWidth ? { deviceWidthMm: mm(opts.deviceWidth, "Device width") } : {}),
+      ...(opts?.deviceDepth ? { deviceDepthMm: mm(opts.deviceDepth, "Device depth") } : {}),
+    });
+    return { x: measure("length", p.x, "mm"), y: measure("length", p.y, "mm") };
   },
 };
 

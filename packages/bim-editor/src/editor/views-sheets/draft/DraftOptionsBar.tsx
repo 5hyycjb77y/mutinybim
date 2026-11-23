@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, ChevronDown, Crosshair, Magnet, RotateCw, X } from 'lucide-react'
+import { Check, ChevronDown, Crosshair, Magnet, Pencil, PenTool, RotateCcw, RotateCw, X } from 'lucide-react'
 import { DETAIL_LINE_STYLES, HATCH_PATTERNS, SNAP_KINDS, detailLineStyleOf, type HatchPattern, type SnapKind } from '@permitzip/bim-kernel'
 import { Button } from '../../../ui/button'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '../../../ui/dropdown-menu'
@@ -146,11 +146,24 @@ function Check2({ id, label, checked, onChange }: { id: string; label: string; c
   )
 }
 
-/** A region's boundary sketch: what to do, Finish and Cancel. */
+/** A region or callout boundary sketch: what to do, Finish, optional extra actions, and Cancel. */
 export interface BoundarySketch {
   readonly prompt: string
   readonly onFinish: () => void
   readonly onCancel: () => void
+  readonly finishLabel?: string
+  readonly onSketchNew?: () => void
+  readonly onResetRect?: () => void
+}
+
+/** Floating quick actions for a selected enlarged-plan callout right on the sheet/view. */
+export interface CalloutSelectionActions {
+  readonly isPolygon: boolean
+  readonly canEdit: boolean
+  readonly onEditBoundary: () => void
+  readonly onSketchNew: () => void
+  readonly onResetRect?: () => void
+  readonly onOpenView?: () => void
 }
 
 function Choice<T extends string>({ id, label, value, options, labels, onChange }: { id: string; label: string; value: T; options: readonly T[]; labels: Record<T, string>; onChange: (v: T) => void }) {
@@ -198,6 +211,9 @@ export function DraftOptionsBar({
   prompt,
   onCancel,
   sketch = null,
+  calloutMode,
+  onCalloutMode,
+  calloutActions = null,
   className = '',
 }: {
   tool: string
@@ -209,6 +225,9 @@ export function DraftOptionsBar({
   prompt: string | null
   onCancel: () => void
   sketch?: BoundarySketch | null
+  calloutMode?: 'rect' | 'pline'
+  onCalloutMode?: (mode: 'rect' | 'pline') => void
+  calloutActions?: CalloutSelectionActions | null
   /** Placement over the drawing (the bar is absolutely positioned by its parent). */
   className?: string
 }) {
@@ -216,7 +235,8 @@ export function DraftOptionsBar({
   const setP = (patch: Partial<ModifyParams>) => onParams({ ...params, ...patch })
   const op = pending?.kind === 'modify' ? pending.op : null
   const drawing = !pending && (isDraftShape(tool) || LINEWORK.has(tool))
-  const aids = drawing || op !== null || tool === 'dimension'
+  const isCalloutTool = !pending && tool === 'callout'
+  const aids = drawing || op !== null || tool === 'dimension' || isCalloutTool
   const frame = `pointer-events-auto flex max-w-full flex-wrap items-center gap-3 rounded-md border bg-background/95 px-3 py-1.5 text-sm shadow-sm ${className}`
   if (sketch) {
     return (
@@ -224,9 +244,21 @@ export function DraftOptionsBar({
         <span className="font-medium" role="status" aria-live="polite" data-testid="boundary-prompt">
           {sketch.prompt}
         </span>
+        {sketch.onSketchNew && (
+          <Button size="sm" variant="outline" onClick={sketch.onSketchNew} data-testid="boundary-sketch-new">
+            <PenTool data-icon="inline-start" />
+            Sketch new P-line
+          </Button>
+        )}
+        {sketch.onResetRect && (
+          <Button size="sm" variant="outline" onClick={sketch.onResetRect} data-testid="boundary-reset-rect">
+            <RotateCcw data-icon="inline-start" />
+            Reset rectangle
+          </Button>
+        )}
         <Button size="sm" onClick={sketch.onFinish} data-testid="boundary-finish">
           <Check data-icon="inline-start" />
-          Finish edit (Enter)
+          {sketch.finishLabel ?? 'Finish edit (Enter)'}
         </Button>
         <Button size="sm" variant="ghost" onClick={sketch.onCancel} data-testid="boundary-cancel">
           <X data-icon="inline-start" />
@@ -235,13 +267,53 @@ export function DraftOptionsBar({
       </div>
     )
   }
-  if (!pending && !drawing && !prompt && !aids) return null
+  if (!pending && !drawing && !prompt && !aids && !calloutActions) return null
+  if (!pending && !drawing && !prompt && !aids && calloutActions) {
+    return (
+      <div className={frame} data-testid="draft-options">
+        <span className="text-xs font-medium text-muted-foreground">{calloutActions.isPolygon ? 'Custom P-Line Callout' : 'Callout Boundary'}</span>
+        {calloutActions.canEdit && (
+          <>
+            <Button size="sm" variant="outline" onClick={calloutActions.onEditBoundary} data-testid="callout-bar-edit-boundary">
+              <Pencil data-icon="inline-start" />
+              Edit Boundary (P-Line)
+            </Button>
+            <Button size="sm" variant="outline" onClick={calloutActions.onSketchNew} data-testid="callout-bar-sketch-pline">
+              <PenTool data-icon="inline-start" />
+              Sketch P-Line
+            </Button>
+            {calloutActions.isPolygon && calloutActions.onResetRect && (
+              <Button size="sm" variant="ghost" onClick={calloutActions.onResetRect} data-testid="callout-bar-reset-rect">
+                <RotateCcw data-icon="inline-start" />
+                Reset Rectangle
+              </Button>
+            )}
+          </>
+        )}
+        {calloutActions.onOpenView && (
+          <Button size="sm" variant="secondary" onClick={calloutActions.onOpenView} data-testid="callout-bar-open-view">
+            Open View
+          </Button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className={frame} data-testid="draft-options">
       {prompt && (
         <span className="font-medium" role="status" aria-live="polite" data-testid="draft-prompt">
           {prompt}
         </span>
+      )}
+      {isCalloutTool && calloutMode && onCalloutMode && (
+        <ToggleGroup type="single" size="sm" variant="outline" value={calloutMode} onValueChange={(v) => v && onCalloutMode(v === 'pline' ? 'pline' : 'rect')} aria-label="Callout shape" data-testid="callout-shape-mode">
+          <ToggleGroupItem value="rect" className="h-7 px-2 text-xs" title="Drag a rectangular enlarged callout (snaps to walls & grids)">
+            Rectangle
+          </ToggleGroupItem>
+          <ToggleGroupItem value="pline" className="h-7 px-2 text-xs" title="Sketch a custom L-shape or P-line callout snapping to walls & grids">
+            Sketch P-Line
+          </ToggleGroupItem>
+        </ToggleGroup>
       )}
       {drawing && LINEWORK.has(tool) && !(tool === 'region' && settings.masking) && (
         <>

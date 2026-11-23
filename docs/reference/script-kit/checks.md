@@ -6,17 +6,18 @@ Checks a script runs on its own output before a person sees it.
 
 Every example below is a complete script that passes the kit's checks; the kit's tests run each one.
 
-- [`checks.clashes`](#checksclashes): The coordination check on the model as the script has it so far (hard and soft clashes, clearances; or the default, documents or issue rule set), worst first, each with its rule, elements, place and words.
+- [`checks.clashes`](#checksclashes): Configurable coordination & clash check on the model as the script has it so far: filter by clash types (hard, self, soft, clearance, dedicated_space, ceiling, placement, connectors), minSeverity, level, ids, tolerances and maxFindings.
+- [`checks.clashReport`](#checksclashreport): Structured clash & clearance report with severity/rule totals and configurable verbosity (detail: 'summary' | 'compact' | 'full').
 
 ## checks.clashes
 
-The coordination check on the model as the script has it so far (hard and soft clashes, clearances; or the default, documents or issue rule set), worst first, each with its rule, elements, place and words. Read only: move things with ctx.edit.
+Configurable coordination & clash check on the model as the script has it so far: filter by clash types (hard, self, soft, clearance, dedicated_space, ceiling, placement, connectors), minSeverity, level, ids, tolerances and maxFindings. Read only: move things with ctx.edit.
 
 ```ts
-clashes(ctx: ScriptContext, spec?: { ruleset?: "default" | "coordination" | "documents" | "issue"; level?: string; ids?: readonly string[]; tolerance?: Measure; skipRules?: readonly string[] }): readonly Finding[]
+clashes(ctx: ScriptContext, spec?: { ruleset?: "default" | "coordination" | "documents" | "issue"; types?: readonly ClashType[]; minSeverity?: "error" | "warning" | "info"; scope?: "touched" | "level" | "all"; level?: string; ids?: readonly string[]; tolerance?: Measure; softClearance?: Measure; structureClearance?: Measure; maxFindings?: number; skipRules?: readonly string[] }): readonly Finding[]
 ```
 
-Topics: clash, clash check, coordination, lint, interference, clearance
+Topics: clash, clash check, coordination, lint, interference, clearance, dedicated space
 
 <details><summary>Example script</summary>
 
@@ -30,8 +31,38 @@ export default defineScript({
     const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Mechanical", scale: 48, cutHeight: units.ft(10) });
     routes.along(ctx, { level: "L1", domain: "duct", size: routes.rect(units.in(20), units.in(12)), system: { id: "sa-1", kind: "supply_air" }, height: units.ft(9), points: [{ x: units.ft(2), y: units.ft(10) }, { x: units.ft(28), y: units.ft(10) }] });
     routes.along(ctx, { level: "L1", domain: "duct", size: routes.rect(units.in(20), units.in(12)), system: { id: "ra-1", kind: "return_air" }, height: units.ft(9), points: [{ x: units.ft(15), y: units.ft(2) }, { x: units.ft(15), y: units.ft(18) }] });
-    const found = checks.clashes(ctx);
-    ctx.label(found.length > 0 ? `Ducts routed; ${found.length} clash to resolve: ${found[0]?.message ?? ""}` : "Ducts routed, no clashes");
+    const found = checks.clashes(ctx, { types: ["hard", "clearance", "dedicated_space"], minSeverity: "error" });
+    ctx.label(found.length > 0 ? `Ducts routed; ${found.length} hard clash to resolve: ${found[0]?.message ?? ""}` : "Ducts routed, no clashes");
+  },
+});
+```
+
+</details>
+
+## checks.clashReport
+
+Structured clash & clearance report with severity/rule totals and configurable verbosity (detail: 'summary' | 'compact' | 'full'). Same options are also available directly on bim_run_script(..., { clashes: ... }).
+
+```ts
+clashReport(ctx: ScriptContext, spec?: ClashCheckSpec & { detail?: "summary" | "compact" | "full" }): ClashReport
+```
+
+Topics: clash, clash report, coordination, bim_run_script, clearance, summary
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "route",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Mechanical", scale: 48, cutHeight: units.ft(10) });
+    routes.along(ctx, { level: "L1", domain: "duct", size: routes.rect(units.in(20), units.in(12)), system: { id: "sa-1", kind: "supply_air" }, height: units.ft(9), points: [{ x: units.ft(2), y: units.ft(10) }, { x: units.ft(28), y: units.ft(10) }] });
+    routes.along(ctx, { level: "L1", domain: "duct", size: routes.rect(units.in(20), units.in(12)), system: { id: "ra-1", kind: "return_air" }, height: units.ft(9), points: [{ x: units.ft(15), y: units.ft(2) }, { x: units.ft(15), y: units.ft(18) }] });
+    const report = checks.clashReport(ctx, { types: ["hard", "self", "clearance"], detail: "compact", maxFindings: 15 });
+    ctx.report("clashes", report);
   },
 });
 ```

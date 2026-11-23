@@ -168,7 +168,51 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
     for (const [viewId, vp] of index.viewportByView) map.set(viewId, numbers.get(vp.sheetId) ?? '')
     return map
   }, [index])
-  const sheets = useMemo(() => [...(index?.sheets ?? [])].sort((a, b) => a.number.localeCompare(b.number, undefined, { numeric: true })), [index])
+  const sheets = useMemo(
+    () =>
+      [...(index?.sheets ?? [])].sort(
+        (a, b) =>
+          (a.props?.sortOrder ?? Number.MAX_SAFE_INTEGER) - (b.props?.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
+          a.number.localeCompare(b.number, undefined, { numeric: true }),
+      ),
+    [index],
+  )
+  const sheetGroups = useMemo(() => {
+    const hasGrouping = sheets.some((s) => Boolean(s.props?.group?.trim() || s.props?.discipline?.trim()))
+    if (!hasGrouping) return null
+    const order = ['General', 'Architectural', 'Structural', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Civil']
+    const rankOf = (label: string) => {
+      const idx = order.findIndex((o) => o.toLowerCase() === label.toLowerCase())
+      return idx >= 0 ? idx : order.length
+    }
+    const labelOf = (s: Sheet): string => {
+      if (s.props?.group?.trim()) return s.props.group.trim()
+      const d = s.props?.discipline?.trim().toLowerCase()
+      if (!d) return 'Other'
+      if (d === 'architecture' || d === 'architectural') return 'Architectural'
+      if (d === 'mechanical' || d === 'hvac') return 'Mechanical'
+      if (d === 'electrical') return 'Electrical'
+      if (d === 'plumbing') return 'Plumbing'
+      if (d === 'structural' || d === 'structure') return 'Structural'
+      if (d === 'fire_protection' || d === 'fire protection') return 'Fire Protection'
+      if (d === 'civil') return 'Civil'
+      if (d === 'general') return 'General'
+      return d.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    }
+    const buckets = new Map<string, { readonly label: string; minSort: number; readonly items: Sheet[] }>()
+    for (const s of sheets) {
+      const label = labelOf(s)
+      const sort = s.props?.sortOrder ?? Number.MAX_SAFE_INTEGER
+      let b = buckets.get(label)
+      if (!b) {
+        b = { label, minSort: sort, items: [] }
+        buckets.set(label, b)
+      }
+      b.minSort = Math.min(b.minSort, sort)
+      b.items.push(s)
+    }
+    return [...buckets.values()].sort((a, b) => a.minSort - b.minSort || rankOf(a.label) - rankOf(b.label) || a.label.localeCompare(b.label))
+  }, [sheets])
 
   return (
     <section className="flex flex-col gap-2" aria-label="Views and sheets" data-testid={headerless ? undefined : 'views-sheets-panel'}>
@@ -217,6 +261,25 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
           <Group title="Sheets" count={sheets.length}>
             {sheets.length === 0 ? (
               <p className="px-2 py-1 text-xs text-muted-foreground">No sheets yet. Use + to make one, then drag views onto it, or have the agent make the set.</p>
+            ) : sheetGroups ? (
+              <div className="flex flex-col gap-0.5 pl-1" data-testid="sheet-groups">
+                {sheetGroups.map((g) => (
+                  <Group key={g.label} title={g.label} count={g.items.length}>
+                    {g.items.map((sheet) => (
+                      <SheetRow
+                        key={sheet.id}
+                        sheet={sheet}
+                        viewCount={index?.viewportsBySheet.get(sheet.id)?.length ?? 0}
+                        active={open.kind === 'sheet' && open.id === sheet.id}
+                        canEdit={canEdit}
+                        blockedReason={blockedReason}
+                        onOpen={() => onOpen({ kind: 'sheet', id: sheet.id })}
+                        onRequest={onRequest}
+                      />
+                    ))}
+                  </Group>
+                ))}
+              </div>
             ) : (
               sheets.map((sheet) => (
                 <SheetRow

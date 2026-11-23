@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ExternalLink, Trash2 } from 'lucide-react'
+import { ExternalLink, Pencil, PenTool, RotateCcw, Trash2 } from 'lucide-react'
 import { STANDARD_SCALES, calloutHead, documentIndex, type CalloutSpec, type DrawingItem, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
 import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog'
@@ -187,23 +187,73 @@ interface PropsPanel {
   readonly blockedReason: string
   readonly onChange: (spec: CalloutSpec) => void
   readonly onOpenView: (viewId: string) => void
+  readonly onEditBoundary?: () => void
+  readonly onSketchBoundary?: () => void
+  readonly onResetRectangle?: () => void
   readonly onDelete: () => void
 }
 
-/** A selected callout: what it refers to and what its head reads right now, with a way to go to that view. */
-export function CalloutProperties({ item, model, canEdit, blockedReason, onChange, onOpenView, onDelete }: PropsPanel) {
+/** A selected callout: what it refers to, its boundary mode (rectangle or P-line), and what its head reads right now. */
+export function CalloutProperties({ item, model, canEdit, blockedReason, onChange, onOpenView, onEditBoundary, onSketchBoundary, onResetRectangle, onDelete }: PropsPanel) {
   const spec = item.callout
   if (!spec) return null
   const head = calloutHead(model, spec)
   const target = model.elements[spec.viewId]
+  const isPolygon = Boolean(spec.boundary && spec.boundary.length >= 3)
   return (
     <FieldGroup className="gap-3" data-testid="callout-properties">
       <Field>
-        <FieldLabel>Head reads</FieldLabel>
+        <div className="flex items-center justify-between gap-2">
+          <FieldLabel>Head reads</FieldLabel>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground" data-testid="callout-boundary-kind">
+            {isPolygon ? `P-Line (${spec.boundary!.length} corners)` : 'Rectangle'}
+          </span>
+        </div>
         <p className="text-sm" data-testid="callout-head">
           {head.top} / {head.bottom}
         </p>
-        <FieldDescription>{head.resolved ? `${head.viewName} is on sheet ${head.bottom}.` : head.viewName ? `${head.viewName} is on no sheet yet: the head shows — until it is placed.` : 'The view it referred to was deleted. Pick another.'}</FieldDescription>
+        <FieldDescription>
+          {head.resolved
+            ? `${head.viewName} is on sheet ${head.bottom}. Drag edges/corners right on the sheet to update the enlarged view crop live.`
+            : head.viewName
+              ? `${head.viewName} is on no sheet yet: the head shows — until it is placed.`
+              : 'The view it referred to was deleted. Pick another.'}
+        </FieldDescription>
+      </Field>
+      {canEdit && (onEditBoundary || onSketchBoundary) && (
+        <div className="flex flex-col gap-1.5">
+          {onEditBoundary && (
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={onEditBoundary} data-testid="callout-edit-boundary">
+              <Pencil data-icon="inline-start" />
+              Edit Boundary (P-Line)
+            </Button>
+          )}
+          {onSketchBoundary && (
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={onSketchBoundary} data-testid="callout-sketch-boundary">
+              <PenTool data-icon="inline-start" />
+              Sketch New P-Line Shape
+            </Button>
+          )}
+          {isPolygon && onResetRectangle && (
+            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={onResetRectangle} data-testid="callout-reset-rect">
+              <RotateCcw data-icon="inline-start" />
+              Reset to Rectangle
+            </Button>
+          )}
+        </div>
+      )}
+      <Field>
+        <label className="flex items-center justify-between gap-2 text-xs cursor-pointer select-none">
+          <span>Show view name beside bubble</span>
+          <input
+            type="checkbox"
+            checked={spec.showLabel !== false}
+            disabled={!canEdit}
+            onChange={(e) => onChange({ ...spec, showLabel: e.target.checked })}
+            data-testid="callout-show-label"
+            className="h-3.5 w-3.5 accent-primary"
+          />
+        </label>
       </Field>
       <Field>
         <FieldLabel htmlFor="callout-view">Refers to</FieldLabel>

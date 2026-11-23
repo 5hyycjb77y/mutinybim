@@ -92,6 +92,12 @@ Rules (these are firm):
   in T1", "kitchen 4 units at 80% (NEC 2023 Table 220.56)". If
   `rules_placeholder` is true, say the totals are connected loads, not a code
   calculation, and ask for the NEC edition (or to record it in the Code Study).
+- **Live one-line fault current & feeder length estimation**: pass
+  `hints: { faultCurrent: true, lengthMode: "shortest" | "manhattan" | "explicit", showLoads: true }`
+  on `documents.diagram(ctx, { kind: "one_line", ... })` (or `bim_layout_one_line`)
+  to compute available fault current (AFC) and compare against panel `aic` ratings
+  automatically using explicit `lengthFt`, 3D straight-line (`"shortest"`), or
+  Manhattan (`"manhattan"`) gear-to-gear distance.
 
 ### Workflow: circuit a floor
 
@@ -428,53 +434,18 @@ activate that pack alongside this one when the workflow below needs it.
 
 ### Workflow: service size before layout
 
-1. Get the kitchen consultant's equipment schedule and the mechanical list
-   (paste, CSV, or read the PDF and pass its text) and the service voltage.
-2. `bim_service_from_equipment_list`. Show the rows whose class you'd
-   question (word guesses) and the ones with a `problem`; ask.
-3. Re-run with `classes` (by each row's `line`; the header is a line too).
-   Give the size, the minimum ampacity (`required_a`) and the trail's key
-   lines (220.56 count and factor, 25% of the largest motor, 125% of the
-   continuous load), and say it is an early estimate.
+1. Get the kitchen equipment schedule and mechanical list (paste, CSV, or PDF text) plus service voltage.
+2. `bim_service_from_equipment_list`. Review any guessed rows or `problem` entries with the user.
+3. Re-run with `classes` (by row `line`, header inclusive). Report size, `required_a`, and key trail lines (220.56 count/factor, 25% largest motor, 125% continuous load) as an early estimate.
 
 ### Workflow: starter service layout (one-line skeleton)
 
-(e.g. "start the one-line from a 400 A 208 V service", "lay out the service
-from that size")
+`bim_place_service_layout` (approval) places the meter, optional fused `main_disconnect`, main distribution (`distribution.name`, default MDP), and `equipment` rows (`kind` panel with `bus_a`/`system`/`mains`, or transformer with `kva`/`system` = secondary), each with `fed_from`, in one edit. Placement: `room` (south wall, clear), `origin_ft` (left end; wins over `room`), or level origin; or **`plan_only: true`** (no `room`/`origin_ft`) to create the logical one-line/schedules/circuits before layout and place pieces later via `bim_place_part` `part_id` (IDs persist).
 
-`bim_place_service_layout` (approval) places the meter, an optional fused
-`main_disconnect`, the main distribution (`distribution.name`, default MDP)
-and the `equipment` rows the person lists (`kind` panel with `bus_a`,
-`system`, `mains`; or transformer with `kva`, `system` = its secondary),
-each with `fed_from` naming another piece, as one edit. Where it goes:
-`room` (id, number or name: the lineup runs along that room's south wall,
-clear of it) or `origin_ft` (the lineup's left end in plan; wins over
-`room`); neither puts it at the level origin. The Electrical tab's Service
-layout sends the same command (Where it goes: In a room, At a point with
-Pick in plan, or Level origin).
-
-**Plan only** (`plan_only: true`, no `room` or `origin_ft`): the meter,
-board, panels and feeders exist (one-line, panel schedules, circuits) but are
-not drawn; `level` is where they will go. Use it when the person wants the
-one-line or a load study before the electrical room is laid out. Each piece
-is placed later from Not placed yet, by the person or with `bim_place_part`
-`part_id`. Devices can be circuited to a planned panel, and a planned device
-can be circuited too: everything keeps its id when placed.
-
-1. Size: the person's number, or `bim_service_from_equipment_list` above.
-2. Ask for every panel and transformer: name, rating, system, main breaker or
-   lugs, what feeds it, and each transformer's primary breaker. Never fill
-   them in yourself; nothing is sized from loads. Ask which room it goes in
-   (the electrical room) and pass `room`; a room that isn't in the model is
-   refused with the rooms that are.
-3. Call it. A refusal (a 208 V panel on a 480 V board, a missing primary
-   breaker, a name already in the model) is the reason to read out; fix and
-   call again. The approval card's notes say when the lineup is longer than
-   the room or leaves under 3 ft of working space (NEC 110.26(A)(1)); read
-   them out.
-4. Then the one-line workflow above: `bim_preview_one_line` `from_model: true`
-   draws it with the utility over the meter. Circuiting devices stays a
-   separate step.
+1. Size from user or `bim_service_from_equipment_list`.
+2. Ask for each panel/transformer's name, rating, system, main breaker/lugs, feeder source, transformer primary breaker, and `room` — never invent ratings.
+3. Call it; relay any refusal (voltage mismatch, missing primary breaker, duplicate name) or NEC 110.26(A)(1) working-space/room-fit notes.
+4. Draw with `bim_preview_one_line` `from_model: true`; circuiting devices stays separate.
 
 Point-to-point fault current is a preview calc (`elec.fault_current_p2p` through `bim_run_calc`) where enabled; otherwise use `elec-short-circuit`. **Script kit (`bim_run_script`):** wall-face hosting (`equipment.place` `onWall` / `equipment.hostOnWall`, custom `parts.part({ hosting: "wall_face" }).planSymbol(...)`), control zones (`equipment.controlZone` with `protocol`, `emergencyMode`), plan wiring (`documents.setCircuitGraphics` `showCircuits` / `hashMarksOn: "home_runs_and_switch_legs"`, `setMwbcGroup`, `setSwitchLegLabelOffset`, `setWirePath`, `setHomeRun`), photometrics, daylighting & NFPA 101/IBC egress (`electrical.setLuminaireIes` with built-in profiles `troffer_2x4_led` / `downlight_6_led` / `linear_pendant_led` / `exit_combo_wall_pack` / `exterior_wall_pack_led` or custom IES LM-63 text + `emergencyMode` / `emergencyLumens` / `lld` / `ldd`, `electrical.runPhotometrics` with 4-bounce patch radiosity + material LRV/`T_vis` + task surfaces/3D stairs, `electrical.runDaylightAnalysis` for CIE Sky Dome Daylight Factor `DF%`, `electrical.runEgressLightingCheck`, `electrical.enablePhotometricOverlay` for plan footcandle grids & contours, `electrical.exportRadiance` for standard LBNL Radiance `.rad`/`.ies`/`.pts` export; calcs `electrical.photometrics_normal` & `electrical.photometrics_egress`), `documents.formSchedule({ kind: "lighting_controls" | "photometric_summary" | "egress_lighting_compliance", ... })`, and `documents.diagram({ kind: "controls_diagram", ... })` (`documents.diagramKinds`).
 

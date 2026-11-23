@@ -1,5 +1,7 @@
 import { drainSystemKinds, oneLineItemsExtent, oneLineTextHeight } from "@permitzip/bim-kernel";
 import type { DiagramEdge, DiagramNode, ElementId, LinePattern, OneLineItem, OneLineLayout, OneLineTextLine, Pen, PipeLabel, RiserLevel, Vec2 } from "@permitzip/bim-kernel";
+import { hasMergedDwvRoots, layoutDwvRiser } from "./dwv-riser-layout";
+import { isDomesticWaterKind, layoutWaterRiser } from "./water-riser-layout";
 
 /**
  * The plumbing riser as plumbers draw it (the issued 7492 P2 / P3 / GR sheets):
@@ -22,9 +24,9 @@ export function defaultPipeLabels(systemKind: string): readonly PipeLabel[] {
   return ["size", "load"];
 }
 
-/** How a system's pipe prints on a diagram: vent dashed, grease heavier, the rest solid. */
+/** How a system's pipe prints on a diagram: vent & domestic hot water dashed, grease heavier, the rest solid. */
 export function pipeLook(systemKind: string): { readonly pattern: LinePattern; readonly weight: Pen } {
-  if (systemKind === "vent") return { pattern: "dashed", weight: "medium" };
+  if (systemKind === "vent" || systemKind === "domestic_hot_water" || systemKind === "domestic_hot_water_return") return { pattern: "dashed", weight: "medium" };
   if (systemKind === "grease_waste") return { pattern: "solid", weight: "heavy" };
   return { pattern: "solid", weight: "medium" };
 }
@@ -46,19 +48,21 @@ export interface PipingLayoutOptions {
   readonly labels?: readonly PipeLabel[];
 }
 
-const COL = 16;
-const DEVICE_W = 9;
-const TIER = 7;
-const ROW = 72;
+const COL = 15;
+const DEVICE_W = 10;
+const TIER = 9;
+const ROW = 76;
 const LEFT = 34;
-const STUB = 5;
+const STUB = 6;
 /** Room between a source and the first thing on its main. */
 const ROOT_LEAD = 16;
-/** A system leaving a fixture (hot water from the heater) starts beside it, clear of the fixture's own drop. */
-const HEATER_LEAD = 12;
-const HEATER_OFFSET = 2.5;
-const SYMBOL_W = 7;
-const SYMBOL_H = 4;
+/** A system leaving a fixture (hot water from the heater) steps clearly right of the cold water drop before rising to its own header. */
+const HEATER_LEAD = 17;
+const HEATER_OFFSET = 5;
+const SYMBOL_W = 8;
+const SYMBOL_H = 4.5;
+/** 45° ASPE sanitary wye sweep leg size (paper mm). */
+const WYE_SWEEP_MM = 2.6;
 /** A pipe up to 4 ft under a floor (a drain below the slab) belongs to that floor. */
 const TOLERANCE_MM = 1219;
 
@@ -93,6 +97,12 @@ interface Printed {
 }
 
 export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonly RiserLevel[], opts: PipingLayoutOptions = {}): PipingLayout {
+  if (roots.length > 0 && roots.every((r) => isDomesticWaterKind(r.service))) {
+    return layoutWaterRiser(roots, levels, opts);
+  }
+  if (hasMergedDwvRoots(roots)) {
+    return layoutDwvRiser(roots, levels, opts);
+  }
   const items: OneLineItem[] = [];
   const pipes: Record<string, PipeRef> = {};
   const ranges: Record<string, readonly [number, number]> = {};
@@ -162,7 +172,7 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
     const P = (p: Vec2): Vec2 => round({ x: X(p.x), y: p.y });
     let pieceNo = 0;
 
-    const pipeLine = (owner: DiagramNode, edge: DiagramEdge | undefined, a: Vec2, b: Vec2): { pa: Vec2; pb: Vec2 } | null => {
+    const pipeLine = (owner: DiagramNode, edge: DiagramEdge | undefined, a: Vec2, b: Vec2, wyeSweep = false): { pa: Vec2; pb: Vec2 } | null => {
       const pa = P(a);
       const pb = P(b);
       if (Math.abs(pa.x - pb.x) < 0.01 && Math.abs(pa.y - pb.y) < 0.01) return null;
@@ -171,22 +181,32 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
       if (ids[0]) pipes[id] = { elementId: ids[0], elementIds: ids, name: `${edge?.label ? `${edge.label} ` : ""}pipe${owner.role === "terminal" && owner.name !== "OPEN END" ? ` to ${owner.name}` : ""}` };
       const segLook = owner.service && owner.service !== kind ? pipeLook(owner.service) : look;
       items.push({ shape: "line", points: [pa, pb], weight: segLook.weight, nodeId: id, ...(segLook.pattern === "dashed" ? { dashed: true } : {}) });
+      // ASPE 45° sanitary wye sweep indicator where a drainage vertical drop/riser enters a horizontal drainage line
+      if (wyeSweep && drain && segLook.pattern !== "dashed" && Math.abs(pa.x - pb.x) < 0.05 && Math.abs(pb.y - pa.y) > WYE_SWEEP_MM * 1.4) {
+        const yDir = pb.y > pa.y ? 1 : -1;
+        items.push({
+          shape: "line",
+          points: [round({ x: pa.x, y: pa.y + yDir * WYE_SWEEP_MM }), round({ x: pa.x + WYE_SWEEP_MM, y: pa.y })],
+          weight: "thin",
+          nodeId: id,
+        });
+      }
       return { pa, pb };
     };
 
-    /** The labels of a drawn piece beside it (above a supply line, under a drain, right of a riser): what changed since the line last printed. */
+    /** The labels of a drawn piece beside it (above a supply line, under a drain, right of a riser): always prints branch sizes so every fixture drop & riser is fully sized. */
     const label = (owner: DiagramNode, edge: DiagramEdge | undefined, seg: { pa: Vec2; pb: Vec2 } | null, printed: Printed, terminal: boolean) => {
       if (!seg || !edge) return;
       const out: string[] = [];
       for (const l of labels) {
-        if (l === "size" && edge.label && (everySize || edge.label !== printed.size)) out.push(edge.label);
-        // A fixture's own text says its load; its drop prints only its size (and length for gas).
+        if (l === "size" && edge.label && (everySize || terminal || edge.label !== printed.size)) out.push(edge.label);
+        // A fixture's own text says its load; its drop prints its size (and length for gas).
         if (l === "load" && edge.load && !terminal && edge.load !== printed.load) out.push(edge.load);
         if (l === "slope" && edge.slope && !terminal && edge.slope !== printed.slope) out.push(edge.slope);
         if (l === "invert" && edge.invert) out.push(edge.invert);
         if (l === "length" && edge.lengthFt) out.push(`${edge.lengthFt} LF`);
       }
-      if (edge.label) printed.size = edge.label;
+      if (edge.label && !terminal) printed.size = edge.label;
       if (edge.load && !terminal) printed.load = edge.load;
       if (edge.slope) printed.slope = edge.slope;
       if (out.length === 0) return;
@@ -197,10 +217,10 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
       const h = oneLineTextHeight(lines, w);
       if (vertical) {
         const midY = (seg.pa.y + seg.pb.y) / 2;
-        items.push({ shape: "text", at: round({ x: seg.pa.x + 0.9, y: midY + h / 2 }), widthMm: w, lines, nodeId: id, role: "device" });
+        items.push({ shape: "text", at: round({ x: seg.pa.x + 1.0, y: midY + h / 2 }), widthMm: w, lines, nodeId: id, role: "device", mask: true });
       } else {
         const left = Math.min(seg.pa.x, seg.pb.x);
-        items.push({ shape: "text", at: round({ x: left + 0.5, y: drain ? seg.pa.y - 1 : seg.pa.y + 1 + h }), widthMm: w, lines, nodeId: id, role: "device" });
+        items.push({ shape: "text", at: round({ x: left + 0.6, y: drain ? seg.pa.y - 1.2 : seg.pa.y + 1.2 + h }), widthMm: w, lines, nodeId: id, role: "device", mask: true });
       }
     };
 
@@ -208,24 +228,35 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
     const fixture = (s: DiagramNode, from: Vec2, b: number, printed: Printed, depth: number, edge: DiagramEdge | null) => {
       const fy = fixtureY(b);
       const x = from.x;
-      // The drop from the line to the fixture: down onto its top (supply), up into its bottom (drain).
-      const seg = pipeLine(s, s.feed, from, { x, y: drain ? fy : fy + SYMBOL_H });
+      // The drop from the line to the fixture: down onto its top (supply), up into its bottom (drain) with 45° wye sweep on drains.
+      const seg = pipeLine(s, s.feed, from, { x, y: drain ? fy : fy + SYMBOL_H }, drain);
       if (edge) label(s, edge, seg, printed, true);
       const first = s.children[0];
       if (first) {
-        // The system it feeds leaves its top beside the drop, rises to its own line and runs on.
-        // A grafted vent rising off a drained fixture climbs into the upper vent header above the fixtures.
-        const outY = drain && first.service === "vent" ? Math.max(fy + SYMBOL_H + 10, topY(b) - 10) : tierY(b, depth + 1);
-        const out = { x: x + HEATER_OFFSET, y: outY };
-        const rise: Printed = {};
-        label(first, first.feed, pipeLine(first, first.feed, { x: out.x, y: fy + SYMBOL_H }, out), rise, false);
-        drawLine(s.children, out, depth + 1, HEATER_LEAD - HEATER_OFFSET, rise);
+        if (drain && first.service === "vent") {
+          // IPC vent takeoff: rises vertically from fixture drain/trap arm to 6"+ above flood-level rim, then joins the horizontal dashed vent header.
+          const outY = Math.max(fy + SYMBOL_H + 14, topY(b) - 10);
+          const out = { x: x + 2.5, y: outY };
+          const rise: Printed = {};
+          label(first, first.feed, pipeLine(first, first.feed, { x: out.x, y: fy + SYMBOL_H }, out), rise, false);
+          drawLine(s.children, out, depth + 1, HEATER_LEAD - 4, rise);
+        } else {
+          // Water heater / booster handoff (CW -> HW): exit cleanly from the right side of the unit, step clear right before rising to a dedicated HW header so CW and HW pipes never tangle.
+          const exitPt = { x: x + SYMBOL_W / 2, y: fy + SYMBOL_H * 0.7 };
+          const stepOut = { x: x + HEATER_OFFSET + 4, y: exitPt.y };
+          const outY = tierY(b, depth + 1);
+          const out = { x: stepOut.x, y: outY };
+          const rise: Printed = {};
+          pipeLine(first, first.feed, exitPt, stepOut);
+          label(first, first.feed, pipeLine(first, first.feed, stepOut, out), rise, false);
+          drawLine(s.children, out, depth + 1, HEATER_LEAD - HEATER_OFFSET, rise);
+        }
       }
       const cx = X(x);
       items.push({ shape: "polyline", points: [round({ x: cx - SYMBOL_W / 2, y: fy }), round({ x: cx + SYMBOL_W / 2, y: fy }), round({ x: cx + SYMBOL_W / 2, y: fy + SYMBOL_H }), round({ x: cx - SYMBOL_W / 2, y: fy + SYMBOL_H })], closed: true, weight: "medium", nodeId: s.id });
       const lines = s.lines.slice(0, 3);
       const h = oneLineTextHeight(lines, COL - 1);
-      items.push({ shape: "text", at: round({ x: cx - (COL - 1) / 2, y: drain ? fy + SYMBOL_H + 1 + h : fy - 1 }), widthMm: COL - 1, lines, nodeId: s.id, role: "equipment", align: "center" });
+      items.push({ shape: "text", at: round({ x: cx - (COL - 1) / 2, y: drain ? fy + SYMBOL_H + 1.2 + h : fy - 1.2 }), widthMm: COL - 1, lines, nodeId: s.id, role: "equipment", align: "center", mask: true });
       nodes.push({ id: s.id, kind: s.kind, name: s.name, center: round({ x: cx, y: fy + SYMBOL_H / 2 }), depth: 0 });
     };
 
@@ -321,13 +352,24 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
 
     const t0 = items.length;
     const start = { x: originX, y: tierY(rb, 0) };
-    // The source: a box at the head of the main, named beside it (left of a supply main, right of a drain's outfall).
-    // A gas source also prints its gas, pressure and total input (its third line).
+    // The source: a box at the head of the main, or an architectural VTR roof flashing terminal for vent stacks.
     const lines = root.lines.slice(0, 3);
     const h = oneLineTextHeight(lines, COL * 2);
     const sx = X(start.x);
-    items.push({ shape: "polyline", points: [round({ x: sx - 1.5, y: start.y - 1.5 }), round({ x: sx + 1.5, y: start.y - 1.5 }), round({ x: sx + 1.5, y: start.y + 1.5 }), round({ x: sx - 1.5, y: start.y + 1.5 })], closed: true, weight: "medium", nodeId: root.id });
-    items.push({ shape: "text", at: round({ x: drain ? sx + 3 : sx - COL * 2 - 2.5, y: start.y + h / 2 }), widthMm: COL * 2, lines, nodeId: root.id, role: "equipment" });
+    if (kind === "vent") {
+      // Standard ASPE Vent Thru Roof (VTR) flashing cap & vent stack top
+      items.push({
+        shape: "polyline",
+        points: [round({ x: sx - 4.5, y: start.y - 1.5 }), round({ x: sx, y: start.y + 2.5 }), round({ x: sx + 4.5, y: start.y - 1.5 })],
+        weight: "medium",
+        nodeId: root.id,
+      });
+      items.push({ shape: "line", points: [round({ x: sx, y: start.y - 1.5 }), round({ x: sx, y: start.y + 4.0 })], weight: "medium", dashed: true, nodeId: root.id });
+      items.push({ shape: "text", at: round({ x: sx + 5.5, y: start.y + h / 2 + 1 }), widthMm: COL * 2, lines, nodeId: root.id, role: "equipment", mask: true });
+    } else {
+      items.push({ shape: "polyline", points: [round({ x: sx - 1.5, y: start.y - 1.5 }), round({ x: sx + 1.5, y: start.y - 1.5 }), round({ x: sx + 1.5, y: start.y + 1.5 }), round({ x: sx - 1.5, y: start.y + 1.5 })], closed: true, weight: "medium", nodeId: root.id });
+      items.push({ shape: "text", at: round({ x: drain ? sx + 3 : sx - COL * 2 - 2.5, y: start.y + h / 2 }), widthMm: COL * 2, lines, nodeId: root.id, role: "equipment", mask: true });
+    }
     nodes.push({ id: root.id, kind: root.kind, name: root.name, center: round({ x: sx, y: start.y }), depth: 0 });
     drawLine(root.children, start, 0, ROOT_LEAD);
     ranges[root.id] = [t0, items.length];

@@ -136,6 +136,7 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
   let counter = 0;
   let working: ModelState = sliceAsModel(input.slice);
   const steps: EditStep[] = [];
+  const touched = new Set<string>();
   const types: { typeId: string; definition: PartTypeDefinition }[] = [];
   const typeIds = new Set<string>();
   let label = "";
@@ -216,6 +217,8 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
       const result = withPackSet(input.packs, () => withUpgradePolicy(serverReads, () => executeCommand(working, step)));
       if (!result.ok) throw new ScriptRunError(`Step ${n} (${command.type}) was refused: ${result.error.message}${missingTradesWords(input.slice)}`);
       working = result.model;
+      for (const id of result.changedIds) touched.add(id);
+      for (const id of result.removedIds) touched.delete(id);
       steps.push(step);
     },
     parts: {
@@ -227,7 +230,7 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
       },
     },
   };
-  bindWorking(ctx, { model: () => working, packs: input.packs });
+  bindWorking(ctx, { model: () => working, packs: input.packs, touchedIds: () => [...touched] });
   try {
     await definition.runWith(ctx, input.values);
   } catch (err) {
