@@ -226,9 +226,14 @@ describe("p9-grid-equivalence: the round 9 grid answers exactly as the previous 
       for (let i = 0; i < 500; i++) fn();
       return performance.now() - t0;
     };
+    const medianTime = (fn: () => void, samples = 5) => {
+      const runs = Array.from({ length: samples }, () => time(fn)).sort((a, b) => a - b);
+      return runs[Math.floor(runs.length / 2)]!;
+    };
     time(() => grid.query(q));
     time(() => prev.query(q));
     // The previous grid visited all 20,000 boxes on every query; a coarse cell holds a handful.
-    expect(time(() => grid.query(q)) * 20).toBeLessThan(time(() => prev.query(q)));
+    // Use median of 5 runs so a single OS/GC pause under parallel Jest load does not flake CI.
+    expect(medianTime(() => grid.query(q)) * 20).toBeLessThan(medianTime(() => prev.query(q)));
   });
 });
