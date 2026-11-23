@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ExternalLink, Pencil, PenTool, RotateCcw, Trash2 } from 'lucide-react'
 import { STANDARD_SCALES, calloutHead, documentIndex, type CalloutSpec, type DrawingItem, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
 import { Button } from '../../ui/button'
+import { Checkbox } from '../../ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../../ui/empty'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '../../ui/field'
@@ -242,18 +243,17 @@ export function CalloutProperties({ item, model, canEdit, blockedReason, onChang
           )}
         </div>
       )}
-      <Field>
-        <label className="flex items-center justify-between gap-2 text-xs cursor-pointer select-none">
-          <span>Show view name beside bubble</span>
-          <input
-            type="checkbox"
-            checked={spec.showLabel !== false}
-            disabled={!canEdit}
-            onChange={(e) => onChange({ ...spec, showLabel: e.target.checked })}
-            data-testid="callout-show-label"
-            className="h-3.5 w-3.5 accent-primary"
-          />
-        </label>
+      <Field orientation="horizontal">
+        <Checkbox
+          id="callout-show-label"
+          checked={spec.showLabel !== false}
+          disabled={!canEdit}
+          onCheckedChange={(v) => onChange({ ...spec, showLabel: v === true })}
+          data-testid="callout-show-label"
+        />
+        <FieldLabel htmlFor="callout-show-label" className="font-normal">
+          Show view name beside bubble
+        </FieldLabel>
       </Field>
       <Field>
         <FieldLabel htmlFor="callout-view">Refers to</FieldLabel>
