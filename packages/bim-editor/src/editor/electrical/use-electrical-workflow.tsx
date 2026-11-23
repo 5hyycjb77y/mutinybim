@@ -224,8 +224,9 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
     inputSetLightEmitters(cache.emitters)
   }, [inputSetLightEmitters, model, inputLightingPreset])
   useEffect(() => {
+    const cache = emitterCacheRef.current
     return () => {
-      emitterCacheRef.current.pushedTo = undefined
+      cache.pushedTo = undefined
       inputSetLightEmitters?.([])
     }
   }, [inputSetLightEmitters])
