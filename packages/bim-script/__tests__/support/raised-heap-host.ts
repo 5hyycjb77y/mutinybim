@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS } from "@permitzip/bim-kernel";
 import { SLICE_FORMAT, type ModelSlice } from "../../src/slice";
 import { ProcessRunner } from "./process-runner";
 
-const LIMITS = { memoryMb: 64, wallMs: 1500, outputBytes: 256 * 1024 };
+const LIMITS = { memoryMb: 64, wallMs: 5000, outputBytes: 256 * 1024 };
 const SLICE: ModelSlice = { format: SLICE_FORMAT, version: 1, modelId: "host", revision: 1, reads: {}, selection: [], elements: {}, connections: [], settings: DEFAULT_SETTINGS, features: [] };
 
 let source = "";

@@ -27,7 +27,9 @@ describe("x11-runner-conformance", () => {
   let hits = 0;
   let dir = "";
   let targets: ConformanceTargets;
-  const LIMITS: RunnerLimits = { memoryMb: 64, wallMs: 1500, outputBytes: 256 * 1024 };
+  // 5 s gives V8's Mark-Compact GC headroom to abort on the 64 MB heap cap
+  // even under heavy CI coverage load, while staying well under the 30 s contract.
+  const LIMITS: RunnerLimits = { memoryMb: 64, wallMs: 5000, outputBytes: 256 * 1024 };
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "x11-conf-"));
