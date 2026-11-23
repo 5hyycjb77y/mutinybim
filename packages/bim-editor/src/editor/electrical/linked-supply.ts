@@ -25,3 +25,5 @@ export function linkedSupplyOf(model: ModelState | null, partId: string): Linked
   }
   return null
 }
+
+export { syncLuminaireEmergencyEdits } from './emergency-sync'
