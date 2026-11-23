@@ -801,35 +801,34 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
     },
   );
 
+  const clashesObjectSchema = z
+    .object({
+      enabled: z.boolean().optional(),
+      scope: z.enum(CLASH_SCOPES).optional(),
+      ruleset: z.enum(["default", "coordination", "documents", "issue"]).optional(),
+      types: z.array(z.enum(CLASH_TYPES)).max(8).optional(),
+      min_severity: z.enum(["error", "warning", "info"]).optional(),
+      detail: z.enum(CLASH_DETAIL_LEVELS).optional(),
+      level: z.string().min(1).max(80).optional(),
+      tolerance_in: z.number().min(0).max(12).optional(),
+      soft_clearance_in: z.number().min(0).max(24).optional(),
+      structure_clearance_in: z.number().min(0).max(24).optional(),
+      max_findings: z.number().int().min(1).max(100).optional(),
+      skip_rules: z.array(z.string().min(1).max(60)).max(40).optional(),
+    })
+    .strict();
+
   const clashesArg = z
-    .union([
-      z.boolean(),
-      z
-        .object({
-          enabled: z.boolean().optional(),
-          scope: z.enum(CLASH_SCOPES).optional(),
-          ruleset: z.enum(["default", "coordination", "documents", "issue"]).optional(),
-          types: z.array(z.enum(CLASH_TYPES)).max(8).optional(),
-          min_severity: z.enum(["error", "warning", "info"]).optional(),
-          detail: z.enum(CLASH_DETAIL_LEVELS).optional(),
-          level: z.string().min(1).max(80).optional(),
-          tolerance_in: z.number().min(0).max(12).optional(),
-          soft_clearance_in: z.number().min(0).max(24).optional(),
-          structure_clearance_in: z.number().min(0).max(24).optional(),
-          max_findings: z.number().int().min(1).max(100).optional(),
-          skip_rules: z.array(z.string().min(1).max(60)).max(40).optional(),
-        })
-        .strict(),
-    ])
+    .union([z.boolean(), z.record(z.string(), z.unknown())])
     .optional()
-    .describe("Optional clash & clearance feedback on the previewed edits. Pass true for touched hard/self/clearance/dedicated_space/ceiling clashes (compact), or an object configuring scope (touched|level|all), types, min_severity, detail (summary|compact|full), tolerances, and max_findings.");
+    .describe("Clash report: true or {scope?, types?, min_severity?, detail?, level?, tolerance_in?, max_findings?}.");
 
   server.registerTool(
     "bim_run_script",
     {
       title: "Run a script (preview)",
       annotations: READ_ONLY_TOOL,
-      description: `Preview: run a script ${options.runsWhere ?? SEALED_MACHINE_WORDS} and check its output. Saves nothing; returns what would change, optional configurable clash feedback (clashes), apply_with and script_id (send the id, not the text, next time).`,
+      description: `Preview: run a script ${options.runsWhere ?? SEALED_MACHINE_WORDS} and check its output. Saves nothing; returns changes, optional clashes, apply_with and script_id.`,
       inputSchema: { project_id: target.project_id, model_id: target.model_id.optional(), ...area, script: scriptArg, values: valuesArg, selection: selectionArg, clashes: clashesArg },
     },
     async (args, extra) => {
@@ -851,7 +850,17 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           repeated = before !== undefined;
           return before ?? null;
         });
-        const clashOptions = resolveRunClashOptions(args.clashes, args.level);
+        let parsedClashes: RunClashesInput | undefined;
+        if (typeof args.clashes === "boolean") {
+          parsedClashes = args.clashes;
+        } else if (args.clashes !== undefined) {
+          const parsed = clashesObjectSchema.safeParse(args.clashes);
+          if (!parsed.success) {
+            return json({ status: "refused", message: `Invalid clashes config: ${parsed.error.issues.map((i) => `${i.path.join(".") || "clashes"}: ${i.message}`).join("; ")}`, nothing_changed: true });
+          }
+          parsedClashes = parsed.data;
+        }
+        const clashOptions = resolveRunClashOptions(parsedClashes, args.level);
         const got = await checked(helpers, run, clashOptions);
         if ("stopped" in got) {
           if (got.stopped.code.startsWith("cap_") && !repeated) {

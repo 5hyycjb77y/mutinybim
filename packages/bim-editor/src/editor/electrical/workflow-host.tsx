@@ -39,7 +39,20 @@ function inputFrom(s: WorkflowServices) {
 export function WorkflowHost({ services, outlet }: WorkflowHostProps): ReactNode {
   const workflow = useElectricalWorkflow(inputFrom(services))
   usePublishWorkflow(outlet, {
-    data: { ribbon: workflow.ribbon, autoTab: workflow.autoTab, shared: { circuitRules: workflow.nec, necEdition: workflow.necEdition, newScheduleForms: workflow.newScheduleForms, openPanelView: workflow.openPanelView } },
+    data: {
+      ribbon: workflow.ribbon,
+      autoTab: workflow.autoTab,
+      shared: {
+        circuitRules: workflow.nec,
+        necEdition: workflow.necEdition,
+        newScheduleForms: workflow.newScheduleForms,
+        openFormView: (kind: string, elementId: string) => {
+          if (kind !== 'panel') return false
+          workflow.openPanelView(elementId)
+          return true
+        },
+      },
+    },
     properties: workflow.properties,
     viewProperties: workflow.scheduleProperties,
   })

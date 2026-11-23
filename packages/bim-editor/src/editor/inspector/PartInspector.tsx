@@ -238,13 +238,16 @@ export function PartInspector(props: PartInspectorProps) {
     }
     // The field shows the height rounded: untouched, it is no move (a rounding difference would move the part and take the undo).
     const dz = texts[HEIGHT] === baseline[HEIGHT] ? 0 : Math.round((heightFt * MM_PER_FT - part.offsetMm) * 1000) / 1000
-    const err = props.onInstance(plan.values, mark, dz, plan.packValues)
+    const hasPackValues = Object.keys(plan.packValues).length > 0
+    const err = hasPackValues
+      ? props.onInstance(plan.values, mark, dz, plan.packValues)
+      : props.onInstance(plan.values, mark, dz)
     if (err) {
       setError(err)
       return
     }
     // Fallback for hosts whose `onInstance` callback only handles 3 args: submit pack values directly via `set_element_values`.
-    if (props.onInstance.length < 4 && Object.keys(plan.packValues).length > 0 && props.onCommand) {
+    if (props.onInstance.length < 4 && hasPackValues && props.onCommand) {
       setError(props.onCommand({ type: 'set_element_values', elementIds: [part.id], values: plan.packValues }))
       return
     }

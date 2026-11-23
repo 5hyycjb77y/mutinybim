@@ -174,7 +174,7 @@ export function PrintedPdfLayer({
             shown.height = win.canvasH
             const onScreen = shown.getContext('2d')
             if (!onScreen) throw new Error('This browser has no 2D drawing surface.')
-            onScreen.drawImage(target, 0, 0)
+            if (typeof onScreen.drawImage === 'function') onScreen.drawImage(target, 0, 0)
             lastWholeRef.current = whole ? { scene, widthPx } : null
             finished = true
             setPlacement(win.placement)

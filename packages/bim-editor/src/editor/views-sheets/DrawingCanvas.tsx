@@ -2335,7 +2335,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                           height={h}
                           rx={0.4 / z}
                           fill={PRIMARY}
-                          stroke="var(--mutiny-panel)"
+                          stroke="var(--card, #fff)"
                           strokeWidth={sw}
                           className={canEdit ? (g.axis === 'y' ? 'cursor-ns-resize' : g.axis === 'x' ? 'cursor-ew-resize' : 'cursor-move') : 'cursor-not-allowed'}
                           data-testid={`grip-${g.key}`}
@@ -2353,7 +2353,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                           cy={at.y}
                           r={r * 1.15}
                           fill={PRIMARY}
-                          stroke="var(--mutiny-panel)"
+                          stroke="var(--card, #fff)"
                           strokeWidth={sw}
                           className={canEdit ? 'cursor-grab' : 'cursor-not-allowed'}
                           data-testid={`grip-${g.key}`}
@@ -2409,9 +2409,9 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                     const z = Math.max(zoom, 0.25)
                     const closing = i === 0 && plineSketch.points.length >= 3 && plineSketch.hover && Math.hypot(plineSketch.hover.x - pt.x, plineSketch.hover.y - pt.y) <= 4 / z
                     return closing ? (
-                      <circle key={i} cx={pt.x} cy={pt.y} r={2.2 / z} fill="var(--mutiny-panel)" stroke="#16a34a" strokeWidth={0.6 / z} />
+                      <circle key={i} cx={pt.x} cy={pt.y} r={2.2 / z} fill="var(--card, #fff)" stroke="#16a34a" strokeWidth={0.6 / z} />
                     ) : (
-                      <rect key={i} x={pt.x - 1.1 / z} y={pt.y - 1.1 / z} width={2.2 / z} height={2.2 / z} fill={i === 0 ? PRIMARY : 'var(--mutiny-panel)'} stroke={PRIMARY} strokeWidth={0.4 / z} />
+                      <rect key={i} x={pt.x - 1.1 / z} y={pt.y - 1.1 / z} width={2.2 / z} height={2.2 / z} fill={i === 0 ? PRIMARY : 'var(--card, #fff)'} stroke={PRIMARY} strokeWidth={0.4 / z} />
                     )
                   })}
                 </g>

@@ -180,23 +180,12 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
   const sheetGroups = useMemo(() => {
     const hasGrouping = sheets.some((s) => Boolean(s.props?.group?.trim() || s.props?.discipline?.trim()))
     if (!hasGrouping) return null
-    const order = ['General', 'Architectural', 'Structural', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Civil']
-    const rankOf = (label: string) => {
-      const idx = order.findIndex((o) => o.toLowerCase() === label.toLowerCase())
-      return idx >= 0 ? idx : order.length
-    }
     const labelOf = (s: Sheet): string => {
       if (s.props?.group?.trim()) return s.props.group.trim()
       const d = s.props?.discipline?.trim().toLowerCase()
       if (!d) return 'Other'
       if (d === 'architecture' || d === 'architectural') return 'Architectural'
-      if (d === 'mechanical' || d === 'hvac') return 'Mechanical'
-      if (d === 'electrical') return 'Electrical'
-      if (d === 'plumbing') return 'Plumbing'
-      if (d === 'structural' || d === 'structure') return 'Structural'
-      if (d === 'fire_protection' || d === 'fire protection') return 'Fire Protection'
-      if (d === 'civil') return 'Civil'
-      if (d === 'general') return 'General'
+      if (d === 'structure') return 'Structural'
       return d.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
     }
     const buckets = new Map<string, { readonly label: string; minSort: number; readonly items: Sheet[] }>()
@@ -211,7 +200,7 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
       b.minSort = Math.min(b.minSort, sort)
       b.items.push(s)
     }
-    return [...buckets.values()].sort((a, b) => a.minSort - b.minSort || rankOf(a.label) - rankOf(b.label) || a.label.localeCompare(b.label))
+    return [...buckets.values()].sort((a, b) => a.minSort - b.minSort || a.label.localeCompare(b.label))
   }, [sheets])
 
   return (

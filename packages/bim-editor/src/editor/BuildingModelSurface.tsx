@@ -3594,11 +3594,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 submit={submitWithUndo}
                 onOpenView={(id) => {
                   const clickedView = index?.views.find((v) => v.id === id)
-                  const openPanel = sharedValue<(panelId: string) => void>(workflows.shared, 'openPanelView')
-                  if (clickedView?.props?.formSchedule?.kind === 'panel' && clickedView.props.formSchedule.elementId && openPanel) {
-                    openPanel(clickedView.props.formSchedule.elementId)
-                    return
-                  }
+                  const openForm = sharedValue<(kind: string, elementId: string) => boolean>(workflows.shared, 'openFormView')
+                  const form = clickedView?.props?.formSchedule
+                  if (form?.kind && form.elementId && openForm?.(form.kind, form.elementId)) return
                   const from = openSheet?.id ?? null
                   openItem({ kind: 'view', id })
                   setReturnSheet(from)
@@ -3713,7 +3711,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 submit={submitWithUndo}
                 editBlocked={canEdit ? null : blockedReason}
                 onOpenSheet={(sheetId) => openItem({ kind: 'sheet', id: sheetId })}
-                onOpenPanel={sharedValue<(panelId: string) => void>(workflows.shared, 'openPanelView') ?? undefined}
+                onOpenFormEditor={sharedValue<(kind: string, elementId: string) => boolean>(workflows.shared, 'openFormView') ?? undefined}
               />
                 )}
               </ModelFromStore>

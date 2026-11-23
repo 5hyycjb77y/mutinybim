@@ -722,6 +722,7 @@ function seedPartLabelObstacles(
 ): void {
   const wallPad = 0.6 * frame.scale;
   const partPad = 0.45 * frame.scale;
+  const roomsVisible = categoryLook(view, "rooms").visible;
   for (const el of candidates) {
     if (!nearWindow(p, el) || leftOutOfDisciplineView(view, el)) continue;
     if (el.kind === "wall") {
@@ -750,7 +751,7 @@ function seedPartLabelObstacles(
         }
       }
       onPart?.(el, look);
-    } else if (el.kind === "room" && categoryLook(view, "rooms").visible) {
+    } else if (el.kind === "room" && roomsVisible) {
       if (!shownAs(el).visible || el.outline.length < 3) continue;
       const rs = resolveTextStyle(model, "space_label");
       const raw = `${el.name} ${el.number}`;
@@ -760,15 +761,11 @@ function seedPartLabelObstacles(
       const halfH = (sizeMm * 0.72 + 0.8) * frame.scale;
       const c = centroidOf(el.outline);
       takenPartBoxes.add({ min: { x: c.x - halfW, y: c.y - halfH }, max: { x: c.x + halfW, y: c.y + halfH } });
-    }
-  }
-  const level = viewModelLevel(model, view.props?.level, view.props?.levelElevationMm);
-  if (level && categoryLook(view, "rooms").visible) {
-    for (const space of spacesOnLevel(model.elements, level.id)) {
-      if (leftOutOfDisciplineView(view, space) || !shownAs(space).visible) continue;
+    } else if (el.kind === "space" && roomsVisible) {
+      if (leftOutOfDisciplineView(view, el) || !shownAs(el).visible) continue;
       let outline: readonly Vec2[] | null = null;
       let area = -1;
-      for (const o of spaceOutlines(model.elements, space)) {
+      for (const o of spaceOutlines(model.elements, el)) {
         const a = outlineAreaMm2(o);
         if (a > area) {
           outline = o;
@@ -778,7 +775,7 @@ function seedPartLabelObstacles(
       if (!outline || outline.length < 3) continue;
       const c = centroidOf(outline);
       if (!inside(p, c)) continue;
-      const label = [space.name.toUpperCase(), space.number].filter((x) => x.trim() !== "").join(" ");
+      const label = [el.name.toUpperCase(), el.number].filter((x) => x.trim() !== "").join(" ");
       const halfW = (label.length * 2.5 * 0.34 + 1.0) * frame.scale;
       const halfH = (2.5 * 0.72 + 0.8) * frame.scale;
       takenPartBoxes.add({ min: { x: c.x - halfW, y: c.y - halfH }, max: { x: c.x + halfW, y: c.y + halfH } });
@@ -833,30 +830,31 @@ function drawPlan(
     const startIdx = list.length > 0 ? p.prims.length : -1;
     for (const dp of list) {
       const near = occlude ? occlude.top.get(dp.el.id) : undefined;
-      const partCat = elementViewCategory(model.elements, dp.el);
-      const showHidden = display.dashed(partCat);
-      const ignoreSelf = (f: Face) => f.owner === dp.el.id;
-      const partLine =
-        occlude && near !== undefined
-          ? (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => {
-              const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occlude.index, () => near, ignoreSelf);
-              for (const [q0, q1] of split.visible) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
-              if (showHidden) {
-                for (const [q0, q1] of split.hidden) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, "thin", dp.tone, HIDDEN_DASH);
-              }
-            }
-          : (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
-      const partCircle =
-        occlude && near !== undefined
-          ? (c: Vec2, r: number, pen: Pen) => {
-              const steps = 24;
-              for (let i = 0; i < steps; i++) {
-                const a0 = (i / steps) * Math.PI * 2;
-                const a1 = ((i + 1) / steps) * Math.PI * 2;
-                partLine({ x: c.x + r * Math.cos(a0), y: c.y + r * Math.sin(a0) }, { x: c.x + r * Math.cos(a1), y: c.y + r * Math.sin(a1) }, pen);
-              }
-            }
-          : (c: Vec2, r: number, pen: Pen) => circleIn(p, c, r, dp.projectionPen(pen), dp.tone, dp.elementDash);
+      const hasOcclude = occlude !== undefined && near !== undefined;
+      let partLine: (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => void;
+      let partCircle: (c: Vec2, r: number, pen: Pen) => void;
+      if (hasOcclude) {
+        const showHidden = display.dashed(elementViewCategory(model.elements, dp.el));
+        const ignoreSelf = (f: Face) => f.owner === dp.el.id;
+        partLine = (a, b, pen, dash) => {
+          const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occlude.index, () => near, ignoreSelf);
+          for (const [q0, q1] of split.visible) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
+          if (showHidden) {
+            for (const [q0, q1] of split.hidden) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, "thin", dp.tone, HIDDEN_DASH);
+          }
+        };
+        partCircle = (c, r, pen) => {
+          const steps = 24;
+          for (let i = 0; i < steps; i++) {
+            const a0 = (i / steps) * Math.PI * 2;
+            const a1 = ((i + 1) / steps) * Math.PI * 2;
+            partLine({ x: c.x + r * Math.cos(a0), y: c.y + r * Math.sin(a0) }, { x: c.x + r * Math.cos(a1), y: c.y + r * Math.sin(a1) }, pen);
+          }
+        };
+      } else {
+        partLine = (a, b, pen, dash) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
+        partCircle = (c, r, pen) => circleIn(p, c, r, dp.projectionPen(pen), dp.tone, dp.elementDash);
+      }
       drawPartSymbol(
         model,
         dp.el,
@@ -868,11 +866,13 @@ function drawPlan(
           scale: frame.scale,
           symbolScale: symScale,
           showMark: tagsShown && !taggedHere.has(dp.el.id),
-          fill: (pts, grey) => {
-            for (const piece of clipFillToPainter(p, pts)) {
-              p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) });
-            }
-          },
+          fill: p.clipPieces
+            ? (pts, grey) => {
+                for (const piece of clipFillToPainter(p, pts)) {
+                  p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) });
+                }
+              }
+            : (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(dp.tone !== "ink" ? { tone: dp.tone } : {}) }),
           circle: partCircle,
           takenBoxes: takenPartBoxes,
         },
@@ -1459,11 +1459,13 @@ function drawPlanConnections(
       scale: p.scale,
       symbolScale: symScale,
       showMark: tagsShown,
-      fill: (pts, grey) => {
-        for (const piece of clipFillToPainter(p, pts)) {
-          p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) });
-        }
-      },
+      fill: p.clipPieces
+        ? (pts, grey) => {
+            for (const piece of clipFillToPainter(p, pts)) {
+              p.prims.push({ kind: "fill", points: piece.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) });
+            }
+          }
+        : (pts, grey) => p.prims.push({ kind: "fill", points: pts.map(p.toPaper), grey, ...(tone !== "ink" ? { tone } : {}) }),
       circle: (c, r, pen) => circleIn(p, c, r, pen, tone),
       takenBoxes: takenPartBoxes,
     });
