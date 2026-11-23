@@ -225,6 +225,7 @@
     "./editor/electrical/electrical-tab": "./src/editor/electrical/electrical-tab.ts",
     "./editor/electrical/ElectricalProperties": "./src/editor/electrical/ElectricalProperties.tsx",
     "./editor/electrical/ElectricalTypesDialog": "./src/editor/electrical/ElectricalTypesDialog.tsx",
+    "./editor/electrical/emergency-sync": "./src/editor/electrical/emergency-sync.ts",
     "./editor/electrical/FaultCurrentStrip": "./src/editor/electrical/FaultCurrentStrip.tsx",
     "./editor/electrical/FeedPanelDialog": "./src/editor/electrical/FeedPanelDialog.tsx",
     "./editor/electrical/firm-typ-label": "./src/editor/electrical/firm-typ-label.ts",
