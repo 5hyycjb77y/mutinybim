@@ -5,8 +5,8 @@ import { $, bool, en, int, list, real, str, type StepGraph, type StepRef, type S
  * Placements and simple bodies. Coordinates are millimetres (the project
  * length unit), plan x east, y north, z up, so kernel numbers cross as they
  * are. Bodies are extrusions (a box, a plan outline pushed up, a profile
- * swept along a run) or, for a modeled part, its real solid as a closed
- * triangulated face set. Anything without a size the kernel states gets a
+ * swept along a run) or, for a modeled part or a library fitting, its real
+ * shape as a triangulated face set. Anything without a size the kernel states gets a
  * placement and no body.
  */
 
@@ -15,6 +15,9 @@ export interface Vec3 {
   readonly y: number;
   readonly z: number;
 }
+
+/** A swept profile's section: a rectangle (width, height) or a circle (diameter), mm. */
+export type Section = { readonly width: number; readonly height: number } | { readonly diameter: number };
 
 const EPS = 1e-9;
 
@@ -61,8 +64,8 @@ export class GeometryWriter {
     return this.g.add("IFCLOCALPLACEMENT", [relTo ?? $, axis]);
   }
 
-  private shape(solid: StepRef): StepRef {
-    const rep = this.g.add("IFCSHAPEREPRESENTATION", [this.body, str("Body"), str("SweptSolid"), list([solid])]);
+  private shape(...solids: StepRef[]): StepRef {
+    const rep = this.g.add("IFCSHAPEREPRESENTATION", [this.body, str("Body"), str("SweptSolid"), list(solids)]);
     return this.g.add("IFCPRODUCTDEFINITIONSHAPE", [$, $, list([rep])]);
   }
 
@@ -102,17 +105,32 @@ export class GeometryWriter {
     return this.shape(this.extrude(profile, this.axis({ x: (min.x + max.x) / 2, y: (min.y + max.y) / 2, z: min.z }), sz));
   }
 
-  /** A plan outline pushed up from `z` by `depth`. Null for fewer than three points or no depth. */
-  prism(outline: readonly Vec2[], z: number, depth: number): StepRef | null {
+  /** A plan outline's distinct corners, without a repeated closing point. Null for fewer than three. */
+  private ring(outline: readonly Vec2[]): readonly Vec2[] | null {
     const pts = outline.filter((p, i) => i === 0 || Math.hypot(p.x - (outline[i - 1]?.x ?? 0), p.y - (outline[i - 1]?.y ?? 0)) > EPS);
     const closedAlready = pts.length > 1 && Math.hypot((pts[0]?.x ?? 0) - (pts[pts.length - 1]?.x ?? 0), (pts[0]?.y ?? 0) - (pts[pts.length - 1]?.y ?? 0)) <= EPS;
     const ring = closedAlready ? pts.slice(0, -1) : pts;
-    if (ring.length < 3 || !(depth > EPS)) return null;
-    const first = ring[0];
-    if (!first) return null;
-    const points: StepValue[] = [...ring, first].map((p) => this.point2(p));
-    const curve = this.g.add("IFCPOLYLINE", [list(points)]);
-    const profile = this.g.add("IFCARBITRARYCLOSEDPROFILEDEF", [en("AREA"), $, curve]);
+    return ring.length < 3 ? null : ring;
+  }
+
+  private closedPolyline(ring: readonly Vec2[]): StepRef {
+    const points: StepValue[] = [...ring, ...ring.slice(0, 1)].map((p) => this.point2(p));
+    return this.g.add("IFCPOLYLINE", [list(points)]);
+  }
+
+  /**
+   * A plan outline pushed up from `z` by `depth`, less any `holes` cut through it.
+   * Null for fewer than three points or no depth; a hole with fewer than three points is left out.
+   */
+  prism(outline: readonly Vec2[], z: number, depth: number, holes: readonly (readonly Vec2[])[] = []): StepRef | null {
+    const ring = this.ring(outline);
+    if (!ring || !(depth > EPS)) return null;
+    const curve = this.closedPolyline(ring);
+    const voids = holes.flatMap((h) => {
+      const inner = this.ring(h);
+      return inner ? [this.closedPolyline(inner)] : [];
+    });
+    const profile = voids.length > 0 ? this.g.add("IFCARBITRARYPROFILEDEFWITHVOIDS", [en("AREA"), $, curve, list(voids)]) : this.g.add("IFCARBITRARYCLOSEDPROFILEDEF", [en("AREA"), $, curve]);
     return this.shape(this.extrude(profile, this.axis({ x: 0, y: 0, z }), depth));
   }
 
@@ -122,11 +140,8 @@ export class GeometryWriter {
     return this.shape(this.extrude(this.rectangle(length, thickness, { x: length / 2, y: 0 }), this.axis({ x: 0, y: 0, z: 0 }), height));
   }
 
-  /**
-   * A profile swept from `start` to `end` (a duct or pipe run), in the parent frame.
-   * `section` is a rectangle (width, height) or a circle (diameter). Null when the run has no length.
-   */
-  sweep(start: Vec3, end: Vec3, section: { readonly width: number; readonly height: number } | { readonly diameter: number }): StepRef | null {
+  /** One profile swept from `start` to `end`, as a solid. Null when it has no length or its section has no size. */
+  private sweptSolid(start: Vec3, end: Vec3, section: Section): StepRef | null {
     const d = unit({ x: end.x - start.x, y: end.y - start.y, z: end.z - start.z });
     const length = Math.hypot(end.x - start.x, end.y - start.y, end.z - start.z);
     if (!d || !(length > EPS)) return null;
@@ -142,6 +157,24 @@ export class GeometryWriter {
       if (!(section.width > EPS && section.height > EPS)) return null;
       profile = this.rectangle(section.width, section.height);
     }
-    return this.shape(this.extrude(profile, this.axis(start, d, ref), length));
+    return this.extrude(profile, this.axis(start, d, ref), length);
+  }
+
+  /**
+   * A profile swept from `start` to `end` (a duct or pipe run), in the parent frame.
+   * `section` is a rectangle (width, height) or a circle (diameter). Null when the run has no length.
+   */
+  sweep(start: Vec3, end: Vec3, section: Section): StepRef | null {
+    const solid = this.sweptSolid(start, end, section);
+    return solid ? this.shape(solid) : null;
+  }
+
+  /**
+   * Several swept profiles as one body (a fitting drawn as a leg to each of its ports).
+   * A leg with no length or no section is left out; null when none is left.
+   */
+  legs(legs: readonly { readonly start: Vec3; readonly end: Vec3; readonly section: Section }[]): StepRef | null {
+    const solids = legs.flatMap((l) => this.sweptSolid(l.start, l.end, l.section) ?? []);
+    return solids.length > 0 ? this.shape(...solids) : null;
   }
 }
