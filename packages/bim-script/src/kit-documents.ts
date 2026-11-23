@@ -893,7 +893,7 @@ export const documents = {
     viewId: string,
     at: SheetPoint,
     scale?: number,
-    title?: { readonly offset?: { readonly x: Measure; readonly y: Measure }; readonly ruleLength?: Measure },
+    title?: { readonly offset?: { readonly x: Measure; readonly y: Measure }; readonly ruleLength?: Measure; readonly northArrowOffset?: { readonly x: Measure; readonly y: Measure } },
   ): string {
     const viewportId = ctx.id("vp");
     ctx.edit({
@@ -903,6 +903,7 @@ export const documents = {
       viewId,
       center: { x: mm(at.x, "Viewport x"), y: mm(at.y, "Viewport y") },
       ...(scale ? { scale } : {}),
+      ...(title?.northArrowOffset ? { northArrowOffsetMm: { x: mm(title.northArrowOffset.x, "North arrow offset x"), y: mm(title.northArrowOffset.y, "North arrow offset y") } } : {}),
       ...(title?.offset ? { titleOffsetMm: { x: mm(title.offset.x, "Title offset x"), y: mm(title.offset.y, "Title offset y") } } : {}),
       ...(title?.ruleLength ? { titleRuleMm: mm(title.ruleLength, "Title rule length") } : {}),
     });
@@ -919,6 +920,19 @@ export const documents = {
       viewportId,
       ...(spec.offset ? { titleOffsetMm: { x: mm(spec.offset.x, "Title offset x"), y: mm(spec.offset.y, "Title offset y") } } : {}),
       ...(spec.ruleLength !== undefined ? { titleRuleMm: spec.ruleLength === null ? null : mm(spec.ruleLength, "Title rule length") } : {}),
+    });
+  },
+  /** Shows, hides, or repositions a placed viewport's north arrow on its sheet. */
+  setViewportNorthArrow(
+    ctx: ScriptContext,
+    viewportId: string,
+    spec: { readonly show?: boolean; readonly offset?: { readonly x: Measure; readonly y: Measure } | null },
+  ): void {
+    ctx.edit({
+      type: "set_viewport_north_arrow",
+      viewportId,
+      ...(spec.show !== undefined ? { show: spec.show } : {}),
+      ...(spec.offset !== undefined ? { offsetMm: spec.offset === null ? null : { x: mm(spec.offset.x, "North arrow offset x"), y: mm(spec.offset.y, "North arrow offset y") } } : {}),
     });
   },
   /** Edits a schedule view, one undo step per call: add / move / remove columns, filter, sort, group, totals. */

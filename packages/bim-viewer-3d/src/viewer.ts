@@ -10,6 +10,8 @@ import { FragmentsModels, type FragmentsModel } from "@thatopen/fragments";
 import { asElementId, elementEntries, type Aabb3, type CropBox3d, type CropFace, type DisplayContext, type ElementId, type ModelState, type RouteJoin, type View3dCamera, findLevelByName, normalizeLevelName } from "@permitzip/bim-kernel";
 import { liveDisplayOf, liveViewRangeExcludes, type CategoryView } from "./live-display";
 import { livePlanSymbols, symbolPositions, type LivePlanText } from "./live-plan-graphics";
+import { buildScalarHeatmapGroup, type ScalarHeatmapOverlay } from "./scalar-heatmap";
+import { SceneLightingController, type SceneLightEmitter, type SceneLightingPreset } from "./scene-lighting";
 import { PlanFootprintGrid } from "./plan-near-miss";
 import { ifcPlacementToScene, kernelToScene, MM, sceneToKernel, toColumnMajor, type Mat4Rows, type Vec3Tuple } from "./coords";
 import { robustCore } from "./framing";
@@ -20,7 +22,20 @@ import { materialOf, parseHexColor, type MaterialPattern } from "@permitzip/bim-
 import { readReferenceItem, type ReferenceItemProperties } from "./item-properties";
 import { nearestTurn, type Orientation, type PlanRectMm } from "./orientation";
 import { screenBoxes, type ScreenRect } from "./box-select";
-import { ARROW_PX, buildArrows, chooseOrbitPivot, gizmoHandleAt, gizmoScreen, metresPerPixel, planUpVector, pointOnScreen, type GizmoHandle, type GizmoScreen } from "./origin-gizmo";
+import {
+  ARROW_PX,
+  buildArrows,
+  buildDepthAwareAxisLines,
+  chooseOrbitPivot,
+  gizmoHandleAt,
+  gizmoScreen,
+  metresPerPixel,
+  planUpVector,
+  pointOnScreen,
+  updateDepthAwareAxisLines,
+  type GizmoHandle,
+  type GizmoScreen,
+} from "./origin-gizmo";
 import { ViewerPalette, type ViewerColors } from "./viewer-colors";
 import { matchCamera, orthoZoomFor, type Projection, type ViewCamera } from "./projection";
 import { makeCameraControls, pinOrbitPoint, zoomFloorFor, type PointZoomControls, type ZoomAnchorQuery } from "./navigation";
@@ -252,6 +267,9 @@ export class ModelViewer3D {
   /** The 3D view's parallel camera (plan keeps its own straight-down one). */
   private readonly orthoView: THREE.OrthographicCamera;
   private sunLight: THREE.DirectionalLight | null = null;
+  private lightingController: SceneLightingController | null = null;
+  private readonly lightEmitterRoot = new THREE.Group();
+  private readonly lightFocusScratch = new THREE.Vector3();
   private shadowsEnabled = true;
   private renderQuality: "draft" | "standard" | "high" = "standard";
   private studioEnv: THREE.Texture | null = null;
@@ -292,6 +310,8 @@ export class ModelViewer3D {
   private selectedOverlayShown = false;
   /** Plan only: the plan symbols the printed drawing draws (a door's swing, a window's lines), over the cut; never picked. */
   private readonly planSymbolRoot = new THREE.Group();
+  /** Trade-agnostic 3D false-color scalar heatmap overlay (e.g. illuminance, coverage); never picked. */
+  private readonly scalarHeatmapRoot = new THREE.Group();
   private planSymbolMaterial: THREE.LineBasicMaterial | null = null;
   /** Plan text textures by colour and text, kept across redraws; freed on dispose. */
   private readonly planTextTextures = new Map<string, { texture: THREE.CanvasTexture; aspect: number }>();
@@ -306,8 +326,10 @@ export class ModelViewer3D {
   private readonly referenceRoot = new THREE.Group();
   private readonly markerRoot = new THREE.Group();
   private readonly palette: ViewerPalette;
-  /** The origin marker's arrows, in the theme's axis colors (the axis lines and label are drawn over the canvas from `originGizmoScreen`). */
+  /** The origin marker's arrows, in the theme's axis colors. */
   private readonly origin: THREE.Group;
+  /** Depth-aware 3D dashed axis lines (crisp in front of the building, softly dimmed behind it). */
+  private readonly originAxes: THREE.Group;
   /** The project origin (base point), scene metres: the orbit point when none is chosen and nothing is loaded or drawn. */
   private readonly projectOrigin = new THREE.Vector3();
   private referencesBoxCache: Promise<THREE.Box3> | null = null;
@@ -362,6 +384,8 @@ export class ModelViewer3D {
     this.elevations = options.elevations ?? DEFAULT_ELEVATIONS;
     this.palette = new ViewerPalette(options.colors);
     this.origin = buildArrows(this.palette.axes);
+    this.originAxes = buildDepthAwareAxisLines(this.palette.axes);
+    this.originAxes.visible = false;
     this.cropOutline = new CropBoxOutline(this.palette.css("selectionOutline"));
     this.overlayScene.add(this.cropOutline.object);
     // Standard hardware 24-bit depth buffer (logarithmicDepthBuffer writes gl_FragDepth, which disables hardware gl.polygonOffset and early-Z culling).
@@ -370,7 +394,7 @@ export class ModelViewer3D {
     if (softwareGpu) {
       this.renderQuality = "draft";
     }
-    this.renderer.setPixelRatio(softwareGpu ? 1 : Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(softwareGpu ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = softwareGpu ? 1.0 : 1.05;
@@ -396,7 +420,8 @@ export class ModelViewer3D {
       }
     }
     // Low ambient + a strong key light with soft shadows so walls, openings and floors read with real depth.
-    this.scene.add(new THREE.HemisphereLight(0xf6f8fc, 0x7d8794, softwareGpu ? 0.95 : 0.85));
+    const hemi = new THREE.HemisphereLight(0xf6f8fc, 0x7d8794, softwareGpu ? 0.95 : 0.85);
+    this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff6ea, softwareGpu ? 2.3 : 2.2);
     sun.position.set(60, 100, 35);
     sun.castShadow = !softwareGpu;
@@ -415,6 +440,17 @@ export class ModelViewer3D {
     const fill = new THREE.DirectionalLight(0xdfe8ff, 0.5);
     fill.position.set(-50, 30, -40);
     this.scene.add(fill);
+    this.lightEmitterRoot.name = "light-emitter-root";
+    this.lightingController = new SceneLightingController(
+      this.renderer,
+      this.scene,
+      hemi,
+      sun,
+      fill,
+      this.lightEmitterRoot,
+      this.studioEnv,
+      this.palette.background,
+    );
     // Subtle matte architectural ground shadow catcher positioned below the lowest slab (FrontSide only, never visible from underneath).
     const groundShadow = new THREE.Mesh(
       new THREE.PlaneGeometry(400, 400),
@@ -427,7 +463,7 @@ export class ModelViewer3D {
     groundShadow.name = "architectural-ground-shadow";
     this.groundShadowPlane = groundShadow;
     this.scene.add(groundShadow);
-    this.scene.add(this.referenceRoot, this.nativeRoot, this.markerRoot, this.ghostRoot, this.groupRoot, this.highlightRoot, this.joinRoot, this.planSymbolRoot, this.selectedRoot, this.origin);
+    this.scene.add(this.referenceRoot, this.nativeRoot, this.markerRoot, this.ghostRoot, this.groupRoot, this.highlightRoot, this.joinRoot, this.planSymbolRoot, this.scalarHeatmapRoot, this.lightEmitterRoot, this.selectedRoot, this.originAxes, this.origin);
 
     const { width, height } = this.size();
     this.perspective = new THREE.PerspectiveCamera(45, width / height, 0.15, 3000);
@@ -518,7 +554,18 @@ export class ModelViewer3D {
     const delta = this.clock.getDelta();
     this.controls.update(delta);
     this.renderer.info.reset();
-    if (this.origin.visible) this.origin.scale.setScalar(ARROW_PX * metresPerPixel(this.camera(), this.origin.position, this.size().height));
+    const hPx = this.size().height;
+    if (this.origin.visible) this.origin.scale.setScalar(ARROW_PX * metresPerPixel(this.camera(), this.origin.position, hPx));
+    const show3dAxes = this.origin.visible && this.mode === "3d";
+    this.originAxes.visible = show3dAxes;
+    if (show3dAxes) {
+      this.originAxes.position.copy(this.origin.position);
+      updateDepthAwareAxisLines(this.originAxes, this.camera(), this.origin.position, hPx);
+    }
+    if (this.mode === "3d" && this.lightingController) {
+      this.controls.getTarget(this.lightFocusScratch);
+      this.lightingController.updateCameraFocus(this.camera(), this.lightFocusScratch);
+    }
     this.toneNewReferenceMaterials();
     this.renderer.render(this.scene, this.camera());
     if (this.cropOutline.object.visible) {
@@ -1080,6 +1127,7 @@ export class ModelViewer3D {
         color: maps ? 0xffffff : color,
         roughness,
         metalness,
+        ...(group === "duct" || group === "duct_fitting" || group === "pipe" || group === "insulation" ? { side: THREE.DoubleSide } : {}),
         ...(maps ? { map: maps.map, bumpMap: maps.bumpMap, bumpScale: maps.bumpScale } : {}),
         // Push coplanar slab edges and roof/column faces subtly behind exterior wall cladding so flush wall-to-slab/parapet joints never z-fight.
         ...(group === "slab"
@@ -1113,6 +1161,11 @@ export class ModelViewer3D {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) child.material.dispose();
     }
     for (const child of [...buildArrows(this.palette.axes).children]) this.origin.add(child);
+    for (const child of [...this.originAxes.children]) {
+      this.originAxes.remove(child);
+      disposeObject(child);
+    }
+    for (const child of [...buildDepthAwareAxisLines(this.palette.axes).children]) this.originAxes.add(child);
     if (this.markerMaterials) {
       // Sprites keep their material; only the drawn symbol changes.
       const outline = this.palette.css("edges");
@@ -1257,6 +1310,12 @@ export class ModelViewer3D {
       this.cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), cutM);
       if (this.sunLight) this.sunLight.castShadow = false;
       if (this.groundShadowPlane) this.groundShadowPlane.visible = false;
+      this.lightingController?.apply(this.lightingController.getPreset(), {
+        is3d: false,
+        shadowsEnabled: false,
+        renderQuality: this.renderQuality,
+        customBackground: true,
+      });
       this.scene.background = this.palette.planBackground;
       void this.setPlanCategoriesVisible(false);
       this.ortho.position.set(target.x, 200, target.z);
@@ -1276,6 +1335,13 @@ export class ModelViewer3D {
       if (this.sunLight) this.sunLight.castShadow = shadowsActive;
       if (this.groundShadowPlane) this.groundShadowPlane.visible = shadowsActive;
       this.scene.background = this.palette.background;
+      if (this.lightingController) {
+        this.lightingController.apply(this.lightingController.getPreset(), {
+          is3d: true,
+          shadowsEnabled: this.shadowsEnabled,
+          renderQuality: this.renderQuality,
+        });
+      }
       void this.setPlanCategoriesVisible(true);
       const camera = this.camera3d();
       // An orbit point a click or a zoom chose survives a trip to plan: the 3D camera comes back as it was, orbiting that point.
@@ -1555,11 +1621,40 @@ export class ModelViewer3D {
       }
       if (this.groundShadowPlane) this.groundShadowPlane.visible = shadowsActive;
     }
+    if (this.lightingController) {
+      this.lightingController.apply(this.lightingController.getPreset(), {
+        is3d: this.mode === "3d",
+        shadowsEnabled: this.shadowsEnabled,
+        renderQuality: quality,
+      });
+    }
     this.invalidateShadows();
   }
 
   getRenderQuality(): "draft" | "standard" | "high" {
     return this.renderQuality;
+  }
+
+  /** Switch 3D time-of-day & atmosphere (`morning`, `noon`, `afternoon`, `evening`, `night`, `night_blackout`, `no_shadows`). */
+  setLightingPreset(preset: SceneLightingPreset) {
+    if (!this.lightingController) return;
+    const cfg = this.lightingController.apply(preset, {
+      is3d: this.mode === "3d",
+      shadowsEnabled: preset !== "no_shadows",
+      renderQuality: this.renderQuality,
+    });
+    this.shadowsEnabled = cfg.sunShadows;
+    if (this.groundShadowPlane) this.groundShadowPlane.visible = this.mode === "3d" && cfg.sunShadows;
+    this.invalidateShadows();
+  }
+
+  getLightingPreset(): SceneLightingPreset {
+    return this.lightingController?.getPreset() ?? "noon";
+  }
+
+  /** Set physical 3D light emitters rendered when the lighting preset illuminates active fixtures (evening/night/blackout). */
+  setLightEmitters(emitters: readonly SceneLightEmitter[]) {
+    this.lightingController?.setEmitters(emitters, this.mode === "3d", this.renderQuality);
   }
 
   setPlanCut(elevationMm: number) {
@@ -2047,7 +2142,14 @@ export class ModelViewer3D {
   setOriginGizmo(position: Vec3Tuple, visible: boolean) {
     this.origin.position.set(...position);
     this.origin.visible = visible;
+    this.originAxes.position.set(...position);
+    this.originAxes.visible = visible && this.mode === "3d";
     for (const listener of this.cameraListeners) listener();
+  }
+
+  /** True when the 3D viewport renders depth-aware origin axis lines (dimmed behind building geometry). */
+  usesDepthAwareOriginAxes(): boolean {
+    return this.mode === "3d";
   }
 
   /** Where the origin marker and its axis lines are on the canvas (px from its top-left); null while hidden. */
@@ -2527,6 +2629,14 @@ export class ModelViewer3D {
     this.controls.setPointerBlocked(this.pointerClaims.size > 0);
   }
 
+  /** Display or clear a trade-agnostic 3D false-color scalar heatmap overlay over floors/workplanes. */
+  setScalarHeatmap(overlay: ScalarHeatmapOverlay | null): void {
+    disposeObject(this.scalarHeatmapRoot);
+    this.scalarHeatmapRoot.clear();
+    if (!overlay || overlay.cells.length === 0) return;
+    this.scalarHeatmapRoot.add(buildScalarHeatmapGroup(overlay));
+  }
+
   dispose() {
     if (this.planFootprintsIdle) {
       if (this.planFootprintsIdle.idle) window.cancelIdleCallback(this.planFootprintsIdle.id);
@@ -2542,10 +2652,13 @@ export class ModelViewer3D {
     disposeObject(this.ghostRoot);
     disposeObject(this.joinRoot);
     disposeObject(this.planSymbolRoot);
+    disposeObject(this.scalarHeatmapRoot);
+    this.lightingController?.dispose();
     disposeObject(this.selectedRoot);
     this.planSymbolMaterial?.dispose();
     for (const { texture } of this.planTextTextures.values()) texture.dispose();
     this.planTextTextures.clear();
+    disposeObject(this.originAxes);
     disposeObject(this.origin);
     this.cropOutline.dispose();
     if (this.markerMaterials) {

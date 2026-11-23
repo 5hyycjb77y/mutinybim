@@ -8,7 +8,7 @@ Generated from the code on every change, for people and for agents. For guides a
 
 - [Example scripts](examples.md): 4 whole scripts to copy
 - [Recipes](recipes.md): 31 worked tasks
-- Script kit: 139 functions
+- Script kit: 144 functions
   - [ctx: the script context](script-kit/ctx.md): 15 functions
   - [units](script-kit/units.md): 6 functions
   - [building](script-kit/building.md): 27 functions
@@ -16,11 +16,12 @@ Generated from the code on every change, for people and for agents. For guides a
   - [equipment](script-kit/equipment.md): 3 functions
   - [parts](script-kit/parts.md): 8 functions
   - [PartBuilder](script-kit/part-builder.md): 22 functions
-  - [documents](script-kit/documents.md): 44 functions
+  - [documents](script-kit/documents.md): 45 functions
   - [checks](script-kit/checks.md): 1 functions
+  - [electrical](script-kit/electrical.md): 4 functions
   - [defineScript](script-kit/define-script.md): 1 functions
 - [Edit commands](commands.md): 204 commands `ctx.edit` takes
-- [Calcs](calcs.md): 28 calculations `ctx.calc` runs
+- [Calcs](calcs.md): 30 calculations `ctx.calc` runs
 - [Pack reads](reads.md): 12 reads `ctx.read` runs
 - TypeScript declarations: the whole kit as one `script-kit.d.ts`, for an agent or editor that type-checks scripts. The docs site builds it; `kitDeclarations()` in `@permitzip/bim-script` returns it.
 

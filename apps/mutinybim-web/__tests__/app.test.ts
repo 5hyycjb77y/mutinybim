@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { AgentSession, agentActor, builtinWebSocketFactory } from "@permitzip/bim-sync";
 import { createApp, type App } from "../src/app";
-import { ModelStore } from "../src/models";
+import { ModelStore, starterModel } from "../src/models";
 import { digest, randomToken } from "../src/secrets";
 import type { WebConfig } from "../src/config";
 import type { Fetch } from "../src/oauth";
@@ -334,4 +334,14 @@ test("the quote button appears only when the deployment sets it", async () => {
   const cookie = await signUp("sam@example.com");
   expect(await (await fetch(`${base}/models`, { headers: { cookie } })).text()).toContain("Get an engineering quote");
   expect((await fetch(`${base}/quote`, { headers: { cookie } })).status).toBe(200);
+});
+
+test("starterModel('...', 'sample') seeds the multi-discipline showcase with views and sheets", () => {
+  const sample = starterModel("m-sample-showcase", "sample");
+  expect(sample.modelId).toBe("m-sample-showcase");
+  const els = Object.values(sample.elements);
+  expect(els.some((e) => e.kind === "wall")).toBe(true);
+  expect(els.some((e) => e.kind === "view" && e.viewType === "three_d")).toBe(true);
+  expect(els.some((e) => e.kind === "sheet" && e.number === "A-101")).toBe(true);
+  expect(els.some((e) => e.kind === "sheet" && e.number === "E-101")).toBe(true);
 });

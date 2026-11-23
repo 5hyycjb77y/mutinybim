@@ -1,10 +1,12 @@
-import { BatteryCharging, Box, Cable, CircleDot, ClipboardCheck, Factory, Gauge, LayoutGrid, Library, Lightbulb, Network, Plug, PlugZap, Power, Repeat, Scale, Server, SquareStack, Table2, TableProperties, ToggleLeft, Unplug, Waypoints, X, Zap } from 'lucide-react'
+import { BatteryCharging, Box, Cable, CircleDot, ClipboardCheck, Factory, Gauge, Layers, LayoutGrid, Library, Lightbulb, Moon, Network, Plug, PlugZap, Power, Repeat, Scale, Server, SquareStack, Sun, Sunset, Table2, TableProperties, ToggleLeft, Unplug, Waypoints, X, Zap } from 'lucide-react'
+import type { SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import type { RibbonCommand, RibbonGroup, RibbonTab } from '../ribbon/types'
 import { tradeTab } from '../ribbon/trade-tab'
 import type { ScheduleChoice } from './schedules/schedule-plan'
 import type { ScheduleAction } from './schedules/use-schedule-workflow'
 import type { DockDeclaration } from '../contributions/types'
 import { dockChildren } from '../schedule-tab/dock'
+import type { PhotometricsHeatmapMode } from './photometrics-heatmap'
 
 /** The starter types the Electrical tab places (packages/bim-kernel/src/library). */
 export const ELECTRICAL_PLACE_TYPES = {
@@ -32,6 +34,9 @@ export const ELECTRICAL_PLACE_TYPES = {
   downlight: 'builtin:downlight-6-led@1',
   light_emergency: 'builtin:troffer-2x4-led-em@1',
   exit_sign: 'builtin:exit-sign-led@1',
+  linear_pendant: 'builtin:linear-pendant-led@1',
+  exit_combo: 'builtin:exit-combo-wall-pack@1',
+  exterior_wall_pack: 'builtin:exterior-wall-pack-led@1',
   panel_208_mcb: 'builtin:panelboard-225-mcb@1',
   panel_480_mcb: 'builtin:panelboard-225-480-mcb@1',
   panel_unit: 'builtin:panelboard-125-208-1ph@1',
@@ -103,6 +108,14 @@ export interface ElectricalRibbon {
   readonly serviceSize?: ElectricalAction
   /** Place a starter service (meter, main, distribution, panels) from a service size; the one-line then draws it. */
   readonly serviceLayout?: ElectricalAction
+  /** Toggle 3D photometric heatmaps and real-time Evening/Night/Blackout lighting renders in the 3D viewer. */
+  readonly photometrics3d?: {
+    readonly mode: PhotometricsHeatmapMode
+    readonly setMode: (mode: PhotometricsHeatmapMode) => void
+    readonly lightingPreset?: SceneLightingPreset
+    readonly setLightingPreset?: (preset: SceneLightingPreset) => void
+    readonly blocked: string | null
+  }
   readonly selection: ElectricalSelection | null
 }
 
@@ -125,6 +138,8 @@ function schedulesGroup(s: ScheduleAction): RibbonGroup {
         keywords: ['schedule'],
         children: [
           scheduleCommand(s, 'lighting_controls', 'Lighting controls schedule', Table2, 'Every switching / control zone with controllers, loads, protocol, circuit, EM mode and sequence', 'ribbon-electrical-lighting-controls-schedule', ['controls', 'switching', 'switch leg', 'dimming', 'zones']),
+          scheduleCommand(s, 'photometric_summary', 'Photometric summary schedule', Sun, 'Normal illuminance (avg/min/max fc, max:min ratio, ASHRAE 90.1 LPD) and pass/fail by room', 'ribbon-electrical-photometric-summary-schedule', ['photometrics', 'footcandles', 'illuminance', 'ies', 'lpd']),
+          scheduleCommand(s, 'egress_lighting_compliance', 'Egress lighting compliance', BatteryCharging, 'NFPA 101 §7.9.2.1 / IBC §1008.3.5 initial & 90-minute floor-plane emergency egress compliance', 'ribbon-electrical-egress-compliance-schedule', ['egress', 'emergency', 'nfpa 101', 'ibc', '90 min']),
           scheduleCommand(s, 'connection_types', 'Connection types', Table2, 'Devices grouped by type and load', 'ribbon-electrical-connection-types-schedule', ['devices', 'receptacles']),
           scheduleCommand(s, 'equipment_connections', 'Equipment connections', Table2, 'Hardwired equipment with MCA, MOCP and its live circuit', 'ribbon-electrical-equipment-connections-schedule', ['mca', 'mocp', 'disconnect']),
           scheduleCommand(s, 'mechanical_equipment', 'Mechanical equipment (with electrical)', Table2, 'The mechanical equipment list with volts, MCA, MOCP and the circuit it is on', 'ribbon-electrical-mechanical-schedule', ['rtu', 'hvac', 'cross trade']),
@@ -162,6 +177,9 @@ function placeGroup(e: ElectricalRibbon): RibbonGroup {
           placeCommand(e, 'downlight', 'Downlight', Lightbulb, 'A 6" LED downlight, 277 V', ['can', 'recessed']),
           placeCommand(e, 'light_emergency', 'Light, emergency battery', BatteryCharging, 'A 2x4 troffer with an emergency battery', ['emergency', 'egress', 'em']),
           placeCommand(e, 'exit_sign', 'Exit sign', BatteryCharging, 'An LED exit sign with battery', ['exit', 'egress']),
+          placeCommand(e, 'linear_pendant', 'Linear pendant, 4 ft', Lightbulb, '4 ft direct/indirect LED pendant (4200 lm, 36 W)', ['pendant', 'suspended', 'linear', 'ies']),
+          placeCommand(e, 'exit_combo', 'Exit / emergency combo', BatteryCharging, 'Exit sign with dual LED emergency egress heads (450 lm)', ['exit', 'combo', 'egress', 'emergency']),
+          placeCommand(e, 'exterior_wall_pack', 'Exterior wall pack', Sun, 'Full-cutoff exterior LED egress discharge sconce (1800 lm)', ['exterior', 'wall pack', 'sconce', 'exit discharge']),
           placeCommand(e, 'switch', 'Switch', ToggleLeft, 'A single-pole switch (snaps & rotates onto wall faces)', ['light switch', 'toggle']),
           placeCommand(e, 'switch_3way', 'Switch, 3-way', ToggleLeft, 'A 3-way switch ($3) for multi-location control', ['3-way', 'traveler', 'switch']),
           placeCommand(e, 'switch_4way', 'Switch, 4-way', ToggleLeft, 'A 4-way intermediate switch ($4)', ['4-way', 'switch']),
@@ -320,6 +338,50 @@ export function electricalTab(e: ElectricalRibbon, select: RibbonGroup): RibbonT
         },
         ...(e.check ? [{ id: 'electrical-check', label: 'Check', icon: ClipboardCheck, description: 'What needs attention: devices on no circuit, voltage mismatches, overloaded or unbalanced panels', keywords: ['findings', 'errors', 'uncircuited', 'overloaded', 'unbalanced', 'audit'], disabledReason: e.check.blocked, run: e.check.run, testId: 'ribbon-electrical-check' }] : []),
         ...(e.balance ? [{ id: 'electrical-balance', label: 'Balance phases', icon: Scale, description: 'Suggest slot moves that even out the load on A, B and C; you choose which to apply', keywords: ['rebalance', 'phase balance', 'load balance'], disabledReason: e.balance.blocked, run: e.balance.run, testId: 'ribbon-electrical-balance' }] : []),
+        ...(e.photometrics3d
+          ? [
+              {
+                id: 'electrical-photometrics-3d',
+                label:
+                  e.photometrics3d.mode === 'off'
+                    ? 'Photometrics 3D'
+                    : e.photometrics3d.mode === 'normal'
+                      ? '3D: Normal fc'
+                      : e.photometrics3d.mode === 'normal_simplified'
+                        ? '3D: Simple fc'
+                        : e.photometrics3d.mode === 'surfaces'
+                          ? '3D: Surfaces'
+                          : '3D: Egress fc',
+                icon: Sun,
+                description: 'Toggle 3D photometric heatmaps (Detailed, Simplified, Task Surfaces & 3D Stairs, Emergency Egress) or render live luminaire lighting in Evening, Night, and Blackout modes',
+                keywords: ['photometrics', 'heatmap', 'footcandles', 'egress', 'illuminance', 'ies', '3d', 'night', 'evening', 'blackout', 'surfaces', 'stairs'],
+                disabledReason: e.photometrics3d.blocked,
+                pressed:
+                  e.photometrics3d.mode !== 'off' ||
+                  e.photometrics3d.lightingPreset === 'evening' ||
+                  e.photometrics3d.lightingPreset === 'night' ||
+                  e.photometrics3d.lightingPreset === 'night_blackout' ||
+                  e.photometrics3d.lightingPreset === 'night_blackout_90min',
+                children: [
+                  { id: 'photometrics-3d-normal', label: 'Normal fc (Detailed: materials & furniture)', icon: Sun, description: 'Maintained footcandle heatmap with Materials Library reflectances, glazing transmittance, furniture shadows & 3D stair treads', pressed: e.photometrics3d.mode === 'normal', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setMode('normal'), testId: 'ribbon-electrical-photometrics-3d-normal' },
+                  { id: 'photometrics-3d-simplified', label: 'Normal fc (Simplified space plane)', icon: LayoutGrid, description: 'Clean empty-room 30" workplane heatmap (80/50/20 defaults, ignores furniture)', pressed: e.photometrics3d.mode === 'normal_simplified', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setMode('normal_simplified'), testId: 'ribbon-electrical-photometrics-3d-simplified' },
+                  { id: 'photometrics-3d-surfaces', label: 'Task surfaces & 3D stairs', icon: Layers, description: 'Fine 1 ft grid directly on kitchen countertops, islands, worktables, vanities & rising 3D stair treads', pressed: e.photometrics3d.mode === 'surfaces', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setMode('surfaces'), testId: 'ribbon-electrical-photometrics-3d-surfaces' },
+                  { id: 'photometrics-3d-egress', label: 'Emergency egress (NFPA 101 + 3D stairs)', icon: BatteryCharging, description: 'Pass/fail floor-plane & 3D stair tread emergency egress heatmap per NFPA 101 §7.9.2.1', pressed: e.photometrics3d.mode === 'egress', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setMode('egress'), testId: 'ribbon-electrical-photometrics-3d-egress' },
+                  ...(e.photometrics3d.setLightingPreset
+                    ? [
+                        { id: 'photometrics-3d-render-evening', label: 'Render: Evening dusk (Normal lights)', icon: Sunset, description: 'Blue-hour twilight with normal luminaires ON (emergency-only combo heads OFF)', pressed: e.photometrics3d.lightingPreset === 'evening', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setLightingPreset?.('evening'), testId: 'ribbon-electrical-render-evening' },
+                        { id: 'photometrics-3d-render-night', label: 'Render: Nighttime (Normal lights)', icon: Moon, description: 'Night sky with all normal luminaires at rated lumens (emergency-only combo heads OFF)', pressed: e.photometrics3d.lightingPreset === 'night', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setLightingPreset?.('night'), testId: 'ribbon-electrical-render-night' },
+                        { id: 'photometrics-3d-render-blackout', label: 'Render: Emergency — Initial (0 min)', icon: BatteryCharging, description: 'Power outage at night: dual-mode egress fixtures dim to electrical.emergency_lumens and exit-combo flood heads snap ON', pressed: e.photometrics3d.lightingPreset === 'night_blackout', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setLightingPreset?.('night_blackout'), testId: 'ribbon-electrical-render-blackout' },
+                        { id: 'photometrics-3d-render-blackout-90m', label: 'Render: Emergency — 90-Min (Battery derate)', icon: BatteryCharging, description: 'NFPA 101 90-minute end-of-discharge: battery-backed fixtures derate to 60% of emergency_lumens while generator/inverter circuits hold 100%', pressed: e.photometrics3d.lightingPreset === 'night_blackout_90min', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setLightingPreset?.('night_blackout_90min'), testId: 'ribbon-electrical-render-blackout-90m' },
+                        { id: 'photometrics-3d-render-day', label: 'Render: Daylight (Noon)', icon: Sun, description: 'Return 3D viewport to standard studio daylight', pressed: e.photometrics3d.lightingPreset === 'noon', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setLightingPreset?.('noon'), testId: 'ribbon-electrical-render-day' },
+                      ]
+                    : []),
+                  { id: 'photometrics-3d-off', label: 'Hide 3D heatmap', icon: X, description: 'Clear the 3D photometric heatmap overlay', pressed: e.photometrics3d.mode === 'off', disabledReason: e.photometrics3d.blocked, run: () => e.photometrics3d?.setMode('off'), testId: 'ribbon-electrical-photometrics-3d-off' },
+                ],
+                testId: 'ribbon-electrical-photometrics-3d',
+              } satisfies RibbonCommand,
+            ]
+          : []),
       ],
     },
     design: {

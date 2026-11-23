@@ -332,8 +332,8 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
   const LOAD_Y = 0;
   const LOAD_H = 26;
   const CTRL_Y = 46;
-  const CTRL_H = 26;
-  const BUS_Y = 92;
+  const CTRL_H = 31;
+  const BUS_Y = 97;
   const BUS_H = 16;
 
   // Title banner
@@ -389,15 +389,18 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
 
     // Tier 2: Control Zone / Controller card
     items.push(rectPoly(nodeId, x, CTRL_Y, COL_W, CTRL_H, z.isEmergencyOnly ? "heavy" : "medium", z.isEmergencyOnly));
-    // Header divider
-    items.push({ nodeId, shape: "line", points: [{ x, y: CTRL_Y + CTRL_H - 7.5 }, { x: x + COL_W, y: CTRL_Y + CTRL_H - 7.5 }], weight: "thin" });
+    // Header divider (room for bold zone label + room/area line without overlapping controllers below)
+    const headerH = 12.5;
+    items.push({ nodeId, shape: "line", points: [{ x, y: CTRL_Y + CTRL_H - headerH }, { x: x + COL_W, y: CTRL_Y + CTRL_H - headerH }], weight: "thin" });
+    const roomUpper = z.room.toUpperCase();
+    const shortRoom = roomUpper.length > 26 ? `${roomUpper.slice(0, 24).trimEnd()}…` : roomUpper;
     items.push(
       textBox(
         nodeId,
         x + 2,
         CTRL_Y + CTRL_H - 1.5,
         COL_W - 4,
-        [{ text: `${z.label} · ${z.room.toUpperCase()}`, bold: true }],
+        [{ text: z.label, bold: true }, { text: shortRoom }],
         "center",
       ),
     );
@@ -415,7 +418,7 @@ export function layoutLightingControlsDiagram(input: DiagramGraphLayoutInput): D
             { text: PROTOCOL_LABELS[z.protocol] ?? z.protocol.toUpperCase() },
           ]
         : [{ text: "UNSWITCHED FEED" }, { text: "CONSTANT HOT / EM" }];
-    items.push(textBox(nodeId, x + 2, CTRL_Y + CTRL_H - 9.2, COL_W - 4, ctrlLines, "center"));
+    items.push(textBox(nodeId, x + 2, CTRL_Y + CTRL_H - headerH - 2.0, COL_W - 4, ctrlLines, "center"));
 
     // Control wiring drop between controller block and controlled loads block
     items.push({ nodeId, shape: "line", points: [{ x: cx, y: CTRL_Y }, { x: cx, y: LOAD_Y + LOAD_H }], weight: "thin", dashed: dashedCtrl });

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@permitzip/bim-ui'
-import { Lock, Sparkles, Sun, Unlock } from 'lucide-react'
+import type { SceneLightingPreset } from '@permitzip/bim-viewer-3d'
+import { BatteryCharging, Lock, Moon, Sparkles, Sun, Sunrise, Sunset, Unlock } from 'lucide-react'
 import { toggleSelectionLock, useSelectionLocks } from './selection-locks'
 
 interface ViewerLightingControls {
@@ -10,14 +11,24 @@ interface ViewerLightingControls {
   setShadows(enabled: boolean): void
   setRenderQuality(quality: 'draft' | 'standard' | 'high'): void
   getRenderQuality?: () => 'draft' | 'standard' | 'high'
+  setLightingPreset?(preset: SceneLightingPreset): void
 }
 
-const SUN_PRESETS = [
-  { label: 'Morning', azimuth: 55, elevation: 32, shadows: true },
-  { label: 'Noon', azimuth: 135, elevation: 62, shadows: true },
-  { label: 'Afternoon', azimuth: 235, elevation: 28, shadows: true },
-  { label: 'No shadows', azimuth: 135, elevation: 62, shadows: false },
-] as const
+const LIGHTING_PRESETS: readonly {
+  readonly id: SceneLightingPreset
+  readonly label: string
+  readonly azimuth: number
+  readonly elevation: number
+  readonly shadows: boolean
+  readonly activeTone: boolean
+}[] = [
+  { id: 'morning', label: 'Morning', azimuth: 55, elevation: 28, shadows: true, activeTone: false },
+  { id: 'noon', label: 'Noon', azimuth: 135, elevation: 62, shadows: true, activeTone: false },
+  { id: 'afternoon', label: 'Afternoon', azimuth: 235, elevation: 24, shadows: true, activeTone: false },
+  { id: 'evening', label: 'Evening', azimuth: 268, elevation: 10, shadows: true, activeTone: true },
+  { id: 'night', label: 'Night', azimuth: 210, elevation: 48, shadows: true, activeTone: true },
+  { id: 'no_shadows', label: 'No shadows', azimuth: 135, elevation: 62, shadows: false, activeTone: false },
+]
 
 const QUALITY_ORDER = ['draft', 'standard', 'high'] as const
 const QUALITY_LABEL: Record<(typeof QUALITY_ORDER)[number], string> = { draft: 'Draft', standard: 'Std', high: 'High' }
@@ -28,16 +39,34 @@ interface Props {
   readonly canEdit: boolean
   readonly onTogglePin?: () => void
   readonly viewer?: ViewerLightingControls | null
+  readonly lightingPreset?: SceneLightingPreset
+  readonly onLightingPresetChange?: (preset: SceneLightingPreset) => void
   readonly is3d?: boolean
 }
 
+function PresetIcon({ preset }: { readonly preset: SceneLightingPreset }): ReactNode {
+  if (preset === 'morning') return <Sunrise className="size-3" />
+  if (preset === 'evening') return <Sunset className="size-3" />
+  if (preset === 'night' || preset === 'night_blackout' || preset === 'night_blackout_90min') return <Moon className="size-3" />
+  return <Sun className="size-3" />
+}
+
 /**
- * Compact Revit-style selection-lock + 3D sun/render-quality strip docked in the bottom status bar.
+ * Compact Revit-style selection-lock + 3D time-of-day lighting/render-quality strip docked in the bottom status bar.
  * Uses only `@permitzip/bim-ui` controls and `--mutiny-*` theme tokens.
  */
-export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTogglePin, viewer, is3d = false }: Props): ReactNode {
+export function SelectionLocksBar({
+  hasSelection,
+  selectionLocked,
+  canEdit,
+  onTogglePin,
+  viewer,
+  lightingPreset,
+  onLightingPresetChange,
+  is3d = false,
+}: Props): ReactNode {
   const locks = useSelectionLocks()
-  const [sunIdx, setSunIdx] = useState(1)
+  const [localPreset, setLocalPreset] = useState<SceneLightingPreset>('noon')
   const [quality, setQuality] = useState<'draft' | 'standard' | 'high'>(() => viewer?.getRenderQuality?.() ?? 'standard')
 
   useEffect(() => {
@@ -45,12 +74,40 @@ export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTo
     if (current) setQuality(current)
   }, [viewer])
 
+  const currentPreset = lightingPreset ?? localPreset
+  const isEmergencyMode = currentPreset === 'night_blackout' || currentPreset === 'night_blackout_90min'
+  const isLitMode = currentPreset === 'evening' || currentPreset === 'night' || isEmergencyMode
+  const baseTimePreset: SceneLightingPreset = isEmergencyMode ? 'night' : currentPreset
+  const presetEntry = LIGHTING_PRESETS.find((p) => p.id === baseTimePreset) ?? LIGHTING_PRESETS[1]!
+
+  const applyPreset = (nextId: SceneLightingPreset) => {
+    setLocalPreset(nextId)
+    if (onLightingPresetChange) {
+      onLightingPresetChange(nextId)
+    } else if (viewer?.setLightingPreset) {
+      viewer.setLightingPreset(nextId)
+    } else {
+      const entry = LIGHTING_PRESETS.find((p) => p.id === nextId) ?? LIGHTING_PRESETS[1]!
+      viewer?.setSun(entry.azimuth, entry.elevation)
+      viewer?.setShadows(entry.shadows)
+    }
+  }
+
   const cycleSun = () => {
-    const next = (sunIdx + 1) % SUN_PRESETS.length
-    setSunIdx(next)
-    const p = SUN_PRESETS[next]!
-    viewer?.setSun(p.azimuth, p.elevation)
-    viewer?.setShadows(p.shadows)
+    const idx = LIGHTING_PRESETS.findIndex((p) => p.id === baseTimePreset)
+    const next = LIGHTING_PRESETS[(idx + 1) % LIGHTING_PRESETS.length]!
+    applyPreset(next.id)
+  }
+
+  // Dedicated 1-click toggle between Normal lighting, Emergency Initial (0 min), and Emergency 90-Min battery derate
+  const cycleEmergencyMode = () => {
+    if (currentPreset === 'night_blackout') {
+      applyPreset('night_blackout_90min')
+    } else if (currentPreset === 'night_blackout_90min') {
+      applyPreset('night')
+    } else {
+      applyPreset('night_blackout')
+    }
   }
 
   const cycleQuality = () => {
@@ -59,7 +116,6 @@ export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTo
     viewer?.setRenderQuality(next)
   }
 
-  const sunPreset = SUN_PRESETS[sunIdx]!
   return (
     <div
       className="ml-auto flex shrink-0 items-center gap-1"
@@ -118,14 +174,36 @@ export function SelectionLocksBar({ hasSelection, selectionLocked, canEdit, onTo
           <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
           <Button
             size="sm"
-            variant={sunPreset.shadows ? 'outline' : 'ghost'}
+            variant={presetEntry.activeTone ? 'default' : presetEntry.shadows ? 'outline' : 'ghost'}
             onClick={cycleSun}
-            title="Cycle 3D sun angle and shadows (Morning / Noon / Afternoon / Off)"
+            title="Cycle 3D time of day (Morning / Noon / Afternoon / Evening lights / Night lights / No shadows)"
             data-testid="sun-preset-toggle"
           >
-            <Sun className="size-3" />
-            {sunPreset.label}
+            <PresetIcon preset={presetEntry.id} />
+            {presetEntry.label}
           </Button>
+          {isLitMode && (
+            <Button
+              size="sm"
+              variant={isEmergencyMode ? 'default' : 'outline'}
+              onClick={cycleEmergencyMode}
+              title={
+                currentPreset === 'night_blackout'
+                  ? 'Emergency Initial (0 min) — emergency fixtures at rated emergency_lumens, exit-combo heads ON. Click for 90-Min battery derate.'
+                  : currentPreset === 'night_blackout_90min'
+                    ? 'Emergency 90-Min (NFPA 101 end-of-discharge) — battery fixtures derated to 60%. Click to restore Normal power.'
+                    : 'Normal power — click to simulate Emergency Blackout (egress fixtures only at emergency_lumens)'
+              }
+              data-testid="emergency-lighting-toggle"
+            >
+              <BatteryCharging className="size-3" />
+              {currentPreset === 'night_blackout'
+                ? 'EM Initial'
+                : currentPreset === 'night_blackout_90min'
+                  ? 'EM 90-Min'
+                  : 'Normal'}
+            </Button>
+          )}
           <Button
             size="sm"
             variant={quality === 'high' ? 'default' : 'ghost'}

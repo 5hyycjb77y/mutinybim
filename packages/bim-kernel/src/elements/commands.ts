@@ -5,7 +5,7 @@ import { activeClassRegistry } from "../registry";
 import { builtinRegistry } from "../registry/builtin";
 import { recognizes } from "../registry/recognition";
 import { withPackParameters } from "../fields/pack-parameters";
-import { PACK_PARAMETER_KEY, PARTS_PACK_VALUES_FEATURE } from "../parts";
+import { PACK_PARAMETER_KEY, PARAM_TEXT_DEFAULT_MAX, PARAM_TEXT_LONG_MAX, PARTS_LONG_TEXT_VALUES_FEATURE, PARTS_PACK_VALUES_FEATURE } from "../parts";
 import "../part-model/unit-gate";
 import "./discipline-gate";
 import "./class-refresh";
@@ -44,7 +44,7 @@ import { ELEMENTS_LINKED_COPY_FEATURE } from "../reference-geometry/linked-copy-
 const idSchema = z.string().min(1).max(200);
 const vec2Schema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
 const paramKey = z.string().max(REGISTRY_ID_MAX_LENGTH).regex(REGISTRY_ID_PATTERN, "a parameter key (zz.section, material.layer_set)");
-const paramValue = z.union([z.number().finite(), z.string().max(400), z.boolean()]);
+const paramValue = z.union([z.number().finite(), z.string().max(PARAM_TEXT_LONG_MAX), z.boolean()]);
 const MAX_IDS = 500;
 const MAX_POINTS = 2000;
 
@@ -247,8 +247,11 @@ function packPartValueRefusal(model: ModelState, part: PartInstance, key: string
       return typeof value === "boolean" ? null : `${field.label} is yes or no`;
     case "choice":
       return typeof value === "string" && (field.choices ?? []).includes(value) ? null : `${field.label} is one of ${(field.choices ?? []).join(", ")}`;
-    default:
-      return typeof value === "string" ? null : `${field.label} is text`;
+    default: {
+      if (typeof value !== "string") return `${field.label} is text`;
+      const limit = field.maxLength ?? PARAM_TEXT_DEFAULT_MAX;
+      return value.length <= limit ? null : `${field.label} must be at most ${limit} characters`;
+    }
   }
 }
 
@@ -552,6 +555,9 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
               if (why) refuse("invalid_value", why, [el.id]);
             }
             if (!peerReads(PARTS_PACK_VALUES_FEATURE)) refuse("invalid_value", `${elementName(el)} can't take pack parameters yet: the model server this model is open on is an older version that doesn't store them. Try again once the server is updated`, [el.id]);
+            if (Object.values(command.values).some((v) => typeof v === "string" && v.length > PARAM_TEXT_DEFAULT_MAX) && !peerReads(PARTS_LONG_TEXT_VALUES_FEATURE)) {
+              refuse("invalid_value", `${elementName(el)} can't store text values longer than ${PARAM_TEXT_DEFAULT_MAX} characters yet: the model server is an older version. Try again once the server is updated`, [el.id]);
+            }
             const values: Record<string, ParamValue> = { ...el.values };
             for (const [k, v] of Object.entries(command.values)) {
               if (v === null) delete values[k];
@@ -564,6 +570,7 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
             const raw = el as BimElement & { readonly values?: Record<string, ParamValue> };
             const values: Record<string, ParamValue> = { ...(raw.values ?? {}) };
             for (const [k, v] of Object.entries(command.values)) {
+              if (typeof v === "string" && v.length > PARAM_TEXT_DEFAULT_MAX) refuse("invalid_value", `${k} must be at most ${PARAM_TEXT_DEFAULT_MAX} characters`, [el.id]);
               if (v === null) delete values[k];
               else values[k] = v;
             }
@@ -574,6 +581,7 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
           const base = current(el);
           const values: Record<string, ParamValue> = { ...(base.values ?? {}) };
           for (const [k, v] of Object.entries(command.values)) {
+            if (typeof v === "string" && v.length > PARAM_TEXT_DEFAULT_MAX) refuse("invalid_value", `${k} must be at most ${PARAM_TEXT_DEFAULT_MAX} characters`, [el.id]);
             if (v === null) delete values[k];
             else values[k] = v;
           }

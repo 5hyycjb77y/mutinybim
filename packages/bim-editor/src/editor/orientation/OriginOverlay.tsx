@@ -81,6 +81,7 @@ export function OriginOverlay({ viewer, model, site, which, editing, toolArmed =
   /** Placed, waiting for the one question. */
   const [placed, setPlaced] = useState<Preview | null>(null)
   const [hovered, setHovered] = useState(false)
+  const [focused, setFocused] = useState(false)
   const [northStart, setNorthStart] = useState<{ x: number; y: number } | null>(null)
   const [northCursor, setNorthCursor] = useState<{ x: number; y: number } | null>(null)
   /** Where a press on the view started while dragging; a release close by is a click. */
@@ -284,6 +285,8 @@ export function OriginOverlay({ viewer, model, site, which, editing, toolArmed =
   const resetBlocked = editBlocked ?? (resetOriginCommand(site, which) ? null : 'Already on model zero.')
   const pointName = which === 'survey_point' ? 'site point' : 'project origin'
 
+  const use3dDepthAxes = typeof viewer.usesDepthAwareOriginAxes === 'function' && viewer.usesDepthAwareOriginAxes()
+
   return (
     <>
       <svg className="pointer-events-none absolute inset-0 size-full" data-testid="origin-overlay" data-origin-point={which} aria-hidden>
@@ -291,7 +294,17 @@ export function OriginOverlay({ viewer, model, site, which, editing, toolArmed =
           (['x', 'y', 'z'] as const).map((axis) => {
             const seg = screen.lines[axis]
             return seg ? (
-              <line key={axis} data-testid={`origin-axis-${axis}`} x1={seg.a.x} y1={seg.a.y} x2={seg.b.x} y2={seg.b.y} className={cn(AXIS_STROKE[axis], 'opacity-70')} strokeWidth={1} strokeDasharray="6 5" />
+              <line
+                key={axis}
+                data-testid={`origin-axis-${axis}`}
+                x1={seg.a.x}
+                y1={seg.a.y}
+                x2={seg.b.x}
+                y2={seg.b.y}
+                className={cn(AXIS_STROKE[axis], use3dDepthAxes ? 'opacity-0' : 'opacity-70')}
+                strokeWidth={1}
+                strokeDasharray="6 5"
+              />
             ) : null
           })}
         {startPx && northCursor && <line x1={startPx.x} y1={startPx.y} x2={northCursor.x} y2={northCursor.y} className="stroke-danger-600" strokeWidth={1.5} />}
@@ -314,6 +327,8 @@ export function OriginOverlay({ viewer, model, site, which, editing, toolArmed =
               style={{ left: o.x - HUB_PX / 2, top: o.y - HUB_PX / 2, width: HUB_PX, height: HUB_PX }}
               onPointerEnter={() => setHovered(true)}
               onPointerLeave={() => setHovered(false)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               onDoubleClick={(e) => {
                 e.stopPropagation()
                 if (!editing && !editBlocked) onStartMove()
@@ -333,7 +348,7 @@ export function OriginOverlay({ viewer, model, site, which, editing, toolArmed =
           </ContextMenuContent>
         </ContextMenu>
       )}
-      {o && !placed && (
+      {o && !placed && (hovered || focused || editing || pickingNorth) && (
         <div
           className="pointer-events-none absolute flex flex-col whitespace-nowrap rounded-sm bg-background/85 px-1.5 py-1 text-[11px] leading-tight shadow-sm"
           style={labelLeft ? { left: o.x - 16, top: o.y - 14, transform: 'translate(-100%, -100%)' } : { left: o.x + 16, top: o.y - 14, transform: 'translateY(-100%)' }}

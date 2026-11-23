@@ -53,6 +53,6 @@ describe("e12: a bare kernel keeps Electrical's records and names the add-on", (
     expect(r.success).toBe(true);
     expect(catalogElementId("feeder_type", "F225")).toBe(STORED.id);
     expect(layoutOneLine(SPEC).nodes.map((n) => n.name)).toEqual(["Utility", "P1"]);
-    expect(viewGraphicsRows().map((row) => row.hintsKey)).toEqual(["circuitGraphics"]);
+    expect(viewGraphicsRows().map((row) => row.hintsKey)).toEqual(["photometrics", "circuitGraphics"]);
   });
 });

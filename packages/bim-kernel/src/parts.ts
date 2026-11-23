@@ -98,7 +98,12 @@ export const PARAM_UNITS = LEGACY_PARAM_UNITS;
 /** @deprecated The stored v1 name; the meaning is `paramUnitBinding(unit)`. */
 export type ParamUnit = (typeof PARAM_UNITS)[number];
 
-const paramValueSchema = z.union([z.number().finite(), z.string().max(400), z.boolean()]);
+/** Default text parameter character limit (kept for older peers without `parts:long_text_values`). */
+export const PARAM_TEXT_DEFAULT_MAX = 400;
+/** Maximum text parameter character limit for structured text payloads when a field opts into `maxLength`. */
+export const PARAM_TEXT_LONG_MAX = 65_536;
+
+const paramValueSchema = z.union([z.number().finite(), z.string().max(PARAM_TEXT_LONG_MAX), z.boolean()]);
 
 export const paramDefSchema = z.object({
   name: z.string().regex(PARAM_NAME, "lower_snake_case, starting with a letter"),
@@ -119,6 +124,7 @@ export const paramDefSchema = z.object({
     .optional(),
   min: z.number().finite().optional(),
   max: z.number().finite().optional(),
+  maxLength: z.number().int().min(1).max(PARAM_TEXT_LONG_MAX).optional(),
   choices: z.array(z.string().min(1).max(80)).min(1).max(50).optional(),
   required: z.boolean().optional(),
   default: paramValueSchema.optional(),
@@ -485,8 +491,11 @@ export function checkParamValue(def: ParamDef, value: ParamValue): string | null
       if (def.max !== undefined && value > def.max) return `${def.label} must be at most ${def.max}`;
       return null;
     case "text":
-    case "material":
-      return typeof value === "string" ? null : `${def.label} must be text`;
+    case "material": {
+      if (typeof value !== "string") return `${def.label} must be text`;
+      const limit = def.maxLength ?? PARAM_TEXT_DEFAULT_MAX;
+      return value.length <= limit ? null : `${def.label} must be at most ${limit} characters`;
+    }
     case "boolean":
       return typeof value === "boolean" ? null : `${def.label} must be yes or no`;
     case "choice":
@@ -996,6 +1005,9 @@ export const PACK_PARAMETER_KEY = /^[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_.]*$/;
 
 /** The protocol feature for part `values` carrying pack parameter keys. */
 export const PARTS_PACK_VALUES_FEATURE = "parts:pack_values";
+
+/** The protocol feature for text parameter values exceeding 400 characters (up to 65536). */
+export const PARTS_LONG_TEXT_VALUES_FEATURE = "parts:long_text_values";
 
 /** The protocol feature for part parameters stored with a unit code (not a v1 unit name). */
 export const PARTS_UNIT_CODES_FEATURE = "parts:unit_codes";

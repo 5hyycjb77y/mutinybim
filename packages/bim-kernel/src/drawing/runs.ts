@@ -240,6 +240,10 @@ function schematicEndTrimMm(model: ModelState, seg: RunSegment, end: "start" | "
   if ((f.fittingType === "tee" || f.fittingType === BRANCH_TAP_FITTING) && f.ports.some((pt) => !flatDir(pt.direction) && pt.direction.z > 0.5)) {
     return SCHEMATIC_NODE_RADIUS_MM * scaleMmPerPaperMm;
   }
+  if (f.fittingType === "wye" && f.host && f.ports[0] && flatDir(f.ports[0].direction)) {
+    // Stop the horizontal branch leg where the 45° wye lateral sweep begins so the junction reads as a true wye, not a 90° tee.
+    return SCHEMATIC_FITTING_OFFSET_MM * 1.45 * scaleMmPerPaperMm;
+  }
   return 0;
 }
 
@@ -527,13 +531,10 @@ function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, sc
       return;
     }
     case "wye": {
+      // ASPE/AIA 1D wye symbol: swept 45° lateral joining trunk in flow direction (distinct from a 90° tee).
       const flatPorts = f.ports.filter((pt) => flatDir(pt.direction));
-      for (const pt of flatPorts) {
-        const pp = plan(pt.position);
-        if (Math.hypot(pp.x - p.x, pp.y - p.y) > 1) line(p, pp, pen);
-        jointTick(pp, unit(plan(pt.direction)), offset, tickHalf, line);
-      }
-      // Swept 45° diagonal marker on the branch port so wyes read distinctly from tees.
+      const hostSeg = f.host ? model.elements[f.host.segmentId] : undefined;
+      const sweepLen = offset * 1.45;
       if (flatPorts.length >= 3) {
         const dirs = flatPorts.map((pt) => unit(plan(pt.direction)));
         let branchIdx = 2;
@@ -546,19 +547,40 @@ function drawSchematicFitting(model: ModelState, f: RunFitting, line: LineFn, sc
             break;
           }
         }
+        for (let i = 0; i < flatPorts.length; i++) {
+          const pt = flatPorts[i]!;
+          const pp = plan(pt.position);
+          if (i !== branchIdx && Math.hypot(pp.x - p.x, pp.y - p.y) > 1) line(p, pp, pen);
+          jointTick(pp, unit(plan(pt.direction)), i === branchIdx ? sweepLen : offset, tickHalf, line);
+        }
         const bd = dirs[branchIdx];
         const md = dirs[(branchIdx + 1) % dirs.length];
         if (bd && md) {
-          line(add(p, scale(bd, offset * 0.9)), add(p, scale(md, offset * 0.9)), "thin");
+          const branchPt = add(p, scale(bd, sweepLen));
+          const trunkPt = add(p, scale(md, sweepLen));
+          line(branchPt, trunkPt, pen);
+          const bp = flatPorts[branchIdx] ? plan(flatPorts[branchIdx]!.position) : p;
+          if (Math.hypot(bp.x - p.x, bp.y - p.y) > 1) line(branchPt, bp, pen);
         }
       } else if (pa) {
-        // Hosted wye on a continuous trunk: derive trunk axis from the host segment when available.
-        const hostSeg = f.host ? model.elements[f.host.segmentId] : undefined;
+        // Hosted combination wye on a continuous trunk: sweep 45° downstream into flow direction.
         const bd = unit(plan(pa.direction));
-        const trunkDir = hostSeg?.kind === "run_segment" && !vertical(hostSeg) ? unit(sub(plan(hostSeg.end), plan(hostSeg.start))) : perp(bd);
-        const branchStart = add(p, scale(bd, offset * 0.9));
-        const trunkPt = add(p, scale(trunkDir, offset * 0.9));
-        line(branchStart, trunkPt, "thin");
+        let trunkDir: Vec2;
+        if (hostSeg?.kind === "run_segment" && !vertical(hostSeg)) {
+          const segDir = unit(sub(plan(hostSeg.end), plan(hostSeg.start)));
+          // Sweep downhill along sloped gravity drains so flow direction reads immediately on plan.
+          trunkDir = hostSeg.end.z < hostSeg.start.z - 0.5 ? segDir : hostSeg.start.z < hostSeg.end.z - 0.5 ? scale(segDir, -1) : segDir;
+        } else {
+          trunkDir = perp(bd);
+        }
+        const branchPt = add(p, scale(bd, sweepLen));
+        const trunkPt = add(p, scale(trunkDir, sweepLen));
+        line(branchPt, trunkPt, pen);
+        const pp = plan(pa.position);
+        if (Math.hypot(pp.x - branchPt.x, pp.y - branchPt.y) > 1) line(branchPt, pp, pen);
+        jointTick(pp, bd, sweepLen, tickHalf, line);
+        jointTick(p, trunkDir, sweepLen, tickHalf, line);
+        jointTick(p, scale(trunkDir, -1), offset, tickHalf, line);
       }
       return;
     }

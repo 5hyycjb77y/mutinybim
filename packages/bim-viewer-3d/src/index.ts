@@ -18,3 +18,5 @@ export * from "./surface-pick";
 export * from "./wheel-zoom";
 export * from "./live-plan-graphics";
 export * from "./mesh-batches";
+export * from "./scalar-heatmap";
+export * from "./scene-lighting";

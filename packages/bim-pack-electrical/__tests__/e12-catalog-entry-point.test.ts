@@ -17,7 +17,7 @@
 import { CATALOG_ENTRY_POINT, catalogElementId, catalogEntryRow, catalogEntryRows, commandSchema, type Command } from "@permitzip/bim-kernel";
 import { PackSet, PackSetError, contribute, definePack, withPackSet } from "@permitzip/bim-kernel/packs";
 import { z } from "zod";
-import { CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW, ELECTRICAL_CATALOG_ROWS, FEEDER_TYPE_ROW, feederTypeOf } from "@permitzip/bim-pack-electrical";
+import { CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW, ELECTRICAL_CATALOG_ROWS, FEEDER_TYPE_ROW, PHOTOMETRIC_PROFILE_CATALOG_ROW, feederTypeOf } from "@permitzip/bim-pack-electrical";
 import { Building } from "../../bim-kernel/__tests__/fixtures/electrical-building";
 
 const F225 = { type: "feeder_type", mark: "F225", ratingA: 225, poles: 3, conductors: { sets: 1, phaseSize: "4/0", groundSize: "4", material: "cu" }, insulation: "THHN", conduit: null, conduitBelowGrade: null, description: "" } as const;
@@ -26,8 +26,9 @@ describe("e12: catalog record types are rows", () => {
   it("reads Electrical's record types from the add-on, ids unchanged", () => {
     expect(catalogEntryRow("feeder_type")).toBe(FEEDER_TYPE_ROW);
     expect(catalogEntryRow("circuit_template")).toBe(CIRCUIT_TEMPLATE_ROW);
-    // Round 13 adds the drafting standard (the typical-label template), after round 12's two.
-    expect(ELECTRICAL_CATALOG_ROWS).toEqual([FEEDER_TYPE_ROW, CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW]);
+    // Round 13 adds the drafting standard (the typical-label template), after round 12's two,
+    // and native IES LM-63 photometrics adds the shared photometric profile record.
+    expect(ELECTRICAL_CATALOG_ROWS).toEqual([FEEDER_TYPE_ROW, CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW, PHOTOMETRIC_PROFILE_CATALOG_ROW]);
     expect(catalogElementId("feeder_type", " f225 ")).toBe("etype:feeder:F225");
     expect(catalogElementId("circuit_template", "two  bedroom")).toBe("etype:template:TWO BEDROOM");
     expect(catalogElementId("connection_type", "e.05")).toBe("etype:connection:E.05");

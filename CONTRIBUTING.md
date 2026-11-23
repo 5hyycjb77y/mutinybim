@@ -49,7 +49,11 @@ You need Node 22 or newer and Git.
 git clone https://github.com/permitzip/mutinybim.git
 cd mutinybim
 npm install
-npm run demo        # dev server and demo editor at http://localhost:3095
+npm run demo             # default Arch + MEP showcase editor at http://localhost:3095
+npm run demo:arch        # architecture-only 2-story pavilion showcase
+npm run demo:electrical  # commercial electrical power, lighting, controls & one-line showcase
+npm run demo:enlarged    # enlarged plans, sections & elevations callout showcase
+npm run demo:mechanical  # legacy mechanical duct fixture (f-a-demo)
 ```
 
 The demo keeps the model in memory. It needs no database, no Docker and no

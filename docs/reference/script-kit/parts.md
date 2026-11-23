@@ -28,7 +28,7 @@ Topics: custom part, equipment, rooftop unit, rtu, water heater, panel, family, 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -56,7 +56,7 @@ Topics: face, connector, side
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -85,7 +85,7 @@ Topics: profile, rectangle, rounded corners, fillet, chamfer
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -113,7 +113,7 @@ Topics: profile, circle, round, tank
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -141,7 +141,7 @@ Topics: profile, polygon, outline, custom shape, hood
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -169,7 +169,7 @@ Topics: view, plane, orientation, which way
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},
@@ -197,7 +197,7 @@ Topics: starter library, part types, built-in parts, catalogue, panelboard, rece
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -225,7 +225,7 @@ Topics: refresh symbols, upgrade part types, built-in symbols, annotative symbol
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },

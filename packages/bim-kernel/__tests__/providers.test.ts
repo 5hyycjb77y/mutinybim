@@ -51,7 +51,7 @@ describe("kernel field providers", () => {
   it("registers trade fields on the kernel's classes", () => {
     expect(fields.length).toBeGreaterThan(150);
     expect(new Set(fields.map((f) => f.field.source))).toEqual(
-      new Set(["provider:base.spatial", "provider:mep.electrical", "provider:mep.plumbing", "provider:mep.gas", "provider:mep.mechanical", "provider:placement", "provider:loads", "provider:mep.ventilation", "provider:qto", "provider:pack:architecture", "provider:architecture.building", "provider:pack:struct", "provider:struct.members", expect.stringMatching(/^provider:base:/)]),
+      new Set(["provider:base.spatial", "provider:mep.electrical", "provider:mep.plumbing", "provider:mep.gas", "provider:mep.mechanical", "provider:placement", "provider:loads", "provider:mep.ventilation", "provider:qto", "provider:pack:architecture", "provider:architecture.building", "provider:pack:electrical", "provider:pack:struct", "provider:struct.members", expect.stringMatching(/^provider:base:/)]),
     );
   });
 

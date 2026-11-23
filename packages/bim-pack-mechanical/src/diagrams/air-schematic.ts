@@ -176,11 +176,25 @@ function treeOf(elements: Elements, system: MepSystem, w: Walk, at: RunGraphNode
   return stationNode(elements, system, w, at, feed, kids);
 }
 
-/** The air schematic's graph: one tree per duct system, rooted at its unit (or its first duct when none is connected yet). */
+const AIR_SYSTEM_TAG: Readonly<Record<string, string>> = {
+  supply_air: "SA",
+  return_air: "RA",
+  exhaust_air: "EA",
+  outside_air: "OA",
+  relief_air: "RLA",
+  transfer_air: "TA",
+};
+
+function airServiceTag(kind: string): string {
+  return AIR_SYSTEM_TAG[kind] ?? kind.replace(/_air$/i, "").toUpperCase();
+}
+
+/** The air schematic's graph: one tree per unit (combining Supply + Return trunks off the same RTU/AHU under one unit box), or per duct system when no unit is attached yet. */
 export function airSchematicGraph(elements: Elements, hints: DiagramHints = {}): DiagramGraph {
   const hidden = new Set(hints.hidden ?? []);
   const reads = new Set<ElementId>();
   const roots: DiagramNode[] = [];
+  const bySourceUnit = new Map<ElementId, { readonly idx: number; readonly summaries: string[] }>();
   const warnings: DiagramGraph["warnings"][number][] = [];
   const systems = airSystems(elements, hints.systemKinds).filter((s) => !hidden.has(s.id));
   const anchors = anchorsOf(elements, systems);
@@ -194,7 +208,32 @@ export function airSchematicGraph(elements: Elements, hints: DiagramHints = {}):
       if (el) reads.add(el.id);
     }
     const root = treeOf(elements, system, w, w.root, undefined, hidden);
-    roots.push(root);
+    const tag = airServiceTag(system.systemKind);
+    const cfm = cfmText(w.load.get(w.root) ?? 0);
+    // Prefix each main trunk leaving the source unit with SA / RA / EA so Supply and Return trunks off one RTU read unambiguously.
+    const taggedChildren = root.children.map((c) =>
+      c.feed ? { ...c, feed: { ...c.feed, label: c.feed.label ? `${tag} ${c.feed.label}` : tag } } : c,
+    );
+    const unitId = w.root.includes("#") ? root.elementId : null;
+    if (unitId && bySourceUnit.has(unitId)) {
+      const existing = bySourceUnit.get(unitId)!;
+      existing.summaries.push(`${tag} ${cfm}`);
+      const prev = roots[existing.idx]!;
+      roots[existing.idx] = {
+        ...prev,
+        lines: [{ text: prev.name, bold: true }, { text: existing.summaries.join(" · ") }],
+        children: [...prev.children, ...taggedChildren],
+      };
+    } else {
+      const summary = `${tag} ${cfm}`;
+      const mergedRoot: DiagramNode = {
+        ...root,
+        lines: [{ text: root.name, bold: true }, { text: summary }],
+        children: taggedChildren,
+      };
+      if (unitId) bySourceUnit.set(unitId, { idx: roots.length, summaries: [summary] });
+      roots.push(mergedRoot);
+    }
     if (!w.root.includes("#") && root.elementId) warnings.push({ kind: "not_fed", elementId: root.elementId, short: "NO UNIT", message: `No unit is connected to ${system.name}; its schematic starts at ${root.name}` });
   }
   return { roots, warnings, reads: [...reads].sort() };
@@ -202,9 +241,9 @@ export function airSchematicGraph(elements: Elements, hints: DiagramHints = {}):
 
 // ------------------------------------------------------------------ layout
 
-const DX = 46;
-const DY = 14;
-const JOG = 8;
+const DX = 58;
+const DY = 17;
+const JOG = 10;
 const TEXT_W = DX - 8;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const pt = (x: number, y: number): Vec2 => ({ x: r2(x), y: r2(y) });

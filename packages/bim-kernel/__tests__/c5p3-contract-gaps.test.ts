@@ -77,7 +77,8 @@ describe("c5p3 S-15: a built-in footing class", () => {
   it("comes from the Structural add-on (first-party since round 14), listed with its classes after the fallback; a footing component is a footing (and still a component)", () => {
     expect(BUILTIN_CLASSES.map((c) => c.id)).not.toContain("struct.footing");
     const ids = builtinRegistry().listClasses({ includeAbstract: true }).map((c) => c.id);
-    expect(ids.slice(ids.indexOf("gen.building_element"), ids.indexOf("gen.building_element") + 5)).toEqual(["gen.building_element", "struct.grid", "struct.column", "struct.beam", "struct.footing"]);
+    expect(ids.indexOf("struct.grid")).toBeGreaterThan(ids.indexOf("gen.building_element"));
+    expect(ids.slice(ids.indexOf("struct.grid"), ids.indexOf("struct.grid") + 4)).toEqual(["struct.grid", "struct.column", "struct.beam", "struct.footing"]);
     expect(builtinRegistry().getClass("struct.footing")?.ifc).toEqual({ entity: "IfcFooting" });
     const base = createFullBimModel({ ...FULL_BIM_TIERS.XS, modelId: "c5p3-footing" });
     // A component record with only the fields recognition reads; the rest of the shape isn't read here.

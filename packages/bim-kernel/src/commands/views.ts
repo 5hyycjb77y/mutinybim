@@ -24,6 +24,7 @@ import {
   SCHEDULE_FILTER_OPS,
   TITLE_BLOCK_TYPES,
   VIEW_CATEGORIES,
+  VIEWPORT_NORTH_ARROW_OFFSET_FEATURE,
   type DrawingItem,
   type SheetProps,
   type ViewProps,
@@ -334,7 +335,7 @@ const documentRecord = z.discriminatedUnion("kind", [
     viewIds: z.array(id).max(500),
     props: z.object({ titleBlock: z.enum(TITLE_BLOCK_TYPES).optional(), titleBlockRow: titleBlockRowSchema.optional(), fields: fields.optional(), revisions: revisionsSchema.optional() }).optional(),
   }),
-  z.object({ ...base, kind: z.literal("viewport"), sheetId: id, viewId: id, center: vec2, size: vec2, scale, northArrow: z.boolean().optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
+  z.object({ ...base, kind: z.literal("viewport"), sheetId: id, viewId: id, center: vec2, size: vec2, scale, northArrow: z.boolean().optional(), northArrowOffsetMm: vec2.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
   z.object({
     ...base,
     kind: z.literal("drawing_item"),
@@ -430,13 +431,13 @@ export const viewCommandSchemas = [
     revisions: revisionsSchema.optional(),
   }),
   z.object({ type: z.literal("delete_sheet"), sheetId: id }),
-  z.object({ type: z.literal("place_viewport"), viewportId: id, sheetId: id, viewId: id, center: vec2, scale: scale.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
+  z.object({ type: z.literal("place_viewport"), viewportId: id, sheetId: id, viewId: id, center: vec2, scale: scale.optional(), northArrowOffsetMm: vec2.optional(), titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).optional() }),
   z.object({ type: z.literal("move_viewport"), viewportId: id, center: vec2 }),
   /** Drag the frame's edges: the view's crop box follows at the viewport's scale. `center` moves the frame too (one edge dragged). */
   z.object({ type: z.literal("resize_viewport"), viewportId: id, size: vec2, center: vec2.optional() }),
   z.object({ type: z.literal("set_viewport_scale"), viewportId: id, scale }),
-  /** Show or hide the viewport's north arrow (it turns itself to true north). */
-  z.object({ type: z.literal("set_viewport_north_arrow"), viewportId: id, show: z.boolean() }),
+  /** Show, hide, or reposition the viewport's north arrow on its sheet (it turns itself to true north). */
+  z.object({ type: z.literal("set_viewport_north_arrow"), viewportId: id, show: z.boolean().optional(), offsetMm: vec2.nullable().optional() }),
   /** Move a placed viewport's title block on its sheet and/or adjust its horizontal title rule length (Revit viewport title grips). */
   z.object({ type: z.literal("set_viewport_title"), viewportId: id, titleOffsetMm: vec2.optional(), titleRuleMm: z.number().finite().min(20).max(600).nullable().optional() }),
   z.object({ type: z.literal("remove_viewport"), viewportId: id }),
@@ -1415,6 +1416,9 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           const other = model.elements[existing.sheetId];
           fail(`${label(view)} is already on ${other?.kind === "sheet" ? `sheet ${other.number}` : "another sheet"}. A view goes on one sheet; duplicate it to show it again.`, [view.id, existing.id], "in_use");
         }
+        if (command.northArrowOffsetMm !== undefined && !peerReads(VIEWPORT_NORTH_ARROW_OFFSET_FEATURE)) {
+          fail("Viewport north-arrow offsets can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [sheet.id]);
+        }
         const s = view.viewType === "schedule" ? 1 : (command.scale ?? view.props?.scale ?? DEFAULT_PLAN_SCALE);
         const vp: Viewport = {
           ...NEW_META,
@@ -1425,6 +1429,7 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           center: roundVec(command.center),
           size: framePaperSize(model, view, viewWindowIn(model, view), s),
           scale: s,
+          ...(command.northArrowOffsetMm ? { northArrowOffsetMm: roundVec(command.northArrowOffsetMm) } : {}),
           ...(command.titleOffsetMm ? { titleOffsetMm: roundVec(command.titleOffsetMm) } : {}),
           ...(command.titleRuleMm !== undefined ? { titleRuleMm: round(command.titleRuleMm) } : {}),
           partition: sheet.partition,
@@ -1484,8 +1489,26 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
       }
       case "set_viewport_north_arrow": {
         const vp = live(reader, command.viewportId, "viewport", "The viewport");
-        write({ ...vp, northArrow: command.show });
-        authored.push({ elementId: vp.id, field: F.northArrow, value: String(command.show) });
+        if ((command.offsetMm !== undefined || command.show === undefined) && !peerReads(VIEWPORT_NORTH_ARROW_OFFSET_FEATURE)) {
+          fail("Viewport north-arrow offsets can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [vp.id]);
+        }
+        let next = vp;
+        if (command.show !== undefined) {
+          next = { ...next, northArrow: command.show };
+          authored.push({ elementId: vp.id, field: F.northArrow, value: String(command.show) });
+        }
+        if (command.offsetMm !== undefined) {
+          if (command.offsetMm === null) {
+            const { northArrowOffsetMm: _drop, ...rest } = next;
+            next = rest;
+            authored.push({ elementId: vp.id, field: F.northArrowOffsetMm, value: "null" });
+          } else {
+            const northArrowOffsetMm = roundVec(command.offsetMm);
+            next = { ...next, northArrowOffsetMm };
+            authored.push({ elementId: vp.id, field: F.northArrowOffsetMm, value: canonicalJson(northArrowOffsetMm) });
+          }
+        }
+        write(next);
         break;
       }
       case "set_viewport_title": {

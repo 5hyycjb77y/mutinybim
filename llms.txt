@@ -23,6 +23,7 @@ The tool server lists at most 10 core tools by default (168 in all, opt-in by fa
 - [PartBuilder](docs/reference/script-kit/part-builder.md): The builder `parts.part()` returns: boxes, extrusions, sweeps, connectors and parameters on one part type.
 - [documents](docs/reference/script-kit/documents.md): Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set.
 - [checks](docs/reference/script-kit/checks.md): Checks a script runs on its own output before a person sees it.
+- [electrical](docs/reference/script-kit/electrical.md): IES LM-63 photometrics, normal illuminance, NFPA 101 / IBC emergency egress checks, and 2D plan overlays.
 - [defineScript](docs/reference/script-kit/define-script.md): The one top-level function: a script's kind, what it reads, its parameters and its `run`.
 - [Edit commands](docs/reference/commands.md): every command ctx.edit takes, with its fields
 - [Calcs](docs/reference/calcs.md): every calculation ctx.calc runs

@@ -107,12 +107,25 @@ export function elementClass(elements: Elements, el: BimElement, categories: Cat
   return best;
 }
 
-/** The service a run or system carries, by its system's kind. */
+/** The service a run, system, or single-service inline accessory carries, by its system kind. */
 function serviceOf(elements: Elements, el: BimElement): string | null {
   if (el.kind === "mep_system") return el.systemKind;
-  if (el.kind !== "run_segment" && el.kind !== "run_fitting") return null;
-  const sys = elements[el.systemId];
-  return sys?.kind === "mep_system" ? sys.systemKind : null;
+  if (el.kind === "run_segment" || el.kind === "run_fitting") {
+    const sys = elements[el.systemId];
+    return sys?.kind === "mep_system" ? sys.systemKind : null;
+  }
+  if (el.kind === "part") {
+    const type = elements[el.typeId];
+    if (type?.kind !== "part_type") return null;
+    const cat = type.definition.category;
+    if (!cat.endsWith("_accessory")) return null;
+    const kinds = new Set<string>();
+    for (const c of type.definition.connectors) {
+      if (c.systemKind && c.systemKind !== "power") kinds.add(c.systemKind);
+    }
+    return kinds.size === 1 ? ([...kinds][0] ?? null) : null;
+  }
+  return null;
 }
 
 /**

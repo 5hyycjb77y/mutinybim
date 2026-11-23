@@ -559,3 +559,50 @@ export function buildStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.Tex
     return null;
   }
 }
+
+/** Build a tailored PMREM reflection environment for day, evening twilight, or night scenes. */
+export function buildMoodEnvironment(
+  renderer: THREE.WebGLRenderer,
+  mood: "day" | "evening" | "night",
+): THREE.Texture | null {
+  if (mood === "day") return buildStudioEnvironment(renderer);
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    const isEvening = mood === "evening";
+    envScene.background = new THREE.Color(isEvening ? 0x1e2c44 : 0x0b1220);
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(24, 24, 16),
+      new THREE.MeshBasicMaterial({ color: isEvening ? 0x223454 : 0x0c1424, side: THREE.BackSide }),
+    );
+    envScene.add(sky);
+    const horizon = new THREE.Mesh(
+      new THREE.CylinderGeometry(21, 21, 8, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color: isEvening ? 0x5c4b5e : 0x162238, side: THREE.BackSide }),
+    );
+    horizon.position.y = 1.2;
+    envScene.add(horizon);
+    if (isEvening) {
+      // Low warm sunset horizon glow for dusk glass reflections
+      const duskPanel = new THREE.Mesh(
+        new THREE.PlaneGeometry(18, 9),
+        new THREE.MeshBasicMaterial({ color: 0xd97d4c, side: THREE.DoubleSide }),
+      );
+      duskPanel.position.set(-16, 4, 2);
+      duskPanel.lookAt(0, 0, 0);
+      envScene.add(duskPanel);
+    }
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshBasicMaterial({ color: isEvening ? 0x1a1f2b : 0x0a0d14, side: THREE.DoubleSide }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -4;
+    envScene.add(ground);
+    const rt = pmrem.fromScene(envScene, 0.05);
+    pmrem.dispose();
+    return rt.texture;
+  } catch {
+    return null;
+  }
+}

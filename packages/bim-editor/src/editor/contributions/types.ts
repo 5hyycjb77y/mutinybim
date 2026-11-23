@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { Command, ElementId, IntakeChoice, ModelState, PartInstance, PartMount, PartTypeDefinition, RunFitting, RunSegment, RunSize, Sheet, StoredDiagramKind, Vec2, ViewElement } from '@permitzip/bim-kernel'
+import type { ScalarHeatmapOverlay, SceneLightEmitter, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import type { BuildingModelRibbonContext } from '../building-model-ribbon'
 import type { ClickHandler, ProposalGhost } from '../model-session'
 import type { RibbonCommand, RibbonGroup, RibbonTab } from '../ribbon/types'
@@ -211,6 +212,14 @@ export interface WorkflowServices {
   readonly openDiagram: (kind: StoredDiagramKind) => string | null
   /** Show proposed parts as ghosts in the plan (null clears). */
   readonly previewParts: (ghosts: readonly ProposalGhost[] | null) => void
+  /** Display or clear a trade-agnostic 3D false-color scalar heatmap overlay over floors/workplanes. */
+  readonly setScalarHeatmap?: (overlay: ScalarHeatmapOverlay | null) => void
+  /** Set active 3D scene light emitters (glowing diffusers + physical spotlights rendered in evening/night/blackout presets). */
+  readonly setLightEmitters?: (emitters: readonly SceneLightEmitter[]) => void
+  /** Switch 3D time-of-day lighting preset (`morning`, `noon`, `afternoon`, `evening`, `night`, `night_blackout`, `no_shadows`). */
+  readonly setLightingPreset?: (preset: SceneLightingPreset) => void
+  /** Current 3D time-of-day lighting preset. */
+  readonly lightingPreset?: SceneLightingPreset
   /** Hear what the pointer is over in the plan or 3D view (ids, null when nothing); returns the unsubscribe. */
   readonly subscribeHover?: (listener: (ids: readonly string[] | null) => void) => () => void
   /** Take plan and 3D clicks before selection (a proposal accepting the room under the pointer); returns the unregister. */

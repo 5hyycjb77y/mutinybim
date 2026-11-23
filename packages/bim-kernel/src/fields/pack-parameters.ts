@@ -25,6 +25,8 @@ export interface PackParameter {
   /** The unit values are typed, shown and stored in; required for quantities, and a unit of `kind`. */
   readonly unit?: UnitCode;
   readonly choices?: readonly string[];
+  /** Maximum length for text values (default 400; up to 65536 for structured payloads). */
+  readonly maxLength?: number;
   /** The facet it reads under in the Inspector ("Structural"). */
   readonly group?: string;
   readonly description?: string;
@@ -77,6 +79,7 @@ export function packParameterField(p: PackParameter): Omit<FieldDef, "source"> {
     ...(p.kind !== undefined ? { kind: p.kind } : {}),
     ...(p.unit !== undefined ? { unit: p.unit, storedUnit: p.unit } : {}),
     ...(p.choices !== undefined ? { choices: p.choices } : {}),
+    ...(p.maxLength !== undefined ? { maxLength: p.maxLength } : {}),
     ...(p.group !== undefined ? { group: p.group } : {}),
     ...(p.description !== undefined ? { description: p.description } : {}),
     ...(p.ifc !== undefined ? { ifc: p.ifc } : {}),

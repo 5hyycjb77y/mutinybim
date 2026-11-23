@@ -22,7 +22,7 @@ import { buildSampleMarketGas, SAMPLE_MARKET_GAS_SYSTEM, SAMPLE_MARKET_GAS_TOTAL
 import { PLUMBING_GAS_PACK, type GasSystemSizing } from "../src";
 
 const GOLDEN_SHA256: Readonly<Record<string, string>> = {
-  "isometric-stack.svg": "7dbe17313cc64e7357bdd636849d79c5b7bc2b1afce8ab6c72565ff09e57f970",
+  "isometric-stack.svg": "75a309a320de56c92d1b6882e1efdfa4f9cfde33906c1eba1656489c9977dc2c",
   "riser-gas-propane.svg": "54facae6cbd775191117315fefd92160bfbfef122f1d57f6ae5e1c89115cb711",
   "riser-stack-sanitary.svg": "561aaa78344eea448ab28052746ea0b6118088fc938d593d5faf4a47628dc87a",
   "riser-sample-market-dcw.svg": "15c6120e1b0360b2b64587a8cd913f1b579ad4206ff3c84b99aa7cc1d2f0c150",

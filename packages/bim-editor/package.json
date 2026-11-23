@@ -230,6 +230,7 @@
     "./editor/electrical/firm-typ-label": "./src/editor/electrical/firm-typ-label.ts",
     "./editor/electrical/linked-supply": "./src/editor/electrical/linked-supply.ts",
     "./editor/electrical/PanelView": "./src/editor/electrical/PanelView.tsx",
+    "./editor/electrical/photometrics-heatmap": "./src/editor/electrical/photometrics-heatmap.ts",
     "./editor/electrical/PlanPointPick": "./src/editor/electrical/PlanPointPick.tsx",
     "./editor/electrical/ProposePanel": "./src/editor/electrical/ProposePanel.tsx",
     "./editor/electrical/RebalanceDialog": "./src/editor/electrical/RebalanceDialog.tsx",

@@ -2,10 +2,12 @@
 
 # Calcs (ctx.calc)
 
-The calculations a script runs with `ctx.calc({ calc: "<id>", inputs })`: 28 calcs. Each returns its values with their units. `ctx.calcs()` lists them from inside a script.
+The calculations a script runs with `ctx.calc({ calc: "<id>", inputs })`: 30 calcs. Each returns its values with their units. `ctx.calcs()` lists them from inside a script.
 
 | Calc | Title | Domain | What it does |
 | --- | --- | --- | --- |
+| `electrical.photometrics_egress` | Emergency / egress lighting compliance (NFPA 101 §7.9.2.1 / IBC §1008.3.5) | electrical | Evaluates emergency/egress floor-plane (Z = 0" AFF) illuminance using strictly emergency-backed luminaires (battery pack, generator circuit, inverter, or emergency circuit) along corridors, stairs, exit discharge pads, and explicit egress paths against NFPA 101 §7.9.2.1 & IBC §1008.3.5 initial (≥1.0 fc avg, ≥0.1 fc min, ≤40:1) and 90-minute end-of-discharge (≥0.6 fc avg, ≥0.06 fc min, ≤40:1) criteria. |
+| `electrical.photometrics_normal` | Normal room illuminance & LPD photometrics (IES LM-63 / ASHRAE 90.1) | electrical | Point-by-point IES LM-63 photometric illuminance calculation across active spaces/rooms (or custom zones) on a configurable grid with luminaire rotation/aim, 3D wall/slab/column occlusion ray-casting, optional 80/50/20 zonal-cavity diffuse inter-reflectance, uniformity checks, and ASHRAE 90.1 Space-by-Space LPD verification. |
 | `mech.duct_friction` | Duct friction rate and velocity | mechanical | Velocity, velocity pressure and friction rate (in. w.c. per 100 ft) for an airflow in a round or rectangular duct: Darcy–Weisbach with Colebrook (or Altshul–Tsal), the material's roughness, and air density and viscosity at the altitude and temperature. The same engine as the duct pressure report. |
 | `mech.duct_system_pressure` | Duct system static pressure (fan ESP) | mechanical | The kernel's duct pressure report for one system on the plugin interface: friction for every stretch, each fitting's C x VP with its coefficient source, the critical path, and the external static pressure the fan needs. Identical numbers to bim_pressure_report. |
 | `mech.makeup_air_heat` | Makeup air tempering load (1.08 × cfm × ΔT) | mechanical | Sensible load the unit serving a space carries when makeup air enters untempered or partly tempered: Q (Btu/h) = 1.08 × cfm × (to − from). Heating when the air must be warmed, cooling when cooled. Worked: 2,400 cfm from 80 °F to 92 °F = 31,104 Btu/h. |

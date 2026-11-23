@@ -5,6 +5,7 @@ import { units } from "./define";
 import { building, equipment } from "./kit-building";
 import { checks } from "./kit-checks";
 import { documents } from "./kit-documents";
+import { electrical } from "./kit-electrical";
 import { parts } from "./kit-parts";
 import { routes } from "./kit-routes";
 import { scriptCommands } from "./reference";
@@ -77,7 +78,7 @@ export interface ScriptKitWarning {
   readonly message: string;
 }
 
-const KIT_NAMESPACES: Readonly<Record<string, object>> = { units, routes, parts, building, equipment, documents, checks };
+const KIT_NAMESPACES: Readonly<Record<string, object>> = { units, routes, parts, building, equipment, documents, checks, electrical };
 const KIT_IMPORT = /\bimport\s*\{([^}]*)\}\s*from\s*["']@permitzip\/bim-script["'];?/;
 
 /** Up to four real names close to a wrong one: those that contain it or are contained in it first, then those that start the same. */

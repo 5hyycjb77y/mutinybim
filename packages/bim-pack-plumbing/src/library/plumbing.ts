@@ -1,5 +1,6 @@
 import { connectionTypeSchema, type ConnectionFieldValue, type ConnectionTypeEntry, type ConnectionTypeInput } from "@permitzip/bim-kernel";
 import type { Dim, ParamDef, PartCategory, PartConnector, PartTypeDefinition, SystemKind, LibraryEntry } from "@permitzip/bim-kernel";
+type GeometryPrimitive = PartTypeDefinition["geometry"][number];
 
 /**
  * The starter plumbing library: fixtures, equipment and accessories, each
@@ -140,11 +141,104 @@ function connector(port: Port, spec: FixtureSpec, sized: ReadonlySet<Port> = new
   };
 }
 
+function customPartGeometry(spec: FixtureSpec): { readonly geometry: readonly GeometryPrimitive[]; readonly materialId?: string; readonly extraParams?: readonly ParamDef[]; readonly extraValues?: Readonly<Record<string, number | string>>; readonly extraInstanceParams?: readonly ParamDef[]; readonly wasteAtRiserBottom?: boolean } | null {
+  switch (spec.slug) {
+    case "cleanout-floor":
+      return {
+        materialId: "architecture.bronze_fixture",
+        extraInstanceParams: [{ ...len("riser_height", "Riser neck depth"), default: 18 * IN }],
+        wasteAtRiserBottom: true,
+        geometry: [
+          // Flush circular brass floor cleanout deck plate at z = 0 (6" Ø × 3/8" thick)
+          { kind: "cylinder", center: [0, 0, -5], radius: 3 * IN, height: 10, axis: "z" },
+          // Countersunk brass access plug top ring
+          { kind: "cylinder", center: [0, 0, 2], radius: 2 * IN, height: 4, axis: "z" },
+          // Adjustable vertical 4" riser neck extending down from floor to pipe invert (-riser_height..0)
+          { kind: "cylinder", center: [0, 0, { param: "riser_height", scale: -0.5 }], radius: 2.25 * IN, height: { param: "riser_height" }, axis: "z" },
+          // Bottom hub collar where riser neck joins the cleanout wye/tee branch
+          { kind: "cylinder", center: [0, 0, { param: "riser_height", scale: -1 }], radius: 2.75 * IN, height: 60, axis: "z" },
+        ],
+      };
+    case "water-meter":
+      return {
+        materialId: "architecture.bronze_fixture",
+        geometry: [
+          // Main horizontal bronze meter barrel spanning inlet to outlet along X
+          { kind: "cylinder", center: [0, 0, 0], radius: 2.25 * IN, height: p("width"), axis: "x" },
+          // Flanged inlet & outlet pipe spuds
+          { kind: "cylinder", center: [neg("width"), 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
+          { kind: "cylinder", center: [half("width"), 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
+          // Measuring chamber dome
+          { kind: "cylinder", center: [0, 0, 2.0 * IN], radius: 2.6 * IN, height: 3.0 * IN, axis: "z" },
+          // Raised circular bronze register dial bonnet + flip lid
+          { kind: "cylinder", center: [0, 0, 4.2 * IN], radius: 2.0 * IN, height: 1.6 * IN, axis: "z" },
+        ],
+      };
+    case "rpz":
+      return {
+        materialId: "architecture.bronze_fixture",
+        geometry: [
+          // Horizontal bronze main RPZ body
+          { kind: "cylinder", center: [0, 0, 0], radius: 1.75 * IN, height: p("width"), axis: "x" },
+          // Inlet & outlet isolation ball valve collars + lever handles
+          { kind: "cylinder", center: [-7.5 * IN, 0, 0], radius: 2.4 * IN, height: 2.0 * IN, axis: "x" },
+          { kind: "cylinder", center: [7.5 * IN, 0, 0], radius: 2.4 * IN, height: 2.0 * IN, axis: "x" },
+          { kind: "box", center: [-7.5 * IN, 0, 3.2 * IN], size: [4.5 * IN, 0.75 * IN, 0.75 * IN] },
+          { kind: "box", center: [7.5 * IN, 0, 3.2 * IN], size: [4.5 * IN, 0.75 * IN, 0.75 * IN] },
+          // Twin check-valve access bonnets on top
+          { kind: "cylinder", center: [-2.8 * IN, 0, 2.2 * IN], radius: 1.8 * IN, height: 2.5 * IN, axis: "z" },
+          { kind: "cylinder", center: [2.8 * IN, 0, 2.2 * IN], radius: 1.8 * IN, height: 2.5 * IN, axis: "z" },
+          // Bottom differential relief valve discharge port + air-gap funnel
+          { kind: "cylinder", center: [0, 0, -2.6 * IN], radius: 1.4 * IN, height: 3.2 * IN, axis: "z" },
+        ],
+      };
+    case "expansion-tank":
+      return {
+        materialId: "architecture.equipment_enamel",
+        geometry: [
+          // Vertical cylindrical thermal expansion tank shell
+          { kind: "cylinder", center: [0, 0, half("height")], radius: half("width"), height: p("height"), axis: "z" },
+          // Top threaded connection spud
+          { kind: "cylinder", center: [0, 0, { param: "height", add: 30 }], radius: 25, height: 60, axis: "z" },
+        ],
+      };
+    case "vtr":
+      return {
+        materialId: "architecture.charcoal_metal",
+        geometry: [
+          // Weatherproof roof flashing cone base
+          { kind: "cylinder", center: [0, 0, 40], radius: 5.5 * IN, height: 80, axis: "z" },
+          // 3" Vent stack extending above roof flashing
+          { kind: "cylinder", center: [0, 0, half("height")], radius: 1.75 * IN, height: p("height"), axis: "z" },
+        ],
+      };
+    default:
+      return null;
+  }
+}
+
 function fixture(spec: FixtureSpec, version: string): LibraryEntry {
   const [w, d, h] = spec.size;
-  const typeParams: ParamDef[] = [len("width", "Width"), len("depth", "Depth"), len("height", "Height"), len("connection_size", "Connection size"), txt("default_connection_type", "Starter connection type")];
+  const custom = customPartGeometry(spec);
+  const typeParams: ParamDef[] = [
+    len("width", "Width"),
+    len("depth", "Depth"),
+    len("height", "Height"),
+    len("connection_size", "Connection size"),
+    txt("default_connection_type", "Starter connection type"),
+    ...(custom?.materialId ? [txt("material_id", "Material")] : []),
+    ...(custom?.extraParams ?? []),
+  ];
   if (spec.heaterKind) typeParams.push(txt("heater_kind", "Water heater kind"));
-  const typeValues: Record<string, number | string> = { width: w * IN, depth: d * IN, height: h * IN, connection_size: (spec.pipeIn ?? 0.5) * IN, default_connection_type: spec.starter };
+  const typeValues: Record<string, number | string> = {
+    width: w * IN,
+    depth: d * IN,
+    height: h * IN,
+    connection_size: (spec.pipeIn ?? 0.5) * IN,
+    default_connection_type: spec.starter,
+    ...(custom?.materialId ? { material_id: custom.materialId } : {}),
+    ...(custom?.extraValues ?? {}),
+  };
   const sizes = PLUMBING_STARTER_CONNECTION_TYPES.find((t) => t.designator === spec.starter)?.quantities?.sizes ?? {};
   const sized = new Set<Port>();
   for (const port of spec.ports) {
@@ -157,6 +251,16 @@ function fixture(spec: FixtureSpec, version: string): LibraryEntry {
     typeValues[ps.param] = inches * IN;
   }
   if (spec.heaterKind) typeValues.heater_kind = spec.heaterKind;
+  const connectors = spec.ports.map((port) => {
+    const c = connector(port, spec, sized);
+    if (custom?.wasteAtRiserBottom && port === "w") {
+      return { ...c, position: [0, 0, { param: "riser_height", scale: -1 }] as PartConnector["position"] };
+    }
+    if (spec.slug === "vtr" && port === "v") {
+      return { ...c, position: [0, 0, 0] as PartConnector["position"], direction: [0, 0, -1] as PartConnector["direction"] };
+    }
+    return c;
+  });
   const definition: PartTypeDefinition = {
     familyName: spec.familyName,
     typeName: spec.typeName,
@@ -164,9 +268,9 @@ function fixture(spec: FixtureSpec, version: string): LibraryEntry {
     description: `Starter part; its loads come from connection type ${spec.starter} (verify for permit work).`,
     typeParams,
     typeValues,
-    instanceParams: [txt("room", "Room")],
-    connectors: spec.ports.map((port) => connector(port, spec, sized)),
-    geometry: [{ kind: "box", center: [0, 0, half("height")], size: [p("width"), p("depth"), p("height")] }],
+    instanceParams: [txt("room", "Room"), ...(custom?.extraInstanceParams ?? [])],
+    connectors,
+    geometry: custom ? [...custom.geometry] : [{ kind: "box", center: [0, 0, half("height")], size: [p("width"), p("depth"), p("height")] }],
     symbol: spec.symbol === "circle" ? [{ kind: "circle", center: [0, 0], radius: half("width") }] : [{ kind: "rect", center: [0, 0], size: [p("width"), p("depth")] }],
     tagFields: ["mark"],
     source: { kind: "builtin", libraryVersion: version },
@@ -272,16 +376,27 @@ const DRAINAGE: readonly DrainageSpec[] = [
 function drainagePart(spec: DrainageSpec, version: string): LibraryEntry {
   const [w, d, h] = spec.size;
   const inline: FixtureSpec = { slug: spec.slug, familyName: spec.familyName, typeName: spec.typeName, category: "pipe_accessory", starter: "", ports: ["in", "out"], size: spec.size, pipeIn: spec.pipeIn, inlineKind: "sanitary" };
+  const isManhole = spec.slug === "sanitary-manhole-existing";
+  const geometry: GeometryPrimitive[] = isManhole
+    ? [
+        // Precast 48" Ø concrete manhole barrel (bottom base to upper cone)
+        { kind: "cylinder", center: [0, 0, { param: "height", scale: 0.42 }], radius: half("width"), height: { param: "height", scale: 0.84 }, axis: "z" },
+        // Reduced concrete eccentric cone throat (34" Ø)
+        { kind: "cylinder", center: [0, 0, { param: "height", scale: 0.9 }], radius: { param: "width", scale: 0.35 }, height: { param: "height", scale: 0.16 }, axis: "z" },
+        // Cast-iron 24" Ø manhole frame & cover sitting flush at finished rim
+        { kind: "cylinder", center: [0, 0, { param: "height", add: 12 }], radius: 12 * IN, height: 24, axis: "z" },
+      ]
+    : [{ kind: "box", center: [0, 0, half("height")], size: [p("width"), p("depth"), p("height")] }];
   const definition: PartTypeDefinition = {
     familyName: spec.familyName,
     typeName: spec.typeName,
     category: "pipe_accessory",
     description: "Starter part for the building sewer checks; type its elevations and ratings in Properties (verify for permit work).",
-    typeParams: [len("width", "Width"), len("depth", "Depth"), len("height", "Height"), len("connection_size", "Connection size"), DRAINAGE_ROLE],
-    typeValues: { width: w * IN, depth: d * IN, height: h * IN, connection_size: spec.pipeIn * IN, drainage_role: spec.role },
+    typeParams: [len("width", "Width"), len("depth", "Depth"), len("height", "Height"), len("connection_size", "Connection size"), DRAINAGE_ROLE, ...(isManhole ? [txt("material_id", "Material")] : [])],
+    typeValues: { width: w * IN, depth: d * IN, height: h * IN, connection_size: spec.pipeIn * IN, drainage_role: spec.role, ...(isManhole ? { material_id: "architecture.concrete_cast" } : {}) },
     instanceParams: [txt("room", "Room"), ...spec.instanceParams],
     connectors: spec.role === "backwater_valve" ? [connector("in", inline), connector("out", inline)] : [connector("in", inline)],
-    geometry: [{ kind: "box", center: [0, 0, half("height")], size: [p("width"), p("depth"), p("height")] }],
+    geometry,
     symbol: spec.symbol === "circle" ? [{ kind: "circle", center: [0, 0], radius: half("width") }] : [{ kind: "rect", center: [0, 0], size: [p("width"), p("depth")] }],
     tagFields: ["mark"],
     source: { kind: "builtin", libraryVersion: version },

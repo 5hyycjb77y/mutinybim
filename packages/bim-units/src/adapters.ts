@@ -149,6 +149,14 @@ export const BIM_CALC_UNIT_CODES = {
   mbh: "MBH",
   cfh: "cfh",
   in_per_ft: "in/ft",
+  fc: "fc",
+  lx: "lx",
+  lm: "lm",
+  cd: "cd",
+  W: "W",
+  W_per_ft2: "W/ft2",
+  ft2: "ft2",
+  ea: "ea",
 } as const satisfies Readonly<Record<string, UnitCode>>;
 
 export type BimCalcUnit = keyof typeof BIM_CALC_UNIT_CODES;

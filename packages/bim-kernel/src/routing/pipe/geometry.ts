@@ -173,6 +173,23 @@ function hostOf(elements: Elements, f: RunFitting): RunSegment | null {
   return h?.kind === "run_segment" ? h : null;
 }
 
+/** Build a smooth, twist-free sequence of round rings along a polyline using parallel transport. */
+function smoothTubeRings(pts: readonly RunPoint[], tangents: readonly RunPoint[], d: number): Ring[] {
+  if (pts.length === 0) return [];
+  const t0 = unit3(tangents[0]!);
+  let a = axisAcross(t0);
+  const out: Ring[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const t = unit3(tangents[i]!);
+    // Project previous normal `a` orthogonal to current tangent `t` so rings never flip/twist.
+    const proj = sub3(a, scale3(t, dot3(a, t)));
+    a = len3(proj) > 1e-6 ? unit3(proj) : axisAcross(t);
+    const b = unit3(cross3(t, a));
+    out.push({ center: pts[i]!, a: scale3(a, d / 2), b: scale3(b, d / 2), shape: "round" });
+  }
+  return out;
+}
+
 function teeBody(elements: Elements, f: RunFitting, rf: ResolvedFitting): FittingBody {
   const port = f.ports[0];
   const host = hostOf(elements, f);
@@ -186,9 +203,40 @@ function teeBody(elements: Elements, f: RunFitting, rf: ResolvedFitting): Fittin
   const end = add3(P, scale3(n, branchTakeout));
   const run: Tube = { rings: [ring(add3(P, scale3(u, -runHalf)), u, runOd * 1.04), ring(add3(P, scale3(u, runHalf)), u, runOd * 1.04)], faceted: true };
   const sweep = rf.family.pipe?.branch?.sweep ?? false;
-  // A swept branch curves into the run's downstream direction; drawn as a lofted throat leaning that way.
-  const throat = sweep ? add3(add3(P, scale3(n, 0.5 * runOd)), scale3(u, 0.25 * branchOd)) : add3(P, scale3(n, 0.5 * runOd));
-  const branch: Tube = { rings: [ring(P, n, branchOd), ring(throat, n, branchOd), ring(end, n, branchOd)], faceted: !sweep };
+  const combination = rf.family.id === "dwv.combo_wye_eighth";
+  // Gravity flow sweeps downhill along the host run; when flat, align with host axis `u`.
+  const dz = host.end.z - host.start.z;
+  const flow = dz < -0.5 ? u : dz > 0.5 ? neg3(u) : u;
+  // Orthogonalize `flow` against `n` so swept branch stays cleanly in the (flow, n) plane.
+  const flowProj = sub3(flow, scale3(n, dot3(flow, n)));
+  const dFlow = len3(flowProj) > 1e-4 ? unit3(flowProj) : axisAcross(n);
+  let branch: Tube;
+  if (combination || sweep) {
+    // ASTM D2665 Combination Wye + 1/8 Bend (or swept branch):
+    // Cubic Bezier centerline from downstream run entry sweeping smoothly at 45° into the perpendicular branch hub `end`.
+    const p0 = add3(P, scale3(dFlow, combination ? 0.55 * branchOd : 0.25 * branchOd));
+    const tStart = unit3(add3(scale3(n, 0.7071), scale3(dFlow, combination ? -0.7071 : -0.45)));
+    const p1 = add3(p0, scale3(tStart, 0.48 * branchTakeout));
+    const p2 = add3(end, scale3(n, -0.42 * branchTakeout));
+    const steps = 10;
+    const pts: RunPoint[] = [];
+    const tans: RunPoint[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const s = i / steps;
+      const omt = 1 - s;
+      const c0 = omt * omt * omt;
+      const c1 = 3 * omt * omt * s;
+      const c2 = 3 * omt * s * s;
+      const c3 = s * s * s;
+      pts.push(add3(add3(scale3(p0, c0), scale3(p1, c1)), add3(scale3(p2, c2), scale3(end, c3))));
+      const d0 = add3(scale3(sub3(p1, p0), 3 * omt * omt), scale3(sub3(p2, p1), 6 * omt * s));
+      tans.push(add3(d0, scale3(sub3(end, p2), 3 * s * s)));
+    }
+    branch = { rings: smoothTubeRings(pts, tans, branchOd * 1.04), faceted: false };
+  } else {
+    const throat = add3(P, scale3(n, 0.5 * runOd));
+    branch = { rings: [ring(P, n, branchOd), ring(throat, n, branchOd), ring(end, n, branchOd)], faceted: true };
+  }
   return {
     family: rf.family,
     tubes: [run, branch, hubTube(add3(P, scale3(u, runHalf)), u, runOd, rf.params), hubTube(add3(P, scale3(u, -runHalf)), neg3(u), runOd, rf.params), hubTube(end, n, branchOd, rf.params)],

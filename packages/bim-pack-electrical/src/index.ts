@@ -79,3 +79,4 @@ export * from "./circuiting/drop";
 export * from "./circuiting/link-load";
 export * from "./circuiting/connect";
 export * from "./circuiting/continue";
+export * from "./photometrics";

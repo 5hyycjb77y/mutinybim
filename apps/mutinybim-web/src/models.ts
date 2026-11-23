@@ -12,7 +12,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { canonicalJson, DEFAULT_SETTINGS, executeCommand, parseBranchModelId, type ModelState } from "@permitzip/bim-kernel";
-import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
+import { createShowcaseDemoModel } from "@permitzip/bim-first-party/seed";
 import { InMemoryBranchHost, type InMemoryHostSnapshot, type SyncHub } from "@permitzip/bim-sync";
 
 export type StarterKind = "blank" | "sample";
@@ -26,7 +26,7 @@ export function blankModel(modelId: string): ModelState {
 }
 
 export function starterModel(modelId: string, kind: StarterKind): ModelState {
-  return kind === "sample" ? { ...createDemoModel(modelId), modelId } : blankModel(modelId);
+  return kind === "sample" ? createShowcaseDemoModel(modelId) : blankModel(modelId);
 }
 
 /** The file's shape. A bare model (the first files this app wrote) still opens, with no branches or history. */

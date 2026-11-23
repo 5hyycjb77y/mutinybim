@@ -14,6 +14,7 @@ export const DOCUMENT_FIELDS = {
   size: "doc.size",
   scale: "doc.scale",
   northArrow: "doc.northArrow",
+  northArrowOffsetMm: "doc.northArrowOffsetMm",
   titleOffsetMm: "doc.titleOffsetMm",
   titleRuleMm: "doc.titleRuleMm",
   points: "doc.points",
@@ -59,6 +60,7 @@ export function documentFieldValue(el: BimElement, field: string): AuthoredValue
       if (key === "size") return el.size;
       if (key === "scale") return el.scale;
       if (key === "northArrow") return el.northArrow === undefined ? "default" : String(el.northArrow);
+      if (key === "northArrowOffsetMm") return canonicalJson(el.northArrowOffsetMm ?? null);
       if (key === "titleOffsetMm") return canonicalJson(el.titleOffsetMm ?? null);
       if (key === "titleRuleMm") return canonicalJson(el.titleRuleMm ?? null);
       return undefined;

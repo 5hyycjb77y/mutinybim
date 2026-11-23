@@ -35,7 +35,7 @@ export interface KitRecipe {
   readonly needsModelContent?: boolean;
 }
 
-const KIT = 'import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script";';
+const KIT = 'import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";';
 
 const layout = (body: string, reads = "{ levels: true }") => `${KIT}\nexport default defineScript({\n  kind: "layout",\n  reads: ${reads},\n  parameters: {},\n  run(ctx) {\n${body}\n  },\n});\n`;
 const route = (body: string) => `${KIT}\nexport default defineScript({\n  kind: "route",\n  reads: { levels: true },\n  parameters: {},\n  run(ctx) {\n${body}\n  },\n});\n`;
@@ -714,10 +714,10 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "documents.place",
-    summary: "Puts a view (a plan, a schedule, a detail) on a sheet at a point (its centre, from the sheet's lower-left corner), with optional scale and viewport title offset/rule length; returns the viewport's id.",
-    signature: "place(ctx: ScriptContext, sheetId: string, viewId: string, at: SheetPoint, scale?: number, title?: { offset?: { x: Measure; y: Measure }; ruleLength?: Measure }): string",
+    summary: "Puts a view (a plan, a schedule, a detail) on a sheet at a point (its centre, from the sheet's lower-left corner), with optional scale and viewport title/north-arrow offsets; returns the viewport's id.",
+    signature: "place(ctx: ScriptContext, sheetId: string, viewId: string, at: SheetPoint, scale?: number, title?: { offset?: { x: Measure; y: Measure }; ruleLength?: Measure; northArrowOffset?: { x: Measure; y: Measure } }): string",
     example: layout(`    const s = documents.sheet(ctx, { number: "M-101", name: "Mechanical plan" });\n    const v = documents.planView(ctx, { level: "L1", name: "L1 Mechanical" });\n    documents.place(ctx, s, v, { x: units.mm(420), y: units.mm(300) });`),
-    topics: ["viewport", "place", "sheet", "layout", "view title"],
+    topics: ["viewport", "place", "sheet", "layout", "view title", "north arrow"],
   },
   {
     name: "documents.setViewportTitle",
@@ -725,6 +725,13 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "setViewportTitle(ctx: ScriptContext, viewportId: string, spec: { offset?: { x: Measure; y: Measure }; ruleLength?: Measure | null }): void",
     example: layout(`    const s = documents.sheet(ctx, { number: "A-101", name: "Floor Plan" });\n    const v = documents.planView(ctx, { level: "L1", name: "L1 Plan" });\n    const vp = documents.place(ctx, s, v, { x: units.mm(420), y: units.mm(300) });\n    documents.setViewportTitle(ctx, vp, { offset: { x: units.mm(0), y: units.mm(12) }, ruleLength: units.mm(95) });`),
     topics: ["viewport", "view title", "title line", "sheet", "layout"],
+  },
+  {
+    name: "documents.setViewportNorthArrow",
+    summary: "Shows, hides, or repositions a placed viewport's north arrow on its sheet (`offset`, or `null` to reset to the default corner).",
+    signature: "setViewportNorthArrow(ctx: ScriptContext, viewportId: string, spec: { show?: boolean; offset?: { x: Measure; y: Measure } | null }): void",
+    example: layout(`    const s = documents.sheet(ctx, { number: "A-101", name: "Floor Plan" });\n    const v = documents.planView(ctx, { level: "L1", name: "L1 Plan" });\n    const vp = documents.place(ctx, s, v, { x: units.mm(420), y: units.mm(300) });\n    documents.setViewportNorthArrow(ctx, vp, { show: true, offset: { x: units.mm(-14), y: units.mm(-10) } });`),
+    topics: ["viewport", "north arrow", "sheet", "layout"],
   },
   {
     name: "documents.editSchedule",
@@ -851,6 +858,34 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "controlZone(ctx: ScriptContext, spec: { leg: string; controllers: readonly (string | PlacedPart)[]; loads: readonly (string | PlacedPart)[]; protocol?: \"line_voltage\" | \"0-10v\" | \"dali\" | \"low_voltage\" | \"wireless\"; emergencyMode?: \"none\" | \"unswitched\" | \"switched\" }): void",
     example: layout(`    const sw = equipment.place(ctx, { level: "L1", type: "builtin:switch-dimmer@1", at: { x: units.ft(2), y: units.ft(0) }, mark: "SD-1" });\n    const lt = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led@1", at: { x: units.ft(8), y: units.ft(8) }, mark: "F1" });\n    equipment.controlZone(ctx, { leg: "a", controllers: [sw], loads: [lt], protocol: "0-10v", emergencyMode: "switched" });`),
     topics: ["switching", "switch leg", "0-10v", "dimmer", "occupancy sensor", "controls", "lighting control", "controlled receptacle", "emergency lighting", "ul 924"],
+  },
+  {
+    name: "electrical.setLuminaireIes",
+    summary: "Attaches a built-in IES profile id (troffer_2x4_led, downlight_6_led, linear_pendant_led, exit_combo_wall_pack, exterior_wall_pack_led) or custom IES LM-63 text (optionally saved once in the photometric_profile catalog), plus emergency driver/battery and LLF metadata, to one or more placed luminaires or all instances of a luminaire part type.",
+    signature: "setLuminaireIes(ctx: ScriptContext, target: string | PlacedPart | readonly (string | PlacedPart)[], spec: LuminaireIesSpec): void",
+    example: layout(`    const lt = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led@1", at: { x: units.ft(8), y: units.ft(8) }, height: units.ft(9), mark: "F1" });\n    electrical.setLuminaireIes(ctx, lt, { profile: "troffer_2x4_led", emergencyMode: "battery_pack", emergencyLumens: 1400, egressFixture: true, lld: 0.9, ldd: 0.92 });`),
+    topics: ["ies", "photometrics", "luminaire", "emergency battery", "egress lighting", "llf", "candela"],
+  },
+  {
+    name: "electrical.runPhotometrics",
+    summary: "Runs point-by-point IES LM-63 normal illuminance and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model. Supports calculationMode: \"simplified\" (empty shell plane), \"detailed\" (default — Materials Library reflectances, glazing transmittance, furniture & stair occlusion), and \"surfaces\" (also evaluates actual kitchen countertops, islands, worktables, vanities & rising 3D stair treads).",
+    signature: "runPhotometrics<T = unknown>(ctx: ScriptContext, spec?: PhotometricsRunSpec): T",
+    example: layout(`${WALLS}\n    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });\n    const f1 = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led@1", at: { x: units.ft(10), y: units.ft(10) }, height: units.ft(9), mark: "F1" });\n    electrical.setLuminaireIes(ctx, f1, { profile: "troffer_2x4_led" });\n    const res = electrical.runPhotometrics(ctx, { gridSpacing: units.ft(2), workplaneHeight: units.in(30), calculationMode: "surfaces" });\n    ctx.report("Normal photometrics", res);`),
+    topics: ["photometrics", "footcandles", "illuminance", "lpd", "ashrae 90.1", "lighting calculation", "materials", "surfaces", "countertop", "stairs"],
+  },
+  {
+    name: "electrical.runEgressLightingCheck",
+    summary: "Runs NFPA 101 §7.9.2.1 / IBC §1008.3.5 emergency egress lighting compliance (initial ≥1.0 avg / ≥0.1 min fc and 90-minute ≥0.6 avg / ≥0.06 min fc, max:min ≤40:1) using strictly emergency-backed fixtures along corridors, 3D multi-flight stair treads/landings, exit discharge pads, or explicit egress paths (supports calculationMode: \"simplified\" | \"detailed\").",
+    signature: "runEgressLightingCheck<T = unknown>(ctx: ScriptContext, spec?: EgressLightingCheckSpec): T",
+    example: layout(`${WALLS}\n    building.room(ctx, { level: "L1", number: "100", name: "Main Corridor", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(8) }, { x: units.ft(0), y: units.ft(8) }] });\n    const em1 = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led-em@1", at: { x: units.ft(8), y: units.ft(4) }, height: units.ft(9), mark: "EM1" });\n    const em2 = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led-em@1", at: { x: units.ft(22), y: units.ft(4) }, height: units.ft(9), mark: "EM2" });\n    electrical.setLuminaireIes(ctx, [em1, em2], { profile: "troffer_2x4_led", emergencyMode: "battery_pack", emergencyLumens: 1400, egressFixture: true });\n    const res = electrical.runEgressLightingCheck(ctx, { gridSpacing: units.ft(2) });\n    ctx.report("Egress lighting", res);`),
+    topics: ["egress lighting", "emergency lighting", "nfpa 101", "ibc 1008", "90-minute", "life safety", "exit discharge", "stairs"],
+  },
+  {
+    name: "electrical.enablePhotometricOverlay",
+    summary: "Toggles the 2D photometric footcandle grid, marching-squares iso-contour lines, and sub-threshold fail highlights on a floor or ceiling plan view (mode: \"off\" | \"normal\" | \"egress\").",
+    signature: "enablePhotometricOverlay(ctx: ScriptContext, viewRef: string, spec: PhotometricOverlaySpec): void",
+    example: layout(`${WALLS}\n${PLAN}\n    electrical.enablePhotometricOverlay(ctx, plan, { mode: "egress", showContours: true, showGridValues: true });`),
+    topics: ["photometric overlay", "iso-contours", "footcandle grid", "egress plan", "life safety plan"],
   },
   {
     name: "documents.keynote",

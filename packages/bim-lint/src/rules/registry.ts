@@ -65,6 +65,9 @@ export interface AvailabilityContext {
   readonly hasNativeCeilings: boolean;
 }
 
+/** Built-in kernel element kind or add-on-owned kind (`pack.kind`). */
+export type LintElementKind = ElementKind | `${string}.${string}`;
+
 export interface RuleDef {
   readonly id: string;
   readonly version: number;
@@ -73,14 +76,14 @@ export interface RuleDef {
   /** Plain words: what it flags. */
   readonly title: string;
   readonly scope: RuleScope;
-  readonly kinds?: readonly ElementKind[];
+  readonly kinds?: readonly LintElementKind[];
   /**
    * Other kinds the rule reads (a column rule that reads the footing under
    * it). When an edit changes one, the rule re-runs on every element it
    * lints, not only those near the edit, so a deleted footing re-flags its
    * column. Element-scope rules only.
    */
-  readonly reads?: readonly ElementKind[];
+  readonly reads?: readonly LintElementKind[];
   /**
    * The rule only reports clash pairs measured from the element (see
    * RuleContext.pairsFrom), so when `pairsFrom` is set it has nothing to say

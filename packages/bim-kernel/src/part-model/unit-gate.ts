@@ -2,7 +2,7 @@ import { refuse, registerEditHook } from "../command-core";
 import { decidingUndo, peerReads } from "../elements/feature";
 import { round } from "../geometry";
 import { TrackedReader } from "../model";
-import { isUnitCodeOnly, PARTS_UNIT_CODES_FEATURE, type ParamDef } from "../parts";
+import { isUnitCodeOnly, PARAM_TEXT_DEFAULT_MAX, PARTS_LONG_TEXT_VALUES_FEATURE, PARTS_UNIT_CODES_FEATURE, type ParamDef } from "../parts";
 import { carryConnectedRuns, RunPropagator } from "../routing/propagate";
 import {
   lineHostTopMm,
@@ -218,8 +218,65 @@ function followWallFaceHosts(base: ModelState, working: Record<string, BimElemen
   flushHookTouched();
 }
 
+/**
+ * Long text part parameters (>400 chars, or `maxLength > 400` in a part type
+ * definition): newly introduced values or definitions are written only when
+ * peers advertise `parts:long_text_values`. Values already stored on the
+ * element round-trip untouched; undo restores stored records and stands aside.
+ */
+function checkLongText(base: Readonly<Record<string, BimElement>>, working: Readonly<Record<string, BimElement>>, touchedIds: readonly ElementId[]): void {
+  if (decidingUndo() || peerReads(PARTS_LONG_TEXT_VALUES_FEATURE)) return;
+  for (const id of touchedIds) {
+    const next = working[id];
+    const prior = base[id];
+    if (next?.kind === "part_type") {
+      const priorParams = new Map<string, ParamDef>();
+      if (prior?.kind === "part_type") {
+        for (const p of [...prior.definition.typeParams, ...prior.definition.instanceParams]) priorParams.set(p.name, p);
+      }
+      for (const p of [...next.definition.typeParams, ...next.definition.instanceParams]) {
+        const prev = priorParams.get(p.name);
+        const addedLongLimit = p.maxLength !== undefined && p.maxLength > PARAM_TEXT_DEFAULT_MAX && !(prev?.maxLength !== undefined && prev.maxLength > PARAM_TEXT_DEFAULT_MAX);
+        const addedLongDefault = typeof p.default === "string" && p.default.length > PARAM_TEXT_DEFAULT_MAX && prev?.default !== p.default;
+        if (addedLongLimit || addedLongDefault) {
+          refuse(
+            "invalid_value",
+            `${next.definition.familyName} ${next.definition.typeName}'s ${p.name} can't store text longer than ${PARAM_TEXT_DEFAULT_MAX} characters yet: the model server this model is open on is an older version. Try again once the server is updated`,
+            [next.id],
+          );
+        }
+      }
+      const prevVals = prior?.kind === "part_type" ? prior.definition.typeValues : undefined;
+      for (const [k, v] of Object.entries(next.definition.typeValues ?? {})) {
+        if (typeof v === "string" && v.length > PARAM_TEXT_DEFAULT_MAX && prevVals?.[k] !== v) {
+          refuse(
+            "invalid_value",
+            `${next.definition.familyName} ${next.definition.typeName}'s ${k} can't store text values longer than ${PARAM_TEXT_DEFAULT_MAX} characters yet: the model server this model is open on is an older version. Try again once the server is updated`,
+            [next.id],
+          );
+        }
+      }
+      continue;
+    }
+    if (next?.kind === "part") {
+      const prevVals = prior?.kind === "part" ? prior.values : undefined;
+      for (const [k, v] of Object.entries(next.values ?? {})) {
+        if (typeof v === "string" && v.length > PARAM_TEXT_DEFAULT_MAX && prevVals?.[k] !== v) {
+          const name = next.mark || "The part";
+          refuse(
+            "invalid_value",
+            `${name}'s ${k} can't store text values longer than ${PARAM_TEXT_DEFAULT_MAX} characters yet: the model server this model is open on is an older version. Try again once the server is updated`,
+            [next.id],
+          );
+        }
+      }
+    }
+  }
+}
+
 registerEditHook("part-unit-codes", (base, working, touchedIds) => {
   checkUnits(base.elements, working, touchedIds);
+  checkLongText(base.elements, working, touchedIds);
   checkLineHosts(base, working, touchedIds);
   checkWallFaceHosts(base, working, touchedIds);
   followWallFaceHosts(base, working, touchedIds);

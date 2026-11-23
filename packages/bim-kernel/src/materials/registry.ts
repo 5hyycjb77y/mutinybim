@@ -60,10 +60,18 @@ export function resolveElementMaterial(
   packSet?: PackSet,
 ): MaterialDef | null {
   const directValues = (el as { readonly values?: Readonly<Record<string, unknown>> }).values;
-  const directId = directValues?.[MATERIAL_ID_KEY];
+  const directId = directValues?.[MATERIAL_ID_KEY] ?? directValues?.material_id;
   if (typeof directId === "string") {
     const found = materialOf(directId, packSet ?? activePackSet());
     if (found) return found;
+  }
+  if (el.kind === "part") {
+    const pt = model.elements[el.typeId];
+    const ptRef = pt?.kind === "part_type" ? (pt.definition.typeValues[MATERIAL_ID_KEY] ?? pt.definition.typeValues.material_id) : undefined;
+    if (typeof ptRef === "string") {
+      const found = materialOf(ptRef, packSet ?? activePackSet());
+      if (found) return found;
+    }
   }
   if (isCoreElement(el) && el.typeId !== undefined) {
     let ref = elementTypeValue(model.elements, el, MATERIAL_ID_KEY);

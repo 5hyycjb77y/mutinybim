@@ -34,6 +34,7 @@ import { createDemoModel, createPlacedDemoModel } from "@permitzip/bim-pack-mech
 import { captureSnapshot, issueFromSnapshot, renderSheetPdf } from "@permitzip/bim-sheets";
 import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
+import { createShowcaseDemoModel } from "@permitzip/bim-first-party/seed";
 import { buildSampleMarketGas } from "../../bim-kernel/__tests__/fixtures/sample-market-gas";
 import { createEditorDemo, type EditorDemo } from "../../bim-editor/demo/server";
 import { createElectricalDemoModel } from "./electrical-demo";
@@ -75,7 +76,9 @@ function openIssueModel(): ModelState {
 const sampleMarketGasModel = (): ModelState => buildSampleMarketGas();
 
 const startingModel =
-  process.env.BIM_DEV_MODEL === "arch-overhaul"
+  process.env.BIM_DEV_MODEL === "showcase"
+    ? createShowcaseDemoModel("showcase-demo")
+    : process.env.BIM_DEV_MODEL === "arch-overhaul"
     ? createArchOverhaulDemoModel("arch-overhaul-demo")
     : process.env.BIM_DEV_MODEL === "electrical-plan"
       ? createElectricalDemoModel("electrical-plan-demo")
@@ -114,7 +117,7 @@ function helloModelId(raw: string): string | null | undefined {
   return null;
 }
 
-const editorMode = process.env.BIM_DEV_EDITOR ?? (process.env.BIM_DEV_MODEL ? "lazy" : "eager");
+const editorMode = process.env.BIM_DEV_EDITOR ?? (process.env.BIM_DEV_MODEL && process.env.BIM_DEV_MODEL !== "showcase" ? "lazy" : "eager");
 if (!["eager", "lazy", "off"].includes(editorMode)) {
   console.error(`[bim-devserver] BIM_DEV_EDITOR="${editorMode}" is not one of eager, lazy, off`);
   process.exit(1);
@@ -170,7 +173,7 @@ async function exportPdf(res: ServerResponse) {
   const snapshot = await sequencer.exportSnapshot();
   const sha = createHash("sha256").update(snapshot.canonical).digest("hex");
   const firstSheet = elementValues(snapshot.model.elements).find((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet" && !el.deleted);
-  const scene = firstSheet ? buildSheetSceneFor(snapshot.model, firstSheet.id, { projectName: "MutinyBIM Electrical Demo" }) : buildSheetScene(snapshot.model, demoSheetDefinition());
+  const scene = firstSheet ? buildSheetSceneFor(snapshot.model, firstSheet.id, { projectName: "MutinyBIM Showcase" }) : buildSheetScene(snapshot.model, demoSheetDefinition());
   const title = firstSheet ? `${firstSheet.number} ${firstSheet.title}` : "M-101 Mechanical Plan";
   const rawFileTag = firstSheet ? firstSheet.number : "M-101";
   const fileTag = rawFileTag.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "sheet";

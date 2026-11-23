@@ -568,7 +568,7 @@ const referenceIndex = (keepsScripts: boolean) => ({
     : {}),
   read_more: 'search: a topic (the two best matches whole, the rest by name). topic: one function or recipe by its exact name, whole with its example. command: one ctx.edit command\'s fields. example: one whole script.',
   prefer: "One script for a multi-step layout (connect N parts to a run, place and route equipment, a sheet per level) instead of many single tool calls: one preview, one Approve, one Undo.",
-  module: 'import { defineScript, units, routes, parts, building, equipment, documents, checks } from "@permitzip/bim-script"; export default defineScript({ kind: "part" | "layout" | "route", reads, parameters, run(ctx, values) { ... } }). Import nothing else; no fetch, files, timers, Date or Math.random.',
+  module: 'import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script"; export default defineScript({ kind: "part" | "layout" | "route", reads, parameters, run(ctx, values) { ... } }). Import nothing else; no fetch, files, timers, Date or Math.random.',
   kit: kitByNamespace(),
   /** The jobs an engineer names, each with a worked example: read one with topic (topic: "Schedules") for its steps and script. */
   tasks: Object.fromEntries(KIT_RECIPES.map((r) => [r.task, r.name])),

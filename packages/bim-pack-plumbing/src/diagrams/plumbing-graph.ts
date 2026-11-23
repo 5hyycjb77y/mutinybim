@@ -1,4 +1,4 @@
-import { systemRules, elementsOfKind } from "@permitzip/bim-kernel";
+import { systemRules, elementsOfKind, drainSystemKinds } from "@permitzip/bim-kernel";
 import type { MepSystem, BimElement, ElementId, DiagramHints, DiagramGraph, DiagramNode, DiagramPipe } from "@permitzip/bim-kernel";
 import { plumbingTrees } from "./plumbing-topology";
 
@@ -41,6 +41,40 @@ function graft(tree: DiagramNode, elementId: string, children: readonly DiagramN
   return null;
 }
 
+/** Invert a tree around a target leaf node (so a vent tree rooted at VTR-1 becomes a tree rooted at a fixture climbing up to VTR-1 and the other vented branches). */
+function rerootAt(root: DiagramNode, targetElementId: string): DiagramNode | null {
+  const path: DiagramNode[] = [];
+  const find = (n: DiagramNode): boolean => {
+    path.push(n);
+    if (n.role === "terminal" && n.elementId === targetElementId) return true;
+    for (const c of n.children) if (find(c)) return true;
+    path.pop();
+    return false;
+  };
+  if (!find(root) || path.length < 2) return null;
+  // Walk upward from the fixture leaf back to the original root (VTR / roof terminal).
+  let prevChild: DiagramNode | null = null;
+  for (let i = 0; i < path.length - 1; i++) {
+    const parent = path[i]!;
+    const nextInPath = path[i + 1]!;
+    const siblings = parent.children.filter((c) => c !== nextInPath);
+    const rebuilt: DiagramNode = {
+      ...parent,
+      role: i === 0 ? "terminal" : parent.role === "source" ? "branch" : parent.role,
+      feed: nextInPath.feed,
+      children: prevChild ? [...siblings, prevChild] : siblings,
+    };
+    prevChild = rebuilt;
+  }
+  return prevChild;
+}
+
+/** Collect every terminal fixture elementId in a diagram tree. */
+function collectTerminalIds(node: DiagramNode, out: Set<string>): void {
+  if (node.role === "terminal" && node.elementId) out.add(node.elementId);
+  for (const c of node.children) collectTerminalIds(c, out);
+}
+
 export function plumbingDiagramGraph(elements: Elements, hints: DiagramHints = {}): DiagramGraph {
   const reads = new Set<ElementId>();
   const hidden = new Set(hints.hidden ?? []);
@@ -62,6 +96,28 @@ export function plumbingDiagramGraph(elements: Elements, hints: DiagramHints = {
       const host = roots[i] as DiagramNode;
       if (host === r || host.service === r.service) continue;
       const grafted = graft(host, r.elementId, r.children);
+      if (!grafted) continue;
+      roots = roots.flatMap((x, j) => (j === i ? [grafted] : x === r ? [] : [x]));
+      break;
+    }
+  }
+  // A vent tree connected to one or more fixtures already on a drawn sanitary tree integrates right onto that sanitary riser.
+  const drains = drainSystemKinds();
+  for (const r of [...roots]) {
+    if (r.service !== "vent") continue;
+    const ventTerminals = new Set<string>();
+    collectTerminalIds(r, ventTerminals);
+    if (ventTerminals.size === 0) continue;
+    for (let i = 0; i < roots.length; i++) {
+      const host = roots[i] as DiagramNode;
+      if (host === r || !host.service || !drains.has(host.service) || host.service === "storm" || host.service === "condensate") continue;
+      const hostTerminals = new Set<string>();
+      collectTerminalIds(host, hostTerminals);
+      const shared = [...ventTerminals].find((id) => hostTerminals.has(id));
+      if (!shared) continue;
+      const rerooted = rerootAt(r, shared);
+      if (!rerooted) continue;
+      const grafted = graft(host, shared, [rerooted]);
       if (!grafted) continue;
       roots = roots.flatMap((x, j) => (j === i ? [grafted] : x === r ? [] : [x]));
       break;

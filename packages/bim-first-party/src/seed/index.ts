@@ -1,2 +1,3 @@
-/** `@permitzip/bim-first-party/seed`: the all-discipline load-test building. Test and perf fixtures, off the Building Model's first download. */
+/** `@permitzip/bim-first-party/seed`: multi-discipline seed buildings (load-test fullbim + flagship showcase demo). */
 export * from "./fullbim";
+export { createShowcaseDemoModel } from "./showcase";

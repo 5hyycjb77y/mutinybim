@@ -10,7 +10,7 @@ import type { ConnectionStatus, Presence, SaveState } from '@permitzip/bim-sync'
 import { type ConnectionProblem } from './operator-messages'
 import { SHEET_FIRM_NAME, type SheetTitle } from '../contracts/building-model/sheet-title'
 import { panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
-import type { LoadedReference, ModelViewer3D, Pick as ViewerPick } from '@permitzip/bim-viewer-3d'
+import type { LoadedReference, ModelViewer3D, Pick as ViewerPick, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import { elevationCut, kernelToScene, livePlanCutMm, liveView, type Projection } from '@permitzip/bim-viewer-3d/light'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { Avatar, AvatarFallback } from '../ui/avatar'
@@ -320,6 +320,19 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   /** Print dialog: the saved revision and how many of your unsaved edits touch the sheet, taken when it opened. */
   const [printing, setPrinting] = useState<{ savedRevision: number; pendingOnSheet: number } | null>(null)
   const [viewer, setViewer] = useState<ModelViewer3D | null>(null)
+  const [lightingPreset, setLightingPresetState] = useState<SceneLightingPreset>('noon')
+  const applyLightingPreset = useCallback((next: SceneLightingPreset) => {
+    setLightingPresetState(next)
+    viewer?.setLightingPreset(next)
+  }, [viewer])
+  const setViewerScalarHeatmap = useCallback(
+    (overlay: Parameters<ModelViewer3D['setScalarHeatmap']>[0]) => viewer?.setScalarHeatmap(overlay),
+    [viewer],
+  )
+  const setViewerLightEmitters = useCallback(
+    (emitters: Parameters<ModelViewer3D['setLightEmitters']>[0]) => viewer?.setLightEmitters(emitters),
+    [viewer],
+  )
   const mutinyTheme = useMutinyTheme()
   const presentation = useMutinyPresentation()
   const bimRoot = useMutinyPortalContainer()
@@ -2572,6 +2585,10 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     choosePlace: () => chooseTool('place'),
     routeAs,
     previewParts: previewProposal,
+    setScalarHeatmap: setViewerScalarHeatmap,
+    setLightEmitters: setViewerLightEmitters,
+    setLightingPreset: applyLightingPreset,
+    lightingPreset,
     subscribeHover: (listener) => sessionRef.current?.onHoverChange(listener) ?? (() => undefined),
     setClickHandler: (claimer) => {
       clickClaimerRef.current = claimer
@@ -3971,6 +3988,8 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         {!scheduleGridOpen && (
           <SelectionLocksBar
             viewer={viewer}
+            lightingPreset={lightingPreset}
+            onLightingPresetChange={applyLightingPreset}
             is3d={!showDrawing && !planOpen}
             hasSelection={selectedIds.length > 0}
             selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}

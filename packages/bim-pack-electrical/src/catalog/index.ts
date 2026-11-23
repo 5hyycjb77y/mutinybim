@@ -4,6 +4,7 @@ import { CIRCUIT_TEMPLATE_ROW, circuitTemplateSchema, type CircuitTemplateEntry 
 import { DEFAULT_LOAD_CLASS, DEFAULT_LOAD_VA, DEFAULT_VOLTAGE, MAX_LOAD_VA, MAX_VOLTAGE } from "./connection-fields";
 import { FEEDER_TYPE_ROW, feederTypeSchema, type FeederTypeEntry } from "./feeder-types";
 import { DRAFTING_STANDARD_ROW, draftingStandardSchema, type DraftingStandardEntry } from "./drafting-standard";
+import { PHOTOMETRIC_PROFILE_CATALOG_ROW, photometricProfileEntrySchema, type PhotometricProfileEntry } from "../photometrics/parameters";
 
 export * from "./circuit-templates";
 export * from "./connection-fields";
@@ -12,18 +13,19 @@ export * from "./drafting-standard";
 
 /**
  * Electrical's catalog record types (`CATALOG_ENTRY_POINT`, round 12): feeder
- * types and room templates. Typed reads narrow through the kernel's
- * `CatalogEntryTypes`, which this add-on extends.
+ * types, room templates, drafting standards, and IES LM-63 photometric profiles.
+ * Typed reads narrow through the kernel's `CatalogEntryTypes`, which this add-on extends.
  */
 declare module "@permitzip/bim-kernel" {
   interface CatalogEntryTypes {
     feeder_type: FeederTypeEntry;
     circuit_template: CircuitTemplateEntry;
     electrical_drafting: DraftingStandardEntry;
+    photometric_profile: PhotometricProfileEntry;
   }
 }
 
-export const ELECTRICAL_CATALOG_ROWS: readonly CatalogEntryTypeRow[] = [FEEDER_TYPE_ROW, CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW];
+export const ELECTRICAL_CATALOG_ROWS: readonly CatalogEntryTypeRow[] = [FEEDER_TYPE_ROW, CIRCUIT_TEMPLATE_ROW, DRAFTING_STANDARD_ROW, PHOTOMETRIC_PROFILE_CATALOG_ROW];
 
 /** Poles a connection type's load takes (Electrical's reading of the shared record). */
 export const CONNECTION_TYPE_POLES = [1, 2, 3] as const;
@@ -36,4 +38,4 @@ const electricalConnectionTypeSchema = connectionTypeObjectSchema.extend({
 });
 
 /** The records the Electrical types dialog and the electrical agent tool edit. */
-export const electricalCatalogEntrySchema = z.discriminatedUnion("type", [electricalConnectionTypeSchema, feederTypeSchema, circuitTemplateSchema, draftingStandardSchema]);
+export const electricalCatalogEntrySchema = z.discriminatedUnion("type", [electricalConnectionTypeSchema, feederTypeSchema, circuitTemplateSchema, draftingStandardSchema, photometricProfileEntrySchema]);

@@ -243,7 +243,7 @@ describe("r5g one override shape: category → parent → legacy → default", (
     const rec = b.head.elements.r1;
     if (!fa || !rec) throw new Error("fixture parts missing");
     expect(elementClass(b.head.elements, fa, reg)).toBe("firm.fire_alarm_device");
-    expect(elementClass(b.head.elements, rec, reg)).toBe("mep.electrical_device");
+    expect(elementClass(b.head.elements, rec, reg)).toBe("electrical.receptacle");
     const view = props({ categoryOverrides: { "firm.fire_alarm_device": { visible: false } } });
     withCategoryRegistry(reg, () => {
       expect(elementLook(b.head, view, fa).visible).toBe(false);

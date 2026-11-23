@@ -101,15 +101,32 @@ function roomsOn(elements: Elements, key: string): readonly Room[] {
       const k = floorKey(elements, r) ?? normalizeLevelName(DEFAULT_PARTITION.level);
       pushTo(map, k, r);
     }
+    for (const s of elementsOfKind(elements, "space")) {
+      const outline = s.bounds.kind === "outline" || s.bounds.kind === "bounded" ? s.bounds.outline : null;
+      if (!outline || outline.length < 3) continue;
+      const k = floorKey(elements, s) ?? normalizeLevelName(DEFAULT_PARTITION.level);
+      pushTo(map, k, {
+        id: s.id,
+        version: s.version,
+        authoredRev: s.authoredRev,
+        kind: "room",
+        name: s.name,
+        number: s.number,
+        outline,
+        areaSqM: 0,
+        ...(s.levelId ? { levelId: s.levelId } : {}),
+        ...(s.partition ? { partition: s.partition } : {}),
+      });
+    }
     index = map;
     roomsByFloor.set(elements, index);
   }
   return index.get(key) ?? [];
 }
 
-/** The room an element stands in: a room on its level whose outline holds its plan point. */
+/** The room or space an element stands in: a room (or space) on its level whose outline holds its plan point. */
 export function roomOf(elements: Elements, el: BimElement): Room | null {
-  if (el.kind === "room") return null;
+  if (el.kind === "room" || el.kind === "space") return null;
   const at = anchorOf(elements, el);
   const key = floorKey(elements, el);
   if (!at || key === null) return null;

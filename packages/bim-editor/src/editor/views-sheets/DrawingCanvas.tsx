@@ -6,7 +6,7 @@ import type { SheetTitle } from '../../contracts/building-model/sheet-title'
 import { toast } from 'sonner'
 import { escapeLeavesField, leftFieldHint } from '../escape-step'
 import { ChevronDown, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
-import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutHead, canonicalJson, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, referencingSheet, resolveNote, sectionMarkEndpoints, textBlockToSvg, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
+import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, NORTH_ARROW_RADIUS_MM, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutHead, canonicalJson, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, noteContentFingerprint, noteLabel, noteText, normalizeParagraphs, paragraphsForCommand, referencingSheet, resolveNote, sectionMarkEndpoints, textBlockToSvg, viewportNorthArrow, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
 import { distributionEquipment } from '@permitzip/bim-pack-electrical'
 import type { Presence } from '@permitzip/bim-sync'
 import { NOTE_LOCK_REFRESH_MS, PresenceClock, editingNoteActivity, lockMessage, noteLocks, type NoteLock } from '@permitzip/bim-sync/note-locks'
@@ -2371,7 +2371,7 @@ function SectionMarkerLinks({
 }) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [drag, setDrag] = useState<{
-    readonly kind: 'sec-head' | 'sec-tail' | 'sec-line' | 'grid-start' | 'grid-end' | 'grid-line' | 'level-left' | 'level-right' | 'vp-title' | 'vp-rule'
+    readonly kind: 'sec-head' | 'sec-tail' | 'sec-line' | 'grid-start' | 'grid-end' | 'grid-line' | 'level-left' | 'level-right' | 'vp-title' | 'vp-rule' | 'vp-north'
     readonly id: string
     readonly pointerId: number
     readonly originPaper: Vec2
@@ -2479,6 +2479,7 @@ function SectionMarkerLinks({
       readonly layout: ReturnType<typeof viewportTitleLayout>
       readonly backRef: ReturnType<typeof referencingSheet>
       readonly backLabel: string | null
+      readonly northCenter: Vec2 | null
     }> = []
     for (const { view, frame, viewport } of views) {
       if (!viewport || view.viewType === 'schedule') continue
@@ -2486,6 +2487,13 @@ function SectionMarkerLinks({
       const layout = viewportTitleLayout(frame, viewport, view.name, !!backRef)
       const srcView = backRef ? model.elements[backRef.sourceViewId] : undefined
       const srcName = srcView?.kind === 'view' ? ` — ${srcView.name}` : ''
+      const arrow = viewportNorthArrow(model, viewport, view)
+      const northCenter = arrow
+        ? {
+            x: layout.ruleEndX + NORTH_ARROW_RADIUS_MM + 8 + (viewport.northArrowOffsetMm?.x ?? 0),
+            y: layout.titleY + 7 + (viewport.northArrowOffsetMm?.y ?? 0),
+          }
+        : null
       out.push({
         key: `vptitle:${viewport.id}`,
         viewport,
@@ -2494,6 +2502,7 @@ function SectionMarkerLinks({
         layout,
         backRef,
         backLabel: backRef ? `Click to return to Sheet ${backRef.sheetNumber}${srcName} · drag title to move` : null,
+        northCenter,
       })
     }
     return out
@@ -2801,9 +2810,14 @@ function SectionMarkerLinks({
       {viewportTitles.map((vt) => {
         const draggingTitle = drag?.kind === 'vp-title' && drag.id === vt.viewport.id
         const draggingRule = drag?.kind === 'vp-rule' && drag.id === vt.viewport.id
+        const draggingNorth = drag?.kind === 'vp-north' && drag.id === vt.viewport.id
         const isActive = hovered === vt.key || draggingTitle || draggingRule
+        const northKey = `vpnorth:${vt.viewport.id}`
+        const northActive = hovered === northKey || draggingNorth
         const dx = draggingTitle && drag ? drag.curPaper.x - drag.originPaper.x : 0
         const dy = draggingTitle && drag ? drag.curPaper.y - drag.originPaper.y : 0
+        const ndx = draggingNorth && drag ? drag.curPaper.x - drag.originPaper.x : 0
+        const ndy = draggingNorth && drag ? drag.curPaper.y - drag.originPaper.y : 0
         const ruleDx = draggingRule && drag ? drag.curPaper.x - drag.originPaper.x : 0
         const { hitRect, bubbleCenter, ruleStartX, ruleEndX, ruleY } = vt.layout
         const curRuleEndX = Math.max(ruleStartX + 20, ruleEndX + ruleDx)
@@ -2972,6 +2986,70 @@ function SectionMarkerLinks({
               >
                 <title>Drag to lengthen or shorten viewport title line</title>
               </circle>
+            )}
+
+            {/* Draggable North Arrow handle on sheet (mirrors viewport title dragging) */}
+            {canEdit && vt.northCenter && (
+              <g onPointerEnter={() => setHovered(northKey)} onPointerLeave={() => setHovered((cur) => (cur === northKey ? null : cur))}>
+                {draggingNorth && (
+                  <circle
+                    cx={vt.northCenter.x + ndx}
+                    cy={vt.northCenter.y + ndy}
+                    r={NORTH_ARROW_RADIUS_MM + 3}
+                    fill={PRIMARY}
+                    fillOpacity={0.12}
+                    stroke={PRIMARY}
+                    strokeWidth={0.6}
+                    strokeDasharray="2.5 1.5"
+                    className="pointer-events-none"
+                  />
+                )}
+                <circle
+                  cx={vt.northCenter.x}
+                  cy={vt.northCenter.y}
+                  r={NORTH_ARROW_RADIUS_MM + 3.5}
+                  data-testid="viewport-north-arrow-drag"
+                  className="cursor-move transition-colors"
+                  fill={northActive ? PRIMARY : 'transparent'}
+                  fillOpacity={northActive ? 0.08 : 0}
+                  stroke={northActive ? PRIMARY : 'transparent'}
+                  strokeOpacity={northActive ? 0.7 : 0}
+                  strokeDasharray="2 1.5"
+                  strokeWidth={0.55}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return
+                    e.stopPropagation()
+                    const pt = paperOf(e)
+                    if (!pt) return
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                    setDrag({ kind: 'vp-north', id: vt.viewport.id, pointerId: e.pointerId, originPaper: pt, curPaper: pt, moved: false, altKey: e.altKey, frame: vt.frame, view: vt.view })
+                  }}
+                  onPointerMove={(e) => {
+                    if (!drag || drag.kind !== 'vp-north' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                    const pt = paperOf(e)
+                    if (!pt) return
+                    const d = Math.hypot(pt.x - drag.originPaper.x, pt.y - drag.originPaper.y)
+                    setDrag({ ...drag, curPaper: pt, moved: drag.moved || d > 1.0 })
+                  }}
+                  onPointerUp={(e) => {
+                    if (!drag || drag.kind !== 'vp-north' || drag.id !== vt.viewport.id || e.pointerId !== drag.pointerId) return
+                    e.stopPropagation()
+                    const wasMoved = drag.moved
+                    const deltaX = drag.curPaper.x - drag.originPaper.x
+                    const deltaY = drag.curPaper.y - drag.originPaper.y
+                    setDrag(null)
+                    if (!wasMoved) return
+                    const curOff = vt.viewport.northArrowOffsetMm ?? { x: 0, y: 0 }
+                    submit(
+                      { type: 'set_viewport_north_arrow', viewportId: vt.viewport.id, offsetMm: { x: Math.round((curOff.x + deltaX) * 10) / 10, y: Math.round((curOff.y + deltaY) * 10) / 10 } },
+                      `Move ${vt.view.name} north arrow`,
+                    )
+                  }}
+                  onLostPointerCapture={() => setDrag(null)}
+                >
+                  <title>{`Drag to move ${vt.view.name} north arrow on sheet`}</title>
+                </circle>
+              </g>
             )}
           </g>
         )

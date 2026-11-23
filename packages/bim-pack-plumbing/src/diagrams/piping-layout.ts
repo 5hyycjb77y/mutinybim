@@ -169,7 +169,8 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
       const id = `pipe:${owner.id}:${pieceNo++}`;
       const ids = edge?.elementIds ?? (edge?.linkId ? [edge.linkId] : []);
       if (ids[0]) pipes[id] = { elementId: ids[0], elementIds: ids, name: `${edge?.label ? `${edge.label} ` : ""}pipe${owner.role === "terminal" && owner.name !== "OPEN END" ? ` to ${owner.name}` : ""}` };
-      items.push({ shape: "line", points: [pa, pb], weight: look.weight, nodeId: id, ...(look.pattern === "dashed" ? { dashed: true } : {}) });
+      const segLook = owner.service && owner.service !== kind ? pipeLook(owner.service) : look;
+      items.push({ shape: "line", points: [pa, pb], weight: segLook.weight, nodeId: id, ...(segLook.pattern === "dashed" ? { dashed: true } : {}) });
       return { pa, pb };
     };
 
@@ -213,7 +214,9 @@ export function layoutPipingRiser(roots: readonly DiagramNode[], levels: readonl
       const first = s.children[0];
       if (first) {
         // The system it feeds leaves its top beside the drop, rises to its own line and runs on.
-        const out = { x: x + HEATER_OFFSET, y: tierY(b, depth + 1) };
+        // A grafted vent rising off a drained fixture climbs into the upper vent header above the fixtures.
+        const outY = drain && first.service === "vent" ? Math.max(fy + SYMBOL_H + 10, topY(b) - 10) : tierY(b, depth + 1);
+        const out = { x: x + HEATER_OFFSET, y: outY };
         const rise: Printed = {};
         label(first, first.feed, pipeLine(first, first.feed, { x: out.x, y: fy + SYMBOL_H }, out), rise, false);
         drawLine(s.children, out, depth + 1, HEATER_LEAD - HEATER_OFFSET, rise);

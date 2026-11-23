@@ -60,7 +60,7 @@ describe("inputs", () => {
 
   it("an unknown calc lists what exists", () => {
     const r = registry.run({ calc: "nec.arc_flash", inputs: {} });
-    expect(!r.ok && r.reason).toMatch(/^No calc "nec\.arc_flash"\. Available: mech\.duct_friction/);
+    expect(!r.ok && r.reason).toMatch(/^No calc "nec\.arc_flash"\. Available: electrical\.photometrics_egress, electrical\.photometrics_normal, mech\.duct_friction/);
   });
 
   it("model calcs refuse without a model", () => {
@@ -101,6 +101,8 @@ describe("the catalogue", () => {
 
   it("lists electrical, mechanical and plumbing calcs with a version, a JSON schema and an example", () => {
     expect(list.map((c) => c.id)).toEqual([
+      "electrical.photometrics_egress",
+      "electrical.photometrics_normal",
       "mech.duct_friction",
       "mech.duct_system_pressure",
       "mech.makeup_air_heat",

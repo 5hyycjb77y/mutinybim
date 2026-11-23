@@ -722,8 +722,8 @@ function triangulate(body: FittingBody): FittingMesh {
           const c = row[i];
           const d = row[j];
           if (a === undefined || b === undefined || c === undefined || d === undefined) continue;
-          // Both windings: sheet metal is seen from outside and, at open ends, from inside.
-          indices.push(a, c, b, b, c, d, a, b, c, b, d, c);
+          // Single outward winding so indexed computeVertexNormals() never cancels opposite faces to zero; viewer renders fitting materials DoubleSide.
+          indices.push(a, b, c, b, d, c);
         }
       }
       prev = row;
@@ -739,7 +739,7 @@ function triangulate(body: FittingBody): FittingMesh {
         const c = upper[i];
         const d = upper[i + 1];
         if (a === undefined || b === undefined || c === undefined || d === undefined) continue;
-        indices.push(a, c, b, b, c, d, a, b, c, b, d, c);
+        indices.push(a, b, c, b, d, c);
       }
     } else {
       const centre = push(plate.ring.center);
@@ -749,7 +749,7 @@ function triangulate(body: FittingBody): FittingMesh {
         const a = rim[i];
         const b = rim[(i + 1) % RING_SAMPLES];
         if (a === undefined || b === undefined) continue;
-        indices.push(centre, a, b, centre, b, a);
+        indices.push(centre, a, b);
       }
     }
   }

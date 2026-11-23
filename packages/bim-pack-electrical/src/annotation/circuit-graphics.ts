@@ -853,6 +853,41 @@ function chain(start: Node, rest: readonly Node[]): Node[] {
 }
 
 /**
+ * O(V²) Prim's minimum spanning tree rooted at `start` under `metric`.
+ * Caches each unvisited node's nearest tree neighbor and updates only against
+ * the newly inserted node, preserving exact earliest-added tie-breaking.
+ */
+function primTree(start: Node, rest: readonly Node[], metric: (p: Vec2, q: Vec2) => number): Array<readonly [Node, Node]> {
+  const left = [...rest];
+  const bestDist = left.map((n) => metric(start.point, n.point));
+  const bestParent = left.map(() => start);
+  const out: Array<readonly [Node, Node]> = [];
+  while (left.length > 0) {
+    let bi = 0;
+    let bd = bestDist[0]!;
+    for (let i = 1; i < left.length; i++) {
+      const d = bestDist[i]!;
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    const next = left.splice(bi, 1)[0]!;
+    const parent = bestParent.splice(bi, 1)[0]!;
+    bestDist.splice(bi, 1);
+    out.push([parent, next]);
+    for (let i = 0; i < left.length; i++) {
+      const d = metric(next.point, left[i]!.point);
+      if (d < bestDist[i]!) {
+        bestDist[i] = d;
+        bestParent[i] = next;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Square style: each member joins the nearest one already drawn (square
  * distance), growing a tree out from the home run, so a line never runs back
  * across the room over the lines before it. Ties: the order they were added.
@@ -860,35 +895,18 @@ function chain(start: Node, rest: readonly Node[]): Node[] {
  */
 function squareTree(start: Node, rest: readonly Node[]): Array<readonly [Node, Node]> {
   const manhattan = (p: Vec2, q: Vec2) => Math.abs(p.x - q.x) + Math.abs(p.y - q.y);
-  const inTree: Node[] = [start];
-  const left = [...rest];
-  const out: Array<readonly [Node, Node]> = [];
-  while (left.length > 0) {
-    let bi = 0;
-    let bt = start;
-    let bd = Infinity;
-    for (let i = 0; i < left.length; i++) {
-      for (const t of inTree) {
-        const d = manhattan(t.point, left[i]!.point);
-        if (d < bd) {
-          bd = d;
-          bi = i;
-          bt = t;
-        }
-      }
-    }
-    const next = left.splice(bi, 1)[0]!;
-    out.push([bt, next]);
-    inTree.push(next);
-  }
-  return out;
+  return primTree(start, rest, manhattan);
 }
 
-/** Pairs to join in drawing order: a tree for square lines, the nearest-neighbour chain otherwise. */
+/** Arc style: minimum spanning tree rooted at `start` (Euclidean distance) so mid-circuit home-runs branch naturally without long loop-back crossings. */
+function arcTree(start: Node, rest: readonly Node[]): Array<readonly [Node, Node]> {
+  return primTree(start, rest, dist);
+}
+
+/** Pairs to join in drawing order: a tree rooted at the home run (Manhattan for square lines, Euclidean for arcs). */
 function joinPairs(style: CircuitGraphicStyle, start: Node, rest: readonly Node[]): Array<readonly [Node, Node]> {
   if (style === "orthogonal") return squareTree(start, rest);
-  const ordered = chain(start, rest);
-  return ordered.slice(1).map((b, i) => [ordered[i]!, b] as const);
+  return arcTree(start, rest);
 }
 
 /**

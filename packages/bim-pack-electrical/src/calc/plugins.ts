@@ -6,6 +6,7 @@ import { motorCircuit, motorCircuitInput } from "./motor";
 import { CIRCUIT_SYSTEMS, sizeCircuit, sizeCircuitInput } from "./size-circuit";
 import { serviceSize, serviceSizeInput } from "./service-size";
 import { faultCurrent, faultCurrentInput } from "./fault-current";
+import { PHOTOMETRIC_CALCS } from "../photometrics/calcs";
 
 function nec(ctx: CalcContext): NecEdition {
   if (!isNecEdition(ctx.code)) throw new Error("This calc needs the NEC pack; the registry resolves it before running");
@@ -278,7 +279,7 @@ export const faultCurrentCalc = defineCalc({
   run: (input) => faultCurrent(input),
 });
 
-export const ELECTRICAL_CALCS = [sizeCircuitCalc, demandLoadCalc, conductorAmpacityCalc, voltageDropCalc, egcCalc, conduitFillCalc, motorCircuitCalc, serviceSizeCalc] as const;
+export const ELECTRICAL_CALCS = [sizeCircuitCalc, demandLoadCalc, conductorAmpacityCalc, voltageDropCalc, egcCalc, conduitFillCalc, motorCircuitCalc, serviceSizeCalc, ...PHOTOMETRIC_CALCS] as const;
 
 /** Calcs that run only where the preview flag is on (bim_run_calc reads it). */
 export const PREVIEW_ELECTRICAL_CALCS = [faultCurrentCalc] as const;

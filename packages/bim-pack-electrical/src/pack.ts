@@ -47,8 +47,11 @@ import { ELECTRICAL_LINT_RULES } from "./lint";
 import { LINT_RULE_POINT } from "@permitzip/bim-lint";
 import { electricalConnect } from "./circuiting/connect";
 import { ELECTRICAL_SCHEDULE_TEMPLATES } from "./schedules/list-templates";
+import { ELECTRICAL_CLASSES } from "./classes";
+import { CLASS_POINT } from "@permitzip/bim-pack/runtime";
 import { ELECTRICAL_KEYNOTE_TABLES } from "./keynotes";
-import { LIBRARY_ROWS_POINT } from "@permitzip/bim-kernel";
+import { LIBRARY_ROWS_POINT, PARAMETER_SET_POINT } from "@permitzip/bim-kernel";
+import { ELECTRICAL_PHOTOMETRICS_PARAMETER_SET, PHOTOMETRIC_GRID_ROW } from "./photometrics";
 
 const [serviceLayoutSchema] = serviceLayoutCommandSchemas;
 
@@ -193,6 +196,8 @@ const PART_TYPES: readonly BuiltinPartTypeRow[] = [
 /** This pack's contributions: the wave-1 kernel rows in their order, then the demand rule sets, calcs, part types, lint rules and agent tools. */
 export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(DISCIPLINE_POINT, ELECTRICAL_DISCIPLINES),
+  contribute(CLASS_POINT, ELECTRICAL_CLASSES),
+  contribute(PARAMETER_SET_POINT, [ELECTRICAL_PHOTOMETRICS_PARAMETER_SET]),
   contribute(COMMAND_POINT, [SERVICE_LAYOUT_COMMAND]),
   contribute(NETWORK_ADAPTER_POINT, [ADAPTER]),
   contribute(DERIVED_ZONE_RULE_POINT, [DEDICATED_SPACE]),
@@ -200,7 +205,7 @@ export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(CATALOG_ENTRY_POINT, ELECTRICAL_CATALOG_ROWS),
   contribute(CONNECTION_FIELD_POINT, ELECTRICAL_CONNECTION_FIELDS),
   contribute(DIAGRAM_LAYOUT_POINT, [ONE_LINE_LAYOUT_ROW, CONTROLS_DIAGRAM_LAYOUT_ROW]),
-  contribute(VIEW_GRAPHICS_POINT, [CIRCUIT_GRAPHICS_ROW]),
+  contribute(VIEW_GRAPHICS_POINT, [CIRCUIT_GRAPHICS_ROW, PHOTOMETRIC_GRID_ROW]),
   contribute(LOAD_SECTION_POINT, [ELECTRICAL_LOAD_SECTION]),
   contribute(SERVICE_POINT, ELECTRICAL_SERVICE_ROWS),
   contribute(SERVICE_LINE_CODE_POINT, ELECTRICAL_SERVICE_LINE_CODES),

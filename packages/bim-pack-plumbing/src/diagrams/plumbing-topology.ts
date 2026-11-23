@@ -295,9 +295,11 @@ function plumbingTree(elements: Elements, system: MepSystem, hidden: ReadonlySet
           if (!hidden.has(el.id)) stations.push(terminalOfPart(cur, close()));
           return stations;
         }
-        // An inline part (meter, backflow preventer, pump): a device on the line.
-        const label = deviceLabel(el.id, partName(elements, el.id), true);
-        if (!hidden.has(el.id)) stations.push(node(uniqueId(el.id), el.id, "device", label.name, label.lines, el.levelId, { x: el.position.x, y: el.position.y, z: runHeightMm(elements, el.levelId, el.offsetMm ?? 0) }, edgeOf(close()), []));
+        // An inline part (meter, backflow preventer, pump) has both `#in` and `#out` graph nodes; emit one station on entry and pass silently through its exit port.
+        if (prev === null || idOf(prev) !== el.id) {
+          const label = deviceLabel(el.id, partName(elements, el.id), true);
+          if (!hidden.has(el.id)) stations.push(node(uniqueId(el.id), el.id, "device", label.name, label.lines, el.levelId, { x: el.position.x, y: el.position.y, z: runHeightMm(elements, el.levelId, el.offsetMm ?? 0) }, edgeOf(close()), []));
+        }
         const next = heaviest(kids);
         for (const k of kids) if (k !== next) stations.push(...branchAt(k, cur));
         prev = cur;

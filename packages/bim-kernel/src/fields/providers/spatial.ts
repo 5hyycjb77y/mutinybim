@@ -32,8 +32,8 @@ export function roomText(r: Room): string | null {
   return textOrNull([r.number, r.name].filter((s) => s.trim() !== "").join(" "));
 }
 
-/** Kinds whose edit can move another element's answer (a level, the rooms, an opening's wall, a load point's run): an edit touching one rebuilds the index. */
-const SHAPING_KINDS: ReadonlySet<BimElement["kind"]> = new Set(["level", "room", "wall", "run_segment", "run_fitting"]);
+/** Kinds whose edit can move another element's answer (a level, the rooms/spaces, an opening's wall, a load point's run): an edit touching one rebuilds the index. */
+const SHAPING_KINDS: ReadonlySet<BimElement["kind"]> = new Set(["level", "room", "space", "wall", "run_segment", "run_fitting"]);
 
 type Inverse = ReadonlyMap<string, readonly ElementId[]>;
 
@@ -166,7 +166,7 @@ function baseFields(registry: Registry, roots: readonly ClassId[]): ProviderFiel
         classes,
         valueType: "text",
         writer: locked(ROOMS, "in_room"),
-        deps: { elementKinds: ["room"] },
+        deps: { elementKinds: ["room", "space"] },
         group: "Location",
         read: read((els, el) => {
           const r = roomOf(els, el);

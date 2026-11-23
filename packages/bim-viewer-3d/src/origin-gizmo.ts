@@ -237,3 +237,85 @@ export function buildArrows(axes?: readonly [THREE.ColorRepresentation, THREE.Co
   group.add(mesh);
   return group;
 }
+
+const AXIS_LINE_HALF_LEN_M = 800;
+
+/**
+ * Depth-aware 3D dashed infinite axis lines (X red, Y green, Z blue) rendered in
+ * two passes so portions in front of the building stay crisp (`opacity: 0.65`)
+ * while portions occluded behind walls, slabs, or roofs dim softly (`opacity: 0.14`).
+ */
+export function buildDepthAwareAxisLines(axes?: readonly [THREE.ColorRepresentation, THREE.ColorRepresentation, THREE.ColorRepresentation]): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "origin-axis-lines";
+
+  (["x", "y", "z"] as const).forEach((axis, i) => {
+    const color = axes?.[i] ?? AXIS_COLOR[axis];
+    const dir = AXIS_SCENE[axis];
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      dir.clone().multiplyScalar(-AXIS_LINE_HALF_LEN_M),
+      dir.clone().multiplyScalar(AXIS_LINE_HALF_LEN_M),
+    ]);
+
+    const frontMat = new THREE.LineDashedMaterial({
+      color,
+      dashSize: 0.35,
+      gapSize: 0.25,
+      transparent: true,
+      opacity: 0.65,
+      depthTest: true,
+      depthFunc: THREE.LessEqualDepth,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const front = new THREE.Line(geo, frontMat);
+    front.computeLineDistances();
+    front.frustumCulled = false;
+    front.renderOrder = 18;
+    front.userData.axis = axis;
+    front.userData.nonPickable = true;
+
+    const behindMat = new THREE.LineDashedMaterial({
+      color,
+      dashSize: 0.35,
+      gapSize: 0.25,
+      transparent: true,
+      opacity: 0.14,
+      depthTest: true,
+      depthFunc: THREE.GreaterDepth,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const behind = new THREE.Line(geo, behindMat);
+    behind.computeLineDistances();
+    behind.frustumCulled = false;
+    behind.renderOrder = 19;
+    behind.userData.axis = axis;
+    behind.userData.nonPickable = true;
+
+    group.add(front, behind);
+  });
+
+  return group;
+}
+
+const _axisLook = new THREE.Vector3();
+
+/** Keep 3D axis line dashes at a steady screen-pixel pitch and hide axes seen end-on. */
+export function updateDepthAwareAxisLines(group: THREE.Group, camera: THREE.Camera, origin: THREE.Vector3, heightPx: number): void {
+  const mpp = Math.max(1e-4, metresPerPixel(camera, origin, heightPx));
+  const dashSize = 6.5 * mpp;
+  const gapSize = 5.0 * mpp;
+  camera.getWorldDirection(_axisLook);
+
+  for (const child of group.children) {
+    if (!(child instanceof THREE.Line)) continue;
+    const axis = child.userData.axis as GizmoAxis | undefined;
+    if (!axis) continue;
+    child.visible = Math.abs(_axisLook.dot(AXIS_SCENE[axis])) <= END_ON_COS;
+    if (child.material instanceof THREE.LineDashedMaterial) {
+      child.material.dashSize = dashSize;
+      child.material.gapSize = gapSize;
+    }
+  }
+}

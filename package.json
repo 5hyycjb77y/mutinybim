@@ -16,9 +16,12 @@
     "packages/*"
   ],
   "scripts": {
-    "demo": "node --import tsx packages/bim-devserver/src/server.ts",
+    "demo": "BIM_DEV_MODEL=showcase node --import tsx packages/bim-devserver/src/server.ts",
+    "demo:showcase": "BIM_DEV_MODEL=showcase node --import tsx packages/bim-devserver/src/server.ts",
     "demo:arch": "BIM_DEV_MODEL=arch-overhaul node --import tsx packages/bim-devserver/src/server.ts",
     "demo:electrical": "BIM_DEV_MODEL=electrical-plan node --import tsx packages/bim-devserver/src/server.ts",
+    "demo:enlarged": "BIM_DEV_MODEL=enlarged-plans node --import tsx packages/bim-devserver/src/server.ts",
+    "demo:mechanical": "node --import tsx packages/bim-devserver/src/server.ts",
     "web": "TSX_TSCONFIG_PATH=apps/mutinybim-web/tsconfig.runtime.json node --import tsx apps/mutinybim-web/src/server.ts",
     "web:reset-password": "TSX_TSCONFIG_PATH=apps/mutinybim-web/tsconfig.runtime.json node --import tsx apps/mutinybim-web/src/admin.ts reset-password",
     "test": "jest",

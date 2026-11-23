@@ -7,6 +7,7 @@ import { feederTypeField } from "../fields/electrical-resolver";
 import { feederTypeRows } from "../fields/feeder-types";
 import { electricalEngineFor } from "../fields/rules-registry";
 import { CONNECTION_TYPES_TEMPLATE, EQUIPMENT_CONNECTIONS_TEMPLATE, FEEDER_TEMPLATE, LIGHTING_CONTROLS_TEMPLATE, PANEL_TEMPLATE, SWITCHBOARD_TEMPLATE } from "./distribution-templates";
+import { PHOTOMETRIC_FORM_ROWS } from "../photometrics/schedules";
 
 const { COLLATOR, cell, empty, headerOf, listForm, options, partOf, titleOf, typeOf } = formScheduleSupport;
 
@@ -412,4 +413,5 @@ export const DISTRIBUTION_FORM_ROWS: readonly FormScheduleDef[] = [
   { kind: "connection_types", evaluate: evaluateParts, label: "Electrical connection type schedule", template: CONNECTION_TYPES_TEMPLATE, source: { kind: "catalog", catalog: "part_types" }, order: 40 },
   { kind: "equipment_connections", evaluate: evaluateParts, label: "Equipment connection schedule", template: EQUIPMENT_CONNECTIONS_TEMPLATE, source: EQUIPMENT, order: 50 },
   { kind: "lighting_controls", evaluate: evaluateLightingControls, label: "Lighting controls schedule", template: LIGHTING_CONTROLS_TEMPLATE, source: LIGHTING_AND_CONTROLS, order: 55 },
+  ...PHOTOMETRIC_FORM_ROWS,
 ];

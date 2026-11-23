@@ -241,7 +241,11 @@ const DUPLEX: LibraryEntry = {
     typeValues: { voltage: 120, rating: 20, nema: "5-20R" },
     instanceParams: [text("circuit", "Circuit"), num("load", "Load", "va", { min: 0, default: 180 }), { name: "gfci", label: "GFCI", kind: "boolean", default: false }],
     connectors: [power("power", 50, p("voltage"), 1, p("load"))],
-    geometry: [{ kind: "box", center: [0, -10, 60], size: [70, 20, 115] }],
+    // Recessed device box inside the wall (-20..0) + 6 mm proud faceplate (0..+6) so wall-face hosting has zero Z-fighting and unhosted wallMountOf keeps its 20 mm back depth.
+    geometry: [
+      { kind: "box", center: [0, -10, 60], size: [55, 20, 95] },
+      { kind: "box", center: [0, 3, 60], size: [70, 6, 115] },
+    ],
     symbol: [
       { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
       { kind: "line", from: [-0.6, 0], to: [-0.6, 3.35], pen: "medium", units: "paper" },

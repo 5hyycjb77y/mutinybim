@@ -747,13 +747,26 @@ function drawPlan(
   const own = levelElements(model, view);
   const symScale = view.props?.symbolScale ?? 1;
   const deferredParts: { readonly el: PartInstance; readonly tone: Tone; readonly planSymbol: boolean | null; readonly detail: DetailLevel; readonly projectionPen: (pen: Pen) => Pen; readonly elementDash: readonly number[] | undefined }[] = [];
-  const flushParts = (): number => {
-    const startIdx = deferredParts.length > 0 ? p.prims.length : -1;
-    for (const dp of deferredParts) {
+  const isBackgroundPart = (el: PartInstance, topZ: number | undefined): boolean => {
+    if (el.host?.kind === "wall_face") return false;
+    if (el.host?.kind === "element" && model.elements[el.host.elementId]?.kind === "ceiling") return false;
+    return (el.offsetMm ?? 0) < 2000 && (topZ === undefined || topZ < floor + 2200);
+  };
+  const drawPartList = (list: typeof deferredParts, occlude?: { readonly index: FaceIndex; readonly top: ReadonlyMap<string, number> }): number => {
+    const startIdx = list.length > 0 ? p.prims.length : -1;
+    for (const dp of list) {
+      const near = occlude ? occlude.top.get(dp.el.id) : undefined;
+      const partLine =
+        occlude && near !== undefined
+          ? (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => {
+              const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occlude.index, () => near);
+              for (const [q0, q1] of split.visible) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
+            }
+          : (a: Vec2, b: Vec2, pen: Pen, dash?: number[]) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash);
       drawPartSymbol(
         model,
         dp.el,
-        (a, b, pen, dash) => lineIn(p, a, b, dp.projectionPen(pen), dp.tone, dash ?? dp.elementDash),
+        partLine,
         (at, text, size, anchor, style) => textIn(p, at, text, size, anchor ?? "middle", dp.tone, style),
         dp.planSymbol,
         dp.detail,
@@ -769,6 +782,7 @@ function drawPlan(
     }
     return startIdx;
   };
+  const flushParts = (): number => drawPartList(deferredParts);
   // Filter to the view window first and bucket by architectural draw layer in O(N) without sorting off-screen elements:
   // 0: slabs & ceilings, 1: walls & columns (poché masks slab/ceiling centerlines), 2: openings, 3: everything else, 4: grids.
   const layerBuckets: [BimElement[], BimElement[], BimElement[], BimElement[], BimElement[]] = [[], [], [], [], []];
@@ -1026,6 +1040,24 @@ function drawPlan(
   }
   if (fillsFaces(style)) fillFaces(p, faces, (o) => roles.get(o) ?? "mep", (o) => tones.get(o) ?? "ink");
   if (!drawsEdges(style)) return flushParts();
+  // In hidden-line plan mode (not ceiling plans) with double-line overhead runs, draw lower floor-level parts first
+  // (geometrically clipped against overhead runs via splitHidden) so background linework never bleeds through.
+  // When there are no double-line overhead runs, keep the normal deferred-part draw order.
+  const maskedRunOwners = new Set<string>();
+  if (hidesEdges(style) && !ceiling) {
+    for (const el of bodies) {
+      if (el.kind === "run_segment" || el.kind === "run_fitting") {
+        const size = el.kind === "run_segment" ? el.size : el.ports[0]?.size;
+        if (!size || (size.shape !== "rect" && size.shape !== "round" && size.shape !== "oval")) continue;
+        const elLook = elementLook(model, view, el);
+        const effDetail = elLook.detailLevel ?? display.detail;
+        if (!isSingleLineRun(el.domain, size, effDetail, elLook.singleLineBelowMm)) maskedRunOwners.add(el.id);
+      }
+    }
+  }
+  const bgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => isBackgroundPart(dp.el, top.get(dp.el.id))) : [];
+  const fgParts = maskedRunOwners.size > 0 ? deferredParts.filter((dp) => !isBackgroundPart(dp.el, top.get(dp.el.id))) : deferredParts;
+  const bgStart = bgParts.length > 0 ? drawPartList(bgParts, { index, top }) : -1;
   for (const l of pending) {
     if (!hidesEdges(style)) {
       lineIn(p, l.a, l.b, l.pen, l.tone, l.dash);
@@ -1045,7 +1077,8 @@ function drawPlan(
     const vis = splitHidden({ u: t.at.x - 0.5, v: t.at.y, near }, { u: t.at.x + 0.5, v: t.at.y, near }, index, () => near);
     if (vis.visible.length > 0) emitInline(t);
   }
-  return flushParts();
+  const fgStart = drawPartList(fgParts);
+  return bgStart >= 0 ? bgStart : fgStart;
 }
 
 /**
@@ -1423,8 +1456,8 @@ function drawSection(model: ModelState, view: ViewElement, p: Painter, display: 
     if (shown.dashed) dashed.add(el.id);
     if (!insulationHiddenInView(view)) for (const poly of insulationSectionCuts(model, el, projector)) insulationCuts.push({ poly, tone: tones.get(el.id) ?? "ink" });
   }
-  drawProjected(p, projected, tones, display, projector, slabCuts, dashed, true, (pa) => {
-    for (const cs of customSections) drawCustomSectionGraphics(pa, cs.el, cs.items, cs.tone, display);
+  drawProjected(p, projected, tones, display, projector, slabCuts, dashed, true, (pa, occluderIndex) => {
+    for (const cs of customSections) drawCustomSectionGraphics(pa, cs.el, cs.items, cs.tone, display, occluderIndex);
   });
   for (const { poly, tone } of insulationCuts) poly.forEach((q, i) => lineIn(p, q, poly[(i + 1) % poly.length] ?? q, "thin", tone, INSULATION_DASH));
 }
@@ -1434,7 +1467,7 @@ function drawSection(model: ModelState, view: ViewElement, p: Painter, display: 
  * edges with hidden-line removal, cut shapes with poche, and single-line duct
  * and pipe at coarse detail.
  */
-function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: ReadonlyMap<string, Tone>, display: Display, projector: Projector, extraCuts: ReadonlyArray<{ poly: Vec2[]; tone: Tone }> = [], dashed: ReadonlySet<string> = NONE_DASHED, schematic2d = false, afterElevation?: (p: Painter) => void): void {
+function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: ReadonlyMap<string, Tone>, display: Display, projector: Projector, extraCuts: ReadonlyArray<{ poly: Vec2[]; tone: Tone }> = [], dashed: ReadonlySet<string> = NONE_DASHED, schematic2d = false, afterElevation?: (p: Painter, occluderIndex: FaceIndex | null) => void): void {
   const style = display.style;
   const toneOf = (owner: string) => tones.get(owner) ?? "ink";
   const solidOf = new Map<string, ElementSolid>(projected.map((x) => [x.solid.owner, x.solid]));
@@ -1497,7 +1530,7 @@ function drawProjected(p: Painter, projected: readonly ProjectedSolid[], tones: 
     }
   }
 
-  if (afterElevation) afterElevation(p);
+  if (afterElevation) afterElevation(p, hidesEdges(style) ? index : null);
 
   // Cut shapes last, over everything beyond.
   // Two-pass Revit merged cut poché: stroke every building cut silhouette (walls, roofs, floor slabs) first,
@@ -1729,13 +1762,36 @@ function drawSectionGridLines(model: ModelState, view: ViewElement, p: Painter, 
   }
 }
 
-/** Paint pack-provided `KindRow.sectionGraphics` back-to-front by `depthMm` so nearer layers mask farther ones cleanly. */
-function drawCustomSectionGraphics(p: Painter, el: BimElement, items: readonly SectionGraphic[], tone: Tone, display: Display): void {
+/** Paint pack-provided `KindRow.sectionGraphics` back-to-front by `depthMm`, occluding edges and fills behind nearer solids when hidden-line removal is on. */
+function drawCustomSectionGraphics(p: Painter, el: BimElement, items: readonly SectionGraphic[], tone: Tone, display: Display, occluderIndex: FaceIndex | null = null): void {
   const ordered = items.map((item, idx) => ({ item, idx })).sort((a, b) => (b.item.depthMm ?? 0) - (a.item.depthMm ?? 0) || a.idx - b.idx);
-  const line = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => lineIn(p, a, b, pen, tone, dash);
-  const screened = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => lineIn(p, a, b, pen, "halftone", dash);
   const cutPen = display.pen("structure", "cut", "heavy", el.id);
-  drawPlanGraphics(p, el, ordered.map((x) => x.item.graphic), { line, screened }, tone, false, cutPen);
+  if (!occluderIndex) {
+    const line = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => lineIn(p, a, b, pen, tone, dash);
+    const screened = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => lineIn(p, a, b, pen, "halftone", dash);
+    drawPlanGraphics(p, el, ordered.map((x) => x.item.graphic), { line, screened }, tone, false, cutPen);
+    return;
+  }
+  const emitOccluded = (a: Vec2, b: Vec2, near: number, pen: Pen, lineTone: Tone, dash?: readonly number[]) => {
+    const split = splitHidden({ u: a.x, v: a.y, near }, { u: b.x, v: b.y, near }, occluderIndex);
+    for (const [q0, q1] of split.visible) lineIn(p, { x: q0.u, y: q0.v }, { x: q1.u, y: q1.v }, pen, lineTone, dash);
+  };
+  const pointVisible = (pt: Vec2, near: number): boolean => {
+    const probe = splitHidden({ u: pt.x - 1, v: pt.y, near }, { u: pt.x + 1, v: pt.y, near }, occluderIndex);
+    return probe.visible.length > 0;
+  };
+  for (const { item } of ordered) {
+    const g = item.graphic;
+    const near = -(item.depthMm ?? 0);
+    // If a filled mask polygon's centroid is behind a solid wall/slab, drop the fill so hidden stairs never punch white holes in exterior elevations.
+    const maskedG =
+      g.form === "polyline" && g.closed && g.fill && g.points.length >= 3 && !pointVisible(centroidOf(g.points), near)
+        ? { ...g, fill: undefined }
+        : g;
+    const line = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => emitOccluded(a, b, near, pen, tone, dash);
+    const screened = (a: Vec2, b: Vec2, pen: Pen, dash?: readonly number[]) => emitOccluded(a, b, near, pen, "halftone", dash);
+    drawPlanGraphics(p, el, [maskedG], { line, screened }, tone, false, cutPen);
+  }
 }
 
 /** Where segment c→d crosses a→b, as a fraction along a→b, or null. */
@@ -2192,8 +2248,12 @@ export function buildSheetSceneFor(model: ModelState, sheetId: string, opts: She
       prims.push({ kind: "text", at: { x: tl.textX, y: tl.titleY + 5.5 }, text: scaleText, size: 2.2, anchor: "start" });
     }
     const arrow = viewportNorthArrow(model, viewport, view);
-    // Beside the title, low enough that the N clears the frame whichever way it points.
-    if (arrow) drawNorthArrow(prims, { x: tl.ruleEndX + NORTH_ARROW_RADIUS_MM + 8, y: tl.titleY + 7 }, arrow.deg);
+    // Beside the title (plus any user drag offset), low enough that the N clears the frame whichever way it points.
+    if (arrow) {
+      const ax = tl.ruleEndX + NORTH_ARROW_RADIUS_MM + 8 + (viewport.northArrowOffsetMm?.x ?? 0);
+      const ay = tl.titleY + 7 + (viewport.northArrowOffsetMm?.y ?? 0);
+      drawNorthArrow(prims, { x: ax, y: ay }, arrow.deg);
+    }
   }
 
   const images: SheetImage[] = [];

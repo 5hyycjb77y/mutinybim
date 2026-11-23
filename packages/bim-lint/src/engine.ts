@@ -1,4 +1,4 @@
-import { documentIndex, elementsOfKind, elementValues, evaluateDiagram, type BimElement, type ModelState } from "@permitzip/bim-kernel";
+import { documentIndex, elementValues, evaluateDiagram, recordsOfKinds, type BimElement, type ModelState } from "@permitzip/bim-kernel";
 import { aabbOverlap, growAabb, p3, unionAabb, type Aabb } from "./geometry/convex";
 import { IndexState, pointInPolygon, type BodyRecord, type Surface } from "./index-state";
 import { findingId, rulesFor, type RuleContext, type RuleDef } from "./rules/registry";
@@ -236,7 +236,7 @@ export class LintEngine {
       const ran = new Set(ids);
       for (const r of readers) {
         if (!unknownKind && !(r.reads ?? []).some((k) => changedKinds.has(k))) continue;
-        const targets = r.kinds ? elementsOfKind(model.elements, ...r.kinds) : elementValues(model.elements);
+        const targets = r.kinds ? recordsOfKinds(model.elements, r.kinds) : elementValues(model.elements);
         for (const el of targets) {
           if (ran.has(el.id) || !rulesHere(el.id, el.kind).includes(r)) continue;
           r.run(ctx, el);

@@ -13,6 +13,7 @@ export * from "./kit-routes";
 export * from "./kit-building";
 export * from "./kit-documents";
 export * from "./kit-checks";
+export * from "./kit-electrical";
 export * from "./lint";
 export * from "./reference";
 export * from "./starters";

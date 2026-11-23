@@ -82,10 +82,25 @@ npm install
 npm run demo
 ```
 
-Open <http://127.0.0.1:3095>. The editor runs against an in-memory model on
-the dev server. The first start builds the editor (about a minute); later
-starts reuse that build. Open the same address in a second window with
-`&name=Priya` added to edit together. Nothing is saved when you stop the server.
+Open <http://127.0.0.1:3095>. The editor opens the two-story creative studio
+showcase building (architecture, smooth PBR materials, cut-out millwork, Carrier
+RTU + Greenheck exhaust fan + flex-connected Titus diffusers, 480V/208V electrical
+room + exterior wall sconces + lighting controls, stacked wet-chase restrooms +
+kitchenette + site water/sewer utilities, live schematic/riser/isometric diagrams,
+schedules, and a 12-sheet Arch D drawing set) against an in-memory model on the
+dev server. The first start
+builds the editor (about a minute); later starts reuse that build. Open the
+same address in a second window with `&name=Priya` added to edit together.
+Nothing is saved when you stop the server.
+
+Other focused showcase demos:
+
+```bash
+npm run demo:arch        # two-story architectural pavilion (walls, roofs, stair, RCP, sections)
+npm run demo:electrical  # commercial electrical power, lighting, controls, schedules & one-line
+npm run demo:enlarged    # enlarged plans, sections & elevations with live callout bubbles
+npm run demo:mechanical  # legacy mechanical-only rooftop unit & duct fixture (f-a-demo)
+```
 
 ### The full stack, with Docker
 

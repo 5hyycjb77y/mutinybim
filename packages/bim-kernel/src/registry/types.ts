@@ -153,6 +153,8 @@ export interface FieldDef {
   /** The unit values are read and written in. Required for quantities. */
   readonly unit?: UnitCode;
   readonly choices?: readonly string[];
+  /** Maximum length for text values (default 400; up to 65536 for structured payloads). */
+  readonly maxLength?: number;
   readonly writer: FieldWriter;
   readonly deps?: DependencySignature;
   /** Absent: the kind's rule. */

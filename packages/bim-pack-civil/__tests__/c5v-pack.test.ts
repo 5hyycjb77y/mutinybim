@@ -56,8 +56,9 @@ describe("civil pack contract", () => {
     expect(pipeMaterialRow("civil.rcp")).toBeNull();
     expect(activePackSet().items(LINT_RULE_POINT).some((r) => r.id.startsWith("civil."))).toBe(false);
     expect(withPackSet(set, () => serviceById("storm"))).toBe(serviceById("storm"));
-    // The always-installed Architecture (round 13) and Structural (round 14) add-ons contribute their classes beside the civil pack's own.
+    // The always-installed Electrical, Architecture (round 13) and Structural (round 14) add-ons contribute their classes beside the civil pack's own.
     expect(set.contributors(CLASS_POINT)).toEqual([
+      { packId: "electrical", packName: "Electrical", version: "1.0.0", count: 2 },
       { packId: "architecture", packName: "Architecture", version: "1.0.0", count: 9 },
       { packId: "struct", packName: "Structural", version: "0.1.0", count: 9 },
       { packId: "civil", packName: "Civil", version: "0.1.0", count: 7 },
