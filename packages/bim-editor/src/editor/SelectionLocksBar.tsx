@@ -189,10 +189,10 @@ export function SelectionLocksBar({
               onClick={cycleEmergencyMode}
               title={
                 currentPreset === 'night_blackout'
-                  ? 'Emergency Initial (0 min) — emergency fixtures at rated emergency_lumens, exit-combo heads ON. Click for 90-Min battery derate.'
+                  ? 'Emergency Initial (0 min) — emergency lights at rated emergency_lumens, exit-combo heads ON. Click for 90-Min battery derate.'
                   : currentPreset === 'night_blackout_90min'
-                    ? 'Emergency 90-Min (NFPA 101 end-of-discharge) — battery fixtures derated to 60%. Click to restore Normal power.'
-                    : 'Normal power — click to simulate Emergency Blackout (egress fixtures only at emergency_lumens)'
+                    ? 'Emergency 90-Min (NFPA 101 end-of-discharge) — battery-backed lights derated to 60%. Click to restore Normal power.'
+                    : 'Normal power — click to simulate Emergency Blackout (egress lights only at emergency_lumens)'
               }
               data-testid="emergency-lighting-toggle"
             >

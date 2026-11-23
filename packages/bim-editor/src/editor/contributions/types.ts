@@ -214,7 +214,7 @@ export interface WorkflowServices {
   readonly previewParts: (ghosts: readonly ProposalGhost[] | null) => void
   /** Display or clear a trade-agnostic 3D false-color scalar heatmap overlay over floors/workplanes. */
   readonly setScalarHeatmap?: (overlay: ScalarHeatmapOverlay | null) => void
-  /** Set active 3D scene light emitters (glowing diffusers + physical spotlights rendered in evening/night/blackout presets). */
+  /** Set active 3D scene light emitters (glowing emitter lenses + physical spotlights rendered in evening/night/blackout presets). */
   readonly setLightEmitters?: (emitters: readonly SceneLightEmitter[]) => void
   /** Switch 3D time-of-day lighting preset (`morning`, `noon`, `afternoon`, `evening`, `night`, `night_blackout`, `no_shadows`). */
   readonly setLightingPreset?: (preset: SceneLightingPreset) => void
