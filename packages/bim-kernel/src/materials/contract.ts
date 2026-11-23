@@ -68,6 +68,10 @@ export interface MaterialDef {
   readonly specificHeatJPerKgK?: number;
   /** Solar heat gain coefficient in (0, 1] for glazing materials. */
   readonly shgc?: number;
+  /** Diffuse visible Light Reflectance Value (LRV) in [0, 1] (CIE Y linear reflectance). */
+  readonly reflectance?: number;
+  /** Visible light transmittance (T_vis) in [0, 1] for glazing or translucent materials (0 = opaque). */
+  readonly visibleTransmittance?: number;
 }
 
 export const MATERIAL_POINT = defineExtensionPoint<MaterialDef>({
@@ -114,6 +118,15 @@ export function materialRowProblems(items: readonly MaterialDef[]): string[] {
     }
     if (item.surfaceHatch !== undefined && !(MATERIAL_SURFACE_HATCHES as readonly string[]).includes(item.surfaceHatch)) {
       out.push(`material ${item.id} has unknown surfaceHatch "${item.surfaceHatch}"`);
+    }
+    if (item.reflectance !== undefined && (!Number.isFinite(item.reflectance) || item.reflectance < 0 || item.reflectance > 1)) {
+      out.push(`material ${item.id} reflectance must be in [0, 1]`);
+    }
+    if (
+      item.visibleTransmittance !== undefined &&
+      (!Number.isFinite(item.visibleTransmittance) || item.visibleTransmittance < 0 || item.visibleTransmittance > 1)
+    ) {
+      out.push(`material ${item.id} visibleTransmittance must be in [0, 1]`);
     }
   }
   return out;

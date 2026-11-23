@@ -52,6 +52,18 @@ const explicitEgressPathSchema = z
   .strict();
 
 const calculationModeSchema = z.enum(["simplified", "detailed", "surfaces"]);
+const radiosityMethodSchema = z.enum(["patch_radiosity", "cavity"]);
+const daylightSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    skyModel: z.enum(["cie_overcast", "cie_clear", "cie_intermediate"]).optional(),
+    outdoorHorizontalFc: z.number().finite().min(50).max(20000).optional(),
+    sunAzimuthDeg: z.number().finite().min(0).max(360).optional(),
+    sunElevationDeg: z.number().finite().min(1).max(89).optional(),
+    directSunNormalFc: z.number().finite().min(0).max(15000).optional(),
+    includeElectric: z.boolean().optional(),
+  })
+  .strict();
 
 export const photometricsNormalInput = z
   .object({
@@ -63,7 +75,9 @@ export const photometricsNormalInput = z
     useMaterialReflectances: z.boolean().optional().describe("Derive room ceiling/wall/floor reflectances from Materials Library assignments."),
     includeFurnitureOcclusion: z.boolean().optional().describe("Include furniture, casework, kitchen counters & equipment in 3D ray occlusion."),
     includeTaskSurfaces: z.boolean().optional().describe("Evaluate fine-grid illuminance directly on kitchen counters, islands, worktables, vanities & 3D stair treads."),
-    interReflectance: z.boolean().default(true).describe("Include 1-bounce diffuse / zonal-cavity inter-reflectance (default true)."),
+    interReflectance: z.boolean().default(true).describe("Include diffuse inter-reflectance (default true)."),
+    radiosityMethod: radiosityMethodSchema.optional().describe('Inter-reflectance solver: "patch_radiosity" (default in detailed/surfaces — 4-bounce spatially-resolved patch radiosity) or "cavity" (uniform room-average cavity method).'),
+    daylight: daylightSchema.optional().describe("Optional CIE sky dome + direct solar daylight contribution through windows, glazed curtain walls, and skylights."),
     reflectances: reflectancesSchema.optional().describe("Explicit ceiling/wall/floor reflectances overriding Materials Library & defaults."),
     zones: z.array(customZoneSchema).max(100).optional().describe("Optional custom calculation zones."),
     zonesOnly: z.boolean().optional().describe("Evaluate only `zones`, skipping auto-discovered model spaces."),
@@ -150,6 +164,8 @@ export const photometricsNormalCalc = defineCalc({
       ...(input.includeFurnitureOcclusion !== undefined ? { includeFurnitureOcclusion: input.includeFurnitureOcclusion } : {}),
       ...(input.includeTaskSurfaces !== undefined ? { includeTaskSurfaces: input.includeTaskSurfaces } : {}),
       interReflectance: input.interReflectance,
+      ...(input.radiosityMethod !== undefined ? { radiosityMethod: input.radiosityMethod } : {}),
+      ...(input.daylight !== undefined ? { daylight: input.daylight } : {}),
       ...(input.reflectances !== undefined ? { reflectances: input.reflectances } : {}),
       ...(input.zones !== undefined ? { zones: input.zones } : {}),
       ...(input.zonesOnly !== undefined ? { zonesOnly: input.zonesOnly } : {}),
@@ -191,6 +207,9 @@ export const photometricsNormalCalc = defineCalc({
       { key: "overall_avg_fc", label: "Area-weighted average illuminance", value: round(detail.overallAvgFc, 2), unit: "fc", cite: [CITE_IES_HB] },
       { key: "overall_min_fc", label: "Minimum point illuminance", value: round(detail.overallMinFc, 2), unit: "fc", cite: [CITE_IES_HB] },
       { key: "overall_max_fc", label: "Maximum point illuminance", value: round(detail.overallMaxFc, 2), unit: "fc", cite: [CITE_IES_HB] },
+      ...(detail.daylight
+        ? [{ key: "overall_daylight_factor_pct", label: "Area-weighted Daylight Factor", value: round(detail.daylight.overallDaylightFactorPct, 2), unit: "%" as const, cite: [CITE_IES_HB] }]
+        : []),
       { key: "overall_lpd", label: "Overall Lighting Power Density", value: round(detail.overallLpdWPerSqFt, 3), unit: "W/ft2", cite: [CITE_ASHRAE_901] },
       { key: "total_watts", label: "Total connected luminaire power", value: round(detail.totalWatts, 1), unit: "W", cite: [CITE_ASHRAE_901] },
       { key: "total_area", label: "Total evaluated area", value: round(detail.totalAreaSqFt, 1), unit: "ft2", cite: [CITE_IES_HB] },

@@ -40,7 +40,7 @@ Panels, circuits, feeders and their loads; dedicated equipment space; electrical
 | Load sections | 1 |
 | Measure rules | 1 |
 | Network adapters | 1 |
-| Pack reads | 9 |
+| Pack reads | 10 |
 | Parameter sets | 1 |
 | Position policies | 1 |
 | Preview calculations | 1 |

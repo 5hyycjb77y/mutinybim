@@ -59,10 +59,15 @@ export function isGlazingMaterial(mat: MaterialDef | null | undefined): boolean 
 
 /**
  * Visible light transmittance `T_vis` in `[0, 1]` for a material.
- * Opaque materials return `0`; clear/low-E/frosted glazing returns `[0.25, 0.85]`.
+ * Prefers explicit `kernel.material` `visibleTransmittance`, falling back to
+ * glazing category/opacity heuristics (`0` for opaque materials).
  */
 export function materialTransmittance(mat: MaterialDef | null | undefined): number {
-  if (!mat || !isGlazingMaterial(mat)) return 0;
+  if (!mat) return 0;
+  if (typeof mat.visibleTransmittance === "number" && Number.isFinite(mat.visibleTransmittance)) {
+    return Math.max(0, Math.min(1, Number(mat.visibleTransmittance.toFixed(3))));
+  }
+  if (!isGlazingMaterial(mat)) return 0;
   const idLower = `${mat.id} ${mat.name}`.toLowerCase();
   if (/low[-_\s]?e|curtain/.test(idLower)) return 0.68;
   if (/frost|translucent|etched|spandrel/.test(idLower)) return 0.42;
@@ -75,13 +80,17 @@ export function materialTransmittance(mat: MaterialDef | null | undefined): numb
 
 /**
  * Diffuse interior surface reflectance (`0.04 .. 0.92`) derived from a material's
+ * explicit `kernel.material` `reflectance` (LRV) when authored, otherwise from its
  * library color, roughness, metalness, and glazing transmittance.
  *
  * At night/interior lighting conditions, transparent glazing has low interior
- * diffuse reflectance (~0.10) because light transmits outward rather than bouncing back.
+ * diffuse reflectance (~0.08-0.10) because light transmits outward rather than bouncing back.
  */
 export function materialReflectance(mat: MaterialDef | null | undefined, fallback: number): number {
   if (!mat) return fallback;
+  if (typeof mat.reflectance === "number" && Number.isFinite(mat.reflectance)) {
+    return Math.max(0.04, Math.min(0.92, Number(mat.reflectance.toFixed(3))));
+  }
   if (isGlazingMaterial(mat)) return 0.1;
   const base = hexColorToLrv(mat.color, fallback);
   // High-metalness bare metals reflect specularly rather than diffusely in a cavity model

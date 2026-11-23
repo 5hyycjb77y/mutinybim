@@ -868,10 +868,24 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "electrical.runPhotometrics",
-    summary: "Runs point-by-point IES LM-63 normal illuminance and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model. Supports calculationMode: \"simplified\" (empty shell plane), \"detailed\" (default — Materials Library reflectances, glazing transmittance, furniture & stair occlusion), and \"surfaces\" (also evaluates actual kitchen countertops, islands, worktables, vanities & rising 3D stair treads).",
+    summary: "Runs point-by-point IES LM-63 normal illuminance, 4-bounce spatially-resolved diffuse patch radiosity, optional CIE daylighting, and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model. Supports calculationMode: \"simplified\" (empty shell plane + cavity bounce), \"detailed\" (default — Materials Library LRV/T_vis, 4-bounce patch radiosity, glazing transmittance, furniture & stair occlusion), and \"surfaces\" (also evaluates actual kitchen countertops, islands, worktables, vanities & rising 3D stair treads).",
     signature: "runPhotometrics<T = unknown>(ctx: ScriptContext, spec?: PhotometricsRunSpec): T",
     example: layout(`${WALLS}\n    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });\n    const f1 = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led@1", at: { x: units.ft(10), y: units.ft(10) }, height: units.ft(9), mark: "F1" });\n    electrical.setLuminaireIes(ctx, f1, { profile: "troffer_2x4_led" });\n    const res = electrical.runPhotometrics(ctx, { gridSpacing: units.ft(2), workplaneHeight: units.in(30), calculationMode: "surfaces" });\n    ctx.report("Normal photometrics", res);`),
-    topics: ["photometrics", "footcandles", "illuminance", "lpd", "ashrae 90.1", "lighting calculation", "materials", "surfaces", "countertop", "stairs"],
+    topics: ["photometrics", "footcandles", "illuminance", "lpd", "ashrae 90.1", "lighting calculation", "materials", "surfaces", "countertop", "stairs", "radiosity", "daylight"],
+  },
+  {
+    name: "electrical.runDaylightAnalysis",
+    summary: "Runs a CIE Sky Dome + direct solar beam daylighting and Daylight Factor (DF%) study across active spaces/rooms with 4-bounce diffuse patch radiosity, glazing visible transmittance (T_vis), and 3D wall/ceiling/roof/furniture occlusion (skyModel: \"cie_overcast\" | \"cie_clear\" | \"cie_intermediate\").",
+    signature: "runDaylightAnalysis<T = unknown>(ctx: ScriptContext, spec?: DaylightAnalysisSpec): T",
+    example: layout(`${WALLS}\n    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });\n    const df = electrical.runDaylightAnalysis(ctx, { skyModel: "cie_overcast", outdoorHorizontalFc: 1000, gridSpacing: units.ft(2) });\n    ctx.report("Daylight factor", df);`),
+    topics: ["daylight", "daylight factor", "cie sky", "solar", "glazing", "photometrics", "leed", "windows"],
+  },
+  {
+    name: "electrical.exportRadiance",
+    summary: "Exports the live working model into standard LBNL Radiance scene text files (`materialsRad`, `geometryRad`, `luminairesRad`, `skyRad`, `sensorGridPts`, `iesFiles`, and `oconv`/`rtrace`/`rpict`/`evalglare` commands) using exact kernel.material LRV/T_vis and luminaire IES webs — zero runtime Radiance dependency.",
+    signature: "exportRadiance<T = unknown>(ctx: ScriptContext, spec?: RadianceExportSpec): T",
+    example: layout(`${WALLS}\n    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });\n    const rad = electrical.exportRadiance(ctx, { skyModel: "cie_clear", sunAzimuthDeg: 180, sunElevationDeg: 45 });\n    ctx.report("Radiance export", rad);`),
+    topics: ["radiance", "rad export", "ies2rad", "rtrace", "evalglare", "glare", "daylight", "bsdf", "photometrics"],
   },
   {
     name: "electrical.runEgressLightingCheck",
@@ -1374,5 +1388,19 @@ export const KIT_RECIPES: readonly KitRecipe[] = [
     uses: ["building.surfacesAt", "routes.along"],
     topics: ["ceiling height", "structure above", "floor elevation", "clearance", "surfaces"],
     example: route(`    const over = building.surfacesAt(ctx, { at: { x: units.ft(10), y: units.ft(10) }, level: "L1" });\n    const topMm = over.structureAbove?.aboveFloorMm ?? over.ceiling?.aboveFloorMm ?? 3000;\n    routes.along(ctx, { level: "L1", domain: "duct", size: routes.rect(units.in(16), units.in(10)), system: { id: "sa-1", kind: "supply_air" }, height: units.mm(Math.max(2400, topMm - 400)), points: [{ x: units.ft(0), y: units.ft(10) }, { x: units.ft(20), y: units.ft(10) }] });`),
+  },
+  {
+    name: "Photometrics, daylight and egress lighting",
+    task: "photometrics",
+    summary: "Assign IES LM-63 profiles and emergency drivers to luminaires, verify normal illuminance (4-bounce patch radiosity + task surfaces + ASHRAE 90.1 LPD), run CIE Daylight Factor or NFPA 101/IBC 90-minute egress compliance, turn on plan iso-contours, or export LBNL Radiance .rad/.ies files.",
+    steps: [
+      "Attach built-in or custom IES LM-63 files and emergency battery metadata with electrical.setLuminaireIes.",
+      "Run electrical.runPhotometrics (calculationMode: \"detailed\" | \"surfaces\", 4-bounce patch radiosity) for room, countertop, and 3D stair footcandles + LPD, or electrical.runDaylightAnalysis for CIE Daylight Factor (DF%).",
+      "Run electrical.runEgressLightingCheck for NFPA 101 §7.9.2.1 / IBC §1008.3.5 initial & 90-minute compliance along corridors, 3D stairs, and exit discharge.",
+      "Toggle plan footcandle grids & contours with electrical.enablePhotometricOverlay, place live schedules with documents.formSchedule (photometric_summary / egress_lighting_compliance), or export standard Radiance scene files with electrical.exportRadiance.",
+    ],
+    uses: ["electrical.setLuminaireIes", "electrical.runPhotometrics", "electrical.runDaylightAnalysis", "electrical.runEgressLightingCheck", "electrical.enablePhotometricOverlay", "electrical.exportRadiance"],
+    topics: ["photometrics", "ies", "footcandles", "egress lighting", "nfpa 101", "daylight", "daylight factor", "radiosity", "radiance", "lpd", "illuminance"],
+    example: layout(`${WALLS}\n${PLAN}\n    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });\n    const f1 = equipment.place(ctx, { level: "L1", type: "builtin:troffer-2x4-led-em@1", at: { x: units.ft(10), y: units.ft(10) }, height: units.ft(9), mark: "EM1" });\n    electrical.setLuminaireIes(ctx, f1, { profile: "troffer_2x4_led", emergencyMode: "battery_pack", emergencyLumens: 1400, egressFixture: true });\n    const normal = electrical.runPhotometrics(ctx, { calculationMode: "surfaces" });\n    const egress = electrical.runEgressLightingCheck(ctx, { gridSpacing: units.ft(2) });\n    electrical.enablePhotometricOverlay(ctx, plan, { mode: "normal", showContours: true, showGridValues: true });\n    ctx.report("Lighting summary", { normal, egress });`),
   },
 ];

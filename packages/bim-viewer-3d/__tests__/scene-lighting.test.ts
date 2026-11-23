@@ -134,16 +134,33 @@ describe("3D scene lighting presets & frustum-culled SpotLight pool", () => {
 
   const lightStats = (g: THREE.Group) => {
     let spots = 0;
+    let bounces = 0;
     let points = 0;
     let sumIntensity = 0;
+    let sumBounceIntensity = 0;
+    const bounceHeights: number[] = [];
+    const bounceAimUp: boolean[] = [];
+    const spotDistances: number[] = [];
+    const ceilingAnglesDeg: number[] = [];
     g.traverse((o) => {
       if (o instanceof THREE.SpotLight) {
-        spots++;
-        sumIntensity += o.intensity;
+        if (o.name === "interior-bounce") {
+          bounces++;
+          sumBounceIntensity += o.intensity;
+          bounceHeights.push(o.position.y);
+          bounceAimUp.push(o.target.position.y > o.position.y);
+        } else {
+          spots++;
+          sumIntensity += o.intensity;
+          spotDistances.push(o.distance);
+          if (o.target.position.y < o.position.y - 2) {
+            ceilingAnglesDeg.push((o.angle * 180) / Math.PI);
+          }
+        }
       }
       if (o instanceof THREE.PointLight) points++;
     });
-    return { spots, points, sumIntensity };
+    return { spots, bounces, points, sumIntensity, sumBounceIntensity, bounceHeights, bounceAimUp, spotDistances, ceilingAnglesDeg };
   };
 
   it("switches emitters cleanly across no_shadows, daytime, evening, night, blackout initial, and blackout 90-min", () => {
@@ -153,21 +170,34 @@ describe("3D scene lighting presets & frustum-culled SpotLight pool", () => {
     const noon = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.noon));
     const evening = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.evening));
     const night = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.night));
+    const nightDraft = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.night, { renderQuality: "draft" }));
     const emInit = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.night_blackout));
     const em90 = lightStats(buildSceneLightEmitterGroup(sampleEmitters, SCENE_LIGHTING_PRESETS.night_blackout_90min));
 
-    // Daytime: interior fixtures ON, photocell exterior sconce & emergency-only heads OFF
+    // Daytime & Draft: interior fixtures ON, photocell exterior sconce & emergency-only heads OFF, zero bounce lights & zero PointLights
     expect(noon.spots).toBe(2);
-    // Evening & Night: interior + exterior photocell sconce ON (3), zero PointLight roof leaks
+    expect(noon.bounces).toBe(0);
+    expect(noon.points).toBe(0);
+    expect(nightDraft.bounces).toBe(0);
+    // Evening & Night: interior + exterior photocell sconce ON (3), plus upward floor-to-ceiling interior bounce
     expect(evening.spots).toBe(3);
     expect(night.spots).toBe(3);
     expect(night.points).toBe(0);
+    expect(night.bounces).toBeGreaterThan(0);
+    expect(night.bounces).toBeLessThanOrEqual(2); // only interior ceiling emitters (never exterior wall sconce)
+    for (const y of night.bounceHeights) expect(y).toBeLessThan(0.6); // floor-bounce origin just above finished floor
+    for (const up of night.bounceAimUp) expect(up).toBe(true); // aims strictly upward onto walls, equipment, and ceiling
+    // Ceiling spotlights reach cleanly past floor height and widen IES 50% FWHM -> soft Lambertian field cone
+    for (const d of night.spotDistances) expect(d).toBeGreaterThanOrEqual(3.8);
+    expect(night.ceilingAnglesDeg.some((deg) => deg >= 75)).toBe(true);
     // Emergency Initial: normal-only OFF, dual-mode dimmed + emergency-only combo heads snap ON
     expect(emInit.spots).toBe(2);
     expect(emInit.sumIntensity).toBeLessThan(night.sumIntensity);
+    expect(emInit.sumBounceIntensity).toBeLessThan(night.sumBounceIntensity);
     // Emergency 90-Min: further 60% battery end-of-discharge derate
     expect(em90.spots).toBe(2);
     expect(em90.sumIntensity).toBeLessThan(emInit.sumIntensity);
+    expect(em90.sumBounceIntensity).toBeLessThan(emInit.sumBounceIntensity);
   });
 
   it("reassigns its fixed SpotLight pool in-place to include every closely-spaced fixture inside the camera frustum", () => {
@@ -252,11 +282,16 @@ describe("3D scene lighting presets & frustum-culled SpotLight pool", () => {
     ctrl.updateCameraFocus(cam, target);
 
     const spots: THREE.SpotLight[] = [];
+    const bounces: THREE.SpotLight[] = [];
     root.traverse((o) => {
-      if (o instanceof THREE.SpotLight) spots.push(o);
+      if (o instanceof THREE.SpotLight) {
+        if (o.name === "interior-bounce") bounces.push(o);
+        else spots.push(o);
+      }
     });
-    // Bounded pool keeps GPU fragment cost small while BOTH zoomed-in twins stay illuminated
+    // Bounded pools keep GPU fragment cost small while BOTH zoomed-in twins stay illuminated + bounced
     expect(spots.length).toBe(12);
+    expect(bounces.length).toBe(6);
     expect(spots.some((s) => Math.hypot(s.position.x - 6.0, s.position.z - -4.0) < 0.25)).toBe(true);
     expect(spots.some((s) => Math.hypot(s.position.x - 6.0, s.position.z - -5.2) < 0.25)).toBe(true);
   });

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Pencil, PencilRuler, RotateCw, Trash2 } from 'lucide-react'
-import { partGroupName, type Command, type FacetRegistry, type ParamDef, type ParamValue, type PartInstance, type PartTypeDefinition } from '@permitzip/bim-kernel'
+import { partGroupName, type Command, type FacetRegistry, type ModelState, type ParamDef, type ParamValue, type PartInstance, type PartTypeDefinition } from '@permitzip/bim-kernel'
 import type { DisplayProfile } from '@permitzip/bim-units'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
@@ -33,10 +33,12 @@ export interface PartInspectorProps {
   formatValue: (def: ParamDef | undefined, value: ParamValue) => string
   /** How many parts share the type (counted when Edit type opens). */
   partsOfType: () => number
-  onInstance: (values: Record<string, ParamValue | null>, mark: string | undefined, dzMm: number) => string | null
+  onInstance: (values: Record<string, ParamValue | null>, mark: string | undefined, dzMm: number, packValues?: Record<string, ParamValue | null>) => string | null
   onType: (values: Record<string, ParamValue | null>) => string | null
   onRotate: (deg: number) => string | null
   onDelete: () => void
+  /** Model elements map so pack parameter sets (`PARAMETER_SET_POINT`) matching this part's class appear in the Inspector. */
+  elements?: ModelState['elements']
   /** Bumped by the ribbon's Edit type: opens the type editor as the button here does. */
   editTypeRequest?: number
   /** Open the part editor on this part's definition (modeled parts only). */
@@ -169,7 +171,17 @@ export function PartInspector(props: PartInspectorProps) {
   const { part, type, levelName, canEdit, saving, saveMessage, formatValue } = props
   const library = useMemo(() => props.library ?? builtinEquipmentParameters(), [props.library])
   const linked = props.linkedSupply?.param
-  const sections = useMemo(() => (type ? inspectorSections(type, library, { ...(props.profile ? { profile: props.profile } : {}), ...(props.facets ? { facets: props.facets } : {}) }) : []), [type, library, props.profile, props.facets])
+  const sections = useMemo(
+    () =>
+      type
+        ? inspectorSections(type, library, {
+            ...(props.profile ? { profile: props.profile } : {}),
+            ...(props.facets ? { facets: props.facets } : {}),
+            ...(props.elements ? { part, elements: props.elements } : {}),
+          })
+        : [],
+    [type, library, props.profile, props.facets, props.elements, part],
+  )
   const instanceSections = sections.map((s) => ({ ...s, parameters: s.parameters.filter((p) => p.scope === 'instance') })).filter((s) => s.parameters.length > 0)
   const typeSections = sections.map((s) => ({ ...s, parameters: s.parameters.filter((p) => p.scope === 'type') })).filter((s) => s.parameters.length > 0)
   const [texts, setTexts] = useState<Record<string, string>>(() => initialTexts(part, type, sections))
@@ -226,16 +238,26 @@ export function PartInspector(props: PartInspectorProps) {
     }
     // The field shows the height rounded: untouched, it is no move (a rounding difference would move the part and take the undo).
     const dz = texts[HEIGHT] === baseline[HEIGHT] ? 0 : Math.round((heightFt * MM_PER_FT - part.offsetMm) * 1000) / 1000
-    setError(props.onInstance(plan.values, mark, dz))
+    const err = props.onInstance(plan.values, mark, dz, plan.packValues)
+    if (err) {
+      setError(err)
+      return
+    }
+    // Fallback for hosts whose `onInstance` callback only handles 3 args: submit pack values directly via `set_element_values`.
+    if (props.onInstance.length < 4 && Object.keys(plan.packValues).length > 0 && props.onCommand) {
+      setError(props.onCommand({ type: 'set_element_values', elementIds: [part.id], values: plan.packValues }))
+      return
+    }
+    setError(null)
   }
 
-  /** Built-in baseline fields the type doesn't hold yet wait behind "More …"; the firm's and the project's always show. */
+  /** Built-in baseline fields the type doesn't hold yet wait behind "More …"; pack, firm and project fields always show. */
   const isSpare = (p: InspectorParameter): boolean => !p.def && p.source === 'builtin'
   const input = (p: InspectorParameter) => {
     if (linked && p.name === linked && props.linkedSupply) {
       return <LinkedSupplyField key={p.name} label={p.label} supply={props.linkedSupply} canEdit={canEdit} onClear={() => setError(props.onInstance({ [p.name]: null }, undefined, 0))} />
     }
-    const offType = !p.def
+    const offType = !p.def && p.source !== 'pack'
     const why = p.locked ?? (offType ? (props.onCommand ? 'Added to this part’s type when you save a value.' : NOT_ON_TYPE) : undefined)
     return <ParameterInput key={p.name} p={p} id={`bm-part-${p.name}`} text={texts[p.name] ?? ''} onText={(t) => setTexts({ ...texts, [p.name]: t })} disabled={!canEdit || p.locked !== undefined || (offType && !props.onCommand)} {...(why ? { why } : {})} />
   }

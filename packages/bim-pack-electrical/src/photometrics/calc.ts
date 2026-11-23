@@ -20,6 +20,8 @@ import {
   type TaskSurfaceKind,
 } from "./materials";
 import { occlusionIndexOf, type OcclusionIndex, type RayQueryOptions } from "./occlusion";
+import { buildSkyDome, evaluateDaylightAtPoint, type DaylightOptions, type DaylightSkyModel, type ResolvedSkyDome } from "./daylight";
+import { solveRoomPatchRadiosity, type RadiosityLuminaireSource, type RoomRadiosityField } from "./radiosity";
 import { extractStairs3D, type ResolvedStair3D } from "./stairs";
 import {
   DEFAULT_BATTERY_90MIN_DERATE,
@@ -51,6 +53,7 @@ const SQMM_PER_SQFT = MM_PER_FT * MM_PER_FT;
 const MAX_LUMINAIRE_RADIUS_MM = 60 * MM_PER_FT;
 
 export type PhotometricsCalculationMode = "simplified" | "detailed" | "surfaces";
+export type RadiosityMethod = "patch_radiosity" | "cavity";
 
 export interface PhotometricGridPoint {
   /** Point centre in kernel plan mm. */
@@ -65,6 +68,10 @@ export interface PhotometricGridPoint {
   readonly fc: number;
   /** Direct-only footcandles before diffuse inter-reflectance. */
   readonly directFc: number;
+  /** Indirect multi-bounce diffuse inter-reflection footcandles at this point. */
+  readonly indirectFc?: number;
+  /** Direct sky + solar daylight footcandles at this point (when daylight mode is enabled). */
+  readonly daylightFc?: number;
   /** End-of-90-minute footcandles (populated in egress mode). */
   readonly fc90Min?: number;
   /** True when this point breaches the minimum illuminance threshold. */
@@ -123,8 +130,12 @@ export interface NormalPhotometricsOptions {
   readonly includeFurnitureOcclusion?: boolean;
   /** Override whether horizontal task surfaces (kitchen counters, islands, desks, vanities) and 3D stair treads are evaluated (default `true` in surfaces mode). */
   readonly includeTaskSurfaces?: boolean;
-  /** Enable 1-bounce diffuse / zonal-cavity inter-reflectance (default true). */
+  /** Enable diffuse inter-reflectance (default true). */
   readonly interReflectance?: boolean;
+  /** Inter-reflectance solver: `"patch_radiosity"` (4-bounce spatially-resolved patch radiosity, default in detailed/surfaces) or `"cavity"` (fast uniform room-average cavity method, default in simplified). */
+  readonly radiosityMethod?: RadiosityMethod;
+  /** Optional CIE sky dome + direct solar daylight contribution through windows, glazed curtain walls, and skylights. */
+  readonly daylight?: DaylightOptions;
   /** Override ceiling/wall/floor reflectances (overrides Materials Library & defaults when supplied). */
   readonly reflectances?: Partial<RoomReflectances>;
   /** Optional custom calculation zones evaluated in addition to (or instead of) model spaces. */
@@ -224,6 +235,10 @@ export interface SpacePhotometricSummary {
   readonly avgMinRatio: number;
   readonly maxMinRatio: number;
   readonly reflectedFc: number;
+  /** Mean direct daylight illuminance across this space (fc), present when daylight is enabled. */
+  readonly daylightAvgFc?: number;
+  /** Mean Daylight Factor (`avgFc / outdoorHorizontalFc * 100%`) when daylight is enabled. */
+  readonly daylightFactorPct?: number;
   readonly reflectancesUsed?: DerivedRoomReflectances;
   readonly lpdWPerSqFt: number;
   readonly target: NormalLightingTarget;
@@ -245,6 +260,16 @@ export interface PhotometricsNormalResult {
   readonly gridSpacingFt: number;
   readonly workplaneHeightIn: number;
   readonly interReflectance: boolean;
+  /** Active inter-reflectance method (`"patch_radiosity"` = 4-bounce spatially-resolved patch radiosity; `"cavity"` = uniform zonal-cavity). */
+  readonly radiosityMethod: RadiosityMethod;
+  /** Summary of daylighting inputs & overall Daylight Factor when `daylight.enabled` is true. */
+  readonly daylight?: {
+    readonly enabled: true;
+    readonly skyModel: DaylightSkyModel;
+    readonly outdoorHorizontalFc: number;
+    readonly includeElectric: boolean;
+    readonly overallDaylightFactorPct: number;
+  };
   readonly reflectances: RoomReflectances;
   readonly totalFixtures: number;
   readonly totalWatts: number;
@@ -482,7 +507,7 @@ export function collectPlacedLuminaires(model: ModelState, battery90MinDerate = 
   return collectLuminaires(model, battery90MinDerate);
 }
 
-function collectLuminaires(model: ModelState, battery90MinDerate: number): PlacedLuminaire[] {
+export function collectLuminaires(model: ModelState, battery90MinDerate: number): PlacedLuminaire[] {
   const levels = resolveLevels(model).byId;
   const catalog = indexPhotometricCatalog(model);
   const emParts = findEmergencyCircuitParts(model);
@@ -551,7 +576,7 @@ function levelOfRoom(room: Room, levels: { readonly byId: ReadonlyMap<string, Le
 }
 
 /** Discover active Spaces (and fallback Rooms not already wrapped by a Space). */
-function collectModelSpaces(
+export function collectModelSpaces(
   model: ModelState,
   levelFilter?: string,
   spaceIdFilter?: readonly string[],
@@ -783,6 +808,54 @@ function directIlluminanceFromLuminaire(
   // E = (I * LLF * T_vis * cos(theta)) / d_ft^2  (algebraically identical to I * LLF * T_vis * cos^3(theta) / h_ft^2)
   const distSqFt = distSqMm / SQMM_PER_SQFT;
   return (candela * lum.photo.llf * transmittance * cosTheta) / distSqFt;
+}
+
+/**
+ * Direct IES illuminance (fc) on an arbitrarily oriented diffuse surface patch
+ * `(px, py, pz)` with unit normal `(nx, ny, nz)` — supports horizontal floors (`+Z`),
+ * vertical walls, and ceiling patches lit by upward pendant flux (`-Z`).
+ */
+function directIlluminanceOnOrientedSurface(
+  lum: PlacedLuminaire,
+  px: number,
+  py: number,
+  pz: number,
+  nx: number,
+  ny: number,
+  nz: number,
+  scaleMultiplier: number,
+  occlusion: OcclusionIndex,
+  rayOpts?: RayQueryOptions,
+): number {
+  const dxMm = px - lum.xMm;
+  const dyMm = py - lum.yMm;
+  const dzMm = pz - lum.zMm;
+  const distSqMm = dxMm * dxMm + dyMm * dyMm + dzMm * dzMm;
+  if (distSqMm < 625 || distSqMm > MAX_LUMINAIRE_RADIUS_MM * MAX_LUMINAIRE_RADIUS_MM) return 0;
+
+  const distMm = Math.sqrt(distSqMm);
+  // Vector from patch toward luminaire is (-dx, -dy, -dz) / dist
+  const cosInc = -(dxMm * nx + dyMm * ny + dzMm * nz) / distMm;
+  if (cosInc <= 1e-4) return 0;
+
+  let lx = dxMm * lum.cosRot + dyMm * lum.sinRot;
+  const ly = -dxMm * lum.sinRot + dyMm * lum.cosRot;
+  let lz = dzMm;
+  if (lum.sinTilt !== 0) {
+    const tx = lx * lum.cosTilt - lz * lum.sinTilt;
+    const tz = lx * lum.sinTilt + lz * lum.cosTilt;
+    lx = tx;
+    lz = tz;
+  }
+
+  const candela = sampleCandelaDirection(lum.photo.web, lx, ly, lz) * lum.photo.lumenScale * lum.tiltFactor * scaleMultiplier;
+  if (candela <= 1e-6) return 0;
+
+  const transmittance = occlusion.rayTransmittance(px, py, pz, lum.xMm, lum.yMm, lum.zMm, rayOpts);
+  if (transmittance <= 0.01) return 0;
+
+  const distSqFt = distSqMm / SQMM_PER_SQFT;
+  return (candela * lum.photo.llf * transmittance * cosInc) / distSqFt;
 }
 
 /**
@@ -1068,6 +1141,11 @@ export function evaluateNormalPhotometrics(
     options.includeFurnitureOcclusion ?? calculationMode !== "simplified";
   const includeTaskSurfaces =
     options.includeTaskSurfaces ?? calculationMode === "surfaces";
+  const radiosityMethod: RadiosityMethod =
+    options.radiosityMethod ?? (calculationMode === "simplified" ? "cavity" : "patch_radiosity");
+  const daylightEnabled = options.daylight?.enabled === true;
+  const includeElectric = daylightEnabled ? (options.daylight?.includeElectric ?? true) : true;
+  const skyDome: ResolvedSkyDome | null = daylightEnabled ? buildSkyDome(options.daylight) : null;
 
   const canCache = !options.zones || options.zones.length === 0;
   const cacheKey = canCache
@@ -1081,6 +1159,8 @@ export function evaluateNormalPhotometrics(
         fo: includeFurnitureOcclusion,
         ts: includeTaskSurfaces,
         ir: options.interReflectance ?? true,
+        rm: radiosityMethod,
+        dl: daylightEnabled ? options.daylight : null,
         r: options.reflectances ?? null,
       })
     : "";
@@ -1137,16 +1217,25 @@ export function evaluateNormalPhotometrics(
   }
 
   // Normal-mode illumination excludes pure exit signage and emergency-only flood units (which stay OFF during normal operation)
-  const allLuminaires = collectLuminaires(model, DEFAULT_BATTERY_90MIN_DERATE).filter(
-    (lum) => !lum.photo.isEmergencyOnly && !lum.photo.isExitSignOnly,
-  );
+  const allLuminaires = includeElectric
+    ? collectLuminaires(model, DEFAULT_BATTERY_90MIN_DERATE).filter(
+        (lum) => !lum.photo.isEmergencyOnly && !lum.photo.isExitSignOnly,
+      )
+    : [];
   const occlusion = occlusionIndexOf(model);
   const spacingMm = gridSpacingFt * MM_PER_FT;
 
   const spaces: SpacePhotometricSummary[] = [];
+  const spaceRadiosityLookup: {
+    readonly levelId: string;
+    readonly reflectedFc: number;
+    readonly radiosityField: RoomRadiosityField | null;
+    readonly outline: readonly Vec2[];
+  }[] = [];
   const allGridPoints: PhotometricGridPoint[] = [];
 
   let sumWeightedAvg = 0;
+  let sumWeightedDaylightDf = 0;
   let totalAreaSqFt = 0;
   let totalWatts = 0;
   let totalFixtures = 0;
@@ -1160,7 +1249,7 @@ export function evaluateNormalPhotometrics(
     const workplaneIn = poly.workplaneHeightIn ?? (options.workplaneHeightIn !== undefined ? defaultWorkplaneIn : target.defaultWorkplaneIn);
     const evalZMm = poly.levelElevationMm + workplaneIn * MM_PER_IN;
     const grid = buildPolygonGrid(poly.outline, spacingMm);
-    const candidates = candidateLuminairesForPolygon(allLuminaires, poly, evalZMm);
+    const candidates = includeElectric ? candidateLuminairesForPolygon(allLuminaires, poly, evalZMm) : [];
 
     // Fixtures physically inside this space on this level (for LPD & inter-reflectance)
     const insideFixtures = candidates.filter(
@@ -1169,23 +1258,31 @@ export function evaluateNormalPhotometrics(
     let spaceWatts = 0;
     for (const lum of insideFixtures) spaceWatts += lum.photo.watts;
 
-    // 1. Direct illuminance at every walkable/unoccupied grid point
+    // 1. Direct illuminance (electric + optional CIE sky/solar daylight) at every walkable/unoccupied grid point
     const activePts = grid.points.filter((pt) => !occlusion.isPointInsideSolid(pt.xMm, pt.yMm, evalZMm, rayOpts));
     const evalPts = activePts.length > 0 ? activePts : grid.points;
-    const directValues = new Float64Array(evalPts.length);
+    const directElectricValues = new Float64Array(evalPts.length);
+    const directDaylightValues = skyDome ? new Float64Array(evalPts.length) : null;
     let directSum = 0;
+    let daylightSum = 0;
     for (let i = 0; i < evalPts.length; i++) {
       const pt = evalPts[i]!;
-      let fc = 0;
+      let elecFc = 0;
       for (let li = 0; li < candidates.length; li++) {
-        fc += directIlluminanceFromLuminaire(candidates[li]!, pt.xMm, pt.yMm, evalZMm, 1, occlusion, rayOpts);
+        elecFc += directIlluminanceFromLuminaire(candidates[li]!, pt.xMm, pt.yMm, evalZMm, 1, occlusion, rayOpts);
       }
-      directValues[i] = fc;
-      directSum += fc;
+      directElectricValues[i] = elecFc;
+      let dlFc = 0;
+      if (skyDome && directDaylightValues) {
+        dlFc = evaluateDaylightAtPoint(skyDome, pt.xMm, pt.yMm, evalZMm, 0, 0, 1, occlusion, rayOpts);
+        directDaylightValues[i] = dlFc;
+        daylightSum += dlFc;
+      }
+      directSum += elecFc + dlFc;
     }
     const directAvg = evalPts.length > 0 ? directSum / evalPts.length : 0;
 
-    // 2. Optional 1-bounce diffuse / zonal-cavity inter-reflectance (material-aware when enabled)
+    // 2. Multi-bounce diffuse patch radiosity (or fast zonal-cavity fallback)
     let reflectancesUsed: DerivedRoomReflectances;
     if (poly.reflectances || options.reflectances) {
       reflectancesUsed = {
@@ -1207,12 +1304,55 @@ export function evaluateNormalPhotometrics(
       reflectancesUsed = { ...baseReflectances, source: "default" };
     }
     const cavityHeightFt = Math.max(1, (poly.ceilingHeightMm - workplaneIn * MM_PER_IN) / MM_PER_FT);
-    const reflectedFc = interReflectance
-      ? computeInterReflectanceFc(insideFixtures, poly.areaSqFt, poly.perimeterFt, cavityHeightFt, directAvg, reflectancesUsed, () => 1)
-      : 0;
+    let radiosityField: RoomRadiosityField | null = null;
+    let uniformReflectedFc = 0;
+
+    const isOutdoorArea = /\b(balcony|terrace|patio|exterior|outdoor|porch|plaza|courtyard|rooftop)\b/i.test(
+      `${poly.name} ${poly.occupancyHint ?? ""}`,
+    );
+
+    if (interReflectance) {
+      if (radiosityMethod === "patch_radiosity" && !isOutdoorArea && (candidates.length > 0 || skyDome !== null)) {
+        const radSources: RadiosityLuminaireSource[] = candidates.map((lum) => ({
+          xMm: lum.xMm,
+          yMm: lum.yMm,
+          zMm: lum.zMm,
+          directIlluminanceOnSurface: (px, py, pz, nx, ny, nz) =>
+            directIlluminanceOnOrientedSurface(lum, px, py, pz, nx, ny, nz, 1, occlusion, rayOpts),
+        }));
+        radiosityField = solveRoomPatchRadiosity({
+          outline: poly.outline,
+          workplaneZMm: evalZMm,
+          ceilingZMm: poly.levelElevationMm + poly.ceilingHeightMm,
+          reflectances: reflectancesUsed,
+          sources: radSources,
+          ...(skyDome
+            ? {
+                extraDirectOnPatch: (patch) =>
+                  evaluateDaylightAtPoint(skyDome, patch.xMm, patch.yMm, patch.zMm, patch.nx, patch.ny, patch.nz, occlusion, rayOpts),
+              }
+            : {}),
+          occlusion,
+          rayOpts,
+          bounces: 4,
+        });
+        uniformReflectedFc = radiosityField.meanIndirectFc;
+      } else {
+        uniformReflectedFc = computeInterReflectanceFc(
+          insideFixtures,
+          poly.areaSqFt,
+          poly.perimeterFt,
+          cavityHeightFt,
+          directAvg,
+          reflectancesUsed,
+          () => 1,
+        );
+      }
+    }
 
     // 3. Final stats and threshold checks
     let sumFc = 0;
+    let sumIndirectFc = 0;
     let minFc = Infinity;
     let maxFc = 0;
     let failingPoints = 0;
@@ -1220,9 +1360,15 @@ export function evaluateNormalPhotometrics(
 
     for (let i = 0; i < evalPts.length; i++) {
       const pt = evalPts[i]!;
-      const directFc = directValues[i]!;
-      const fc = directFc + reflectedFc;
+      const elecFc = directElectricValues[i]!;
+      const dlFc = directDaylightValues ? directDaylightValues[i]! : 0;
+      const directFc = elecFc + dlFc;
+      const pointIndirectFc = radiosityField
+        ? radiosityField.gatherIndirectFc(pt.xMm, pt.yMm, evalZMm, 0, 0, 1, occlusion, rayOpts)
+        : uniformReflectedFc;
+      const fc = directFc + pointIndirectFc;
       sumFc += fc;
+      sumIndirectFc += pointIndirectFc;
       if (fc < minFc) minFc = fc;
       if (fc > maxFc) maxFc = fc;
       const pointFail = fc < target.targetMinFc;
@@ -1235,6 +1381,8 @@ export function evaluateNormalPhotometrics(
         row: pt.row,
         fc: round2(fc),
         directFc: round2(directFc),
+        ...(interReflectance ? { indirectFc: round2(pointIndirectFc) } : {}),
+        ...(skyDome ? { daylightFc: round2(dlFc) } : {}),
         fail: pointFail,
         surfaceKind: "workplane",
       };
@@ -1244,6 +1392,10 @@ export function evaluateNormalPhotometrics(
 
     const n = evalPts.length;
     const avgFc = n > 0 ? sumFc / n : 0;
+    const reflectedFc = n > 0 ? sumIndirectFc / n : uniformReflectedFc;
+    const daylightAvgFc = skyDome && n > 0 ? daylightSum / n : undefined;
+    const daylightFactorPct =
+      skyDome && skyDome.outdoorHorizontalFc > 0 ? round2((avgFc / skyDome.outdoorHorizontalFc) * 100) : undefined;
     if (n === 0) minFc = 0;
     const avgMinRatio = minFc > 1e-4 ? avgFc / minFc : maxFc > 0 ? 999 : 0;
     const maxMinRatio = minFc > 1e-4 ? maxFc / minFc : maxFc > 0 ? 999 : 0;
@@ -1264,12 +1416,20 @@ export function evaluateNormalPhotometrics(
     if (pass) passingSpaces++;
     else failingSpaces++;
 
+    sumWeightedAvg += avgFc * poly.areaSqFt;
+    if (daylightFactorPct !== undefined) sumWeightedDaylightDf += daylightFactorPct * poly.areaSqFt;
     totalAreaSqFt += poly.areaSqFt;
     totalWatts += spaceWatts;
     totalFixtures += insideFixtures.length;
-    sumWeightedAvg += avgFc * poly.areaSqFt;
     if (minFc < overallMinFc) overallMinFc = minFc;
     if (maxFc > overallMaxFc) overallMaxFc = maxFc;
+
+    spaceRadiosityLookup.push({
+      levelId: poly.levelId,
+      reflectedFc,
+      radiosityField,
+      outline: poly.outline,
+    });
 
     spaces.push({
       spaceId: poly.id,
@@ -1295,6 +1455,8 @@ export function evaluateNormalPhotometrics(
       avgMinRatio: round2(avgMinRatio),
       maxMinRatio: round2(maxMinRatio),
       reflectedFc: round2(reflectedFc),
+      ...(daylightAvgFc !== undefined ? { daylightAvgFc: round2(daylightAvgFc) } : {}),
+      ...(daylightFactorPct !== undefined ? { daylightFactorPct } : {}),
       reflectancesUsed,
       lpdWPerSqFt: round3(lpdWPerSqFt),
       target,
@@ -1315,36 +1477,20 @@ export function evaluateNormalPhotometrics(
   const stairSummaries: StairPhotometricSummary[] = [];
 
   if (includeTaskSurfaces && !options.zonesOnly) {
-    // Index room reflected bounce per level so task surfaces inherit their room's inter-reflectance boost
-    const spaceReflectedLookup = spaces.map((s) => ({
-      levelId: s.levelId,
-      reflectedFc: s.reflectedFc,
-      outline: polygons.find((p) => p.id === s.spaceId)?.outline ?? [],
-    }));
-
     const { taskSurfaces } = extractPartPhotometrics(model);
     for (const surf of taskSurfaces) {
       const lvl = levels.byId.get(surf.levelId);
       if (options.level && !matchesLevelFilter(lvl, options.level)) continue;
       const samplePts = buildTaskSurfaceGrid(surf);
       const box = boundingBoxOf(surf.outline);
-      const candidates = candidateLuminairesForVolume(
-        allLuminaires,
-        box.minX,
-        box.maxX,
-        box.minY,
-        box.maxY,
-        surf.zMm,
-        surf.zMm + 100,
-      );
-      // Inherit ambient bounce of enclosing room (when inter-reflectance enabled)
+      const candidates = includeElectric
+        ? candidateLuminairesForVolume(allLuminaires, box.minX, box.maxX, box.minY, box.maxY, surf.zMm, surf.zMm + 100)
+        : [];
       const cx = (box.minX + box.maxX) * 0.5;
       const cy = (box.minY + box.maxY) * 0.5;
-      let surfReflectedFc = 0;
-      if (interReflectance) {
-        const hostSpace = spaceReflectedLookup.find((sp) => sp.levelId === surf.levelId && pointInPolygon(cx, cy, sp.outline));
-        if (hostSpace) surfReflectedFc = hostSpace.reflectedFc;
-      }
+      const hostSpace = interReflectance
+        ? spaceRadiosityLookup.find((sp) => sp.levelId === surf.levelId && pointInPolygon(cx, cy, sp.outline))
+        : undefined;
 
       const surfRayOpts: RayQueryOptions = {
         includeFurniture: includeFurnitureOcclusion,
@@ -1361,7 +1507,13 @@ export function evaluateNormalPhotometrics(
         for (let li = 0; li < candidates.length; li++) {
           directFc += directIlluminanceFromLuminaire(candidates[li]!, pt.xMm, pt.yMm, pt.zMm, 1, occlusion, surfRayOpts);
         }
-        const fc = directFc + surfReflectedFc;
+        const dlFc = skyDome ? evaluateDaylightAtPoint(skyDome, pt.xMm, pt.yMm, pt.zMm, 0, 0, 1, occlusion, surfRayOpts) : 0;
+        const surfReflectedFc = hostSpace
+          ? hostSpace.radiosityField
+            ? hostSpace.radiosityField.gatherIndirectFc(pt.xMm, pt.yMm, pt.zMm, 0, 0, 1, occlusion, surfRayOpts)
+            : hostSpace.reflectedFc
+          : 0;
+        const fc = directFc + dlFc + surfReflectedFc;
         sumFc += fc;
         if (fc < minFc) minFc = fc;
         if (fc > maxFc) maxFc = fc;
@@ -1372,7 +1524,9 @@ export function evaluateNormalPhotometrics(
           col: pt.col,
           row: pt.row,
           fc: round2(fc),
-          directFc: round2(directFc),
+          directFc: round2(directFc + dlFc),
+          ...(interReflectance ? { indirectFc: round2(surfReflectedFc) } : {}),
+          ...(skyDome ? { daylightFc: round2(dlFc) } : {}),
           fail: fc < surf.targetMinFc,
           rotationDeg: pt.rotationDeg,
           cellSizeMm: pt.cellSizeMm,
@@ -1501,6 +1655,18 @@ export function evaluateNormalPhotometrics(
     gridSpacingFt,
     workplaneHeightIn: defaultWorkplaneIn,
     interReflectance,
+    radiosityMethod,
+    ...(skyDome
+      ? {
+          daylight: {
+            enabled: true as const,
+            skyModel: skyDome.skyModel,
+            outdoorHorizontalFc: skyDome.outdoorHorizontalFc,
+            includeElectric,
+            overallDaylightFactorPct: totalAreaSqFt > 0 ? round2(sumWeightedDaylightDf / totalAreaSqFt) : 0,
+          },
+        }
+      : {}),
     reflectances: baseReflectances,
     totalFixtures,
     totalWatts: round2(totalWatts),

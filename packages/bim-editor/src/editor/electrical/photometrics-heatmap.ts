@@ -387,7 +387,8 @@ export function buildSceneLightEmitters(model: ModelState): readonly SceneLightE
         colorHex: 0xfff3d4,
         beamAngleDeg,
         penumbra,
-        rangeMm: Math.max(2600, Math.min(4200, Math.max(2000, lum.zMm - lum.levelElevationMm) + 120)),
+        rangeMm: Math.max(4000, Math.min(5800, Math.max(2000, lum.zMm - lum.levelElevationMm) * 1.55)),
+        floorElevationMm: lum.levelElevationMm,
         apertureMm: [Math.min(260, signW * 0.7), 64],
         apertureShape: 'rect',
         diffuserPlane: 'horizontal',
@@ -435,13 +436,14 @@ export function buildSceneLightEmitters(model: ModelState): readonly SceneLightE
           ? 0xffe4b8
           : 0xfff0d9
 
-    // Bound ceiling luminaire SpotLight reach tightly to floor-to-fixture height + 0.12 m (inside the 8" slab thickness)
-    // so light illuminates the finished floor naturally and decays to zero BEFORE the underside of the slab or ground below.
+    // Size ceiling SpotLight reach to ~1.65x mounting height so Three.js's `(1 - (d/D)^4)^2`
+    // attenuation window keeps >=70% output at the finished floor (downward spotlights never light
+    // the downward-facing slab underside because dot(N_underside, L) <= 0).
     const mountingHeightMm = Math.max(2000, lum.zMm - lum.levelElevationMm)
     const rangeMm =
       lum.mountKind === 'wall'
         ? Math.max(3600, Math.min(5800, mountingHeightMm * 1.8))
-        : Math.max(2400, Math.min(4200, mountingHeightMm + 120))
+        : Math.max(4200, Math.min(6400, mountingHeightMm * 1.65))
 
     const emScale = lum.photo.isEmergency ? lum.photo.emergencyScale : 0
     out.push({
@@ -454,6 +456,7 @@ export function buildSceneLightEmitters(model: ModelState): readonly SceneLightE
       beamAngleDeg,
       penumbra,
       rangeMm,
+      floorElevationMm: lum.levelElevationMm,
       apertureMm,
       apertureShape: isRound ? 'round' : 'rect',
       diffuserPlane: 'horizontal',

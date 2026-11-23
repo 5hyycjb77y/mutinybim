@@ -40,8 +40,12 @@ it rests on (`NEC 2023 Table 310.16, copper 90°C column`, `NEC 2020 250.122(B)`
 Calcs: `nec.size_circuit` (branch circuit or feeder: device, conductor, voltage
 drop upsizing, EGC grown in proportion, conduit), `nec.demand_load` (Article 220
 calculated load at a panel or service), `nec.conductor_ampacity`,
-`nec.voltage_drop`, `nec.egc`, `nec.conduit_fill`, `mech.duct_friction`,
-`mech.duct_system_pressure`, `plumbing.water_friction`, `plumbing.pipe_system`.
+`nec.voltage_drop`, `nec.egc`, `nec.conduit_fill`,
+`electrical.photometrics_normal` (IES LM-63 room/surface/stair illuminance,
+4-bounce patch radiosity, optional CIE daylighting, ASHRAE 90.1 LPD),
+`electrical.photometrics_egress` (NFPA 101 / IBC initial & 90-min egress),
+`mech.duct_friction`, `mech.duct_system_pressure`, `plumbing.water_friction`,
+`plumbing.pipe_system`.
 The duct and pipe system calcs give the same numbers as `bim_pressure_report`
 and `bim_pipe_report` (below).
 

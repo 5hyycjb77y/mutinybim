@@ -12,6 +12,7 @@ import { planRebalance } from "./connections/rebalance";
 import { CONNECTED_LOAD_ONLY } from "./connections/rules";
 import { distributionOf } from "./connections/systems";
 import { planCircuitTemplate } from "./connections/templates";
+import { exportRadianceScene } from "./photometrics/radiance-export";
 import { ELECTRICAL_TOOL_ARGS, type ElectricalPackRead } from "./agent-tools";
 
 /**
@@ -164,6 +165,31 @@ function feederRead(model: ModelState, input: unknown) {
   return feederProposal(model, resolved.edition, panelId, { ...(length_ft ? { lengthFt: length_ft } : {}), ...(material ? { material } : {}), ...(conduit ? { conduit } : {}) });
 }
 
+const RADIANCE_EXPORT_INPUT = z
+  .object({
+    skyModel: z.enum(["cie_overcast", "cie_clear", "cie_intermediate"]).optional(),
+    sunAzimuthDeg: z.number().finite().min(0).max(360).optional(),
+    sunElevationDeg: z.number().finite().min(1).max(89).optional(),
+    includeLuminaires: z.boolean().optional(),
+    gridSpacingFt: z.number().finite().min(0.5).max(20).optional(),
+    workplaneHeightIn: z.number().finite().min(0).max(120).optional(),
+  })
+  .strict();
+
+function radianceExportRead(model: ModelState, input: unknown) {
+  const parsed = RADIANCE_EXPORT_INPUT.safeParse(input ?? {});
+  if (!parsed.success) return issuesIn(parsed.error);
+  const d = parsed.data;
+  return exportRadianceScene(model, {
+    ...(d.skyModel !== undefined ? { skyModel: d.skyModel } : {}),
+    ...(d.sunAzimuthDeg !== undefined ? { sunAzimuthDeg: d.sunAzimuthDeg } : {}),
+    ...(d.sunElevationDeg !== undefined ? { sunElevationDeg: d.sunElevationDeg } : {}),
+    ...(d.includeLuminaires !== undefined ? { includeLuminaires: d.includeLuminaires } : {}),
+    ...(d.gridSpacingFt !== undefined ? { gridSpacingFt: d.gridSpacingFt } : {}),
+    ...(d.workplaneHeightIn !== undefined ? { workplaneHeightIn: d.workplaneHeightIn } : {}),
+  });
+}
+
 export const ELECTRICAL_SCRIPT_READS: readonly ElectricalPackRead[] = [
   { id: "electrical.loads", label: "A panel's connected and demand loads, per phase", run: loadsRead },
   { id: "electrical.check", label: "The electrical design check", run: checkRead },
@@ -171,4 +197,5 @@ export const ELECTRICAL_SCRIPT_READS: readonly ElectricalPackRead[] = [
   { id: "electrical.rebalance_plan", label: "Phase moves that balance a panel", run: rebalanceRead },
   { id: "electrical.circuit_template_plan", label: "A room template's circuits for the units given", run: templateRead },
   { id: "electrical.feeder_proposal", label: "The feeder a panel's demand load needs", run: feederRead },
+  { id: "electrical.export_radiance", label: "Export LBNL Radiance .rad, .ies, and .pts scene files from the model", run: radianceExportRead },
 ];

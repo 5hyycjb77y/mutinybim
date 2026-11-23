@@ -197,12 +197,17 @@ describe('ModelDrawingLayer electrical wire and home-run interactions inside roo
     fireEvent.click(screen.getByTestId('edit-controls-apply'))
 
     expect(closed).toBe(true)
-    expect(submitted).toHaveLength(1)
+    expect(submitted).toHaveLength(2)
     expect(submitted[0]?.command).toEqual({
       type: 'set_parameters',
       id: 'lt-d1',
       scope: 'instance',
       values: { switch_leg: 'z', control_type: 'dali', emergency: true, emergency_mode: 'switched' },
+    })
+    expect(submitted[1]?.command).toEqual({
+      type: 'set_element_values',
+      elementIds: ['lt-d1'],
+      values: { 'electrical.emergency_mode': 'battery_pack', 'electrical.egress_fixture': true },
     })
   })
 

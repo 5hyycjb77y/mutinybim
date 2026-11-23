@@ -18,6 +18,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 0.16,
     densityKgPerM3: 800,
     specificHeatJPerKgK: 1090,
+    reflectance: 0.8,
   },
   {
     id: "architecture.cmu_concrete",
@@ -32,6 +33,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 0.85,
     densityKgPerM3: 1850,
     specificHeatJPerKgK: 880,
+    reflectance: 0.34,
   },
   {
     id: "architecture.brick_red",
@@ -47,6 +49,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 0.72,
     densityKgPerM3: 1920,
     specificHeatJPerKgK: 840,
+    reflectance: 0.16,
   },
   {
     id: "architecture.concrete_slab",
@@ -61,6 +64,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 1.7,
     densityKgPerM3: 2400,
     specificHeatJPerKgK: 880,
+    reflectance: 0.48,
   },
   {
     id: "architecture.wood_oak",
@@ -72,6 +76,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     pattern: "wood",
     planCutFill: "#c8b9a6",
     planCutHatch: "solid",
+    reflectance: 0.32,
   },
   {
     id: "architecture.wood_door",
@@ -83,6 +88,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     pattern: "wood",
     planCutFill: "#c4b4a2",
     planCutHatch: "solid",
+    reflectance: 0.19,
   },
   {
     id: "architecture.aluminum_frame",
@@ -94,6 +100,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     pattern: "metal",
     planCutFill: "#757c82",
     planCutHatch: "solid",
+    reflectance: 0.14,
   },
   {
     id: "architecture.clear_glazing",
@@ -106,6 +113,9 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     pattern: "glass",
     planCutFill: "#d9edf7",
     planCutHatch: "none",
+    shgc: 0.7,
+    reflectance: 0.08,
+    visibleTransmittance: 0.82,
   },
   {
     id: "architecture.act_ceiling",
@@ -118,6 +128,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     planCutFill: "#e4e3df",
     planCutHatch: "none",
     surfaceHatch: "grid_600x1200",
+    reflectance: 0.85,
   },
   {
     id: "architecture.ceramic_tile",
@@ -130,6 +141,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     planCutFill: "#cfccc4",
     planCutHatch: "solid",
     surfaceHatch: "grid_600",
+    reflectance: 0.62,
   },
   {
     id: "architecture.galvanized_steel",
@@ -197,6 +209,9 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     pattern: "glass",
     planCutFill: "#cde4f2",
     planCutHatch: "none",
+    shgc: 0.38,
+    reflectance: 0.1,
+    visibleTransmittance: 0.68,
   },
   {
     id: "architecture.bronze_mullion",
@@ -246,6 +261,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     planCutHatch: "none",
     thermalConductivityWPerMK: 1.6,
     densityKgPerM3: 2300,
+    reflectance: 0.68,
   },
   {
     id: "architecture.asphalt_shingle",
@@ -287,6 +303,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 0.72,
     densityKgPerM3: 1850,
     specificHeatJPerKgK: 840,
+    reflectance: 0.84,
   },
   {
     id: "architecture.board_concrete",
@@ -301,6 +318,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 1.7,
     densityKgPerM3: 2400,
     specificHeatJPerKgK: 880,
+    reflectance: 0.52,
   },
   {
     id: "architecture.charcoal_metal",
@@ -315,6 +333,7 @@ export const ARCHITECTURE_MATERIALS: readonly MaterialDef[] = [
     thermalConductivityWPerMK: 50,
     densityKgPerM3: 7850,
     specificHeatJPerKgK: 490,
+    reflectance: 0.06,
   },
   {
     id: "architecture.equipment_enamel",

@@ -339,6 +339,12 @@ export interface View3dSpec extends Camera3dSpec {
 export type LuminaireEmergencyMode = "none" | "battery_pack" | "generator_circuit" | "inverter";
 export type PhotometricOverlayMode = "off" | "normal" | "egress";
 export type PhotometricsCalculationMode = "simplified" | "detailed" | "surfaces";
+export type RadiosityMethod = "patch_radiosity" | "cavity";
+export type DaylightSkyModel = "cie_overcast" | "cie_clear" | "cie_intermediate";
+export interface DaylightSpec {
+  enabled?: boolean; skyModel?: DaylightSkyModel; outdoorHorizontalFc?: number;
+  sunAzimuthDeg?: number; sunElevationDeg?: number; directSunNormalFc?: number; includeElectric?: boolean;
+}
 export interface LuminaireIesSpec {
   profile?: string; iesText?: string; saveAsProfile?: string;
   emergencyMode?: LuminaireEmergencyMode; emergencyLumens?: number; emergencyBallastFactor?: number;
@@ -348,7 +354,16 @@ export interface PhotometricsRunSpec {
   level?: string; spaceIds?: readonly string[]; gridSpacing?: Measure | number; workplaneHeight?: Measure | number;
   calculationMode?: PhotometricsCalculationMode; useMaterialReflectances?: boolean;
   includeFurnitureOcclusion?: boolean; includeTaskSurfaces?: boolean;
-  interReflectance?: boolean; reflectances?: { ceiling?: number; wall?: number; floor?: number };
+  interReflectance?: boolean; radiosityMethod?: RadiosityMethod; daylight?: DaylightSpec;
+  reflectances?: { ceiling?: number; wall?: number; floor?: number };
+}
+export interface DaylightAnalysisSpec extends Omit<PhotometricsRunSpec, "daylight"> {
+  skyModel?: DaylightSkyModel; outdoorHorizontalFc?: number; sunAzimuthDeg?: number;
+  sunElevationDeg?: number; directSunNormalFc?: number; includeElectric?: boolean;
+}
+export interface RadianceExportSpec {
+  skyModel?: DaylightSkyModel; sunAzimuthDeg?: number; sunElevationDeg?: number;
+  includeLuminaires?: boolean; gridSpacing?: Measure | number; workplaneHeight?: Measure | number;
 }
 export interface EgressLightingCheckSpec {
   level?: string; gridSpacing?: Measure | number; workplaneHeight?: Measure | number;

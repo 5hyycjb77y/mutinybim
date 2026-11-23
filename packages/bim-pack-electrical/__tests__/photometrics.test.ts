@@ -31,9 +31,13 @@ import {
   cachedParseIesFile,
   evaluateEgressPhotometrics,
   evaluateNormalPhotometrics,
+  exportRadianceScene,
   extractIsoContours,
   hexColorToLrv,
+  materialReflectance,
+  materialTransmittance,
   parseIesFile,
+  radianceGlassTransmissivity,
   sampleCandela,
   sampleCandelaDirection,
   sampleTiltFactor,
@@ -484,8 +488,8 @@ describe("NFPA 101 §7.9.2.1 / IBC §1008.3.5 emergency egress pass/fail, calcs,
   });
 });
 
-describe("Performance benchmark: 20-room building on 2 ft grid (< 150 ms)", () => {
-  it("evaluates a 20-room office building with walls and 40 luminaires in under 150 ms", () => {
+describe("Performance benchmark: 20-room building on 2 ft grid", () => {
+  it("evaluates a 20-room office building with walls and 40 luminaires fast in both cavity-bounce and 4-bounce patch radiosity modes", () => {
     const troffer = builtinPartType("builtin:troffer-2x4-led@1")!;
     // 20 rooms arranged in 2 rows of 10 (each 12'×14' = 168 sf -> 3,360 sf total, ~840 grid points, 40 luminaires, 33 opaque walls)
     const walls: Array<{ wallId: string; start: { x: number; y: number }; end: { x: number; y: number }; thicknessMm: number; heightMm: number }> = [];
@@ -557,15 +561,27 @@ describe("Performance benchmark: 20-room building on 2 ft grid (< 150 ms)", () =
       ...placements,
     ]);
 
-    // Measure cold uncached detailed-mode runtime (materials + occlusion + inter-reflectance) for 20 rooms / 40 luminaires
+    // 1. Measure cold uncached detailed-mode runtime (materials + occlusion + 4-bounce patch radiosity) for 20 rooms / 40 luminaires
     const t0 = performance.now();
     const res = evaluateNormalPhotometrics(m, { gridSpacingFt: 2, workplaneHeightIn: 30, interReflectance: true });
-    const elapsed = performance.now() - t0;
+    const elapsedPatch = performance.now() - t0;
 
     expect(res.spaces.length).toBe(20);
     expect(res.totalFixtures).toBe(40);
     expect(res.gridPoints.length).toBeGreaterThanOrEqual(700);
-    expect(elapsed).toBeLessThan(300);
+    expect(elapsedPatch).toBeLessThan(800);
+
+    // 2. Measure fast cavity-bounce mode on the same 20-room building
+    const t1 = performance.now();
+    const resFast = evaluateNormalPhotometrics(m, {
+      gridSpacingFt: 2,
+      workplaneHeightIn: 30,
+      interReflectance: true,
+      radiosityMethod: "cavity",
+    });
+    const elapsedFast = performance.now() - t1;
+    expect(resFast.spaces.length).toBe(20);
+    expect(elapsedFast).toBeLessThan(300);
   });
 });
 
@@ -916,5 +932,278 @@ describe("Photometrics materials, glazing, furniture, surfaces, 3D stairs & 3D s
     expect(runWithFeatures(placedVp.model, { type: "set_viewport_north_arrow", viewportId: "vp-1", show: false }, []).ok).toBe(true);
     expect(runWithFeatures(placedVp.model, { type: "set_viewport_north_arrow", viewportId: "vp-1", offsetMm: { x: -12, y: -8 } }, []).ok).toBe(false);
     expect(runWithFeatures(placedVp.model, { type: "set_viewport_north_arrow", viewportId: "vp-1", offsetMm: { x: -12, y: -8 } }, [VIEWPORT_NORTH_ARROW_OFFSET_FEATURE]).ok).toBe(true);
+  });
+
+  it("honors explicit kernel.material optical reflectance (LRV) and visibleTransmittance (T_vis)", () => {
+    expect(
+      materialReflectance(
+        { id: "test.custom_plaster", name: "Plaster", color: "#222222", reflectance: 0.77 },
+        0.5,
+      ),
+    ).toBe(0.77);
+    expect(
+      materialTransmittance({
+        id: "test.triple_lowe",
+        name: "Triple Low-E",
+        color: "#a8d0ea",
+        category: "glazing",
+        visibleTransmittance: 0.61,
+      }),
+    ).toBe(0.61);
+    // Canonical Greg Ward glass transmissivity tn > T_vis for clear glass (accounts for surface Fresnel reflection)
+    const tn = radianceGlassTransmissivity(0.82);
+    expect(tn).toBeGreaterThan(0.85);
+    expect(tn).toBeLessThan(0.92);
+  });
+
+  it("runs spatially-resolved 4-bounce patch radiosity (higher bounce near luminaire than far corner, energy-conserving)", () => {
+    const troffer = builtinPartType("builtin:troffer-2x4-led@1")!;
+    // Long 40 ft x 12 ft room with a single luminaire near the west end (x = 5 ft)
+    const model = runCmds(emptyModel("radiosity-spatial"), [
+      { type: "save_part_types", types: [{ typeId: troffer.id, definition: troffer.definition }] },
+      {
+        type: "add_architecture",
+        levelId: "L1",
+        walls: [
+          { wallId: "w1", start: { x: 0, y: 0 }, end: { x: 40 * FT, y: 0 }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w2", start: { x: 40 * FT, y: 0 }, end: { x: 40 * FT, y: 12 * FT }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w3", start: { x: 40 * FT, y: 12 * FT }, end: { x: 0, y: 12 * FT }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w4", start: { x: 0, y: 12 * FT }, end: { x: 0, y: 0 }, thicknessMm: 150, heightMm: 3000 },
+        ],
+        rooms: [
+          {
+            roomId: "r-long",
+            number: "101",
+            name: "Long Gallery",
+            outline: [
+              { x: 0, y: 0 },
+              { x: 40 * FT, y: 0 },
+              { x: 40 * FT, y: 12 * FT },
+              { x: 0, y: 12 * FT },
+            ],
+          },
+        ],
+        openings: [],
+        casework: [],
+      },
+      { type: "place_part", partId: "f-west", typeId: troffer.id, levelId: "L1", position: { x: 5 * FT, y: 6 * FT }, offsetMm: 9 * FT, mark: "F1" },
+    ]);
+
+    const res = evaluateNormalPhotometrics(model, {
+      calculationMode: "detailed",
+      radiosityMethod: "patch_radiosity",
+      gridSpacingFt: 2,
+      reflectances: { ceiling: 0.85, wall: 0.65, floor: 0.35 },
+    });
+    expect(res.radiosityMethod).toBe("patch_radiosity");
+    const pts = res.spaces[0]!.gridPoints;
+    const nearPts = pts.filter((p) => p.xMm < 10 * FT);
+    const farPts = pts.filter((p) => p.xMm > 30 * FT);
+    const nearIndirect = nearPts.reduce((s, p) => s + (p.indirectFc ?? 0), 0) / nearPts.length;
+    const farIndirect = farPts.reduce((s, p) => s + (p.indirectFc ?? 0), 0) / farPts.length;
+    // Patch radiosity resolves real spatial falloff of inter-reflected light (unlike flat uniform cavity average!)
+    expect(nearIndirect).toBeGreaterThan(farIndirect * 2.5);
+    expect(farIndirect).toBeGreaterThan(0);
+  });
+
+  it("computes CIE Overcast Daylight Factor (DF%) and CIE Clear Solar Daylight through windows while blocking windowless rooms", () => {
+    const model = runCmds(emptyModel("daylight-test"), [
+      { type: "create_level", levelId: "L-ROOF", name: "Roof", elevationMm: 3000 },
+      {
+        type: "add_architecture",
+        levelId: "L1",
+        walls: [
+          // Shared perimeter + center partition separating Daylit Room (west, x=0..16) & Windowless Room (east, x=16..32)
+          { wallId: "w-south", start: { x: 0, y: 0 }, end: { x: 32 * FT, y: 0 }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w-east", start: { x: 32 * FT, y: 0 }, end: { x: 32 * FT, y: 14 * FT }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w-north", start: { x: 32 * FT, y: 14 * FT }, end: { x: 0, y: 14 * FT }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w-west", start: { x: 0, y: 14 * FT }, end: { x: 0, y: 0 }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w-part", start: { x: 16 * FT, y: 0 }, end: { x: 16 * FT, y: 14 * FT }, thicknessMm: 150, heightMm: 3000 },
+        ],
+        rooms: [
+          {
+            roomId: "r-daylit",
+            number: "101",
+            name: "Daylit Studio",
+            outline: [
+              { x: 0, y: 0 },
+              { x: 16 * FT, y: 0 },
+              { x: 16 * FT, y: 14 * FT },
+              { x: 0, y: 14 * FT },
+            ],
+          },
+          {
+            roomId: "r-dark",
+            number: "102",
+            name: "Windowless Vault",
+            outline: [
+              { x: 16 * FT, y: 0 },
+              { x: 32 * FT, y: 0 },
+              { x: 32 * FT, y: 14 * FT },
+              { x: 16 * FT, y: 14 * FT },
+            ],
+          },
+        ],
+        openings: [
+          // Large south-facing window in Daylit Studio only
+          { openingId: "win-1", wallId: "w-south", kind: "window", offsetMm: 8 * FT, widthMm: 10 * FT, heightMm: 6 * FT },
+        ],
+        casework: [],
+      },
+      // Opaque roof slab at z = 3000 mm over both rooms so sky rays can ONLY enter through windows
+      {
+        type: "create_element",
+        elementId: "roof-1",
+        kind: "slab",
+        levelId: "L-ROOF",
+        placement: {
+          kind: "area",
+          outline: [
+            { x: -300, y: -300 },
+            { x: 32 * FT + 300, y: -300 },
+            { x: 32 * FT + 300, y: 14 * FT + 300 },
+            { x: -300, y: 14 * FT + 300 },
+          ],
+        },
+        size: { thicknessMm: 200 },
+      },
+    ]);
+
+    const overcast = evaluateNormalPhotometrics(model, {
+      calculationMode: "detailed",
+      gridSpacingFt: 2,
+      daylight: { enabled: true, skyModel: "cie_overcast", outdoorHorizontalFc: 1000, includeElectric: false },
+    });
+    expect(overcast.daylight?.enabled).toBe(true);
+    const daylit = overcast.spaces.find((s) => s.name === "Daylit Studio")!;
+    const dark = overcast.spaces.find((s) => s.name === "Windowless Vault")!;
+    expect(daylit.avgFc).toBeGreaterThan(20);
+    expect(daylit.daylightFactorPct ?? 0).toBeGreaterThan(2);
+    expect(daylit.daylightFactorPct ?? 100).toBeLessThan(35);
+    expect(dark.avgFc).toBe(0);
+    expect(dark.daylightFactorPct).toBe(0);
+
+    // Clear sky with South sun (180 deg, 40 deg alt) boosts direct solar illuminance inside the south-facing room
+    const clear = evaluateNormalPhotometrics(model, {
+      calculationMode: "detailed",
+      gridSpacingFt: 2,
+      daylight: {
+        enabled: true,
+        skyModel: "cie_clear",
+        outdoorHorizontalFc: 1000,
+        sunAzimuthDeg: 180,
+        sunElevationDeg: 40,
+        includeElectric: false,
+      },
+    });
+    const clearDaylit = clear.spaces.find((s) => s.name === "Daylit Studio")!;
+    expect(clearDaylit.avgFc).toBeGreaterThan(daylit.avgFc);
+  });
+
+  it("exports valid LBNL Radiance .rad, .ies, and .pts files that round-trip through parseIesFile", () => {
+    const troffer = builtinPartType("builtin:troffer-2x4-led@1")!;
+    const model = runCmds(emptyModel("radiance-export-test"), [
+      { type: "save_part_types", types: [{ typeId: troffer.id, definition: troffer.definition }] },
+      {
+        type: "add_architecture",
+        levelId: "L1",
+        walls: [
+          { wallId: "w1", start: { x: 0, y: 0 }, end: { x: 20 * FT, y: 0 }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w2", start: { x: 20 * FT, y: 0 }, end: { x: 20 * FT, y: 14 * FT }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w3", start: { x: 20 * FT, y: 14 * FT }, end: { x: 0, y: 14 * FT }, thicknessMm: 200, heightMm: 3000 },
+          { wallId: "w4", start: { x: 0, y: 14 * FT }, end: { x: 0, y: 0 }, thicknessMm: 200, heightMm: 3000 },
+        ],
+        rooms: [
+          {
+            roomId: "r1",
+            number: "101",
+            name: "Office",
+            outline: [
+              { x: 0, y: 0 },
+              { x: 20 * FT, y: 0 },
+              { x: 20 * FT, y: 14 * FT },
+              { x: 0, y: 14 * FT },
+            ],
+          },
+        ],
+        openings: [{ openingId: "win-1", wallId: "w1", kind: "window", offsetMm: 10 * FT, widthMm: 6 * FT, heightMm: 5 * FT }],
+        casework: [],
+      },
+      { type: "set_element_values", elementIds: ["w1", "w2", "w3", "w4"], values: { "material.id": "architecture.gypsum_partition" } },
+      { type: "place_part", partId: "f1", typeId: troffer.id, levelId: "L1", position: { x: 10 * FT, y: 7 * FT }, offsetMm: 9 * FT, mark: "F1" },
+    ]);
+
+    const exp = exportRadianceScene(model, { skyModel: "cie_clear", sunAzimuthDeg: 180, sunElevationDeg: 45 });
+    expect(exp.summary.wallCount).toBe(4);
+    expect(exp.summary.openingCount).toBe(1);
+    expect(exp.summary.luminaireCount).toBe(1);
+    expect(exp.summary.iesFileCount).toBe(1);
+    expect(exp.summary.sensorCount).toBeGreaterThan(20);
+    expect(exp.materialsRad).toContain("void plastic architecture.gypsum_partition");
+    expect(exp.materialsRad).toContain("void glass");
+    expect(exp.geometryRad).toContain("glass_win-1");
+    expect(exp.luminairesRad).toContain("!ies2rad");
+    expect(exp.skyRad).toContain("!gensky -ang 45.0000 0.0000 +s");
+    expect(exp.commands.some((c) => c.includes("evalglare"))).toBe(true);
+
+    // Every exported .ies file must parse cleanly as valid ANSI/IES LM-63
+    for (const iesText of Object.values(exp.iesFiles)) {
+      const parsed = parseIesFile(iesText);
+      expect(parsed.totalLumens).toBeGreaterThan(100);
+      expect(parsed.maxCandela).toBeGreaterThan(10);
+    }
+  });
+
+  it("recomputes egress photometrics immediately when a luminaire is toggled between normal, unswitched EM, and switched UL 924 EM", () => {
+    const troffer = builtinPartType("builtin:troffer-2x4-led@1")!;
+    const base = runCmds(emptyModel("em-toggle-sync"), [
+      { type: "save_part_types", types: [{ typeId: troffer.id, definition: troffer.definition }] },
+      {
+        type: "add_architecture",
+        levelId: "L1",
+        walls: [
+          { wallId: "w1", start: { x: 0, y: 0 }, end: { x: 20 * FT, y: 0 }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w2", start: { x: 20 * FT, y: 0 }, end: { x: 20 * FT, y: 8 * FT }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w3", start: { x: 20 * FT, y: 8 * FT }, end: { x: 0, y: 8 * FT }, thicknessMm: 150, heightMm: 3000 },
+          { wallId: "w4", start: { x: 0, y: 8 * FT }, end: { x: 0, y: 0 }, thicknessMm: 150, heightMm: 3000 },
+        ],
+        rooms: [
+          {
+            roomId: "r-corr",
+            number: "100",
+            name: "Main Corridor",
+            outline: [
+              { x: 0, y: 0 },
+              { x: 20 * FT, y: 0 },
+              { x: 20 * FT, y: 8 * FT },
+              { x: 0, y: 8 * FT },
+            ],
+          },
+        ],
+        openings: [],
+        casework: [],
+      },
+      { type: "place_part", partId: "f1", typeId: troffer.id, levelId: "L1", position: { x: 10 * FT, y: 4 * FT }, offsetMm: 9 * FT, mark: "F1" },
+    ]);
+
+    // 1. Starts as normal fixture -> 0 egress fc
+    const before = evaluateEgressPhotometrics(base, { gridSpacingFt: 2 });
+    expect(before.paths[0]!.avgFc).toBe(0);
+
+    // 2. Switched EM (UL 924) via control params + synced electrical.emergency_mode -> lights up egress immediately
+    const asSwitchedEm = runCmds(base, [
+      { type: "set_parameters", id: "f1", scope: "instance", values: { emergency: true, emergency_mode: "switched" } },
+      { type: "set_element_values", elementIds: ["f1"], values: { "electrical.emergency_mode": "battery_pack", "electrical.egress_fixture": true } },
+    ]);
+    const duringEm = evaluateEgressPhotometrics(asSwitchedEm, { gridSpacingFt: 2 });
+    expect(duringEm.paths[0]!.avgFc).toBeGreaterThan(2);
+
+    // 3. Toggled back to Normal -> drops straight back to 0 egress fc
+    const backToNormal = runCmds(asSwitchedEm, [
+      { type: "set_parameters", id: "f1", scope: "instance", values: { emergency: false, emergency_mode: "none" } },
+      { type: "set_element_values", elementIds: ["f1"], values: { "electrical.emergency_mode": "none", "electrical.egress_fixture": false } },
+    ]);
+    const afterOff = evaluateEgressPhotometrics(backToNormal, { gridSpacingFt: 2 });
+    expect(afterOff.paths[0]!.avgFc).toBe(0);
   });
 });

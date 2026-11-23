@@ -1211,7 +1211,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-15", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(31.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-8", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-18", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(20.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-9", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     { type: "place_part", partId: "lt-19", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(26.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-10", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
-    { type: "place_part", partId: "lt-20", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(31.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-11", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-20", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(34.5 * FT, 23.5 * FT), offsetMm: Math.round(10.8 * FT), mark: "F1-11", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     // Suspended linear task pendants over 8'-6" Oak Kitchenette Counter (FDA/IES 50 fc food-prep) & Quartz Break Island (30+ fc)
     { type: "place_part", partId: "lt-kit-1", typeId: linearPendant.id, levelId: "L1", position: pt(19.4 * FT, 13.0 * FT), offsetMm: Math.round(7.5 * FT), rotationDeg: 90, mark: "F3-5", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F3" } },
     { type: "place_part", partId: "lt-kit-2", typeId: linearPendant.id, levelId: "L1", position: pt(19.4 * FT, 17.0 * FT), offsetMm: Math.round(7.5 * FT), rotationDeg: 90, mark: "F3-6", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F3" } },
@@ -1253,8 +1253,8 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-212", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(30.0 * FT, 14.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-16", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-213", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(22.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-17", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-214", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(30.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-18", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F2" } },
-    // Dedicated L2 stairwell emergency downlight above U-stair mid-landing & upper flight (NFPA 101 3D tread compliance!)
-    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(34.5 * FT, 23.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
+    // Dedicated L2 stairwell emergency downlight centered inside the stairwell shaft above the U-stair mid-landing & upper flight (NFPA 101 3D tread compliance!)
+    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(32.5 * FT, 23.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
 
     // Emergency Exit / Combo Units above Studio corridor door D104 & L2 Stair Head
     { type: "place_part", partId: "exit-1", typeId: exit.id, levelId: "L1", position: pt(34.5 * FT, 10.5 * FT), offsetMm: Math.round(8.5 * FT), mark: "EX-1", values: { emergency: true, emergency_mode: "unswitched", type_mark: "EX" } },
@@ -1269,12 +1269,12 @@ function buildShowcase(modelId: string): ModelState {
     // Attach explicit IES LM-63 photometric profiles, LLF (0.90 × 0.92 = 0.828), and NFPA 101 emergency battery pack ratings
     {
       type: "set_element_values",
-      elementIds: ["lt-1", "lt-2", "lt-13", "lt-15", "lt-17", "lt-20", "lt-11", "lt-11b", "lt-12b", "lt-12", "lt-205", "lt-206", "lt-207", "lt-208"],
+      elementIds: ["lt-1", "lt-2", "lt-13", "lt-15", "lt-17", "lt-11", "lt-11b", "lt-12b", "lt-12", "lt-205", "lt-206", "lt-207", "lt-208"],
       values: { "electrical.photometric_profile": "downlight_6_led", "electrical.emergency_mode": "none", "electrical.lld": 0.9, "electrical.ldd": 0.92 },
     },
     {
       type: "set_element_values",
-      elementIds: ["lt-3", "lt-14", "lt-16", "lt-18", "lt-19", "lt-215"],
+      elementIds: ["lt-3", "lt-14", "lt-16", "lt-18", "lt-19", "lt-20", "lt-215"],
       values: { "electrical.photometric_profile": "downlight_6_led", "electrical.emergency_mode": "battery_pack", "electrical.emergency_lumens": 1400, "electrical.egress_fixture": true, "electrical.lld": 0.9, "electrical.ldd": 0.92 },
     },
     {

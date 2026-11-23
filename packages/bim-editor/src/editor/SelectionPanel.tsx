@@ -10,6 +10,7 @@ import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '../ui/
 import { Separator } from '../ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { linkedSupplyOf } from './electrical/linked-supply'
+import { syncLuminaireEmergencyEdits } from './electrical/emergency-sync'
 import type { EquipmentParameter } from './equipment-list/parameters'
 import { LinkedElementProperties } from './LinkedElementProperties'
 import type { ModelSession, Selection } from './model-session'
@@ -141,9 +142,19 @@ export function SelectionPanel({
     const type = view?.elements[el.typeId] ?? null
     const level = view?.elements[el.levelId] ?? null
     const definition = type?.kind === 'part_type' ? type.definition : null
-    const submitInstance = (values: Record<string, ParamValue | null>, mark: string | undefined, dzMm: number): string | null => {
-      if (Object.keys(values).length > 0 || mark !== undefined) {
-        const refused = session.setPartValues(el.id, 'instance', values, mark)
+    const submitInstance = (
+      values: Record<string, ParamValue | null>,
+      mark: string | undefined,
+      dzMm: number,
+      packValues?: Record<string, ParamValue | null>,
+    ): string | null => {
+      const synced = syncLuminaireEmergencyEdits(el, definition, values, packValues ?? {})
+      if (Object.keys(synced.partValues).length > 0 || mark !== undefined) {
+        const refused = session.setPartValues(el.id, 'instance', synced.partValues, mark)
+        if (refused) return refused
+      }
+      if (Object.keys(synced.packValues).length > 0) {
+        const refused = session.submitCommand({ type: 'set_element_values', elementIds: [el.id], values: synced.packValues })
         if (refused) return refused
       }
       return dzMm !== 0 ? session.movePartBy(el.id, { x: 0, y: 0 }, dzMm) : null
@@ -154,6 +165,7 @@ export function SelectionPanel({
         part={el}
         type={definition}
         typeId={el.typeId}
+        elements={view?.elements}
         levelName={level?.kind === 'level' ? level.name : 'No level'}
         canEdit={canEdit}
         saving={saveLabel}

@@ -326,3 +326,16 @@ The floor, ceiling, roof and structure over a point, to set a run's or a unit's 
 1. building.surfacesAt(ctx, { at, level }) or { element }; use ceiling or structureAbove elevationMm to pick a height.
 
 Uses: `building.surfacesAt`, `routes.along`
+
+## Photometrics, daylight and egress lighting
+
+Task: photometrics
+
+Assign IES LM-63 profiles and emergency drivers to luminaires, verify normal illuminance (4-bounce patch radiosity + task surfaces + ASHRAE 90.1 LPD), run CIE Daylight Factor or NFPA 101/IBC 90-minute egress compliance, turn on plan iso-contours, or export LBNL Radiance .rad/.ies files.
+
+1. Attach built-in or custom IES LM-63 files and emergency battery metadata with electrical.setLuminaireIes.
+2. Run electrical.runPhotometrics (calculationMode: "detailed" | "surfaces", 4-bounce patch radiosity) for room, countertop, and 3D stair footcandles + LPD, or electrical.runDaylightAnalysis for CIE Daylight Factor (DF%).
+3. Run electrical.runEgressLightingCheck for NFPA 101 §7.9.2.1 / IBC §1008.3.5 initial & 90-minute compliance along corridors, 3D stairs, and exit discharge.
+4. Toggle plan footcandle grids & contours with electrical.enablePhotometricOverlay, place live schedules with documents.formSchedule (photometric_summary / egress_lighting_compliance), or export standard Radiance scene files with electrical.exportRadiance.
+
+Uses: `electrical.setLuminaireIes`, `electrical.runPhotometrics`, `electrical.runDaylightAnalysis`, `electrical.runEgressLightingCheck`, `electrical.enablePhotometricOverlay`, `electrical.exportRadiance`

@@ -3,6 +3,7 @@ import {
   findLevelByName,
   resolveElementMaterial,
   type BimElement,
+  type Ceiling,
   type Column,
   type Level,
   type ModelState,
@@ -43,6 +44,7 @@ interface WallOpeningCutout {
 }
 
 interface WallOccluder {
+  readonly idx: number;
   readonly id: string;
   readonly x0: number;
   readonly y0: number;
@@ -63,6 +65,7 @@ interface WallOccluder {
 }
 
 interface ColumnOccluder {
+  readonly idx: number;
   readonly id: string;
   readonly minX: number;
   readonly maxX: number;
@@ -82,6 +85,8 @@ interface SlabOccluder {
   readonly maxY: number;
   readonly outline: readonly Vec2[];
   readonly holes: readonly (readonly Vec2[])[];
+  /** True for ceiling assemblies (checked when `includeCeilings` is true, e.g. sky/daylight rays). */
+  readonly isCeiling?: boolean;
 }
 
 interface StairFlightOccluder {
@@ -105,6 +110,8 @@ export interface RayQueryOptions {
   readonly includeFurniture?: boolean;
   /** Include solid stair flights & mid-landings in occlusion (default true). */
   readonly includeStairs?: boolean;
+  /** Include ceiling planes in occlusion (default false for electric ceiling fixtures; true for upward sky/daylight rays). */
+  readonly includeCeilings?: boolean;
   /** Ignore self-occlusion by this specific partId (used when sampling top surface of a counter/desk). */
   readonly ignorePartId?: string;
 }
@@ -248,6 +255,7 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     const zMax = zMin + Math.max(100, wall.height);
     const transmittance = wallVisibleTransmittance(model, wall);
     const occ: WallOccluder = {
+      idx: walls.length,
       id: wall.id,
       x0: wall.start.x,
       y0: wall.start.y,
@@ -292,6 +300,7 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     const hw = Math.max(50, col.size.x * 0.5);
     const hd = Math.max(50, col.size.y * 0.5);
     const occ: ColumnOccluder = {
+      idx: columns.length,
       id: col.id,
       minX: col.position.x - hw,
       maxX: col.position.x + hw,
@@ -331,17 +340,87 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
       slab.placement && slab.placement.kind === "area" && slab.placement.holes ? slab.placement.holes : [];
     slabs.push({ id: slab.id, zBottom, zTop, minX, maxX, minY, maxY, outline: slab.outline, holes });
   }
+  for (const ceil of elementsOfKind(model.elements, "ceiling") as Iterable<Ceiling>) {
+    if (ceil.outline.length < 3 || ceil.role === "open_to_structure" || ceil.form === "open_to_structure") continue;
+    const baseZ = levels.get(ceil.levelId) ?? 0;
+    const zBottom = baseZ + ceil.heightMm;
+    const zTop = zBottom + 40;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of ceil.outline) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    slabs.push({
+      id: ceil.id,
+      zBottom,
+      zTop,
+      minX,
+      maxX,
+      minY,
+      maxY,
+      outline: ceil.outline,
+      holes: ceil.holes ?? [],
+      isCeiling: true,
+    });
+  }
+  // 4b. Architectural roofs (add-on element kind `architecture.roof`, flat or sloped)
+  for (const el of Object.values(model.elements)) {
+    const raw = el as unknown as {
+      kind?: string;
+      id?: string;
+      levelId?: string;
+      outline?: readonly Vec2[];
+      thicknessMm?: number;
+      baseOffsetMm?: number;
+      slope?: { directionDeg: number; rise: number };
+    };
+    if (raw.kind !== "architecture.roof" || !Array.isArray(raw.outline) || raw.outline.length < 3) continue;
+    const baseZ = (raw.levelId ? levels.get(raw.levelId) : undefined) ?? resolveElementBaseZ(el, levels, sortedLevels);
+    const zBase = baseZ + (typeof raw.baseOffsetMm === "number" ? raw.baseOffsetMm : 0);
+    const thick = typeof raw.thicknessMm === "number" && raw.thicknessMm > 10 ? raw.thicknessMm : 200;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of raw.outline) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    // For sloped shed/gable roofs, compute mean plane elevation above base so upward sky rays intersect accurately
+    const spanMm = Math.max(maxX - minX, maxY - minY);
+    const riseExtra = raw.slope && Number.isFinite(raw.slope.rise) ? Math.abs(raw.slope.rise) * spanMm * 0.35 : 0;
+    slabs.push({
+      id: raw.id ?? el.id,
+      zBottom: zBase - thick,
+      zTop: zBase + riseExtra + thick,
+      minX,
+      maxX,
+      minY,
+      maxY,
+      outline: raw.outline,
+      holes: [],
+    });
+  }
 
   // 5. Furniture, casework, kitchen counters & equipment oriented bounding boxes
   const { occluders: furniture } = extractPartPhotometrics(model);
-  const furnGrid = new Map<number, OrientedPartBox[]>();
-  for (const box of furniture) {
+  const furnGrid = new Map<number, { readonly idx: number; readonly box: OrientedPartBox }[]>();
+  for (let fi = 0; fi < furniture.length; fi++) {
+    const box = furniture[fi]!;
+    const entry = { idx: fi, box };
     for (let cx = cellCoord(box.wMinX); cx <= cellCoord(box.wMaxX); cx++) {
       for (let cy = cellCoord(box.wMinY); cy <= cellCoord(box.wMaxY); cy++) {
         const key = cellKey(cx, cy);
         const bucket = furnGrid.get(key);
-        if (bucket) bucket.push(box);
-        else furnGrid.set(key, [box]);
+        if (bucket) bucket.push(entry);
+        else furnGrid.set(key, [entry]);
       }
     }
   }
@@ -381,10 +460,11 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     }
   }
 
-  // Reusable visit sets per ray query
-  const visitedWall = new Set<string>();
-  const visitedCol = new Set<string>();
-  const visitedFurn = new Set<OrientedPartBox>();
+  // Zero-allocation integer generation stamps per ray query (replaces Set hashing/clearing)
+  const wallStamp = new Uint32Array(walls.length);
+  const colStamp = new Uint32Array(columns.length);
+  const furnStamp = new Uint32Array(furniture.length);
+  let queryStamp = 0;
 
   /** Returns transmittance multiplier in [0, 1] for this wall (`1` = missed, `0` = opaque hit, `(0,1)` = glass hit). */
   function wallRayTransmission(w: WallOccluder, ax: number, ay: number, az: number, rx: number, ry: number, rz: number): number {
@@ -537,9 +617,12 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     const zLo = Math.min(az, bz);
     const zHi = Math.max(az, bz);
 
-    // 1. Intervening floor/ceiling slabs (respecting stairwell holes)
+    // 1. Intervening floor/roof slabs (and ceilings when `includeCeilings` is true, e.g. sky rays)
+    const includeCeilings = options?.includeCeilings ?? false;
     if (slabs.length > 0 && Math.abs(rz) > 1) {
-      for (const s of slabs) {
+      for (let si = 0; si < slabs.length; si++) {
+        const s = slabs[si]!;
+        if (s.isCeiling && !includeCeilings) continue;
         if (s.zTop <= zLo + 20 || s.zBottom >= zHi - 20) continue;
         const zMid = (s.zBottom + s.zTop) * 0.5;
         const t = (zMid - az) / rz;
@@ -549,8 +632,8 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
         if (hx < s.minX || hx > s.maxX || hy < s.minY || hy > s.maxY) continue;
         if (!pointInPolygon2D(hx, hy, s.outline)) continue;
         let inHole = false;
-        for (const hole of s.holes) {
-          if (pointInPolygon2D(hx, hy, hole)) {
+        for (let hi = 0; hi < s.holes.length; hi++) {
+          if (pointInPolygon2D(hx, hy, s.holes[hi]!)) {
             inHole = true;
             break;
           }
@@ -582,65 +665,130 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
       }
     }
 
-    // 3. Walls, columns, and optional furniture/casework boxes via 2D spatial hash
-    const cx0 = cellCoord(minX);
-    const cx1 = cellCoord(maxX);
-    const cy0 = cellCoord(minY);
-    const cy1 = cellCoord(maxY);
+    // 3. Walls, columns, and optional furniture/casework boxes via 2D spatial hash + zero-alloc stamp
     const includeFurniture = options?.includeFurniture ?? false;
     const ignorePartId = options?.ignorePartId;
 
-    visitedWall.clear();
-    visitedCol.clear();
-    if (includeFurniture) visitedFurn.clear();
+    queryStamp = (queryStamp + 1) >>> 0;
+    if (queryStamp === 0) {
+      wallStamp.fill(0);
+      colStamp.fill(0);
+      furnStamp.fill(0);
+      queryStamp = 1;
+    }
+    const stamp = queryStamp;
 
-    for (let cx = cx0; cx <= cx1; cx++) {
-      for (let cy = cy0; cy <= cy1; cy++) {
-        const key = cellKey(cx, cy);
-        const wBucket = wallGrid.get(key);
-        if (wBucket) {
-          for (let i = 0; i < wBucket.length; i++) {
-            const w = wBucket[i]!;
-            if (visitedWall.has(w.id)) continue;
-            visitedWall.add(w.id);
-            if (w.maxX < minX || w.minX > maxX || w.maxY < minY || w.minY > maxY) continue;
-            if (w.zMax < zLo || w.zMin > zHi) continue;
-            const wt = wallRayTransmission(w, ax, ay, az, rx, ry, rz);
-            if (wt <= 0.01) return 0;
-            if (wt < 1) {
-              transmission *= wt;
-              if (transmission <= 0.01) return 0;
+    const visitCell = (cx: number, cy: number): boolean => {
+      const key = cellKey(cx, cy);
+      const wBucket = wallGrid.get(key);
+      if (wBucket) {
+        for (let i = 0; i < wBucket.length; i++) {
+          const w = wBucket[i]!;
+          if (wallStamp[w.idx] === stamp) continue;
+          wallStamp[w.idx] = stamp;
+          if (w.maxX < minX || w.minX > maxX || w.maxY < minY || w.minY > maxY) continue;
+          if (w.zMax < zLo || w.zMin > zHi) continue;
+          const wt = wallRayTransmission(w, ax, ay, az, rx, ry, rz);
+          if (wt <= 0.01) {
+            transmission = 0;
+            return false;
+          }
+          if (wt < 1) {
+            transmission *= wt;
+            if (transmission <= 0.01) {
+              transmission = 0;
+              return false;
             }
           }
         }
-        const cBucket = colGrid.get(key);
-        if (cBucket) {
-          for (let i = 0; i < cBucket.length; i++) {
-            const c = cBucket[i]!;
-            if (visitedCol.has(c.id)) continue;
-            visitedCol.add(c.id);
-            if (c.maxX < minX || c.minX > maxX || c.maxY < minY || c.minY > maxY) continue;
-            if (c.zMax < zLo || c.zMin > zHi) continue;
-            if (rayHitsAabb(c.minX, c.maxX, c.minY, c.maxY, c.zMin, c.zMax, ax, ay, az, rx, ry, rz)) return 0;
+      }
+      const cBucket = colGrid.get(key);
+      if (cBucket) {
+        for (let i = 0; i < cBucket.length; i++) {
+          const c = cBucket[i]!;
+          if (colStamp[c.idx] === stamp) continue;
+          colStamp[c.idx] = stamp;
+          if (c.maxX < minX || c.minX > maxX || c.maxY < minY || c.minY > maxY) continue;
+          if (c.zMax < zLo || c.zMin > zHi) continue;
+          if (rayHitsAabb(c.minX, c.maxX, c.minY, c.maxY, c.zMin, c.zMax, ax, ay, az, rx, ry, rz)) {
+            transmission = 0;
+            return false;
           }
         }
-        if (includeFurniture) {
-          const fBucket = furnGrid.get(key);
-          if (fBucket) {
-            for (let i = 0; i < fBucket.length; i++) {
-              const f = fBucket[i]!;
-              if (visitedFurn.has(f)) continue;
-              visitedFurn.add(f);
-              if (ignorePartId && f.partId === ignorePartId) continue;
-              if (f.wMaxX < minX || f.wMinX > maxX || f.wMaxY < minY || f.wMinY > maxY) continue;
-              if (f.wMaxZ < zLo || f.wMinZ > zHi) continue;
-              if (rayHitsOrientedPart(f, ax, ay, az, rx, ry, rz)) {
-                if (f.transmittance <= 0.01) return 0;
-                transmission *= f.transmittance;
-                if (transmission <= 0.01) return 0;
+      }
+      if (includeFurniture) {
+        const fBucket = furnGrid.get(key);
+        if (fBucket) {
+          for (let i = 0; i < fBucket.length; i++) {
+            const entry = fBucket[i]!;
+            if (furnStamp[entry.idx] === stamp) continue;
+            furnStamp[entry.idx] = stamp;
+            const f = entry.box;
+            if (ignorePartId && f.partId === ignorePartId) continue;
+            if (f.wMaxX < minX || f.wMinX > maxX || f.wMaxY < minY || f.wMinY > maxY) continue;
+            if (f.wMaxZ < zLo || f.wMinZ > zHi) continue;
+            if (rayHitsOrientedPart(f, ax, ay, az, rx, ry, rz)) {
+              if (f.transmittance <= 0.01) {
+                transmission = 0;
+                return false;
+              }
+              transmission *= f.transmittance;
+              if (transmission <= 0.01) {
+                transmission = 0;
+                return false;
               }
             }
           }
+        }
+      }
+      return true;
+    };
+
+    const startCx = cellCoord(ax);
+    const startCy = cellCoord(ay);
+    const endCx = cellCoord(bx);
+    const endCy = cellCoord(by);
+    const spanX = Math.abs(endCx - startCx);
+    const spanY = Math.abs(endCy - startCy);
+
+    if (spanX <= 1 && spanY <= 1) {
+      const cx0 = Math.min(startCx, endCx);
+      const cx1 = Math.max(startCx, endCx);
+      const cy0 = Math.min(startCy, endCy);
+      const cy1 = Math.max(startCy, endCy);
+      for (let cx = cx0; cx <= cx1; cx++) {
+        for (let cy = cy0; cy <= cy1; cy++) {
+          if (!visitCell(cx, cy)) return 0;
+        }
+      }
+    } else {
+      // 2D Amanatides-Woo DDA grid traversal — visits only cells pierced by the ray (O(L) instead of O(L²))
+      let cx = startCx;
+      let cy = startCy;
+      const stepX = rx >= 0 ? 1 : -1;
+      const stepY = ry >= 0 ? 1 : -1;
+      const tDeltaX = Math.abs(rx) > 1e-6 ? CELL_MM / Math.abs(rx) : Infinity;
+      const tDeltaY = Math.abs(ry) > 1e-6 ? CELL_MM / Math.abs(ry) : Infinity;
+      let tMaxX =
+        Math.abs(rx) > 1e-6
+          ? ((rx > 0 ? (cx + 1) * CELL_MM : cx * CELL_MM) - ax) / rx
+          : Infinity;
+      let tMaxY =
+        Math.abs(ry) > 1e-6
+          ? ((ry > 0 ? (cy + 1) * CELL_MM : cy * CELL_MM) - ay) / ry
+          : Infinity;
+      const maxSteps = spanX + spanY + 3;
+      for (let step = 0; step < maxSteps; step++) {
+        if (!visitCell(cx, cy)) return 0;
+        if (cx === endCx && cy === endCy) break;
+        if (tMaxX < tMaxY) {
+          if (tMaxX > 1 + EPS) break;
+          tMaxX += tDeltaX;
+          cx += stepX;
+        } else {
+          if (tMaxY > 1 + EPS) break;
+          tMaxY += tDeltaY;
+          cy += stepY;
         }
       }
     }
@@ -671,7 +819,8 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     if (options?.includeFurniture) {
       const fBucket = furnGrid.get(key);
       if (fBucket) {
-        for (const f of fBucket) {
+        for (const entry of fBucket) {
+          const f = entry.box;
           if (options.ignorePartId && f.partId === options.ignorePartId) continue;
           if (f.transmittance > 0.01) continue;
           if (x < f.wMinX || x > f.wMaxX || y < f.wMinY || y > f.wMaxY) continue;

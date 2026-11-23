@@ -7,7 +7,9 @@ IES LM-63 photometrics, normal illuminance, NFPA 101 / IBC emergency egress chec
 Every example below is a complete script that passes the kit's checks; the kit's tests run each one.
 
 - [`electrical.setLuminaireIes`](#electricalsetluminaireies): Attaches a built-in IES profile id (troffer_2x4_led, downlight_6_led, linear_pendant_led, exit_combo_wall_pack, exterior_wall_pack_led) or custom IES LM-63 text (optionally saved once in the photometric_profile catalog), plus emergency driver/battery and LLF metadata, to one or more placed luminaires or all instances of a luminaire part type.
-- [`electrical.runPhotometrics`](#electricalrunphotometrics): Runs point-by-point IES LM-63 normal illuminance and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model.
+- [`electrical.runPhotometrics`](#electricalrunphotometrics): Runs point-by-point IES LM-63 normal illuminance, 4-bounce spatially-resolved diffuse patch radiosity, optional CIE daylighting, and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model.
+- [`electrical.runDaylightAnalysis`](#electricalrundaylightanalysis): Runs a CIE Sky Dome + direct solar beam daylighting and Daylight Factor (DF%) study across active spaces/rooms with 4-bounce diffuse patch radiosity, glazing visible transmittance (T_vis), and 3D wall/ceiling/roof/furniture occlusion (skyModel: "cie_overcast" | "cie_clear" | "cie_intermediate").
+- [`electrical.exportRadiance`](#electricalexportradiance): Exports the live working model into standard LBNL Radiance scene text files (`materialsRad`, `geometryRad`, `luminairesRad`, `skyRad`, `sensorGridPts`, `iesFiles`, and `oconv`/`rtrace`/`rpict`/`evalglare` commands) using exact kernel.material LRV/T_vis and luminaire IES webs — zero runtime Radiance dependency.
 - [`electrical.runEgressLightingCheck`](#electricalrunegresslightingcheck): Runs NFPA 101 §7.9.2.1 / IBC §1008.3.5 emergency egress lighting compliance (initial ≥1.0 avg / ≥0.1 min fc and 90-minute ≥0.6 avg / ≥0.06 min fc, max:min ≤40:1) using strictly emergency-backed fixtures along corridors, 3D multi-flight stair treads/landings, exit discharge pads, or explicit egress paths (supports calculationMode: "simplified" | "detailed").
 - [`electrical.enablePhotometricOverlay`](#electricalenablephotometricoverlay): Toggles the 2D photometric footcandle grid, marching-squares iso-contour lines, and sub-threshold fail highlights on a floor or ceiling plan view (mode: "off" | "normal" | "egress").
 
@@ -40,13 +42,13 @@ export default defineScript({
 
 ## electrical.runPhotometrics
 
-Runs point-by-point IES LM-63 normal illuminance and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model. Supports calculationMode: "simplified" (empty shell plane), "detailed" (default — Materials Library reflectances, glazing transmittance, furniture & stair occlusion), and "surfaces" (also evaluates actual kitchen countertops, islands, worktables, vanities & rising 3D stair treads).
+Runs point-by-point IES LM-63 normal illuminance, 4-bounce spatially-resolved diffuse patch radiosity, optional CIE daylighting, and ASHRAE 90.1 LPD across active spaces/rooms on the script's live working model. Supports calculationMode: "simplified" (empty shell plane + cavity bounce), "detailed" (default — Materials Library LRV/T_vis, 4-bounce patch radiosity, glazing transmittance, furniture & stair occlusion), and "surfaces" (also evaluates actual kitchen countertops, islands, worktables, vanities & rising 3D stair treads).
 
 ```ts
 runPhotometrics<T = unknown>(ctx: ScriptContext, spec?: PhotometricsRunSpec): T
 ```
 
-Topics: photometrics, footcandles, illuminance, lpd, ashrae 90.1, lighting calculation, materials, surfaces, countertop, stairs
+Topics: photometrics, footcandles, illuminance, lpd, ashrae 90.1, lighting calculation, materials, surfaces, countertop, stairs, radiosity, daylight
 
 <details><summary>Example script</summary>
 
@@ -63,6 +65,64 @@ export default defineScript({
     electrical.setLuminaireIes(ctx, f1, { profile: "troffer_2x4_led" });
     const res = electrical.runPhotometrics(ctx, { gridSpacing: units.ft(2), workplaneHeight: units.in(30), calculationMode: "surfaces" });
     ctx.report("Normal photometrics", res);
+  },
+});
+```
+
+</details>
+
+## electrical.runDaylightAnalysis
+
+Runs a CIE Sky Dome + direct solar beam daylighting and Daylight Factor (DF%) study across active spaces/rooms with 4-bounce diffuse patch radiosity, glazing visible transmittance (T_vis), and 3D wall/ceiling/roof/furniture occlusion (skyModel: "cie_overcast" | "cie_clear" | "cie_intermediate").
+
+```ts
+runDaylightAnalysis<T = unknown>(ctx: ScriptContext, spec?: DaylightAnalysisSpec): T
+```
+
+Topics: daylight, daylight factor, cie sky, solar, glazing, photometrics, leed, windows
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });
+    const df = electrical.runDaylightAnalysis(ctx, { skyModel: "cie_overcast", outdoorHorizontalFc: 1000, gridSpacing: units.ft(2) });
+    ctx.report("Daylight factor", df);
+  },
+});
+```
+
+</details>
+
+## electrical.exportRadiance
+
+Exports the live working model into standard LBNL Radiance scene text files (`materialsRad`, `geometryRad`, `luminairesRad`, `skyRad`, `sensorGridPts`, `iesFiles`, and `oconv`/`rtrace`/`rpict`/`evalglare` commands) using exact kernel.material LRV/T_vis and luminaire IES webs — zero runtime Radiance dependency.
+
+```ts
+exportRadiance<T = unknown>(ctx: ScriptContext, spec?: RadianceExportSpec): T
+```
+
+Topics: radiance, rad export, ies2rad, rtrace, evalglare, glare, daylight, bsdf, photometrics
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    building.room(ctx, { level: "L1", number: "101", name: "Open Office", outline: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }] });
+    const rad = electrical.exportRadiance(ctx, { skyModel: "cie_clear", sunAzimuthDeg: 180, sunElevationDeg: 45 });
+    ctx.report("Radiance export", rad);
   },
 });
 ```

@@ -72,10 +72,34 @@ function normalizedLeg(part: PartInstance): string {
 
 function currentEmergencyMode(model: ModelState, part: PartInstance): EmergencyMode {
   const type = model.elements[part.typeId]
-  const mode = part.values.emergency_mode ?? (type?.kind === 'part_type' ? type.definition.typeValues.emergency_mode : undefined)
-  if (mode === 'unswitched' || mode === 'switched' || mode === 'none') return mode
-  const em = part.values.emergency ?? (type?.kind === 'part_type' ? type.definition.typeValues.emergency : undefined)
+  const typeVals = type?.kind === 'part_type' ? type.definition.typeValues : undefined
+  const mode = part.values.emergency_mode ?? typeVals?.emergency_mode
+  if (mode === 'unswitched' || mode === 'switched') return mode
+  const packEm = part.values['electrical.emergency_mode'] ?? typeVals?.['electrical.emergency_mode']
+  if (packEm === 'battery_pack' || packEm === 'generator_circuit' || packEm === 'inverter') return 'unswitched'
+  if (mode === 'none' || packEm === 'none') return 'none'
+  const egress = part.values['electrical.egress_fixture'] ?? typeVals?.['electrical.egress_fixture']
+  if (egress === true) return 'unswitched'
+  const em = part.values.emergency ?? typeVals?.emergency
   return em === true ? 'unswitched' : 'none'
+}
+
+/** Map Controls dialog EmergencyMode onto photometric `electrical.emergency_mode` + `electrical.egress_fixture`, preserving existing generator/inverter backing. */
+function photometricEmergencyValues(model: ModelState, part: PartInstance, nextMode: EmergencyMode): Record<string, string | boolean> {
+  if (nextMode === 'none') {
+    return {
+      'electrical.emergency_mode': 'none',
+      'electrical.egress_fixture': false,
+    }
+  }
+  const type = model.elements[part.typeId]
+  const typeVals = type?.kind === 'part_type' ? type.definition.typeValues : undefined
+  const existing = part.values['electrical.emergency_mode'] ?? typeVals?.['electrical.emergency_mode']
+  const preserved = existing === 'generator_circuit' || existing === 'inverter' ? existing : 'battery_pack'
+  return {
+    'electrical.emergency_mode': preserved,
+    'electrical.egress_fixture': true,
+  }
 }
 
 function nextUnusedLeg(existing: readonly string[]): string {
@@ -271,7 +295,8 @@ export function EditControlsDialog({
 
   const saveZone = () => {
     setError(null)
-    if (!activeLeg) {
+    const zoneEditsPending = memberDiffIds.added.length > 0 || memberDiffIds.removed.length > 0 || protocolTouched
+    if (zoneEditsPending && !activeLeg) {
       setError('Pick or create a zone letter first (e.g. a, b, c).')
       return
     }
@@ -286,7 +311,7 @@ export function EditControlsDialog({
       }
     }
     // 2. Apply zone assignment + protocol to added devices (and protocol to all existing zone members if touched).
-    const toUpdate = protocolTouched ? effectiveMembers : memberDiffIds.added
+    const toUpdate = zoneEditsPending ? (protocolTouched ? effectiveMembers : memberDiffIds.added) : []
     const touchedIds = new Set<string>()
     for (const part of toUpdate) {
       touchedIds.add(part.id)
@@ -299,11 +324,22 @@ export function EditControlsDialog({
         candidate.emergency_mode = emergencyMode
       }
       const values = filterPartParams(model, part, candidate)
-      if (Object.keys(values).length === 0) continue
-      const refusal = submit({ type: 'set_parameters', id: part.id, scope: 'instance', values }, `update control zone ${activeLeg.toUpperCase()}`)
-      if (refusal) {
-        setError(refusal)
-        return
+      if (Object.keys(values).length > 0) {
+        const refusal = submit({ type: 'set_parameters', id: part.id, scope: 'instance', values }, `update control zone ${activeLeg.toUpperCase()}`)
+        if (refusal) {
+          setError(refusal)
+          return
+        }
+      }
+      if (emergencyTouched && isLightingPart(model, part)) {
+        const emRefusal = submit(
+          { type: 'set_element_values', elementIds: [part.id], values: photometricEmergencyValues(model, part, emergencyMode) },
+          `update emergency photometrics on ${partMark(part)}`,
+        )
+        if (emRefusal) {
+          setError(emRefusal)
+          return
+        }
       }
     }
     // 3. Apply emergency mode to selected/zone luminaires if emergency was edited directly.
@@ -317,10 +353,19 @@ export function EditControlsDialog({
           emergency: emergencyMode !== 'none',
           emergency_mode: emergencyMode,
         })
-        if (Object.keys(values).length === 0) continue
-        const refusal = submit({ type: 'set_parameters', id: part.id, scope: 'instance', values }, `set emergency mode on ${partMark(part)}`)
-        if (refusal) {
-          setError(refusal)
+        if (Object.keys(values).length > 0) {
+          const refusal = submit({ type: 'set_parameters', id: part.id, scope: 'instance', values }, `set emergency mode on ${partMark(part)}`)
+          if (refusal) {
+            setError(refusal)
+            return
+          }
+        }
+        const emRefusal = submit(
+          { type: 'set_element_values', elementIds: [part.id], values: photometricEmergencyValues(model, part, emergencyMode) },
+          `set emergency photometrics on ${partMark(part)}`,
+        )
+        if (emRefusal) {
+          setError(emRefusal)
           return
         }
       }

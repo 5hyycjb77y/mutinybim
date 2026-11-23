@@ -43,6 +43,25 @@ export interface LuminaireIesSpec {
 }
 
 export type PhotometricsCalculationMode = "simplified" | "detailed" | "surfaces";
+export type RadiosityMethod = "patch_radiosity" | "cavity";
+export type DaylightSkyModel = "cie_overcast" | "cie_clear" | "cie_intermediate";
+
+export interface DaylightSpec {
+  /** Enable CIE sky dome + direct solar daylighting (default true when object is passed). */
+  readonly enabled?: boolean;
+  /** CIE sky luminance distribution (`"cie_overcast"` for Daylight Factor, `"cie_clear"`, or `"cie_intermediate"`). */
+  readonly skyModel?: DaylightSkyModel;
+  /** Unobstructed outdoor horizontal diffuse sky illuminance in fc (default 1000 fc). */
+  readonly outdoorHorizontalFc?: number;
+  /** Solar azimuth in degrees clockwise from +Y North (default 180°). */
+  readonly sunAzimuthDeg?: number;
+  /** Solar altitude above horizon in degrees (default 45°). */
+  readonly sunElevationDeg?: number;
+  /** Direct normal solar beam illuminance in fc for clear/intermediate skies. */
+  readonly directSunNormalFc?: number;
+  /** Include electric luminaires alongside daylight (default true in `runPhotometrics`, false in `runDaylightAnalysis`). */
+  readonly includeElectric?: boolean;
+}
 
 export interface PhotometricsRunSpec {
   /** Optional level id or level name filter. */
@@ -56,7 +75,7 @@ export interface PhotometricsRunSpec {
   /**
    * Calculation fidelity mode:
    * - `"simplified"`: shell-only space plane at `workplaneHeight` with standard reflectances (ignores furniture).
-   * - `"detailed"` (default): derives ceiling/wall/floor reflectances from the Materials Library, applies glazing transmittance, and includes furniture & stair occlusion.
+   * - `"detailed"` (default): derives ceiling/wall/floor reflectances from the Materials Library, applies glazing transmittance, runs 4-bounce spatially-resolved patch radiosity, and includes furniture & stair occlusion.
    * - `"surfaces"`: full `"detailed"` physics plus fine-grid evaluation on kitchen countertops, islands, worktables, vanities & rising 3D stair treads.
    */
   readonly calculationMode?: PhotometricsCalculationMode;
@@ -66,10 +85,44 @@ export interface PhotometricsRunSpec {
   readonly includeFurnitureOcclusion?: boolean;
   /** Evaluate horizontal task surfaces (counters, desks, vanities) & multi-flight 3D stair treads. */
   readonly includeTaskSurfaces?: boolean;
-  /** Include 1-bounce diffuse / zonal-cavity inter-reflectance (default true). */
+  /** Include diffuse inter-reflectance (default true). */
   readonly interReflectance?: boolean;
+  /** Inter-reflectance solver: `"patch_radiosity"` (4-bounce spatially-resolved patch radiosity, default in detailed/surfaces) or `"cavity"` (fast uniform room average). */
+  readonly radiosityMethod?: RadiosityMethod;
+  /** Optional CIE sky dome + direct solar daylighting through windows, glazed curtain walls, and skylights. */
+  readonly daylight?: DaylightSpec;
   /** Optional room surface reflectances overriding Materials Library & defaults. */
   readonly reflectances?: { readonly ceiling?: number; readonly wall?: number; readonly floor?: number };
+}
+
+export interface DaylightAnalysisSpec extends Omit<PhotometricsRunSpec, "daylight"> {
+  /** CIE sky model (default `"cie_overcast"` for LEED / EN 17037 Daylight Factor). */
+  readonly skyModel?: DaylightSkyModel;
+  /** Unobstructed outdoor horizontal sky illuminance in fc (default 1000 fc). */
+  readonly outdoorHorizontalFc?: number;
+  /** Solar azimuth in degrees clockwise from +Y North (default 180°). */
+  readonly sunAzimuthDeg?: number;
+  /** Solar altitude above horizon in degrees (default 45°). */
+  readonly sunElevationDeg?: number;
+  /** Direct normal solar beam illuminance in fc for clear/intermediate skies. */
+  readonly directSunNormalFc?: number;
+  /** Include electric luminaires in addition to daylight (default false — pure Daylight Factor). */
+  readonly includeElectric?: boolean;
+}
+
+export interface RadianceExportSpec {
+  /** Sky model for `sky.rad` `!gensky` header (default `"cie_overcast"`). */
+  readonly skyModel?: DaylightSkyModel;
+  /** Solar azimuth in degrees clockwise from +Y North (default 180°). */
+  readonly sunAzimuthDeg?: number;
+  /** Solar altitude above horizon in degrees (default 45°). */
+  readonly sunElevationDeg?: number;
+  /** Include electric luminaires & `.ies` files (default true). */
+  readonly includeLuminaires?: boolean;
+  /** Sensor grid spacing for `sensors.pts` (length Measure or feet number; default 2 ft). */
+  readonly gridSpacing?: Measure | number;
+  /** Workplane elevation AFF for `sensors.pts` (length Measure or inches number; default 30"). */
+  readonly workplaneHeight?: Measure | number;
 }
 
 export interface EgressLightingCheckSpec {
@@ -204,6 +257,32 @@ export const electrical = {
       elementIds,
       values,
     });
+
+    // Keep control-wiring `emergency` / `emergency_mode` instance params in sync when declared on the part type
+    if (spec.emergencyMode !== undefined) {
+      const isEm = spec.emergencyMode !== "none";
+      const updates = onWorking(ctx, "electrical.setLuminaireIes:syncControl", (m) => {
+        const out: { id: string; values: Record<string, string | boolean> }[] = [];
+        for (const id of elementIds) {
+          const part = m.elements[id];
+          if (part?.kind !== "part") continue;
+          const pt = m.elements[part.typeId];
+          if (pt?.kind !== "part_type") continue;
+          const allowed = new Set(pt.definition.instanceParams.map((p) => p.name));
+          const syncVals: Record<string, string | boolean> = {};
+          if (allowed.has("emergency")) syncVals.emergency = isEm;
+          if (allowed.has("emergency_mode")) {
+            const cur = part.values.emergency_mode;
+            syncVals.emergency_mode = isEm ? (cur === "switched" ? "switched" : "unswitched") : "none";
+          }
+          if (Object.keys(syncVals).length > 0) out.push({ id, values: syncVals });
+        }
+        return out;
+      });
+      for (const u of updates) {
+        ctx.edit({ type: "set_parameters", id: u.id, scope: "instance", values: u.values });
+      }
+    }
   },
 
   /**
@@ -226,10 +305,59 @@ export const electrical = {
         ...(spec.includeFurnitureOcclusion !== undefined ? { includeFurnitureOcclusion: spec.includeFurnitureOcclusion } : {}),
         ...(spec.includeTaskSurfaces !== undefined ? { includeTaskSurfaces: spec.includeTaskSurfaces } : {}),
         ...(spec.interReflectance !== undefined ? { interReflectance: spec.interReflectance } : {}),
+        ...(spec.radiosityMethod !== undefined ? { radiosityMethod: spec.radiosityMethod } : {}),
+        ...(spec.daylight !== undefined ? { daylight: { enabled: spec.daylight.enabled ?? true, ...spec.daylight } } : {}),
         ...(spec.reflectances !== undefined ? { reflectances: spec.reflectances } : {}),
       },
     });
     return result as T;
+  },
+
+  /**
+   * Runs a CIE Sky Dome + Direct Solar daylighting & Daylight Factor (`DF%`) study across
+   * active spaces/rooms on the script's live working model, including 4-bounce diffuse
+   * patch radiosity and exact glazing `T_vis` transmission through windows & curtain walls.
+   */
+  runDaylightAnalysis<T = unknown>(ctx: ScriptContext, spec: DaylightAnalysisSpec = {}): T {
+    const {
+      skyModel = "cie_overcast",
+      outdoorHorizontalFc = 1000,
+      sunAzimuthDeg,
+      sunElevationDeg,
+      directSunNormalFc,
+      includeElectric = false,
+      ...base
+    } = spec;
+    return electrical.runPhotometrics<T>(ctx, {
+      ...base,
+      daylight: {
+        enabled: true,
+        skyModel,
+        outdoorHorizontalFc,
+        ...(sunAzimuthDeg !== undefined ? { sunAzimuthDeg } : {}),
+        ...(sunElevationDeg !== undefined ? { sunElevationDeg } : {}),
+        ...(directSunNormalFc !== undefined ? { directSunNormalFc } : {}),
+        includeElectric,
+      },
+    });
+  },
+
+  /**
+   * Exports the script's live working model into standard LBNL Radiance text files
+   * (`materialsRad`, `geometryRad`, `luminairesRad`, `skyRad`, `sensorGridPts`, `iesFiles`,
+   * and copy-paste `oconv`/`rtrace`/`rpict`/`evalglare` CLI commands).
+   */
+  exportRadiance<T = unknown>(ctx: ScriptContext, spec: RadianceExportSpec = {}): T {
+    const gridSpacingFt = asFt(spec.gridSpacing);
+    const workplaneHeightIn = asIn(spec.workplaneHeight);
+    return ctx.read<T>("electrical.export_radiance", {
+      ...(spec.skyModel !== undefined ? { skyModel: spec.skyModel } : {}),
+      ...(spec.sunAzimuthDeg !== undefined ? { sunAzimuthDeg: spec.sunAzimuthDeg } : {}),
+      ...(spec.sunElevationDeg !== undefined ? { sunElevationDeg: spec.sunElevationDeg } : {}),
+      ...(spec.includeLuminaires !== undefined ? { includeLuminaires: spec.includeLuminaires } : {}),
+      ...(gridSpacingFt !== undefined ? { gridSpacingFt } : {}),
+      ...(workplaneHeightIn !== undefined ? { workplaneHeightIn } : {}),
+    });
   },
 
   /**

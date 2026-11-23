@@ -1,5 +1,5 @@
 import { BASELINE_KIND_FACETS, EQUIPMENT_DEFAULT_COLUMNS } from '@permitzip/bim-library'
-import { BUILTIN_FACET_REGISTRY, groupParametersByFacet, partParameters, type FacetRegistry, type ParamDef, type ParameterDef, type ParamValue, type PartInstance, type PartTypeDefinition } from '@permitzip/bim-kernel'
+import { BUILTIN_FACET_REGISTRY, builtinRegistry, groupParametersByFacet, partParameters, recognizes, withPackParameters, type FacetRegistry, type FieldDef, type ModelState, type ParamDef, type ParameterDef, type ParamValue, type PartInstance, type PartTypeDefinition } from '@permitzip/bim-kernel'
 import { convert, displayUnit, type DisplayProfile, type Kind, type UnitCode } from '@permitzip/bim-units'
 import { parseParameterText, type EquipmentParameter, type ParameterSource } from '../equipment-list/parameters'
 
@@ -33,7 +33,7 @@ export interface InspectorParameter {
   readonly def?: ParamDef
   /** The library field it comes from, when it does. */
   readonly library?: EquipmentParameter
-  readonly source: 'part' | ParameterSource
+  readonly source: 'part' | 'pack' | ParameterSource
   /** Why it can't be typed in (a formula, read from elsewhere); absent: editable. */
   readonly locked?: string
 }
@@ -113,13 +113,46 @@ function fromLibrary(lib: EquipmentParameter, profile: DisplayProfile | undefine
   }
 }
 
+function fromPackField(field: FieldDef, key: string, profile: DisplayProfile | undefined): InspectorParameter {
+  const kind = field.kind
+  const storedUnit = field.storedUnit ?? field.unit
+  return {
+    name: key,
+    key,
+    label: field.label,
+    ...(field.group === undefined ? {} : { group: field.group }),
+    scope: 'instance',
+    valueType: field.valueType === 'quantity' ? 'quantity' : field.valueType === 'boolean' ? 'boolean' : field.valueType === 'choice' ? 'choice' : 'text',
+    ...(kind === undefined ? {} : { kind }),
+    ...(storedUnit === undefined ? {} : { storedUnit, displayUnit: displayOf(kind, storedUnit, storedUnit, profile) }),
+    ...(field.choices === undefined ? {} : { choices: field.choices }),
+    source: 'pack',
+  }
+}
+
+/** Max text length rendered as an inline Inspector input; larger structured payloads (e.g. raw files) stay out of inline text boxes. */
+const INLINE_PACK_TEXT_MAX = 2000
+
 /**
  * Every parameter of a part, in facet sections: its type's parameters (type
- * values and instance values alike), then the library fields that apply to
- * equipment and fixtures and that the type doesn't declare yet. `connection_type`
- * and anything `hidden` reads elsewhere is left to its own control.
+ * values and instance values alike), pack parameters (`PARAMETER_SET_POINT`)
+ * attached to the part's recognized classes (written via `set_element_values`),
+ * then the library fields that apply to equipment and fixtures and that the
+ * type doesn't declare yet. `connection_type` and anything `hidden` reads
+ * elsewhere is left to its own control.
  */
-export function inspectorSections(type: PartTypeDefinition, library: readonly EquipmentParameter[], options: { readonly profile?: DisplayProfile; readonly hidden?: ReadonlySet<string>; readonly includeLibrary?: boolean; readonly facets?: FacetRegistry } = {}): InspectorSection[] {
+export function inspectorSections(
+  type: PartTypeDefinition,
+  library: readonly EquipmentParameter[],
+  options: {
+    readonly profile?: DisplayProfile
+    readonly hidden?: ReadonlySet<string>
+    readonly includeLibrary?: boolean
+    readonly facets?: FacetRegistry
+    readonly part?: PartInstance
+    readonly elements?: ModelState['elements']
+  } = {},
+): InspectorSection[] {
   const hidden = options.hidden ?? new Set<string>()
   const libraryByName = new Map(library.map((l) => [l.name, l]))
   const own = new Map<string, ParamDef>([...type.typeParams, ...type.instanceParams].map((d) => [d.name, d]))
@@ -129,6 +162,28 @@ export function inspectorSections(type: PartTypeDefinition, library: readonly Eq
     const def = own.get(name)
     if (!def || hidden.has(name)) continue
     items.push(fromPart(p, def, libraryByName.get(name), options.profile))
+  }
+  // Pack-declared parameters (`PARAMETER_SET_POINT`) matching this part's class(es)
+  if (options.part && options.elements) {
+    const registry = withPackParameters(builtinRegistry())
+    const classes =
+      options.part.classId !== undefined
+        ? [options.part.classId]
+        : registry
+            .listClasses()
+            .filter((c) => recognizes(c, options.part!, options.elements!))
+            .map((c) => c.id)
+    const seenPack = new Set<string>()
+    for (const clsId of classes) {
+      for (const field of registry.fieldsFor(clsId)) {
+        if (field.writer.kind !== 'command' || field.writer.command !== 'set_element_values') continue
+        const key = field.key ?? field.path
+        if (seenPack.has(key) || own.has(key) || hidden.has(key)) continue
+        if (field.valueType === 'text' && (field.maxLength ?? 0) > INLINE_PACK_TEXT_MAX) continue
+        seenPack.add(key)
+        items.push(fromPackField(field, key, options.profile))
+      }
+    }
   }
   if (options.includeLibrary !== false && (type.category === 'mechanical_equipment' || type.category === 'plumbing_fixture')) {
     for (const lib of library) if (!own.has(lib.name) && !hidden.has(lib.name)) items.push(fromLibrary(lib, options.profile))
@@ -178,11 +233,20 @@ export function parseDisplayText(p: InspectorParameter, text: string): { readonl
 }
 
 /**
- * What a Save sends for the parameters of one scope: the changed values, and
- * the library fields the type must declare first. Unchanged texts send nothing.
+ * What a Save sends for the parameters of one scope: the changed part
+ * parameters (`set_parameters`), the changed pack parameters
+ * (`set_element_values`), and the library fields the type must declare first.
+ * Unchanged texts send nothing.
  */
-export function planParameterEdit(type: PartTypeDefinition, part: PartInstance, params: readonly InspectorParameter[], texts: Readonly<Record<string, string>>, scope: 'instance' | 'type'): { readonly values: Record<string, ParamValue | null>; readonly declare: readonly EquipmentParameter[] } | { readonly problem: string } {
+export function planParameterEdit(
+  type: PartTypeDefinition,
+  part: PartInstance,
+  params: readonly InspectorParameter[],
+  texts: Readonly<Record<string, string>>,
+  scope: 'instance' | 'type',
+): { readonly values: Record<string, ParamValue | null>; readonly packValues: Record<string, ParamValue | null>; readonly declare: readonly EquipmentParameter[] } | { readonly problem: string } {
   const values: Record<string, ParamValue | null> = {}
+  const packValues: Record<string, ParamValue | null> = {}
   const declare: EquipmentParameter[] = []
   for (const p of params) {
     if (p.scope !== scope || p.locked) continue
@@ -190,11 +254,15 @@ export function planParameterEdit(type: PartTypeDefinition, part: PartInstance, 
     if (text === undefined || text === displayText(p, storedValue(type, part, p))) continue
     const read = parseDisplayText(p, text)
     if ('problem' in read) return read
+    if (p.source === 'pack') {
+      packValues[p.name] = read.value
+      continue
+    }
     if (!p.def) {
       if (read.value === null) continue
       if (p.library) declare.push(p.library)
     }
     values[p.name] = read.value
   }
-  return { values, declare }
+  return { values, packValues, declare }
 }

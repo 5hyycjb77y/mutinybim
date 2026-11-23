@@ -178,13 +178,93 @@ describe("@permitzip/bim-script electrical photometrics & egress kit", () => {
     expect(cat).toBeDefined();
   });
 
-  it("exposes calculationMode options and viewport north-arrow helpers in generated script declarations", async () => {
-    const { kitDeclarations } = await import("../src");
+  it("exposes radiosity, daylighting, Radiance export, calculationMode, and viewport north-arrow helpers in generated script declarations and reference", async () => {
+    const { kitDeclarations, searchReference } = await import("../src");
     const dts = kitDeclarations();
     expect(dts).toContain('export type PhotometricsCalculationMode = "simplified" | "detailed" | "surfaces";');
+    expect(dts).toContain('export type RadiosityMethod = "patch_radiosity" | "cavity";');
+    expect(dts).toContain('export type DaylightSkyModel = "cie_overcast" | "cie_clear" | "cie_intermediate";');
+    expect(dts).toContain("runDaylightAnalysis<T = unknown>(");
+    expect(dts).toContain("exportRadiance<T = unknown>(");
     expect(dts).toContain("calculationMode?: PhotometricsCalculationMode;");
     expect(dts).toContain("includeFurnitureOcclusion?: boolean;");
     expect(dts).toContain("setViewportNorthArrow(");
     expect(dts).toContain("northArrowOffset?: { x: Measure; y: Measure }");
+
+    const refPhot = searchReference("photometrics");
+    expect(refPhot.some((h) => h.kind === "recipe" && h.name.toLowerCase().includes("photometrics"))).toBe(true);
+    const refRad = searchReference("radiance");
+    expect(refRad.some((h) => h.kind === "function" && h.name === "electrical.exportRadiance")).toBe(true);
+  });
+
+  it("executes electrical.runDaylightAnalysis and electrical.exportRadiance cleanly inside a script", async () => {
+    let base: ModelState = {
+      modelId: "script-daylight-rad",
+      revision: 0 as Revision,
+      elements: {},
+      connections: [],
+      settings: DEFAULT_SETTINGS,
+    };
+    base = withUpgradePolicy(
+      () => true,
+      () => {
+        const res = executeCommand(base, { type: "create_level", levelId: "L1", name: "Level 1", elevationMm: 0 });
+        if (!res.ok) throw new Error(res.error.message);
+        return res.model;
+      },
+    );
+    const script = defineScript({
+      kind: "layout",
+      reads: { levels: true },
+      parameters: {},
+      run(ctx) {
+        building.room(ctx, {
+          level: "L1",
+          number: "101",
+          name: "Studio",
+          outline: [
+            { x: units.ft(0), y: units.ft(0) },
+            { x: units.ft(20), y: units.ft(0) },
+            { x: units.ft(20), y: units.ft(14) },
+            { x: units.ft(0), y: units.ft(14) },
+          ],
+        });
+        const f1 = equipment.place(ctx, {
+          level: "L1",
+          type: "builtin:troffer-2x4-led@1",
+          at: { x: units.ft(10), y: units.ft(7) },
+          height: units.ft(9),
+          mark: "F1",
+        });
+        electrical.setLuminaireIes(ctx, f1, { profile: "troffer_2x4_led" });
+        const daylight = electrical.runDaylightAnalysis<{ ok: boolean; run: { values: readonly { key: string; value: unknown }[] } }>(ctx, {
+          skyModel: "cie_overcast",
+          outdoorHorizontalFc: 1000,
+          gridSpacing: units.ft(4),
+        });
+        const rad = electrical.exportRadiance<{ summary: { luminaireCount: number; iesFileCount: number; sensorCount: number } }>(ctx, {
+          skyModel: "cie_clear",
+          sunAzimuthDeg: 180,
+          sunElevationDeg: 45,
+        });
+        ctx.report("daylight_ok", daylight.ok);
+        ctx.report("daylight_df", daylight.run.values.find((v) => v.key === "overall_daylight_factor_pct")?.value);
+        ctx.report("rad_summary", rad.summary);
+      },
+    });
+
+    const out = await runScript(script, {
+      slice: sliceModel(base, script.manifest.reads, [], SERVER_FEATURES),
+      values: {},
+      scriptHash: "sha256:daylight-rad-seed",
+    });
+
+    expect(out.kind).toBe("edits");
+    expect(out.report?.find((r) => r.label === "daylight_ok")?.value).toBe(true);
+    expect(typeof out.report?.find((r) => r.label === "daylight_df")?.value).toBe("number");
+    const radSum = out.report?.find((r) => r.label === "rad_summary")?.value as { luminaireCount: number; iesFileCount: number; sensorCount: number };
+    expect(radSum.luminaireCount).toBe(1);
+    expect(radSum.iesFileCount).toBe(1);
+    expect(radSum.sensorCount).toBeGreaterThan(10);
   });
 });

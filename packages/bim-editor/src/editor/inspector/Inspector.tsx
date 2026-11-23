@@ -57,7 +57,7 @@ export function ElementInspector({ model, elementId, canEdit, onCommand, part, r
     const typeEl = model.elements[el.typeId]
     const type: PartTypeDefinition | null = typeEl?.kind === 'part_type' ? typeEl.definition : null
     return (
-      <PartInspector key={`${el.id}:${el.version}:${typeEl?.version ?? 0}`} {...part} part={el} type={type} typeId={el.typeId} canEdit={canEdit} onCommand={onCommand}>
+      <PartInspector key={`${el.id}:${el.version}:${typeEl?.version ?? 0}`} {...part} part={el} type={type} typeId={el.typeId} elements={model.elements} canEdit={canEdit} onCommand={onCommand}>
         {children}
       </PartInspector>
     )

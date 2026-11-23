@@ -2,7 +2,7 @@
 
 # Pack reads (ctx.read)
 
-What the add-ons let a script read with `ctx.read("<id>", input)`: 12 reads. A read never edits.
+What the add-ons let a script read with `ctx.read("<id>", input)`: 13 reads. A read never edits.
 
 | Read | What it returns |
 | --- | --- |
@@ -12,6 +12,7 @@ What the add-ons let a script read with `ctx.read("<id>", input)`: 12 reads. A r
 | `electrical.catalog` | Connection types, feeder types and room templates |
 | `electrical.check` | The electrical design check |
 | `electrical.circuit_template_plan` | A room template's circuits for the units given |
+| `electrical.export_radiance` | Export LBNL Radiance .rad, .ies, and .pts scene files from the model |
 | `electrical.feeder_proposal` | The feeder a panel's demand load needs |
 | `electrical.loads` | A panel's connected and demand loads, per phase |
 | `electrical.planned_row_facts` | A planned part's circuit |
