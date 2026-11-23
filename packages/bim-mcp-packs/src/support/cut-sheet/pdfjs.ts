@@ -21,7 +21,12 @@ export interface PdfDocumentLike {
   destroy?: () => Promise<void>
 }
 
-export type GetPdfDocument = (opts: { data: Uint8Array; useSystemFonts?: boolean; isEvalSupported?: boolean }) => { promise: Promise<PdfDocumentLike> }
+export interface PdfLoadingTaskLike {
+  readonly promise: Promise<PdfDocumentLike>
+  destroy?: () => Promise<void>
+}
+
+export type GetPdfDocument = (opts: { data: Uint8Array; useSystemFonts?: boolean; isEvalSupported?: boolean }) => PdfLoadingTaskLike
 
 export function pdfjsFrom(mod: unknown): { getDocument: GetPdfDocument } {
   if (typeof mod !== "object" || mod === null || typeof Reflect.get(mod, "getDocument") !== "function") throw new Error("pdf.js didn't load")

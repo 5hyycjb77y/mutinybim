@@ -25,7 +25,8 @@ export const MAX_CUT_SHEET_BYTES = 25 * 1024 * 1024
 export async function pdfLines(bytes: Uint8Array): Promise<{ pages: number; lines: CutSheetLine[] }> {
   if (bytes.byteLength > MAX_CUT_SHEET_BYTES) throw new Error(`The PDF is ${Math.round(bytes.byteLength / 1024 / 1024)} MB; a cut sheet should be under ${MAX_CUT_SHEET_BYTES / 1024 / 1024} MB`)
   const { getDocument } = await loadPdfjs()
-  const doc = await getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, isEvalSupported: false }).promise
+  const loadingTask = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, isEvalSupported: false })
+  const doc = await loadingTask.promise
   const lines: CutSheetLine[] = []
   try {
     const last = Math.min(doc.numPages, MAX_CUT_SHEET_PAGES)
@@ -55,6 +56,7 @@ export async function pdfLines(bytes: Uint8Array): Promise<{ pages: number; line
     }
     return { pages: doc.numPages, lines }
   } finally {
-    await doc.destroy?.().catch((err: unknown) => console.error("[cut-sheet] pdf.js document cleanup failed", err))
+    const cleanup = typeof loadingTask.destroy === "function" ? loadingTask.destroy() : doc.destroy?.()
+    await cleanup?.catch((err: unknown) => console.error("[cut-sheet] pdf.js document cleanup failed", err))
   }
 }

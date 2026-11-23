@@ -42,7 +42,7 @@
     "@permitzip/bim-sync": "*",
     "@permitzip/bim-units": "*",
     "@resvg/resvg-js": "^2.6.2",
-    "pdfjs-dist": "5.4.296",
+    "pdfjs-dist": "6.5.438",
     "zod": "^4.0.0"
   }
 }

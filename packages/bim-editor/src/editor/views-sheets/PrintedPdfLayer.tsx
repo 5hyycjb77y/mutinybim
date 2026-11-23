@@ -135,7 +135,8 @@ export function PrintedPdfLayer({
           const { PDF_WORKER_SRC } = await import('@permitzip/bim-editor/assets/pdf-worker')
           const { pdfjs } = await import('react-pdf')
           pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC
-          const doc = await pdfjs.getDocument({ data: bytes }).promise
+          const loadingTask = pdfjs.getDocument({ data: bytes })
+          const doc = await loadingTask.promise
           try {
             const page = await doc.getPage(1)
             const base = page.getViewport({ scale: 1 })
@@ -170,7 +171,13 @@ export function PrintedPdfLayer({
             setPlacement(win.placement)
             setRendered({ kind: 'ready', scene })
           } finally {
-            await doc.destroy()
+            // pdfjs-dist v6 removed PDFDocumentProxy.destroy() in favor of loadingTask.destroy().
+            if (typeof loadingTask.destroy === 'function') {
+              await loadingTask.destroy()
+            } else {
+              const legacyDoc = doc as { destroy?: () => Promise<void> }
+              await legacyDoc.destroy?.()
+            }
           }
         } catch (err) {
           if (cancelled) return

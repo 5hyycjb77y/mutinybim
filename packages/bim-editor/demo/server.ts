@@ -25,6 +25,9 @@ const TYPES: Readonly<Record<string, string>> = {
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.wasm': 'application/wasm',
+  '.bcmap': 'application/octet-stream',
+  '.pfb': 'application/octet-stream',
+  '.icc': 'application/vnd.iccprofile',
   '.glb': 'model/gltf-binary',
 }
 
@@ -48,6 +51,10 @@ const STATIC_DIRS: ReadonlyArray<readonly [string, string]> = [
   ['/mutinybim/brand/', path.join(REPO_ROOT, 'public/mutinybim/brand')],
   ['/assets/bim-ui/', path.join(PACKAGES_DIR, 'bim-ui/assets')],
   ['/pdfjs/images/', path.join(REPO_ROOT, 'node_modules/pdfjs-dist/web/images')],
+  ['/pdfjs/cmaps/', path.join(REPO_ROOT, 'node_modules/pdfjs-dist/cmaps')],
+  ['/pdfjs/standard_fonts/', path.join(REPO_ROOT, 'node_modules/pdfjs-dist/standard_fonts')],
+  ['/pdfjs/wasm/', path.join(REPO_ROOT, 'node_modules/pdfjs-dist/wasm')],
+  ['/pdfjs/iccs/', path.join(REPO_ROOT, 'node_modules/pdfjs-dist/iccs')],
 ]
 
 const NODE_MODULES = path.join(REPO_ROOT, 'node_modules')

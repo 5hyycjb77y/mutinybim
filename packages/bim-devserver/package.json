@@ -30,7 +30,7 @@
     "@thatopen/fragments": "^3.4.8",
     "esbuild": "*",
     "manifold-3d": "3.5.4",
-    "pdfjs-dist": "5.4.296",
+    "pdfjs-dist": "6.5.438",
     "postcss": "^8.5.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
