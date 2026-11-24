@@ -359,7 +359,99 @@ CREATE TABLE IF NOT EXISTS linked_offers (
 );
 `;
 
-export type Db = ReturnType<typeof openDb>;
+export interface WebStore {
+  close(): Promise<void>;
+
+  createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): Promise<UserRow>;
+  userByEmail(email: string): Promise<UserRow | null>;
+  userById(id: string): Promise<UserRow | null>;
+  renameUser(id: string, displayName: string): Promise<void>;
+  setColorScheme(id: string, scheme: ColorScheme): Promise<void>;
+
+  userByIdentity(provider: string, subject: string): Promise<UserRow | null>;
+  linkIdentity(provider: string, subject: string, userId: string): Promise<void>;
+  identitySubject(userId: string, provider: string): Promise<string | null>;
+  identitiesOf(userId: string): Promise<readonly string[]>;
+
+  createSession(tokenHash: string, userId: string, expiresAt: Date, via: string): Promise<void>;
+  userBySession(tokenHash: string): Promise<UserRow | null>;
+  session(tokenHash: string): Promise<SessionInfo | null>;
+  deleteSession(tokenHash: string): Promise<void>;
+  deleteSessionsOf(userId: string, keepTokenHash?: string | null): Promise<void>;
+  setPassword(userId: string, passwordHash: string): Promise<void>;
+
+  createPasswordReset(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
+  userByPasswordReset(tokenHash: string): Promise<UserRow | null>;
+  usePasswordReset(tokenHash: string): Promise<void>;
+
+  createModel(input: { id: string; ownerId: string; name: string }): Promise<ModelRow>;
+  modelsOf(userId: string): Promise<readonly ModelRow[]>;
+  modelById(id: string): Promise<ModelRow | null>;
+  countModelsOf(userId: string): Promise<number>;
+  renameModel(id: string, name: string): Promise<void>;
+  touchModel(id: string): Promise<void>;
+  deleteModel(id: string): Promise<void>;
+
+  accessTo(userId: string, modelId: string): Promise<{ readonly model: ModelRow; readonly access: ModelAccess } | null>;
+  sharedWith(userId: string): Promise<readonly SharedModelRow[]>;
+  sharesOf(modelId: string): Promise<readonly ShareRow[]>;
+  share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<void>;
+  unshare(modelId: string, userId: string): Promise<void>;
+
+  createAgentKey(input: { id: string; userId: string; keyHash: string; label: string; last4: string }): Promise<void>;
+  agentKeysOf(userId: string): Promise<readonly AgentKeyRow[]>;
+  userByAgentKey(keyHash: string): Promise<UserRow | null>;
+  deleteAgentKey(id: string, userId: string): Promise<void>;
+
+  oauthClient(provider: string, redirectUri: string): Promise<OAuthClientRow | null>;
+  saveOAuthClient(provider: string, redirectUri: string, clientId: string): Promise<void>;
+  forgetOAuthClient(provider: string, redirectUri: string): Promise<void>;
+
+  saveAssistantClient(input: { clientId: string; clientName: string; redirectUris: readonly string[]; kind: "registered" | "metadata"; tokenAuthMethod?: AssistantTokenAuthMethod; secretHash?: string | null }): Promise<void>;
+  assistantClient(clientId: string): Promise<AssistantClientRow | null>;
+  countAssistantClients(): Promise<number>;
+
+  saveAssistantCode(codeHash: string, code: AssistantCodeRow, expiresAt: Date): Promise<void>;
+  takeAssistantCode(codeHash: string): Promise<AssistantCodeRow | null>;
+
+  createAssistantGrant(input: { id: string; userId: string; clientId: string; clientName: string; resource: string; scope: string; accessHash: string; accessExpiresAt: Date; refreshHash: string; refreshExpiresAt: Date }): Promise<void>;
+  assistantGrantByAccess(accessHash: string): Promise<{ readonly grant: AssistantGrantRow; readonly user: UserRow } | null>;
+  rotateAssistantRefresh(refreshHash: string, clientId: string, next: { accessHash: string; accessExpiresAt: Date; refreshHash: string; refreshExpiresAt: Date }): Promise<{ readonly grant: AssistantGrantRow } | { readonly reused: true } | null>;
+  assistantGrantsOf(userId: string): Promise<readonly AssistantGrantRow[]>;
+  deleteAssistantGrant(id: string, userId: string): Promise<void>;
+  revokeAssistantToken(tokenHash: string): Promise<string | null>;
+  assistantGrantExists(id: string): Promise<boolean>;
+
+  saveAssistantApproval(row: AssistantApprovalRow): Promise<void>;
+  assistantApproval(id: string): Promise<AssistantApprovalRow | null>;
+  assistantApprovalsOf(userId: string): Promise<readonly AssistantApprovalRow[]>;
+  expireAssistantApprovals(cutoff: number, dropBefore: number, outcome: string): Promise<void>;
+
+  saveKeptScript(input: { id: string; userId: string; body: unknown; expiresAt: number; keep: number }): Promise<void>;
+  keptScript(id: string, userId: string): Promise<unknown>;
+
+  saveAssistantSession(row: AssistantSessionRow): Promise<void>;
+  assistantSession(id: string): Promise<AssistantSessionRow | null>;
+  touchAssistantSession(id: string, at: number): Promise<void>;
+  deleteAssistantSession(id: string): Promise<void>;
+  deleteAssistantSessionsBefore(cutoff: number): Promise<void>;
+  trimAssistantSessions(userId: string, keep: number): Promise<void>;
+
+  linkedGrant(userId: string, provider: string): Promise<LinkedGrantRow | null>;
+  saveLinkedGrant(input: { userId: string; provider: string; clientId: string; accessCipher: string; refreshCipher: string; accessExpiresAt: Date; refreshExpiresAt: Date }): Promise<void>;
+  markLinkedReconnect(userId: string, provider: string, error: string): Promise<void>;
+  deleteLinkedGrant(userId: string, provider: string): Promise<void>;
+  linkedModelsOf(userId: string, provider: string): Promise<readonly LinkedModelRow[]>;
+  linkedModelByAlias(userId: string, aliasId: string): Promise<LinkedModelRow | null>;
+  replaceLinkedModels(userId: string, provider: string, rows: readonly { remoteModelId: string; remoteProjectId: string; label: string; canEdit: boolean; openUrl: string | null }[], newAlias: () => string): Promise<readonly LinkedModelRow[]>;
+  linkedOfferAnswered(userId: string, provider: string): Promise<boolean>;
+  answerLinkedOffer(userId: string, provider: string): Promise<void>;
+
+  saveOAuthState(input: { state: string; provider: string; codeVerifier: string; returnTo: string }): Promise<void>;
+  takeOAuthState(state: string): Promise<OAuthStateRow | null>;
+}
+
+export type Db = WebStore;
 
 function now(): string {
   return new Date().toISOString();
@@ -380,23 +472,23 @@ function strOrNull(row: Record<string, unknown>, key: string): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function toUser(row: unknown): UserRow | null {
+export function toUser(row: unknown): UserRow | null {
   if (!isRecord(row)) return null;
   const scheme = row.color_scheme;
   return { id: str(row, "id"), email: str(row, "email"), display_name: str(row, "display_name"), password_hash: strOrNull(row, "password_hash"), created_at: str(row, "created_at"), color_scheme: isColorScheme(scheme) ? scheme : "system" };
 }
 
-function toModel(row: unknown): ModelRow | null {
+export function toModel(row: unknown): ModelRow | null {
   if (!isRecord(row)) return null;
   return { id: str(row, "id"), owner_id: str(row, "owner_id"), name: str(row, "name"), created_at: str(row, "created_at"), updated_at: str(row, "updated_at") };
 }
 
-function toAgentKey(row: unknown): AgentKeyRow | null {
+export function toAgentKey(row: unknown): AgentKeyRow | null {
   if (!isRecord(row)) return null;
   return { id: str(row, "id"), user_id: str(row, "user_id"), label: str(row, "label"), last4: str(row, "last4"), created_at: str(row, "created_at"), last_used_at: strOrNull(row, "last_used_at") };
 }
 
-function toGrant(row: unknown): AssistantGrantRow | null {
+export function toGrant(row: unknown): AssistantGrantRow | null {
   if (!isRecord(row)) return null;
   return {
     id: str(row, "id"),
@@ -412,10 +504,11 @@ function toGrant(row: unknown): AssistantGrantRow | null {
   };
 }
 
-function parseJson(text: string | null): unknown {
-  if (text === null) return null;
+function parseJsonValue(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return value;
   try {
-    return JSON.parse(text);
+    return JSON.parse(value);
   } catch (err) {
     console.error("[mutinybim-web db] a stored JSON value didn't parse", { err });
     return null;
@@ -430,12 +523,19 @@ function num(row: Record<string, unknown>, key: string): number {
   const value = row[key];
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value);
   throw new Error(`[mutinybim-web db] column ${key} is not a number`);
+}
+
+function bool(row: Record<string, unknown>, key: string): boolean {
+  const value = row[key];
+  if (typeof value === "boolean") return value;
+  return num(row, key) === 1;
 }
 
 const APPROVAL_STATES: readonly AssistantApprovalState[] = ["waiting", "approved", "declined", "landed", "failed", "expired"];
 
-function toApproval(row: unknown): AssistantApprovalRow | null {
+export function toApproval(row: unknown): AssistantApprovalRow | null {
   if (!isRecord(row)) return null;
   const state = APPROVAL_STATES.find((s) => s === row.state);
   const kind = row.kind === "edit" || row.kind === "retry" ? row.kind : null;
@@ -447,31 +547,31 @@ function toApproval(row: unknown): AssistantApprovalRow | null {
     model_id: str(row, "model_id"),
     model_name: str(row, "model_name"),
     summary: str(row, "summary"),
-    details: stringList(parseJson(str(row, "details"))),
+    details: stringList(parseJsonValue(row.details)),
     kind,
     key: strOrNull(row, "key"),
     state,
     outcome: strOrNull(row, "outcome"),
-    landing: parseJson(strOrNull(row, "landing")),
+    landing: parseJsonValue(row.landing),
     created_at: num(row, "created_at"),
   };
 }
 
-function toAssistantSession(row: unknown): AssistantSessionRow | null {
+export function toAssistantSession(row: unknown): AssistantSessionRow | null {
   if (!isRecord(row)) return null;
   return {
     id: str(row, "id"),
     user_id: str(row, "user_id"),
     grant_id: str(row, "grant_id"),
     family: str(row, "family"),
-    families: stringList(parseJson(str(row, "families"))),
+    families: stringList(parseJsonValue(row.families)),
     run_id: str(row, "run_id"),
-    init: parseJson(str(row, "init")),
+    init: parseJsonValue(row.init),
     last_seen_at: num(row, "last_seen_at"),
   };
 }
 
-function toLinkedGrant(row: unknown): LinkedGrantRow | null {
+export function toLinkedGrant(row: unknown): LinkedGrantRow | null {
   if (!isRecord(row)) return null;
   return {
     user_id: str(row, "user_id"),
@@ -487,7 +587,7 @@ function toLinkedGrant(row: unknown): LinkedGrantRow | null {
   };
 }
 
-function toLinkedModel(row: unknown): LinkedModelRow | null {
+export function toLinkedModel(row: unknown): LinkedModelRow | null {
   if (!isRecord(row)) return null;
   return {
     alias_id: str(row, "alias_id"),
@@ -496,15 +596,32 @@ function toLinkedModel(row: unknown): LinkedModelRow | null {
     remote_model_id: str(row, "remote_model_id"),
     remote_project_id: str(row, "remote_project_id"),
     label: str(row, "label"),
-    can_edit: num(row, "can_edit") === 1,
+    can_edit: bool(row, "can_edit"),
     open_url: strOrNull(row, "open_url"),
     seen_at: str(row, "seen_at"),
   };
 }
 
-function shareRole(value: unknown): ShareRole {
+export function shareRole(value: unknown): ShareRole {
   if (value === "view" || value === "edit") return value;
   throw new Error(`[mutinybim-web db] share role ${String(value)} is not view or edit`);
+}
+
+export function toAssistantClient(row: unknown): AssistantClientRow | null {
+  if (!isRecord(row)) return null;
+  const uris = parseJsonValue(row.redirect_uris);
+  const kind = row.kind === "metadata" ? "metadata" : "registered";
+  const tokenAuthMethod: AssistantTokenAuthMethod = row.token_auth_method === "client_secret_post" || row.token_auth_method === "client_secret_basic" ? row.token_auth_method : "none";
+  const secretHash = typeof row.secret_hash === "string" && row.secret_hash ? row.secret_hash : null;
+  return {
+    client_id: str(row, "client_id"),
+    client_name: str(row, "client_name"),
+    redirect_uris: Array.isArray(uris) ? uris.filter((u): u is string => typeof u === "string") : [],
+    kind,
+    token_auth_method: tokenAuthMethod,
+    secret_hash: secretHash,
+    created_at: str(row, "created_at"),
+  };
 }
 
 /** Changes to tables made by earlier versions of this app, applied once, in order (PRAGMA user_version counts them). */
@@ -515,7 +632,7 @@ const UPGRADES: readonly string[] = [
   "ALTER TABLE assistant_clients ADD COLUMN secret_hash TEXT",
 ];
 
-export function openDb(file: string) {
+export function openDb(file: string): WebStore {
   if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -529,87 +646,111 @@ export function openDb(file: string) {
   }
 
   return {
-    close: () => db.close(),
+    async close() {
+      db.close();
+    },
 
-    createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): UserRow {
+    async createUser(input) {
       db.prepare("INSERT INTO users (id, email, display_name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(input.id, input.email, input.displayName, input.passwordHash, now());
       const user = toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(input.id));
       if (!user) throw new Error("[mutinybim-web db] the new account was not saved");
       return user;
     },
-    userByEmail: (email: string): UserRow | null => toUser(db.prepare("SELECT * FROM users WHERE email = ?").get(email)),
-    userById: (id: string): UserRow | null => toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id)),
-    renameUser: (id: string, displayName: string): void => void db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(displayName, id),
-    setColorScheme: (id: string, scheme: ColorScheme): void => void db.prepare("UPDATE users SET color_scheme = ? WHERE id = ?").run(scheme, id),
+    async userByEmail(email) {
+      return toUser(db.prepare("SELECT * FROM users WHERE email = ?").get(email));
+    },
+    async userById(id) {
+      return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id));
+    },
+    async renameUser(id, displayName) {
+      db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(displayName, id);
+    },
+    async setColorScheme(id, scheme) {
+      db.prepare("UPDATE users SET color_scheme = ? WHERE id = ?").run(scheme, id);
+    },
 
-    userByIdentity(provider: string, subject: string): UserRow | null {
+    async userByIdentity(provider, subject) {
       return toUser(db.prepare("SELECT u.* FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = ? AND i.subject = ?").get(provider, subject));
     },
-    linkIdentity(provider: string, subject: string, userId: string): void {
+    async linkIdentity(provider, subject, userId) {
       db.prepare("INSERT OR IGNORE INTO identities (provider, subject, user_id, created_at) VALUES (?, ?, ?, ?)").run(provider, subject, userId, now());
     },
-    /** The subject a person's linked sign-in has at a provider, or null. */
-    identitySubject(userId: string, provider: string): string | null {
+    async identitySubject(userId, provider) {
       const row = db.prepare("SELECT subject FROM identities WHERE user_id = ? AND provider = ?").get(userId, provider);
       return isRecord(row) && typeof row.subject === "string" ? row.subject : null;
     },
-    identitiesOf(userId: string): readonly string[] {
+    async identitiesOf(userId) {
       return db.prepare("SELECT provider FROM identities WHERE user_id = ? ORDER BY provider").all(userId).flatMap((r) => (isRecord(r) && typeof r.provider === "string" ? [r.provider] : []));
     },
 
-    createSession(tokenHash: string, userId: string, expiresAt: Date, via: string): void {
+    async createSession(tokenHash, userId, expiresAt, via) {
       db.prepare("INSERT INTO sessions (token_hash, user_id, created_at, expires_at, via) VALUES (?, ?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString(), via);
     },
-    userBySession(tokenHash: string): UserRow | null {
+    async userBySession(tokenHash) {
       return toUser(db.prepare("SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?").get(tokenHash, now()));
     },
-    session(tokenHash: string): SessionInfo | null {
+    async session(tokenHash) {
       const row = db.prepare("SELECT via, created_at, user_id FROM sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash, now());
       if (!isRecord(row)) return null;
       const user = toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(str(row, "user_id")));
       return user ? { user, via: str(row, "via"), created_at: str(row, "created_at") } : null;
     },
-    deleteSession: (tokenHash: string): void => void db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash),
-    /** Signs the person out everywhere except, optionally, the session they are using. */
-    deleteSessionsOf: (userId: string, keepTokenHash: string | null = null): void => void db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?").run(userId, keepTokenHash),
-    setPassword: (userId: string, passwordHash: string): void => void db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId),
+    async deleteSession(tokenHash) {
+      db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+    },
+    async deleteSessionsOf(userId, keepTokenHash = null) {
+      db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash IS NOT ?").run(userId, keepTokenHash);
+    },
+    async setPassword(userId, passwordHash) {
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId);
+    },
 
-    createPasswordReset(tokenHash: string, userId: string, expiresAt: Date): void {
+    async createPasswordReset(tokenHash, userId, expiresAt) {
       db.prepare("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").run(userId, now());
       db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString());
     },
-    /** The person a reset link is for, while it is unused and unexpired (reading it does not use it up). */
-    userByPasswordReset(tokenHash: string): UserRow | null {
+    async userByPasswordReset(tokenHash) {
       return toUser(db.prepare("SELECT u.* FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ? AND r.expires_at > ?").get(tokenHash, now()));
     },
-    usePasswordReset: (tokenHash: string): void => void db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash),
+    async usePasswordReset(tokenHash) {
+      db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash);
+    },
 
-    createModel(input: { id: string; ownerId: string; name: string }): ModelRow {
+    async createModel(input) {
       const at = now();
       db.prepare("INSERT INTO models (id, owner_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(input.id, input.ownerId, input.name, at, at);
       const model = toModel(db.prepare("SELECT * FROM models WHERE id = ?").get(input.id));
       if (!model) throw new Error("[mutinybim-web db] the new model was not saved");
       return model;
     },
-    modelsOf: (userId: string): readonly ModelRow[] => db.prepare("SELECT * FROM models WHERE owner_id = ? ORDER BY updated_at DESC").all(userId).flatMap((r) => toModel(r) ?? []),
-    modelById: (id: string): ModelRow | null => toModel(db.prepare("SELECT * FROM models WHERE id = ?").get(id)),
-    countModelsOf(userId: string): number {
+    async modelsOf(userId) {
+      return db.prepare("SELECT * FROM models WHERE owner_id = ? ORDER BY updated_at DESC").all(userId).flatMap((r) => toModel(r) ?? []);
+    },
+    async modelById(id) {
+      return toModel(db.prepare("SELECT * FROM models WHERE id = ?").get(id));
+    },
+    async countModelsOf(userId) {
       const row = db.prepare("SELECT count(*) AS n FROM models WHERE owner_id = ?").get(userId);
       return isRecord(row) && typeof row.n === "number" ? row.n : 0;
     },
-    renameModel: (id: string, name: string): void => void db.prepare("UPDATE models SET name = ?, updated_at = ? WHERE id = ?").run(name, now(), id),
-    touchModel: (id: string): void => void db.prepare("UPDATE models SET updated_at = ? WHERE id = ?").run(now(), id),
-    deleteModel: (id: string): void => void db.prepare("DELETE FROM models WHERE id = ?").run(id),
+    async renameModel(id, name) {
+      db.prepare("UPDATE models SET name = ?, updated_at = ? WHERE id = ?").run(name, now(), id);
+    },
+    async touchModel(id) {
+      db.prepare("UPDATE models SET updated_at = ? WHERE id = ?").run(now(), id);
+    },
+    async deleteModel(id) {
+      db.prepare("DELETE FROM models WHERE id = ?").run(id);
+    },
 
-    /** What this person may do with a model: own it, edit it, view it, or nothing (null). */
-    accessTo(userId: string, modelId: string): { readonly model: ModelRow; readonly access: ModelAccess } | null {
+    async accessTo(userId, modelId) {
       const model = toModel(db.prepare("SELECT * FROM models WHERE id = ?").get(modelId));
       if (!model) return null;
       if (model.owner_id === userId) return { model, access: "owner" };
       const row = db.prepare("SELECT role FROM model_shares WHERE model_id = ? AND user_id = ?").get(modelId, userId);
       return isRecord(row) ? { model, access: shareRole(row.role) } : null;
     },
-    sharedWith(userId: string): readonly SharedModelRow[] {
+    async sharedWith(userId) {
       return db
         .prepare("SELECT m.*, s.role, u.display_name AS owner_name FROM model_shares s JOIN models m ON m.id = s.model_id JOIN users u ON u.id = m.owner_id WHERE s.user_id = ? ORDER BY m.updated_at DESC")
         .all(userId)
@@ -618,40 +759,48 @@ export function openDb(file: string) {
           return model && isRecord(r) ? [{ ...model, role: shareRole(r.role), owner_name: str(r, "owner_name") }] : [];
         });
     },
-    sharesOf(modelId: string): readonly ShareRow[] {
+    async sharesOf(modelId) {
       return db
         .prepare("SELECT s.user_id, u.email, u.display_name, s.role, s.created_at FROM model_shares s JOIN users u ON u.id = s.user_id WHERE s.model_id = ? ORDER BY s.created_at")
         .all(modelId)
         .flatMap((r) => (isRecord(r) ? [{ user_id: str(r, "user_id"), email: str(r, "email"), display_name: str(r, "display_name"), role: shareRole(r.role), created_at: str(r, "created_at") }] : []));
     },
-    share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): void {
+    async share(input) {
       db.prepare("INSERT INTO model_shares (model_id, user_id, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (model_id, user_id) DO UPDATE SET role = excluded.role").run(input.modelId, input.userId, input.role, input.invitedBy, now());
     },
-    unshare: (modelId: string, userId: string): void => void db.prepare("DELETE FROM model_shares WHERE model_id = ? AND user_id = ?").run(modelId, userId),
+    async unshare(modelId, userId) {
+      db.prepare("DELETE FROM model_shares WHERE model_id = ? AND user_id = ?").run(modelId, userId);
+    },
 
-    createAgentKey(input: { id: string; userId: string; keyHash: string; label: string; last4: string }): void {
+    async createAgentKey(input) {
       db.prepare("INSERT INTO agent_keys (id, user_id, key_hash, label, last4, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(input.id, input.userId, input.keyHash, input.label, input.last4, now());
     },
-    agentKeysOf: (userId: string): readonly AgentKeyRow[] => db.prepare("SELECT * FROM agent_keys WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toAgentKey(r) ?? []),
-    userByAgentKey(keyHash: string): UserRow | null {
+    async agentKeysOf(userId) {
+      return db.prepare("SELECT * FROM agent_keys WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toAgentKey(r) ?? []);
+    },
+    async userByAgentKey(keyHash) {
       const row = db.prepare("SELECT user_id FROM agent_keys WHERE key_hash = ?").get(keyHash);
       if (!isRecord(row) || typeof row.user_id !== "string") return null;
       db.prepare("UPDATE agent_keys SET last_used_at = ? WHERE key_hash = ?").run(now(), keyHash);
       return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(row.user_id));
     },
-    deleteAgentKey: (id: string, userId: string): void => void db.prepare("DELETE FROM agent_keys WHERE id = ? AND user_id = ?").run(id, userId),
+    async deleteAgentKey(id, userId) {
+      db.prepare("DELETE FROM agent_keys WHERE id = ? AND user_id = ?").run(id, userId);
+    },
 
-    oauthClient(provider: string, redirectUri: string): OAuthClientRow | null {
+    async oauthClient(provider, redirectUri) {
       const row = db.prepare("SELECT * FROM oauth_clients WHERE provider = ? AND redirect_uri = ?").get(provider, redirectUri);
       if (!isRecord(row)) return null;
       return { provider: str(row, "provider"), client_id: str(row, "client_id"), redirect_uri: str(row, "redirect_uri"), registered_at: str(row, "registered_at") };
     },
-    saveOAuthClient(provider: string, redirectUri: string, clientId: string): void {
+    async saveOAuthClient(provider, redirectUri, clientId) {
       db.prepare("INSERT OR REPLACE INTO oauth_clients (provider, redirect_uri, client_id, registered_at) VALUES (?, ?, ?, ?)").run(provider, redirectUri, clientId, now());
     },
-    forgetOAuthClient: (provider: string, redirectUri: string): void => void db.prepare("DELETE FROM oauth_clients WHERE provider = ? AND redirect_uri = ?").run(provider, redirectUri),
+    async forgetOAuthClient(provider, redirectUri) {
+      db.prepare("DELETE FROM oauth_clients WHERE provider = ? AND redirect_uri = ?").run(provider, redirectUri);
+    },
 
-    saveAssistantClient(input: { clientId: string; clientName: string; redirectUris: readonly string[]; kind: "registered" | "metadata"; tokenAuthMethod?: AssistantTokenAuthMethod; secretHash?: string | null }): void {
+    async saveAssistantClient(input) {
       db.prepare("INSERT OR REPLACE INTO assistant_clients (client_id, client_name, redirect_uris, kind, token_auth_method, secret_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
         input.clientId,
         input.clientName,
@@ -662,47 +811,31 @@ export function openDb(file: string) {
         now(),
       );
     },
-    assistantClient(clientId: string): AssistantClientRow | null {
-      const row = db.prepare("SELECT * FROM assistant_clients WHERE client_id = ?").get(clientId);
-      if (!isRecord(row)) return null;
-      const uris: unknown = JSON.parse(str(row, "redirect_uris"));
-      const kind = row.kind === "metadata" ? "metadata" : "registered";
-      const tokenAuthMethod: AssistantTokenAuthMethod = row.token_auth_method === "client_secret_post" || row.token_auth_method === "client_secret_basic" ? row.token_auth_method : "none";
-      const secretHash = typeof row.secret_hash === "string" && row.secret_hash ? row.secret_hash : null;
-      return {
-        client_id: str(row, "client_id"),
-        client_name: str(row, "client_name"),
-        redirect_uris: Array.isArray(uris) ? uris.filter((u): u is string => typeof u === "string") : [],
-        kind,
-        token_auth_method: tokenAuthMethod,
-        secret_hash: secretHash,
-        created_at: str(row, "created_at"),
-      };
+    async assistantClient(clientId) {
+      return toAssistantClient(db.prepare("SELECT * FROM assistant_clients WHERE client_id = ?").get(clientId));
     },
-    countAssistantClients(): number {
+    async countAssistantClients() {
       const row = db.prepare("SELECT count(*) AS n FROM assistant_clients").get();
       return isRecord(row) && typeof row.n === "number" ? row.n : 0;
     },
 
-    saveAssistantCode(codeHash: string, code: AssistantCodeRow, expiresAt: Date): void {
+    async saveAssistantCode(codeHash, code, expiresAt) {
       db.prepare("DELETE FROM assistant_codes WHERE expires_at < ?").run(now());
       db.prepare("INSERT INTO assistant_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, resource, scope, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(codeHash, code.client_id, code.user_id, code.redirect_uri, code.code_challenge, code.resource, code.scope, expiresAt.toISOString());
     },
-    /** A sign-in code, used up by reading it (a code works once). */
-    takeAssistantCode(codeHash: string): AssistantCodeRow | null {
+    async takeAssistantCode(codeHash) {
       const row = db.prepare("SELECT * FROM assistant_codes WHERE code_hash = ? AND expires_at > ?").get(codeHash, now());
       db.prepare("DELETE FROM assistant_codes WHERE code_hash = ?").run(codeHash);
       if (!isRecord(row)) return null;
       return { client_id: str(row, "client_id"), user_id: str(row, "user_id"), redirect_uri: str(row, "redirect_uri"), code_challenge: str(row, "code_challenge"), resource: str(row, "resource"), scope: str(row, "scope") };
     },
 
-    createAssistantGrant(input: { id: string; userId: string; clientId: string; clientName: string; resource: string; scope: string; accessHash: string; accessExpiresAt: Date; refreshHash: string; refreshExpiresAt: Date }): void {
+    async createAssistantGrant(input) {
       db.prepare(
         "INSERT INTO assistant_grants (id, user_id, client_id, client_name, resource, scope, access_hash, access_expires_at, refresh_hash, refresh_expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(input.id, input.userId, input.clientId, input.clientName, input.resource, input.scope, input.accessHash, input.accessExpiresAt.toISOString(), input.refreshHash, input.refreshExpiresAt.toISOString(), now());
     },
-    /** The grant an unexpired access token belongs to, and its person. */
-    assistantGrantByAccess(accessHash: string): { readonly grant: AssistantGrantRow; readonly user: UserRow } | null {
+    async assistantGrantByAccess(accessHash) {
       const row = db.prepare("SELECT * FROM assistant_grants WHERE access_hash = ? AND access_expires_at > ?").get(accessHash, now());
       const grant = toGrant(row);
       if (!grant) return null;
@@ -711,11 +844,7 @@ export function openDb(file: string) {
       db.prepare("UPDATE assistant_grants SET last_used_at = ? WHERE id = ?").run(now(), grant.id);
       return { grant, user };
     },
-    /**
-     * Swaps a refresh token for new tokens (rotation). Presenting the refresh
-     * token that was already swapped means it leaked: the grant is ended.
-     */
-    rotateAssistantRefresh(refreshHash: string, clientId: string, next: { accessHash: string; accessExpiresAt: Date; refreshHash: string; refreshExpiresAt: Date }): { readonly grant: AssistantGrantRow } | { readonly reused: true } | null {
+    async rotateAssistantRefresh(refreshHash, clientId, next) {
       const reused = toGrant(db.prepare("SELECT * FROM assistant_grants WHERE previous_refresh_hash = ?").get(refreshHash));
       if (reused) {
         db.prepare("DELETE FROM assistant_grants WHERE id = ?").run(reused.id);
@@ -733,37 +862,39 @@ export function openDb(file: string) {
       );
       return { grant };
     },
-    assistantGrantsOf: (userId: string): readonly AssistantGrantRow[] => db.prepare("SELECT * FROM assistant_grants WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toGrant(r) ?? []),
-    deleteAssistantGrant: (id: string, userId: string): void => void db.prepare("DELETE FROM assistant_grants WHERE id = ? AND user_id = ?").run(id, userId),
-    /** Ends the grant a token (access or refresh) belongs to; the grant's id, or null when the token was unknown. */
-    revokeAssistantToken(tokenHash: string): string | null {
+    async assistantGrantsOf(userId) {
+      return db.prepare("SELECT * FROM assistant_grants WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toGrant(r) ?? []);
+    },
+    async deleteAssistantGrant(id, userId) {
+      db.prepare("DELETE FROM assistant_grants WHERE id = ? AND user_id = ?").run(id, userId);
+    },
+    async revokeAssistantToken(tokenHash) {
       const grant = toGrant(db.prepare("SELECT * FROM assistant_grants WHERE access_hash = ? OR refresh_hash = ?").get(tokenHash, tokenHash));
       if (!grant) return null;
       db.prepare("DELETE FROM assistant_grants WHERE id = ?").run(grant.id);
       return grant.id;
     },
-    assistantGrantExists(id: string): boolean {
+    async assistantGrantExists(id) {
       return isRecord(db.prepare("SELECT 1 AS one FROM assistant_grants WHERE id = ?").get(id));
     },
 
-    saveAssistantApproval(row: AssistantApprovalRow): void {
+    async saveAssistantApproval(row) {
       db.prepare(
         "INSERT INTO assistant_approvals (id, user_id, client_name, model_id, model_name, summary, details, kind, key, state, outcome, landing, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET state = excluded.state, outcome = excluded.outcome, landing = excluded.landing",
       ).run(row.id, row.user_id, row.client_name, row.model_id, row.model_name, row.summary, JSON.stringify(row.details), row.kind, row.key, row.state, row.outcome, row.landing === null || row.landing === undefined ? null : JSON.stringify(row.landing), row.created_at);
     },
-    assistantApproval: (id: string): AssistantApprovalRow | null => toApproval(db.prepare("SELECT * FROM assistant_approvals WHERE id = ?").get(id)),
-    assistantApprovalsOf: (userId: string): readonly AssistantApprovalRow[] => db.prepare("SELECT * FROM assistant_approvals WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toApproval(r) ?? []),
-    /** Waiting requests older than `cutoff` become expired; rows older than `dropBefore` go. */
-    expireAssistantApprovals(cutoff: number, dropBefore: number, outcome: string): void {
+    async assistantApproval(id) {
+      return toApproval(db.prepare("SELECT * FROM assistant_approvals WHERE id = ?").get(id));
+    },
+    async assistantApprovalsOf(userId) {
+      return db.prepare("SELECT * FROM assistant_approvals WHERE user_id = ? ORDER BY created_at DESC").all(userId).flatMap((r) => toApproval(r) ?? []);
+    },
+    async expireAssistantApprovals(cutoff, dropBefore, outcome) {
       db.prepare("UPDATE assistant_approvals SET state = 'expired', outcome = ?, landing = NULL WHERE state = 'waiting' AND created_at < ?").run(outcome, cutoff);
       db.prepare("DELETE FROM assistant_approvals WHERE created_at < ?").run(dropBefore);
     },
 
-    /**
-     * A script an assistant sent, kept so later calls name it by id (and a preview lands by it), across restarts.
-     * `body` is the tool server's record, stored whole; a person's oldest go once they hold more than `keep`.
-     */
-    saveKeptScript(input: { id: string; userId: string; body: unknown; expiresAt: number; keep: number }): void {
+    async saveKeptScript(input) {
       const at = Date.now();
       db.prepare("DELETE FROM assistant_kept_scripts WHERE expires_at <= ?").run(at);
       db.prepare(
@@ -771,47 +902,57 @@ export function openDb(file: string) {
       ).run(input.id, input.userId, JSON.stringify(input.body), input.expiresAt, at);
       db.prepare("DELETE FROM assistant_kept_scripts WHERE user_id = ? AND id NOT IN (SELECT id FROM assistant_kept_scripts WHERE user_id = ? ORDER BY saved_at DESC, id LIMIT ?)").run(input.userId, input.userId, input.keep);
     },
-    /** The kept script's record, only for the person it was kept for and only before it expires. */
-    keptScript(id: string, userId: string): unknown {
+    async keptScript(id, userId) {
       const row = db.prepare("SELECT body FROM assistant_kept_scripts WHERE id = ? AND user_id = ? AND expires_at > ?").get(id, userId, Date.now());
-      return isRecord(row) ? parseJson(strOrNull(row, "body")) : null;
+      return isRecord(row) ? parseJsonValue(row.body) : null;
     },
 
-    saveAssistantSession(row: AssistantSessionRow): void {
+    async saveAssistantSession(row) {
       db.prepare(
         "INSERT INTO assistant_sessions (id, user_id, grant_id, family, families, run_id, init, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET families = excluded.families, last_seen_at = excluded.last_seen_at",
       ).run(row.id, row.user_id, row.grant_id, row.family, JSON.stringify(row.families), row.run_id, JSON.stringify(row.init), Date.now(), row.last_seen_at);
     },
-    assistantSession: (id: string): AssistantSessionRow | null => toAssistantSession(db.prepare("SELECT * FROM assistant_sessions WHERE id = ?").get(id)),
-    touchAssistantSession: (id: string, at: number): void => void db.prepare("UPDATE assistant_sessions SET last_seen_at = ? WHERE id = ?").run(at, id),
-    deleteAssistantSession: (id: string): void => void db.prepare("DELETE FROM assistant_sessions WHERE id = ?").run(id),
-    deleteAssistantSessionsBefore: (cutoff: number): void => void db.prepare("DELETE FROM assistant_sessions WHERE last_seen_at < ?").run(cutoff),
-    /** Keeps a person's `keep` most recent sessions. */
-    trimAssistantSessions: (userId: string, keep: number): void =>
-      void db.prepare("DELETE FROM assistant_sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM assistant_sessions WHERE user_id = ? ORDER BY last_seen_at DESC LIMIT ?)").run(userId, userId, keep),
+    async assistantSession(id) {
+      return toAssistantSession(db.prepare("SELECT * FROM assistant_sessions WHERE id = ?").get(id));
+    },
+    async touchAssistantSession(id, at) {
+      db.prepare("UPDATE assistant_sessions SET last_seen_at = ? WHERE id = ?").run(at, id);
+    },
+    async deleteAssistantSession(id) {
+      db.prepare("DELETE FROM assistant_sessions WHERE id = ?").run(id);
+    },
+    async deleteAssistantSessionsBefore(cutoff) {
+      db.prepare("DELETE FROM assistant_sessions WHERE last_seen_at < ?").run(cutoff);
+    },
+    async trimAssistantSessions(userId, keep) {
+      db.prepare("DELETE FROM assistant_sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM assistant_sessions WHERE user_id = ? ORDER BY last_seen_at DESC LIMIT ?)").run(userId, userId, keep);
+    },
 
-    linkedGrant: (userId: string, provider: string): LinkedGrantRow | null => toLinkedGrant(db.prepare("SELECT * FROM linked_grants WHERE user_id = ? AND provider = ?").get(userId, provider)),
-    saveLinkedGrant(input: { userId: string; provider: string; clientId: string; accessCipher: string; refreshCipher: string; accessExpiresAt: Date; refreshExpiresAt: Date }): void {
+    async linkedGrant(userId, provider) {
+      return toLinkedGrant(db.prepare("SELECT * FROM linked_grants WHERE user_id = ? AND provider = ?").get(userId, provider));
+    },
+    async saveLinkedGrant(input) {
       const at = now();
       db.prepare(
         "INSERT INTO linked_grants (user_id, provider, client_id, access_cipher, refresh_cipher, access_expires_at, refresh_expires_at, state, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', NULL, ?, ?) " +
           "ON CONFLICT (user_id, provider) DO UPDATE SET client_id = excluded.client_id, access_cipher = excluded.access_cipher, refresh_cipher = excluded.refresh_cipher, access_expires_at = excluded.access_expires_at, refresh_expires_at = excluded.refresh_expires_at, state = 'ok', last_error = NULL, updated_at = excluded.updated_at",
       ).run(input.userId, input.provider, input.clientId, input.accessCipher, input.refreshCipher, input.accessExpiresAt.toISOString(), input.refreshExpiresAt.toISOString(), at, at);
     },
-    /** The host refused the pass: keep the row (so the page says "reconnect"), drop the ciphertext. */
-    markLinkedReconnect(userId: string, provider: string, error: string): void {
+    async markLinkedReconnect(userId, provider, error) {
       db.prepare("UPDATE linked_grants SET state = 'reconnect', access_cipher = '', refresh_cipher = '', last_error = ?, updated_at = ? WHERE user_id = ? AND provider = ?").run(error.slice(0, 300), now(), userId, provider);
       db.prepare("DELETE FROM linked_models WHERE user_id = ? AND provider = ?").run(userId, provider);
     },
-    deleteLinkedGrant(userId: string, provider: string): void {
+    async deleteLinkedGrant(userId, provider) {
       db.prepare("DELETE FROM linked_grants WHERE user_id = ? AND provider = ?").run(userId, provider);
       db.prepare("DELETE FROM linked_models WHERE user_id = ? AND provider = ?").run(userId, provider);
     },
-    linkedModelsOf: (userId: string, provider: string): readonly LinkedModelRow[] =>
-      db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND provider = ? ORDER BY label").all(userId, provider).flatMap((r) => toLinkedModel(r) ?? []),
-    linkedModelByAlias: (userId: string, aliasId: string): LinkedModelRow | null => toLinkedModel(db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND alias_id = ?").get(userId, aliasId)),
-    /** The host's list as it is now: known models keep their alias, new ones get one, the rest go. */
-    replaceLinkedModels(userId: string, provider: string, rows: readonly { remoteModelId: string; remoteProjectId: string; label: string; canEdit: boolean; openUrl: string | null }[], newAlias: () => string): readonly LinkedModelRow[] {
+    async linkedModelsOf(userId, provider) {
+      return db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND provider = ? ORDER BY label").all(userId, provider).flatMap((r) => toLinkedModel(r) ?? []);
+    },
+    async linkedModelByAlias(userId, aliasId) {
+      return toLinkedModel(db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND alias_id = ?").get(userId, aliasId));
+    },
+    async replaceLinkedModels(userId, provider, rows, newAlias) {
       const at = now();
       db.exec("BEGIN");
       try {
@@ -833,16 +974,18 @@ export function openDb(file: string) {
       }
       return db.prepare("SELECT * FROM linked_models WHERE user_id = ? AND provider = ? ORDER BY label").all(userId, provider).flatMap((r) => toLinkedModel(r) ?? []);
     },
-    linkedOfferAnswered(userId: string, provider: string): boolean {
+    async linkedOfferAnswered(userId, provider) {
       return isRecord(db.prepare("SELECT 1 AS one FROM linked_offers WHERE user_id = ? AND provider = ?").get(userId, provider));
     },
-    answerLinkedOffer: (userId: string, provider: string): void => void db.prepare("INSERT OR REPLACE INTO linked_offers (user_id, provider, answered_at) VALUES (?, ?, ?)").run(userId, provider, now()),
+    async answerLinkedOffer(userId, provider) {
+      db.prepare("INSERT OR REPLACE INTO linked_offers (user_id, provider, answered_at) VALUES (?, ?, ?)").run(userId, provider, now());
+    },
 
-    saveOAuthState(input: { state: string; provider: string; codeVerifier: string; returnTo: string }): void {
+    async saveOAuthState(input) {
       db.prepare("DELETE FROM oauth_states WHERE created_at < ?").run(new Date(Date.now() - 15 * 60_000).toISOString());
       db.prepare("INSERT INTO oauth_states (state, provider, code_verifier, return_to, created_at) VALUES (?, ?, ?, ?, ?)").run(input.state, input.provider, input.codeVerifier, input.returnTo, now());
     },
-    takeOAuthState(state: string): OAuthStateRow | null {
+    async takeOAuthState(state) {
       const row = db.prepare("SELECT * FROM oauth_states WHERE state = ? AND created_at > ?").get(state, new Date(Date.now() - 15 * 60_000).toISOString());
       db.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
       if (!isRecord(row)) return null;

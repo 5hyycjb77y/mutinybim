@@ -126,6 +126,8 @@ export class ApprovalBook {
   private readonly waiters = new Map<string, (answer: "approved" | "declined") => void>();
   /** Requests the person approved while the assistant's call was still waiting: that call is applying them now. */
   private readonly applying = new Set<string>();
+  /** Last loaded waiting approvals per person, for synchronous header rendering. */
+  private readonly waitingCache = new Map<string, readonly WaitingApproval[]>();
   private lander: Lander | null = null;
 
   constructor(private readonly db: Db) {}
@@ -145,47 +147,57 @@ export class ApprovalBook {
     for (const listener of this.listeners) listener(userId);
   }
 
-  private prune(): void {
+  private async prune(): Promise<void> {
     const cutoff = Date.now() - APPROVAL_KEEP_MS;
-    this.db.expireAssistantApprovals(cutoff, cutoff - APPROVAL_KEEP_MS, EXPIRED_WORDS);
+    await this.db.expireAssistantApprovals(cutoff, cutoff - APPROVAL_KEEP_MS, EXPIRED_WORDS);
   }
 
-  private save(item: PendingApproval): PendingApproval {
-    this.db.saveAssistantApproval(toRow(item));
+  private async save(item: PendingApproval): Promise<PendingApproval> {
+    await this.db.saveAssistantApproval(toRow(item));
     return item;
   }
 
-  create(input: Pick<PendingApproval, "userId" | "clientName" | "modelId" | "modelName" | "summary" | "details" | "kind" | "key"> & { readonly landing?: unknown }): PendingApproval {
-    this.prune();
-    const item = this.save({ ...input, id: randomUUID(), createdAt: Date.now(), state: "waiting", outcome: null, landing: input.landing ?? null });
+  async create(input: Pick<PendingApproval, "userId" | "clientName" | "modelId" | "modelName" | "summary" | "details" | "kind" | "key"> & { readonly landing?: unknown }): Promise<PendingApproval> {
+    await this.prune();
+    const item = await this.save({ ...input, id: randomUUID(), createdAt: Date.now(), state: "waiting", outcome: null, landing: input.landing ?? null });
+    await this.waiting(item.userId);
     this.changed(item.userId);
     return item;
   }
 
   /** What lands if the person approves after the call returned. */
-  setLanding(item: PendingApproval, landing: unknown): PendingApproval {
-    const now = this.get(item.userId, item.id);
+  async setLanding(item: PendingApproval, landing: unknown): Promise<PendingApproval> {
+    const now = await this.get(item.userId, item.id);
     if (!now || now.state !== "waiting") return now ?? item;
     return this.save({ ...now, landing });
   }
 
   /** Newest first; only this person's. */
-  of(userId: string): readonly PendingApproval[] {
-    this.prune();
-    return this.db.assistantApprovalsOf(userId).map(toItem);
+  async of(userId: string): Promise<readonly PendingApproval[]> {
+    await this.prune();
+    const items = (await this.db.assistantApprovalsOf(userId)).map(toItem);
+    this.waitingCache.set(userId, items.filter((i) => i.state === "waiting").map(toWaiting).reverse());
+    return items;
   }
 
   /** What is waiting for this person's answer, oldest first. */
-  waiting(userId: string): readonly WaitingApproval[] {
-    return this.of(userId)
+  async waiting(userId: string): Promise<readonly WaitingApproval[]> {
+    const items = (await this.of(userId))
       .filter((i) => i.state === "waiting")
       .map(toWaiting)
       .reverse();
+    this.waitingCache.set(userId, items);
+    return items;
   }
 
-  get(userId: string, id: string): PendingApproval | null {
-    this.prune();
-    const row = this.db.assistantApproval(id);
+  /** Snapshot of waiting approvals loaded for this request (used by synchronous page framing). */
+  cachedWaiting(userId: string): readonly WaitingApproval[] {
+    return this.waitingCache.get(userId) ?? [];
+  }
+
+  async get(userId: string, id: string): Promise<PendingApproval | null> {
+    await this.prune();
+    const row = await this.db.assistantApproval(id);
     return row && row.user_id === userId ? toItem(row) : null;
   }
 
@@ -207,31 +219,32 @@ export class ApprovalBook {
 
   /** The person's answer from the page. Returns the item (with its outcome) or null when it isn't theirs. */
   async answer(userId: string, id: string, approve: boolean): Promise<PendingApproval | null> {
-    const item = this.get(userId, id);
+    const item = await this.get(userId, id);
     if (!item) return null;
     if (item.state !== "waiting") return item;
     const waiter = this.waiters.get(id);
     let next: PendingApproval;
     if (!approve) {
-      next = this.save({ ...item, state: "declined", outcome: "You declined it. Nothing changed.", landing: null });
+      next = await this.save({ ...item, state: "declined", outcome: "You declined it. Nothing changed.", landing: null });
       waiter?.("declined");
     } else if (waiter) {
-      next = this.save({ ...item, state: "approved", outcome: "Approved. Your assistant is applying it now.", landing: null });
+      next = await this.save({ ...item, state: "approved", outcome: "Approved. Your assistant is applying it now.", landing: null });
       this.applying.add(id);
       waiter("approved");
     } else if (item.landing !== null && this.lander) {
       // Marked first, so a second press while it lands doesn't land it twice.
-      this.save({ ...item, state: "approved", outcome: "Approved. Applying it now." });
+      await this.save({ ...item, state: "approved", outcome: "Approved. Applying it now." });
       try {
         const ended = await this.lander(item);
-        next = this.save({ ...item, state: ended.applied ? "landed" : "failed", outcome: ended.words, landing: null });
+        next = await this.save({ ...item, state: ended.applied ? "landed" : "failed", outcome: ended.words, landing: null });
       } catch (err) {
         console.error("[mutinybim-web] an approved change couldn't be applied", { id, err });
-        next = this.save({ ...item, state: "failed", outcome: `Approved, but it couldn't be applied: ${err instanceof Error ? err.message : String(err)}. Nothing changed; ask your assistant again.`, landing: null });
+        next = await this.save({ ...item, state: "failed", outcome: `Approved, but it couldn't be applied: ${err instanceof Error ? err.message : String(err)}. Nothing changed; ask your assistant again.`, landing: null });
       }
     } else {
-      next = this.save({ ...item, state: "approved", outcome: "Approved. Tell your assistant to send it again; it lands then." });
+      next = await this.save({ ...item, state: "approved", outcome: "Approved. Tell your assistant to send it again; it lands then." });
     }
+    await this.waiting(userId);
     this.changed(userId);
     return next;
   }
@@ -241,20 +254,21 @@ export class ApprovalBook {
    * was still waiting: applied, or not (with why). Without this the page would
    * say "applying it now" for good.
    */
-  settle(userId: string, id: string, applied: boolean, outcome: string): void {
+  async settle(userId: string, id: string, applied: boolean, outcome: string): Promise<void> {
     if (!this.applying.delete(id)) return;
-    const item = this.get(userId, id);
+    const item = await this.get(userId, id);
     if (!item || item.state !== "approved") return;
-    this.save({ ...item, state: applied ? "landed" : "failed", outcome, landing: null });
+    await this.save({ ...item, state: applied ? "landed" : "failed", outcome, landing: null });
+    await this.waiting(userId);
     this.changed(userId);
   }
 
   /** A retry of a request the person already approved on the page: used once. */
-  takeApprovedRetry(userId: string, key: string): boolean {
-    for (const item of this.of(userId)) {
+  async takeApprovedRetry(userId: string, key: string): Promise<boolean> {
+    for (const item of await this.of(userId)) {
       // One the assistant's waiting call is applying right now is not a retry to take: it would land twice.
       if (item.kind === "retry" && item.key === key && item.state === "approved" && !this.applying.has(item.id)) {
-        this.save({ ...item, state: "landed", outcome: "Approved and sent again by your assistant." });
+        await this.save({ ...item, state: "landed", outcome: "Approved and sent again by your assistant." });
         this.changed(userId);
         return true;
       }
@@ -263,7 +277,7 @@ export class ApprovalBook {
   }
 
   /** A retry the person hasn't answered yet (so a second call doesn't add a second request). */
-  waitingRetry(userId: string, key: string): PendingApproval | null {
-    return this.of(userId).find((i) => i.kind === "retry" && i.key === key && i.state === "waiting") ?? null;
+  async waitingRetry(userId: string, key: string): Promise<PendingApproval | null> {
+    return (await this.of(userId)).find((i) => i.kind === "retry" && i.key === key && i.state === "waiting") ?? null;
   }
 }

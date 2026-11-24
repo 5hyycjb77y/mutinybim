@@ -265,8 +265,8 @@ test("right after the first sign-in: one extra Allow, then the host's projects u
   expect(models.indexOf("No models yet")).toBeLessThan(models.indexOf('data-testid="linked-example"'));
 
   // Only ciphertext is kept.
-  const user = app?.db.userByEmail("pat@example.com");
-  const grant = user ? app?.db.linkedGrant(user.id, "example") : null;
+  const user = await app?.db.userByEmail("pat@example.com");
+  const grant = user ? await app?.db.linkedGrant(user.id, "example") : null;
   expect(grant?.access_cipher.startsWith("lk1.")).toBe(true);
   expect(JSON.stringify(grant)).not.toContain("pass-access-1");
   expect(JSON.stringify(grant)).not.toContain("pass-refresh-1");
@@ -305,8 +305,8 @@ test("an assistant works on linked models through the host, in this app's ids; v
   await start();
   const cookie = await signInWithHost();
   await page("/models", cookie);
-  const user = app?.db.userByEmail("pat@example.com");
-  const rows = user ? (app?.db.linkedModelsOf(user.id, "example") ?? []) : [];
+  const user = await app?.db.userByEmail("pat@example.com");
+  const rows = user ? ((await app?.db.linkedModelsOf(user.id, "example")) ?? []) : [];
   const editable = rows.find((r) => r.can_edit)?.alias_id ?? "";
   const viewOnly = rows.find((r) => !r.can_edit)?.alias_id ?? "";
   expect(editable).toMatch(/^lk-/);
@@ -352,8 +352,8 @@ test("a change approved on the approvals page after the call returned lands on t
   await start();
   const cookie = await signInWithHost();
   await page("/models", cookie);
-  const user = app?.db.userByEmail("pat@example.com");
-  const editable = user ? (app?.db.linkedModelsOf(user.id, "example").find((r) => r.can_edit)?.alias_id ?? "") : "";
+  const user = await app?.db.userByEmail("pat@example.com");
+  const editable = user ? ((await app?.db.linkedModelsOf(user.id, "example"))?.find((r) => r.can_edit)?.alias_id ?? "") : "";
   const client = await assistant(cookie, null);
   const waiting = await client.callTool({ name: "bim_apply_output", arguments: { model_id: editable, ...APPLY } });
   const id = textOf(waiting).match(/approvals\/([0-9a-f-]{36})/)?.[1] ?? "";
@@ -371,8 +371,8 @@ test("turning it off hands the pass back and takes the models away from the page
   await start();
   const cookie = await signInWithHost();
   await page("/models", cookie);
-  const user = app?.db.userByEmail("pat@example.com");
-  const alias = user ? (app?.db.linkedModelsOf(user.id, "example")[0]?.alias_id ?? "") : "";
+  const user = await app?.db.userByEmail("pat@example.com");
+  const alias = user ? ((await app?.db.linkedModelsOf(user.id, "example"))?.[0]?.alias_id ?? "") : "";
   const settings = await page("/settings", cookie);
   expect(settings).toContain("Show Example projects:");
   const off = await post("/settings/linked/example/off", {}, cookie);

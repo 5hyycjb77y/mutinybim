@@ -30,23 +30,59 @@ function PageTitle({ children, lede }: { children: ReactNode; lede?: ReactNode }
   );
 }
 
-function ProviderButtons({ providers, returnTo }: { providers: readonly OAuthProviderConfig[]; returnTo: string }) {
-  if (providers.length === 0) return null;
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor">
+      <path d="M21.35 11.1h-9.18v2.98h5.27c-.23 1.24-.92 2.29-1.97 2.99v2.48h3.19c1.86-1.72 2.94-4.25 2.94-7.24 0-.42-.04-.83-.11-1.21h-.14Z" />
+      <path d="M12.17 22c2.66 0 4.89-.88 6.52-2.38l-3.19-2.48c-.88.59-2.01.94-3.33.94-2.56 0-4.73-1.73-5.51-4.05H3.37v2.55A9.83 9.83 0 0 0 12.17 22Z" />
+      <path d="M6.66 14.03a5.9 5.9 0 0 1 0-3.79V7.69H3.37a9.83 9.83 0 0 0 0 8.89l3.29-2.55Z" />
+      <path d="M12.17 5.92c1.45 0 2.74.5 3.76 1.48l2.82-2.82C17.05 2.99 14.82 2 12.17 2a9.83 9.83 0 0 0-8.8 5.69l3.29 2.55c.78-2.32 2.95-4.05 5.51-4.32Z" />
+    </svg>
+  );
+}
+
+function GoogleAuthButton({ config, returnTo }: { config: WebConfig; returnTo: string }) {
+  if (!config.supabase?.google) return null;
   return (
     <>
-      <div className="flex flex-col gap-2">
-        {providers.map((p) => (
-          <Button key={p.id} asChild size="lg" variant="outline" className="w-full">
-            <a href={`/auth/${p.id}/start?return_to=${encodeURIComponent(returnTo)}`}>{p.label}</a>
-          </Button>
-        ))}
-      </div>
+      <Button asChild size="lg" variant="outline" className="w-full">
+        <a href={`/auth/supabase/google/start?return_to=${encodeURIComponent(returnTo)}`}>
+          <GoogleMark />
+          Continue with Google
+        </a>
+      </Button>
       <div className="flex items-center gap-3 text-xs text-(--mutiny-muted)">
         <Separator className="flex-1" />
         or with email
         <Separator className="flex-1" />
       </div>
     </>
+  );
+}
+
+function OrgProviderButtons({ providers, returnTo, mode }: { providers: readonly OAuthProviderConfig[]; returnTo: string; mode: "login" | "signup" }) {
+  if (providers.length === 0) return null;
+  const heading = mode === "signup" ? "Already have an organization account?" : "or with an organization";
+  const hint =
+    mode === "signup"
+      ? "Only for existing accounts on that platform — use the form above to create a free MutinyBIM account."
+      : "For existing organization accounts only (not for new public sign-ups).";
+  return (
+    <div className="flex flex-col gap-2 pt-1">
+      <div className="flex items-center gap-3 text-xs text-(--mutiny-muted)">
+        <Separator className="flex-1" />
+        {heading}
+        <Separator className="flex-1" />
+      </div>
+      <p className="text-xs text-(--mutiny-muted)">{hint}</p>
+      <div className="flex flex-col gap-2">
+        {providers.map((p) => (
+          <Button key={p.id} asChild size="default" variant="outline" className="w-full">
+            <a href={`/auth/${p.id}/start?return_to=${encodeURIComponent(returnTo)}`}>{p.label}</a>
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -114,7 +150,7 @@ export function loginPage(config: WebConfig, options: { email?: string; returnTo
         <CardDescription>Open your models and the ones shared with you.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ProviderButtons providers={config.providers} returnTo={options.returnTo} />
+        <GoogleAuthButton config={config} returnTo={options.returnTo} />
         <form method="post" action="/login" className="flex flex-col gap-3">
           <input type="hidden" name="return_to" value={options.returnTo} />
           <TextField label="Email" name="email" type="email" autoComplete="email" required defaultValue={options.email ?? ""} />
@@ -123,6 +159,7 @@ export function loginPage(config: WebConfig, options: { email?: string; returnTo
             Log in
           </Button>
         </form>
+        <OrgProviderButtons providers={config.providers} returnTo={options.returnTo} mode="login" />
       </CardContent>
       <CardFooter className="justify-between text-sm text-(--mutiny-muted)">
         <a href="/forgot">Forgot your password?</a>
@@ -157,7 +194,7 @@ export function signupPage(config: WebConfig, options: { email?: string; name?: 
         <CardDescription>Free models, shared with whoever you choose.</CardDescription>
       </CardHeader>
       <CardContent>
-        <ProviderButtons providers={config.providers} returnTo="/models" />
+        <GoogleAuthButton config={config} returnTo="/models" />
         <form method="post" action="/signup" className="flex flex-col gap-3">
           <TextField label="Your name" hint="People editing with you see it." name="name" autoComplete="name" required maxLength={80} defaultValue={options.name ?? ""} />
           <TextField label="Email" name="email" type="email" autoComplete="email" required defaultValue={options.email ?? ""} />
@@ -172,6 +209,7 @@ export function signupPage(config: WebConfig, options: { email?: string; name?: 
             Create account
           </Button>
         </form>
+        <OrgProviderButtons providers={config.providers} returnTo="/models" mode="signup" />
       </CardContent>
       <CardFooter className="text-sm text-(--mutiny-muted)">
         Already have one?&nbsp;<a href="/login">Log in</a>
@@ -228,8 +266,37 @@ export function privacyPage(): string {
   ]);
 }
 
-/** No email is sent by this app, so recovery is a linked sign-in or a reset link from whoever runs the server. */
-export function forgotPage(config: WebConfig): string {
+/** Password recovery: sends a reset email when Supabase Auth is enabled, otherwise explains local recovery. */
+export function forgotPage(config: WebConfig, options: { email?: string; flash?: Flash } = {}): string {
+  if (config.supabase) {
+    return page(
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">Reset your password</CardTitle>
+          <CardDescription>Enter the email address on your account and we'll send a one-time reset link.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form method="post" action="/forgot" className="flex flex-col gap-3">
+            <TextField label="Email" name="email" type="email" autoComplete="email" required defaultValue={options.email ?? ""} />
+            <Button type="submit" size="lg">
+              Send reset link
+            </Button>
+          </form>
+          {config.supabase.google ? (
+            <p className="text-xs text-(--mutiny-muted)">
+              Signed up with Google? You don't need a password — use <strong>Continue with Google</strong> on the log-in page.
+            </p>
+          ) : null}
+        </CardContent>
+        <CardFooter>
+          <Button asChild variant="ghost">
+            <a href="/login">Back to log in</a>
+          </Button>
+        </CardFooter>
+      </Card>,
+      { title: "Forgot your password", user: null, quote: null, flash: options.flash ?? null, narrow: true },
+    );
+  }
   return page(
     <Card>
       <CardHeader>
@@ -259,7 +326,27 @@ export function forgotPage(config: WebConfig): string {
         </Button>
       </CardFooter>
     </Card>,
-    { title: "Forgot your password", user: null, quote: null, narrow: true },
+    { title: "Forgot your password", user: null, quote: null, flash: options.flash ?? null, narrow: true },
+  );
+}
+
+export function supabaseResetPage(options: { email: string; flash?: Flash }): string {
+  return page(
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-2xl">Set a new password</CardTitle>
+        <CardDescription>For {options.email}. You are signed out everywhere else once it is saved.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form method="post" action="/reset-password" className="flex flex-col gap-3">
+          <TextField label="New password" hint="At least 8 characters." name="password" type="password" autoComplete="new-password" required minLength={8} />
+          <Button type="submit" size="lg">
+            Save and log in
+          </Button>
+        </form>
+      </CardContent>
+    </Card>,
+    { title: "Reset your password", user: null, quote: null, flash: options.flash ?? null, narrow: true },
   );
 }
 
@@ -355,6 +442,8 @@ export interface LinkedModelsView {
   readonly sections: readonly LinkedView[];
   /** A provider is a linked host but the server has no link key (shown to people who use that provider). */
   readonly keyMissing: readonly OAuthProviderConfig[];
+  /** Organization providers whose configured email domain matches the signed-in user and are not yet linked or dismissed. */
+  readonly linkPrompts?: readonly OAuthProviderConfig[];
 }
 
 function LinkedRow({ row, host }: { row: LinkedModelRow; host: string }) {
@@ -427,6 +516,32 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
   return page(
     <>
       <PageTitle>My models</PageTitle>
+      {(linked.linkPrompts ?? []).map((p) => {
+        const host = providerName(p);
+        const domain = user.email.split("@")[1] ?? "";
+        return (
+          <Card key={p.id} data-testid={`link-prompt-${p.id}`}>
+            <CardContent className="flex flex-wrap items-center gap-3 pt-4">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">Link your {host} account?</p>
+                <p className="text-sm text-(--mutiny-muted)">
+                  You signed in with an <code>@{domain}</code> email. Link {host} to log in either way{p.models ? ` and reach your ${p.models.label} here` : ""}.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button asChild size="sm">
+                  <a href={`/auth/${p.id}/start?link=1&return_to=%2Fmodels`}>Link {host}</a>
+                </Button>
+                <form method="post" action={`/auth/${p.id}/link-prompt/dismiss`}>
+                  <Button type="submit" size="sm" variant="ghost">
+                    Not now
+                  </Button>
+                </form>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
       <Card>
         <CardHeader>
           <CardTitle>Yours</CardTitle>
@@ -644,12 +759,18 @@ export function settingsPage(config: WebConfig, user: UserRow, linked: readonly 
             Save name
           </Button>
         </form>
-        {config.providers.length > 0 ? (
+        {config.providers.length > 0 || linked.includes("google") ? (
           <>
             <Separator />
             <div className="flex flex-col gap-2">
               <h3 className="text-sm">Ways to log in</h3>
               <ul className="flex flex-col gap-2">
+                {linked.includes("google") ? (
+                  <li className="flex flex-wrap items-center gap-2 text-sm">
+                    <strong>Google</strong>
+                    <Badge>Linked</Badge>
+                  </li>
+                ) : null}
                 {config.providers.map((p) => {
                   const switchFor = linked.includes(p.id) ? options.linkedModels?.find((m) => m.provider.id === p.id) : undefined;
                   return (
@@ -679,15 +800,21 @@ export function settingsPage(config: WebConfig, user: UserRow, linked: readonly 
       <Card id="password">
         <CardHeader>
           <CardTitle>Password</CardTitle>
-          <CardDescription>{user.password_hash ? "Changing it signs you out on every other device." : "You sign in through a linked account. Set a password to also log in with your email."}</CardDescription>
+          <CardDescription>
+            {config.supabase
+              ? "Changing it signs you out on every other device. Signed up with Google? Use Forgot your password to set an email password."
+              : user.password_hash
+                ? "Changing it signs you out on every other device."
+                : "You sign in through a linked account. Set a password to also log in with your email."}
+          </CardDescription>
         </CardHeader>
         <form method="post" action="/settings/password" className="flex flex-col gap-3">
-          {user.password_hash && !options.passwordFree ? <TextField label="Current password" name="current" type="password" autoComplete="current-password" required /> : null}
-          {user.password_hash && options.passwordFree ? <FieldHint>You just logged in with a linked account, so no current password is needed for the next few minutes.</FieldHint> : null}
+          {(config.supabase || user.password_hash) && !options.passwordFree ? <TextField label="Current password" name="current" type="password" autoComplete="current-password" required /> : null}
+          {!config.supabase && user.password_hash && options.passwordFree ? <FieldHint>You just logged in with a linked account, so no current password is needed for the next few minutes.</FieldHint> : null}
           <TextField label="New password" hint="At least 8 characters." name="password" type="password" autoComplete="new-password" required minLength={8} />
           <div>
             <Button type="submit" variant="outline" size="lg">
-              {user.password_hash ? "Change password" : "Set password"}
+              {config.supabase || user.password_hash ? "Change password" : "Set password"}
             </Button>
           </div>
         </form>

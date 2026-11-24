@@ -98,7 +98,7 @@ export async function discover(provider: OAuthProviderConfig, fetchImpl: Fetch =
 /** The client id to use: the configured one, the one this app registered before, or a new registration. */
 export async function clientIdFor(provider: OAuthProviderConfig, metadata: ProviderMetadata, redirectUri: string, db: Db, fetchImpl: Fetch = fetch, options: { readonly fresh?: boolean } = {}): Promise<string> {
   if (provider.clientId) return provider.clientId;
-  const known = options.fresh ? null : db.oauthClient(provider.id, redirectUri);
+  const known = options.fresh ? null : await db.oauthClient(provider.id, redirectUri);
   if (known && Date.now() - Date.parse(known.registered_at) < 7 * 24 * 3600_000) return known.client_id;
   if (!metadata.registration_endpoint) throw new SignInError(`${provider.label} sign-in needs a client id for this app, and none is set.`, "no registration endpoint");
   let response: Response;
@@ -125,7 +125,7 @@ export async function clientIdFor(provider: OAuthProviderConfig, metadata: Provi
   }
   const body = await readJson(response, "registration");
   if (typeof body.client_id !== "string" || body.client_id.length === 0) throw new SignInError(`${provider.label} sign-in answered without a client id.`);
-  db.saveOAuthClient(provider.id, redirectUri, body.client_id);
+  await db.saveOAuthClient(provider.id, redirectUri, body.client_id);
   return body.client_id;
 }
 
@@ -136,7 +136,7 @@ export async function startSignIn(input: { provider: OAuthProviderConfig; redire
   const clientId = await clientIdFor(input.provider, metadata, input.redirectUri, input.db, fetchImpl);
   const { verifier, challenge } = pkcePair();
   const state = randomToken();
-  input.db.saveOAuthState({ state, provider: input.provider.id, codeVerifier: verifier, returnTo: input.returnTo });
+  await input.db.saveOAuthState({ state, provider: input.provider.id, codeVerifier: verifier, returnTo: input.returnTo });
   const target = new URL(metadata.authorization_endpoint);
   target.searchParams.set("response_type", "code");
   target.searchParams.set("client_id", clientId);
@@ -166,7 +166,7 @@ export async function finishSignIn(input: { provider: OAuthProviderConfig; redir
   }
   if (!tokenResponse.ok) {
     console.error("[mutinybim-web oauth] code exchange refused", { provider: input.provider.id, status: tokenResponse.status });
-    if (tokenResponse.status === 401) input.db.forgetOAuthClient(input.provider.id, input.redirectUri);
+    if (tokenResponse.status === 401) await input.db.forgetOAuthClient(input.provider.id, input.redirectUri);
     throw new SignInError(`${input.provider.label} didn't accept this sign-in (it may have taken too long). Try again.`);
   }
   const tokenBody = await readJson(tokenResponse, "token");

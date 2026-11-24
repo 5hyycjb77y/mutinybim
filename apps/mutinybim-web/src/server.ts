@@ -30,7 +30,10 @@ app
   .then(() => {
     console.log(`[mutinybim-web] MutinyBIM at ${config.origin} (listening on ${config.host}:${config.port})`, {
       data: config.dataDir,
-      signIn: ["email", ...config.providers.map((p) => p.id)],
+      store: config.supabase?.secretKey ? "supabase-postgres" : "sqlite",
+      auth: config.supabase ? (config.supabase.google ? ["supabase-email", "google"] : ["supabase-email"]) : ["email"],
+      providers: config.providers.map((p) => p.id),
+      trustProxy: Boolean(config.trustProxy),
       quote: config.quote ? config.quote.provider : "off",
       signup: config.signupOpen ? "open" : "closed",
       scripts: config.scripts?.mode ?? "sealed",

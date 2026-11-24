@@ -121,7 +121,7 @@ export interface LinkedHosts {
   /** Turns it off: hands the pass back to the host and forgets it and the list. */
   unlink(user: UserRow, provider: LinkedProvider): Promise<void>;
   /** The linked model an alias names for this person, or null. */
-  byAlias(userId: string, modelId: string): LinkedModelRow | null;
+  byAlias(userId: string, modelId: string): Promise<LinkedModelRow | null>;
   /** One line for an assistant's instructions: the linked models, or why there are none. */
   assistantLine(user: UserRow): Promise<string>;
   /** Sends one tool call to the host's tool server, with the host's ids, and brings the answer back in this app's ids. */
@@ -200,9 +200,9 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
   /** The provider as a client registration for the pass: its own callback, its own scope. */
   const passClient = (provider: LinkedProvider): OAuthProviderConfig => ({ ...provider, scope: provider.models.scope });
 
-  function keep(user: UserRow, provider: LinkedProvider, clientId: string, pass: Pass): void {
+  async function keep(user: UserRow, provider: LinkedProvider, clientId: string, pass: Pass): Promise<void> {
     if (!keys) throw new Error("linked hosts are off on this server");
-    db.saveLinkedGrant({
+    await db.saveLinkedGrant({
       userId: user.id,
       provider: provider.id,
       clientId,
@@ -213,8 +213,8 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
     });
   }
 
-  function reconnect(user: UserRow, provider: LinkedProvider, why: string): HostAnswer {
-    db.markLinkedReconnect(user.id, provider.id, why);
+  async function reconnect(user: UserRow, provider: LinkedProvider, why: string): Promise<HostAnswer> {
+    await db.markLinkedReconnect(user.id, provider.id, why);
     cache.delete(cacheKey(user.id, provider.id));
     console.warn("[mutinybim-web linked] a linked host refused the pass; the person must reconnect", { provider: provider.id, userId: user.id, why });
     return new HostAnswer("reconnect", `${hostName(provider)} needs you to reconnect.`, why);
@@ -223,14 +223,14 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
   /** A pass good for another minute: the stored one, or a refreshed one (one refresh at a time per person and host). */
   async function accessFor(user: UserRow, provider: LinkedProvider, force = false): Promise<string> {
     if (!keys) throw new HostAnswer("down", "Linked projects are off on this server.");
-    const grant = db.linkedGrant(user.id, provider.id);
+    const grant = await db.linkedGrant(user.id, provider.id);
     if (!grant) throw new HostAnswer("reconnect", `Connect ${hostName(provider)} to see these projects.`);
     if (grant.state === "reconnect") throw new HostAnswer("reconnect", `${hostName(provider)} needs you to reconnect.`);
     const access = openWith(keys, grant.access_cipher);
     const refresh = openWith(keys, grant.refresh_cipher);
-    if (!access || !refresh) throw reconnect(user, provider, "the stored pass couldn't be opened with this server's key");
+    if (!access || !refresh) throw await reconnect(user, provider, "the stored pass couldn't be opened with this server's key");
     if (!force && Date.parse(grant.access_expires_at) - Date.now() > ACCESS_SKEW_MS) {
-      if (access.stale || refresh.stale) keep(user, provider, grant.client_id, { access: access.plain, refresh: refresh.plain, accessExpiresAt: Date.parse(grant.access_expires_at), refreshExpiresAt: Date.parse(grant.refresh_expires_at) });
+      if (access.stale || refresh.stale) await keep(user, provider, grant.client_id, { access: access.plain, refresh: refresh.plain, accessExpiresAt: Date.parse(grant.access_expires_at), refreshExpiresAt: Date.parse(grant.refresh_expires_at) });
       return access.plain;
     }
     const key = cacheKey(user.id, provider.id);
@@ -250,13 +250,13 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
         throw new HostAnswer("down", `${hostName(provider)} can't be reached right now.`);
       }
       const body = await readJsonBody(response);
-      if (response.status === 400 || response.status === 401) throw reconnect(user, provider, typeof body.error_description === "string" ? body.error_description : `refresh ${response.status}`);
+      if (response.status === 400 || response.status === 401) throw await reconnect(user, provider, typeof body.error_description === "string" ? body.error_description : `refresh ${response.status}`);
       const pass = response.ok ? passFromTokens(body) : null;
       if (!pass) {
         console.error("[mutinybim-web linked] refreshing a pass failed", { provider: provider.id, status: response.status });
         throw new HostAnswer("down", `${hostName(provider)} isn't answering right now.`);
       }
-      keep(user, provider, grant.client_id, pass);
+      await keep(user, provider, grant.client_id, pass);
       return pass.access;
     })();
     refreshing.set(key, work);
@@ -293,7 +293,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
     }
     const body = await readJsonBody(response);
     const subject = typeof body.subject === "string" ? body.subject : null;
-    const linkedAs = db.identitySubject(user.id, provider.id);
+    const linkedAs = await db.identitySubject(user.id, provider.id);
     if (subject && linkedAs && subject !== linkedAs) {
       await unlinkQuietly(user, provider);
       throw new HostAnswer("reconnect", `That ${hostName(provider)} sign-in isn't the one linked to this account. Connect again with the same ${hostName(provider)} account.`);
@@ -307,7 +307,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
   }
 
   async function unlinkQuietly(user: UserRow, provider: LinkedProvider): Promise<void> {
-    const grant = db.linkedGrant(user.id, provider.id);
+    const grant = await db.linkedGrant(user.id, provider.id);
     if (grant && keys && provider.models.revoke) {
       for (const sealed of [grant.refresh_cipher, grant.access_cipher]) {
         const token = sealed ? openWith(keys, sealed) : null;
@@ -320,7 +320,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
         }
       }
     }
-    db.deleteLinkedGrant(user.id, provider.id);
+    await db.deleteLinkedGrant(user.id, provider.id);
     cache.delete(cacheKey(user.id, provider.id));
   }
 
@@ -328,13 +328,13 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
     const key = cacheKey(user.id, provider.id);
     const cached = cache.get(key);
     if (!viewOptions.fresh && cached && Date.now() - cached.at < LIST_CACHE_MS) return cached.view;
-    const grant = db.linkedGrant(user.id, provider.id);
+    const grant = await db.linkedGrant(user.id, provider.id);
     if (!grant) return { provider, state: "not_linked", rows: [] };
     if (grant.state === "reconnect") return { provider, state: "reconnect", rows: [] };
     try {
       let rows = await fetchList(user, provider, await accessFor(user, provider));
       if (rows === "unauthorized") rows = await fetchList(user, provider, await accessFor(user, provider, true));
-      if (rows === "unauthorized") throw reconnect(user, provider, "the host refused the pass");
+      if (rows === "unauthorized") throw await reconnect(user, provider, "the host refused the pass");
       const answer: LinkedView = { provider, state: "ok", rows };
       cache.set(key, { at: Date.now(), view: answer });
       return answer;
@@ -355,7 +355,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
       const clientId = await clientIdFor(passClient(provider), metadata, redirectUri, db, fetchImpl);
       const { verifier, challenge } = pkcePair();
       const state = randomToken();
-      db.saveOAuthState({ state, provider: provider.id, codeVerifier: verifier, returnTo: `${LINK_STATE_PREFIX}${returnTo}` });
+      await db.saveOAuthState({ state, provider: provider.id, codeVerifier: verifier, returnTo: `${LINK_STATE_PREFIX}${returnTo}` });
       const target = new URL(metadata.authorization_endpoint);
       target.searchParams.set("response_type", "code");
       target.searchParams.set("client_id", clientId);
@@ -389,7 +389,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
         console.error("[mutinybim-web linked] the host didn't issue a pass", { provider: provider.id, status: response.status, error: body.error });
         throw new SignInError(`${hostName(provider)} didn't allow it${typeof body.error_description === "string" ? `: ${body.error_description}` : ""}. Try again.`);
       }
-      keep(user, provider, clientId, pass);
+      await keep(user, provider, clientId, pass);
       cache.delete(cacheKey(user.id, provider.id));
       console.log("[mutinybim-web linked] a person linked their models", { provider: provider.id, userId: user.id });
     },
@@ -401,7 +401,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
       console.log("[mutinybim-web linked] a person turned linked models off", { provider: provider.id, userId: user.id });
     },
 
-    byAlias(userId, modelId) {
+    async byAlias(userId, modelId) {
       const base = parseBranchModelId(modelId)?.baseModelId ?? modelId;
       return base.startsWith(LINKED_ALIAS_PREFIX) ? db.linkedModelByAlias(userId, base) : null;
     },
@@ -409,7 +409,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
     async assistantLine(user) {
       const parts: string[] = [];
       for (const provider of providers) {
-        if (!db.linkedGrant(user.id, provider.id)) continue;
+        if (!(await db.linkedGrant(user.id, provider.id))) continue;
         const seen = await view(user, provider);
         if (seen.state !== "ok") {
           parts.push(`${provider.models.label}: ${seen.state === "reconnect" ? `${user.display_name} needs to reconnect ${hostName(provider)} on ${config.origin}/models first` : `${hostName(provider)} can't be reached right now`}.`);
@@ -455,7 +455,7 @@ export function createLinkedHosts(options: { readonly config: WebConfig; readonl
           return await once(await accessFor(user, provider, true));
         } catch (again) {
           if (again instanceof HostAnswer) throw again;
-          if (unauthorized(again)) throw reconnect(user, provider, "the host refused the pass on a tool call");
+          if (unauthorized(again)) throw await reconnect(user, provider, "the host refused the pass on a tool call");
           throw new HostAnswer("down", `${hostName(provider)} didn't answer that call.`);
         }
       }

@@ -12,29 +12,38 @@
 import path from "node:path";
 import { readConfig } from "./config";
 import { openDb } from "./db";
+import { openSupabaseStore } from "./db-supabase";
 import { digest, randomToken, RESET_LINK_HOURS } from "./secrets";
 
-function main(argv: readonly string[]): number {
+async function main(argv: readonly string[]): Promise<number> {
   const [command, email] = argv;
   if (command !== "reset-password" || !email) {
     console.error("Usage: npm run web:reset-password -- person@example.com");
     return 2;
   }
   const config = readConfig();
-  const db = openDb(path.join(config.dataDir, "accounts.sqlite"));
+  const db = config.supabase?.secretKey ? openSupabaseStore({ url: config.supabase.url, secretKey: config.supabase.secretKey }) : openDb(path.join(config.dataDir, "accounts.sqlite"));
   try {
-    const user = db.userByEmail(email.trim().toLowerCase());
+    const user = await db.userByEmail(email.trim().toLowerCase());
     if (!user) {
-      console.error(`No account uses ${email} in ${config.dataDir}. Check the address and MUTINYBIM_WEB_DATA.`);
+      console.error(`No account uses ${email} in ${config.supabase?.secretKey ? "Supabase" : config.dataDir}. Check the address and configuration.`);
       return 1;
     }
     const token = randomToken();
-    db.createPasswordReset(digest(token), user.id, new Date(Date.now() + RESET_LINK_HOURS * 3_600_000));
+    await db.createPasswordReset(digest(token), user.id, new Date(Date.now() + RESET_LINK_HOURS * 3_600_000));
     console.log(`Reset link for ${user.email} (works once, for ${RESET_LINK_HOURS} hour):\n${config.origin}/reset/${token}`);
     return 0;
   } finally {
-    db.close();
+    await db.close();
   }
 }
 
-process.exitCode = main(process.argv.slice(2));
+void main(process.argv.slice(2)).then(
+  (code) => {
+    process.exitCode = code;
+  },
+  (err: unknown) => {
+    console.error(err);
+    process.exitCode = 1;
+  },
+);

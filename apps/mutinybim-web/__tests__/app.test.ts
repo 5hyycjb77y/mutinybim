@@ -236,7 +236,7 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   expect(await agentEdit(guestKey, id, "level-edit")).toMatchObject({ status: "saved" });
 
   const sharePage = await (await fetch(`${base}/models/${id}/share`, { headers: { cookie: owner } })).text();
-  const guestId = app?.db.userByEmail("guest@example.com")?.id;
+  const guestId = (await app?.db.userByEmail("guest@example.com"))?.id;
   expect(sharePage).toContain("Gus Guest");
   expect((await post(`/models/${id}/share/${guestId}/delete`, {}, owner)).status).toBe(200);
   expect((await fetch(`${base}/m/${id}`, { headers: { cookie: guest } })).status).toBe(404);
@@ -270,14 +270,14 @@ test("branches, their edits and saved versions are on disk and come back after a
 test("password recovery: a reset link works once, signs out everywhere, and changing a password needs the old one", async () => {
   await start();
   const first = await signUp("sam@example.com");
-  const user = app?.db.userByEmail("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
   if (!user || !app) throw new Error("no account");
 
   const wrong = await post("/settings/password", { current: "not-it", password: "new-password-1" }, first);
   expect(wrong.status).toBe(401);
 
   const token = randomToken();
-  app.db.createPasswordReset(digest(token), user.id, new Date(Date.now() + 3_600_000));
+  await app.db.createPasswordReset(digest(token), user.id, new Date(Date.now() + 3_600_000));
   expect((await fetch(`${base}/reset/${token}`)).status).toBe(200);
   const done = await post(`/reset/${token}`, { password: "new-password-2" });
   expect(done.status).toBe(303);
@@ -300,7 +300,7 @@ test("the theme choice is kept in the account and drawn on every page", async ()
   expect(page).toContain("--mutiny-surface");
   const json = await fetch(`${base}/settings/scheme`, { method: "POST", headers: { origin: base, cookie, "content-type": "application/json" }, body: JSON.stringify({ scheme: "light" }) });
   expect(json.status).toBe(204);
-  expect(app?.db.userByEmail("sam@example.com")?.color_scheme).toBe("light");
+  expect((await app?.db.userByEmail("sam@example.com"))?.color_scheme).toBe("light");
 });
 
 test("sign-up shows the terms and privacy agreement, and the pages answer", async () => {
