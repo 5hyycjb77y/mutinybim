@@ -60,9 +60,9 @@ export interface StepRuns<S> {
 
 export function executeSteps<S extends { readonly type: string }>(model: ModelState, steps: readonly S[], run: (model: ModelState, step: S) => ExecuteResult, label: string, runs?: StepRuns<S>): ExecuteResult {
   let current = model;
-  const changed: ElementId[] = [];
-  const seenChanged = new Set<ElementId>();
-  const removed: ElementId[] = [];
+  const changed = new Set<ElementId>();
+  const removed = new Set<ElementId>();
+  const initialConnections = new Map(model.connections.map((c) => [c.id, c]));
   const removedConnections = new Map<string, Connection>();
   const addedConnections = new Map<string, Connection>();
   const readSet: Record<string, number> = {};
@@ -94,14 +94,32 @@ export function executeSteps<S extends { readonly type: string }>(model: ModelSt
     for (const result of results) {
       current = result.model;
       openIssues = result.openIssues;
-      for (const id of result.changedIds) {
-        if (seenChanged.has(id)) continue;
-        seenChanged.add(id);
-        changed.push(id);
+      // Net element deltas against the pre-batch model: keep changedIds and removedIds strictly disjoint.
+      // Deleting then recreating an id in the same batch is a net change (not a removal);
+      // creating then deleting a new id in the same batch is a net no-op.
+      for (const id of result.removedIds) {
+        if (current.elements[id]) continue;
+        changed.delete(id);
+        if (model.elements[id]) removed.add(id);
       }
-      removed.push(...result.removedIds);
-      for (const c of result.removedConnections) removedConnections.set(connectionKey(c), c);
-      for (const c of result.addedConnections) addedConnections.set(connectionKey(c), c);
+      for (const id of result.changedIds) {
+        if (!current.elements[id]) continue;
+        removed.delete(id);
+        changed.add(id);
+      }
+      for (const c of result.removedConnections) {
+        addedConnections.delete(c.id);
+        const prior = initialConnections.get(c.id);
+        if (prior) removedConnections.set(c.id, prior);
+      }
+      for (const c of result.addedConnections) {
+        const prior = initialConnections.get(c.id);
+        if (prior && connectionKey(prior) === connectionKey(c)) {
+          removedConnections.delete(c.id);
+        } else {
+          addedConnections.set(c.id, c);
+        }
+      }
       // Only what existed before the batch can have been changed by someone else.
       for (const [id, version] of Object.entries(result.readSet)) {
         const before = model.elements[id];
@@ -115,8 +133,8 @@ export function executeSteps<S extends { readonly type: string }>(model: ModelSt
   return {
     ok: true,
     model: current,
-    changedIds: changed,
-    removedIds: [...new Set(removed)],
+    changedIds: [...changed],
+    removedIds: [...removed],
     removedConnections: [...removedConnections.values()],
     addedConnections: [...addedConnections.values()],
     readSet,

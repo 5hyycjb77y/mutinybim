@@ -214,11 +214,11 @@ export class InMemoryBranchHost {
     const own = await served.store.changesSince(pin);
     const out = new Map<string, BimElement>();
     for (const cs of own) {
-      for (const el of cs.elements) out.set(el.id, head.elements[el.id] ?? el);
       for (const id of cs.removedIds ?? []) {
         const before = cs.before?.[id];
         if (before) out.set(id, before);
       }
+      for (const el of cs.elements) out.set(el.id, head.elements[el.id] ?? el);
     }
     return [...out.values()];
   }

@@ -65,13 +65,13 @@ export function mergedScheduleChange(model: ModelState, changes: readonly Change
   const endpoints = new Set<string>();
   for (const cs of changes) {
     const one = scheduleChangeFromChangeset(cs, model);
-    for (const id of one.changedIds) {
-      changed.add(id);
-      removed.delete(id);
-    }
     for (const id of one.removedIds ?? []) {
       removed.add(id);
       changed.delete(id);
+    }
+    for (const id of one.changedIds) {
+      changed.add(id);
+      removed.delete(id);
     }
     for (const id of one.connectionEndpoints ?? []) endpoints.add(id);
   }
