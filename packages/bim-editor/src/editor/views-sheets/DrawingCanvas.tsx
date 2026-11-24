@@ -181,7 +181,7 @@ interface Props {
   readonly onPlaced?: (partId: string) => void
   readonly onPlacingCancel?: () => void
   /** Spaces on a floor plan: underlay pictures, outlines, and the Draw space tool while `mode` is set. */
-  readonly spaces?: { readonly projectId: string; readonly mode: DrawSpaceMode | null; readonly onDrawn: (spaceId: string) => void; readonly onCancel: () => void; readonly onSeparatorLine?: (line: SeparatorLine) => void } | null
+  readonly spaces?: { readonly projectId: string; readonly mode: DrawSpaceMode | null; readonly panelOpen?: boolean; readonly onDrawn: (spaceId: string) => void; readonly onCancel: () => void; readonly onSeparatorLine?: (line: SeparatorLine) => void } | null
   /** The ceiling plan's Ceiling tool while it is on (`ceilings/`); null otherwise. */
   readonly ceilings?: CeilingCanvasTool | null
   /** Question pins on floor plans; clicking one opens it in Coordination › Questions. */
@@ -1849,6 +1849,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   submit={modelEdit.submit}
                   hint={modelEdit.hint}
                   mode={tracing ? spaces.mode : null}
+                  panelOpen={spaces.panelOpen}
                   onDrawn={spaces.onDrawn}
                   onCancel={spaces.onCancel}
                   onSeparatorLine={spaces.onSeparatorLine}

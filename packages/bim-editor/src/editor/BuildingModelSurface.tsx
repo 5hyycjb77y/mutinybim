@@ -3624,7 +3624,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                   if (placingNewOnDrawing) chooseTool('select')
                   else stopPlannedPlacing(plannedPlacing ? `Stopped placing ${plannedPlacing.label}; nothing changed.` : null)
                 }}
-                spaces={{ projectId, mode: spacesTool.mode, onDrawn: spacesTool.onDrawn, onCancel: spacesTool.stop, onSeparatorLine: spacesTool.onSeparatorLine }}
+                spaces={{ projectId, mode: spacesTool.mode, panelOpen: spacesOpen, onDrawn: spacesTool.onDrawn, onCancel: spacesTool.stop, onSeparatorLine: spacesTool.onSeparatorLine }}
                 ceilings={ceilingTool.canvas}
                 questions={{ onOpen: openQuestion, focusedQuestionId: questionFocus?.questionId ?? null }}
                 blockFreshness={openSheet ? (itemId) => <SheetFreshness projectId={projectId} modelId={config?.authority?.modelId ?? shownModel.modelId} sheetNumber={openSheet.number} revision={shownModel.revision} blockId={itemId} /> : undefined}
