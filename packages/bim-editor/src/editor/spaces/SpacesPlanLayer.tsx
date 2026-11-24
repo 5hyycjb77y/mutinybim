@@ -63,8 +63,8 @@ interface Props {
   /** Esc: stop drawing; nothing changes. */
   readonly onCancel: () => void
   readonly selectedSpaceId?: ElementId | null
-  /** Show space outlines whenever the Spaces panel is open (not only mid-draw). */
-  readonly panelOpen?: boolean
+  /** Show space outlines whenever the Spaces drawer is open (not only mid-draw). */
+  readonly drawerOpen?: boolean
   /** A separation line was drawn across a room (Split space asks the rest). */
   readonly onSeparatorLine?: (line: SeparatorLine) => void
 }
@@ -128,7 +128,7 @@ function UnderlayPicture({ projectId, underlay, view, z, tracing }: { readonly p
  * or a click on the first corner closes it; Backspace takes back a corner;
  * Shift squares the leg; Esc stops with nothing changed. Area shows live.
  */
-export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel, submit, hint, mode, onDrawn, onCancel, selectedSpaceId, panelOpen, onSeparatorLine }: Props) {
+export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel, submit, hint, mode, onDrawn, onCancel, selectedSpaceId, drawerOpen, onSeparatorLine }: Props) {
   const level = viewModelLevel(model, view.view.props?.level, view.view.props?.levelElevationMm)
   const levelId = level?.id ?? null
   const z = level?.elevationMm ?? 0
@@ -273,9 +273,9 @@ export function SpacesPlanLayer({ projectId, model, view, paperOf, paperPerPixel
   const liveArea = outline.length >= 3 ? polygonAreaFt2(outline) : null
   const crop = view.paperRect
   const spacesClipId = `spaces-crop-${view.view.id}`
-  // Show the green space-boundary overlay while the Spaces panel is open, a Space tool is active, or a space is selected —
+  // Show the green space-boundary overlay while the Spaces drawer is open, a Space tool is active, or a space is selected —
   // never flood normal plan/sheet editing with green polygons or duplicate room labels (views.ts already draws draggable masked room/space labels).
-  const showSpaceOverlay = Boolean(panelOpen) || mode !== null || selectedSpaceId != null
+  const showSpaceOverlay = Boolean(drawerOpen) || mode !== null || selectedSpaceId != null
   const planShowsRooms = !(view.view.props?.hiddenCategories ?? []).includes('rooms')
 
   return (
