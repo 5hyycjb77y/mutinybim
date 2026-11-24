@@ -403,7 +403,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const detail = drafting.view(ctx, { name: "Bolts", scale: 8 });
-    drafting.repeat(ctx, { view: detail, symbol: "anchor_bolt", from: { x: units.in(0), y: units.in(0) }, to: { x: units.in(36), y: units.in(0) }, spacing: units.in(12) });
+    drafting.repeat(ctx, { view: detail, symbol: "concrete_anchor", from: { x: units.in(0), y: units.in(0) }, to: { x: units.in(36), y: units.in(0) }, spacing: units.in(12) });
   },
 });
 ```

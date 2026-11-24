@@ -63,7 +63,7 @@ export const DEFAULT_DRAFT_SETTINGS: DraftSettings = {
   weight: 'medium',
   pattern: 'solid',
   hatch: 'diagonal',
-  regionTone: 'halftone',
+  regionTone: 'ink',
   masking: false,
   symbolId: DETAIL_COMPONENTS[0]?.id ?? 'gate_valve',
   battThickness: '2"',
