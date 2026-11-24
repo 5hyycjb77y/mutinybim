@@ -53,6 +53,41 @@ export function decodeStepString(body: string): string {
   return out;
 }
 
+/** Return the offset after a quoted string, including any doubled apostrophes. */
+function afterString(text: string, opening: number): number {
+  let i = opening + 1;
+  for (;;) {
+    const quote = text.indexOf("'", i);
+    if (quote < 0) throw new Error("STEP: unterminated string");
+    if (text.charAt(quote + 1) !== "'") return quote + 1;
+    i = quote + 2;
+  }
+}
+
+/** Split records at semicolons outside strings and replace comments with a token separator. */
+function* statements(text: string): Generator<string> {
+  const delimiter = /[;']|\/(?=\*)/g;
+  let start = 0;
+  let prefix = "";
+  while (delimiter.test(text)) {
+    const at = delimiter.lastIndex - 1;
+    const ch = text.charAt(at);
+    if (ch === "'") {
+      delimiter.lastIndex = afterString(text, at);
+    } else if (ch === "/") {
+      const end = text.indexOf("*/", at + 2);
+      if (end < 0) throw new Error("STEP: unterminated comment");
+      prefix += text.slice(start, at) + " ";
+      start = end + 2;
+      delimiter.lastIndex = start;
+    } else {
+      yield prefix + text.slice(start, at);
+      start = delimiter.lastIndex;
+      prefix = "";
+    }
+  }
+}
+
 class Cursor {
   i = 0;
   constructor(readonly s: string) {}
@@ -79,17 +114,9 @@ class Cursor {
       return { kind: "ref", id: Number(m[1]) };
     }
     if (c === "'") {
-      let j = this.i + 1;
-      for (;;) {
-        const k = this.s.indexOf("'", j);
-        if (k < 0) throw new Error("STEP: unterminated string");
-        if (this.s.charAt(k + 1) === "'") j = k + 2;
-        else {
-          const body = this.s.slice(this.i + 1, k);
-          this.i = k + 1;
-          return { kind: "string", value: decodeStepString(body) };
-        }
-      }
+      const start = this.i + 1;
+      this.i = afterString(this.s, this.i);
+      return { kind: "string", value: decodeStepString(this.s.slice(start, this.i - 1)) };
     }
     if (c === ".") {
       const k = this.s.indexOf(".", this.i + 1);
@@ -137,22 +164,31 @@ class Cursor {
 
 /** Parse a Part 21 file's schema line and DATA section. Throws on text it cannot read. */
 export function readStep(text: string): StepFile {
-  const schema = /FILE_SCHEMA\s*\(\s*\(([^)]*)\)\s*\)/.exec(text);
-  const schemas = schema?.[1] ? [...schema[1].matchAll(/'([^']*)'/g)].map((m) => m[1] ?? "") : [];
-  const data = /\nDATA;([\s\S]*?)\nENDSEC;/.exec(text);
-  if (!data?.[1]) throw new Error("STEP: no DATA section");
+  let schemas: string[] = [];
   const entities = new Map<number, ReadEntity>();
-  const body = data[1];
-  const head = /#(\d+)\s*=\s*([A-Z][A-Z0-9_]*)\s*/gi;
-  let m: RegExpExecArray | null;
-  while ((m = head.exec(body)) !== null) {
-    const cursor = new Cursor(body);
-    cursor.i = head.lastIndex;
+  const head = /^\s*#(\d+)\s*=\s*([A-Z][A-Z0-9_]*)\s*/i;
+  let inData = false;
+  for (const statement of statements(text)) {
+    if (!inData) {
+      if (statement.trim() === "DATA") inData = true;
+      const schema = /^\s*FILE_SCHEMA\s*\(\s*\(([^)]*)\)\s*\)/.exec(statement);
+      if (schema?.[1]) schemas = [...schema[1].matchAll(/'([^']*)'/g)].map((m) => m[1] ?? "");
+      continue;
+    }
+    const match = head.exec(statement);
+    if (!match) {
+      if (statement.trim() === "ENDSEC") return { schemas, entities };
+      continue;
+    }
+    const cursor = new Cursor(statement);
+    cursor.i = match[0].length;
+    const id = Number(match[1]);
     const args = cursor.items();
-    entities.set(Number(m[1]), { id: Number(m[1]), type: (m[2] ?? "").toUpperCase(), args });
-    head.lastIndex = cursor.i;
+    cursor.ws();
+    if (statement.charAt(cursor.i) === "#") throw new Error(`STEP: expected ; after #${id}`);
+    entities.set(id, { id, type: (match[2] ?? "").toUpperCase(), args });
   }
-  return { schemas, entities };
+  throw new Error(inData ? "STEP: DATA section is missing its closing ENDSEC;" : "STEP: no DATA section");
 }
 
 /** Rooted entities (they carry a GlobalId first): their GlobalId and Name. */
