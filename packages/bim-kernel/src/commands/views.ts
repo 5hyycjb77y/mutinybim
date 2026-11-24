@@ -62,7 +62,7 @@ import { noteLabel, richTextNoteSchema } from "../annotation/rich-text";
 import { executeTextNoteCommand, isTextNoteCommand, textNoteCommandSchemas } from "../annotation/text-note-commands";
 import { DOCUMENT_FIELDS, documentFieldValue, propValue } from "../document-fields";
 import { dimensionPointRange, dimSpecSchema, tagSpecNeedsMaskLeaderPeers, tagSpecSchema, tagStyleCategoryOf, type DimSpec, type TagSpec } from "../annotation/annotations";
-import { DRAFTING_CATEGORIES, battSpecSchema, componentPlacementSchema, detailComponent, detailPointRange, lineStyleSchema, regionFillSchema } from "../annotation/detailing";
+import { DRAFTING_CAD_STANDARDS_FEATURE, DRAFTING_CATEGORIES, battSpecSchema, componentPlacementSchema, detailComponent, detailPointRange, lineStyleSchema, regionFillNeedsCadStandards, regionFillSchema } from "../annotation/detailing";
 import { carryOrganization, organizationOf, viewOrganizationProblem } from "../organization/model";
 import { referenceDisplaySchema } from "../reference-display";
 import { boxFollowingPlanCrop, view3dPropsProblem, view3dPropsShape, withDefault3d, withoutWorking } from "../view3d";
@@ -1015,6 +1015,9 @@ function checkDetail(shape: DrawingItem["shape"], fields: Pick<DrawingItem, "com
   }
   if (shape === "batt" && !fields.batt) fail("Insulation needs its thickness.", [itemId]);
   if (fields.fill && shape !== "region") fail("Only a region takes a fill.", [itemId]);
+  if (fields.fill && regionFillNeedsCadStandards(fields.fill) && !peerReads(DRAFTING_CAD_STANDARDS_FEATURE)) {
+    fail("Halftone/screened region hatches and extended hatch patterns can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [itemId]);
+  }
   if (fields.batt && shape !== "batt") fail("Only insulation takes a thickness.", [itemId]);
   if (fields.component && shape !== "component" && shape !== "repeat") fail("Only a detail component or repeating detail takes a component.", [itemId]);
 }

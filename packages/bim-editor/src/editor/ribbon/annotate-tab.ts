@@ -14,7 +14,7 @@ import type { BuildingModelRibbonContext } from '../building-model-ribbon'
  */
 
 /** The shapes one Detail line draws; the split button remembers the last one. */
-export const DETAIL_SHAPES = ['line', 'rect', 'polygon', 'arc', 'circle', 'polyline', 'spline'] as const satisfies readonly DrawingTool[]
+export const DETAIL_SHAPES = ['line', 'rect', 'polygon', 'arc', 'arc_radius', 'arc_tangent', 'circle', 'polyline', 'spline'] as const satisfies readonly DrawingTool[]
 export type DetailShape = (typeof DETAIL_SHAPES)[number]
 export function isDetailShape(tool: DrawingTool): tool is DetailShape {
   return (DETAIL_SHAPES as readonly string[]).includes(tool)
@@ -52,7 +52,9 @@ export function drawingCommand(ctx: BuildingModelRibbonContext, tool: DrawingToo
 const SHAPE: Record<DetailShape, { readonly label: string; readonly icon: RibbonCommand['icon']; readonly description: string; readonly keywords: readonly string[] }> = {
   line: { label: 'Line', icon: Minus, description: 'Drag a detail line; pick its line style in the bar over the drawing', keywords: ['detail line'] },
   rect: { label: 'Rectangle', icon: Square, description: 'Drag a rectangle: four detail lines joined at the corners, so you can fillet, trim or offset them', keywords: ['box', 'joined lines'] },
-  arc: { label: 'Arc', icon: Rainbow, description: 'Click the centre, the start and the end', keywords: ['curve'] },
+  arc: { label: 'Arc (centre)', icon: Rainbow, description: 'Click the centre, the start and the end', keywords: ['curve', 'center arc'] },
+  arc_radius: { label: 'Arc (start-end-bulge)', icon: Rainbow, description: 'Click the start, the end, and a point on the arc', keywords: ['curve', '3 point arc', 'radius arc'] },
+  arc_tangent: { label: 'Arc (tangent)', icon: Rainbow, description: 'Click the start, a point along the tangent, and the end', keywords: ['curve', 'tangent arc'] },
   circle: { label: 'Circle', icon: Circle, description: 'Click the centre and a point on it', keywords: ['round'] },
   polygon: { label: 'Polygon', icon: Hexagon, description: 'Click the centre and a corner: joined detail lines, inscribed or circumscribed, sides typed in the bar', keywords: ['hexagon', 'octagon', 'joined lines'] },
   polyline: { label: 'Lines (chain)', icon: Waypoints, description: 'Click each point: one detail line per segment, joined end to end. Click the first point to close; Enter finishes', keywords: ['chain', 'polyline', 'path', 'joined lines'] },

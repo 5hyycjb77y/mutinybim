@@ -251,7 +251,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - lineStyle?: { weight?: "thin"|"medium"|"wide"|"heavy"; pattern?: "solid"|"dashed"|"hidden"|"center"|"phantom"|"dotted" }
 - closed?: boolean
 - ccw?: boolean
-- fill?: { pattern: "solid"|"diagonal"|"diagonal_reverse"|"crosshatch"|"horizontal"|"vertical"|"dots"|"concrete"|"earth"|"insulation_rigid"|"masonry"; spacingMm?: number; grey?: number; masking?: boolean; boundary?: boolean }
+- fill?: { pattern: "solid"|"diagonal"|"diagonal_reverse"|"crosshatch"|"horizontal"|"vertical"|"dots"|"concrete"|"earth"|"insulation_rigid"|"masonry"|"steel_section"|"gravel"|"sand"|"gypsum"|"wood_grain"|"metal_deck"|"roofing_membrane"|"acoustic"; spacingMm?: number; grey?: number; tone?: "ink"|"halftone"|"screened"; masking?: boolean; boundary?: boolean }
 - component?: { symbolId: string; widthMm?: number; heightMm?: number; rotationDeg?: number; mirror?: boolean; spacingMm?: number }
 - batt?: { thicknessMm: number }
 - category?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"
@@ -536,9 +536,10 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - rotation?: number
 - textSize?: number
 - lineSpacing?: number
+- mask?: boolean
 - paragraphs: { runs: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; size?: number; font?: "sans"; color?: string }[]; align?: "left"|"center"|"right"|"justify"; list?: { kind: "bullet"|"numbered"; level: number; start?: number } }[]
 - leader?: { x: number; y: number } | null
-- leaders?: { to: { x: number; y: number }; elbow?: { x: number; y: number }; arrow?: "arrow"|"dot"|"tick"|"none" }[]
+- leaders?: { to: { x: number; y: number }; elbow?: { x: number; y: number }; arrow?: "arrow"|"filled_arrow"|"dot"|"filled_dot"|"tick"|"none" }[]
 
 ## create_text_style
 
@@ -807,6 +808,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - paragraphs: { runs: { text: string; bold?: boolean; italic?: boolean; underline?: boolean; size?: number; font?: "sans"; color?: string }[]; align?: "left"|"center"|"right"|"justify"; list?: { kind: "bullet"|"numbered"; level: number; start?: number } }[]
 - textSize?: number
 - lineSpacing?: number
+- mask?: boolean
 
 ## edit_underlay
 
@@ -932,8 +934,9 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - itemId: string
 - at?: { x: number; y: number }
 - rotation?: number
+- mask?: boolean
 - leader?: { x: number; y: number } | null
-- leaders?: { to: { x: number; y: number }; elbow?: { x: number; y: number }; arrow?: "arrow"|"dot"|"tick"|"none" }[]
+- leaders?: { to: { x: number; y: number }; elbow?: { x: number; y: number }; arrow?: "arrow"|"filled_arrow"|"dot"|"filled_dot"|"tick"|"none" }[]
 
 ## move_viewport
 
@@ -1629,7 +1632,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - lineStyle?: { weight?: "thin"|"medium"|"wide"|"heavy"; pattern?: "solid"|"dashed"|"hidden"|"center"|"phantom"|"dotted" }
 - closed?: boolean
 - ccw?: boolean
-- fill?: { pattern: "solid"|"diagonal"|"diagonal_reverse"|"crosshatch"|"horizontal"|"vertical"|"dots"|"concrete"|"earth"|"insulation_rigid"|"masonry"; spacingMm?: number; grey?: number; masking?: boolean; boundary?: boolean }
+- fill?: { pattern: "solid"|"diagonal"|"diagonal_reverse"|"crosshatch"|"horizontal"|"vertical"|"dots"|"concrete"|"earth"|"insulation_rigid"|"masonry"|"steel_section"|"gravel"|"sand"|"gypsum"|"wood_grain"|"metal_deck"|"roofing_membrane"|"acoustic"; spacingMm?: number; grey?: number; tone?: "ink"|"halftone"|"screened"; masking?: boolean; boundary?: boolean }
 - component?: { symbolId: string; widthMm?: number; heightMm?: number; rotationDeg?: number; mirror?: boolean; spacingMm?: number }
 - batt?: { thicknessMm: number }
 - category?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"

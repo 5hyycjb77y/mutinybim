@@ -26,7 +26,7 @@ Topics: units, metric, millimetre
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -52,7 +52,7 @@ Topics: units, metric, metre
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -78,7 +78,7 @@ Topics: units, imperial, inch
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -104,7 +104,7 @@ Topics: units, imperial, foot, feet
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -130,7 +130,7 @@ Topics: units, airflow, cfm, quantity
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -157,7 +157,7 @@ Topics: units, convert, number
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "part",
   reads: {},

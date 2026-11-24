@@ -496,16 +496,42 @@ export function annotationBox(model: ModelState, view: ViewElement | null, item:
   if (item.dim) {
     const pts = dimensionPoints(model, view, item).points.map(toPaper)
     if (pts.length === 0) return null
+    const spec = item.dim
+    const [p0, p1] = pts
+    if (p0 && p1 && (spec.kind === 'linear' || spec.kind === 'aligned')) {
+      const dx = p1.x - p0.x
+      const dy = p1.y - p0.y
+      const dist = Math.hypot(dx, dy) || 1
+      const axis = spec.kind === 'aligned' ? { x: dx / dist, y: dy / dist } : spec.direction === 'vertical' ? { x: 0, y: 1 } : { x: 1, y: 0 }
+      const n = { x: -axis.y, y: axis.x }
+      const lineAt = (p: Vec2) => {
+        const along = (p.x - p0.x) * axis.x + (p.y - p0.y) * axis.y
+        return { x: p0.x + axis.x * along + n.x * spec.offsetMm, y: p0.y + axis.y * along + n.y * spec.offsetMm }
+      }
+      const a2 = lineAt(p0)
+      const b2 = lineAt(p1)
+      const mid = { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 }
+      const vertical = Math.abs(axis.x) < 0.3
+      const side = n.x * (spec.offsetMm >= 0 ? 1 : -1) >= 0 ? 1 : -1
+      // Tight band around the actual dimension line + its text label so clicking the dimension
+      // selects it immediately without creating a giant invisible box over surrounding geometry.
+      const labelHalfW = Math.max(8, ((spec.prefix?.length ?? 0) + (spec.suffix?.length ?? 0) + 6) * 1.4)
+      const xs = [a2.x, b2.x, ...(vertical ? [mid.x + side * (labelHalfW * 1.6)] : [mid.x - labelHalfW, mid.x + labelHalfW])]
+      const ys = [a2.y, b2.y, ...(vertical ? [mid.y - 3, mid.y + 3] : [mid.y - 5.5, mid.y + 2.5])]
+      const minX = Math.min(...xs) - 2
+      const maxX = Math.max(...xs) + 2
+      const minY = Math.min(...ys) - 2
+      const maxY = Math.max(...ys) + 2
+      return { x: minX, y: minY, w: Math.max(4, maxX - minX), h: Math.max(4, maxY - minY) }
+    }
     const xs = pts.map((p) => p.x)
     const ys = pts.map((p) => p.y)
-    const pad = Math.abs(item.dim.offsetMm) + 3
-    const horizontal = item.dim.kind === 'linear' && item.dim.direction !== 'vertical'
-    const vertical = item.dim.kind === 'linear' && item.dim.direction === 'vertical'
+    const pad = Math.max(4, Math.abs(spec.offsetMm) + 3)
     return {
-      x: Math.min(...xs) - (vertical ? pad : 1),
-      y: Math.min(...ys) - (horizontal ? pad : 1),
-      w: Math.max(...xs) - Math.min(...xs) + (vertical ? pad * 2 : 2),
-      h: Math.max(...ys) - Math.min(...ys) + (horizontal ? pad * 2 : 2),
+      x: Math.min(...xs) - pad,
+      y: Math.min(...ys) - pad,
+      w: Math.max(...xs) - Math.min(...xs) + pad * 2,
+      h: Math.max(...ys) - Math.min(...ys) + pad * 2,
     }
   }
   return null

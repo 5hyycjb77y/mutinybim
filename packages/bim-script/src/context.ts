@@ -230,7 +230,7 @@ export async function runScript(definition: ScriptDefinition, input: RunScriptIn
       },
     },
   };
-  bindWorking(ctx, { model: () => working, packs: input.packs, touchedIds: () => [...touched] });
+  bindWorking(ctx, { model: () => working, packs: input.packs, touchedIds: () => [...touched], features });
   try {
     await definition.runWith(ctx, input.values);
   } catch (err) {

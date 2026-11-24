@@ -12,9 +12,11 @@ import {
   dimensionCommand,
   isDraftShape,
   keepsSelection,
+  listeningPoint,
   modifyPicks,
   modifyPrompt,
   modifyRequest,
+  parseLength,
   pickNeedsItem,
   shapeCommand,
   shapePrompt,
@@ -51,9 +53,17 @@ export interface DraftInput {
   /** True when a Draft tool, a click-drawn dimension, or a modify / leader pick is in hand. */
   readonly active: boolean
   readonly prompt: string | null
-  readonly preview: { readonly prims: Primitive[]; readonly rubber: readonly Vec2[]; readonly marker: Constrained | null }
+  readonly preview: {
+    readonly prims: Primitive[]
+    readonly rubber: readonly Vec2[]
+    readonly marker: Constrained | null
+    readonly typedLength: string
+    readonly storedPerPaperMm: number
+  }
   readonly down: (at: Vec2) => void
   readonly move: (at: Vec2) => void
+  /** Listening dimension key input while drawing (digits, ', ", -, /, ., m, Backspace, Enter). True if handled. */
+  readonly handleKey: (key: string) => boolean
   /** Enter or double-click: finish an open shape. */
   readonly finish: () => boolean
   /** Esc: drop the clicks in progress, then the pending operation. True when it had something to drop. */
@@ -67,6 +77,7 @@ export interface DraftInput {
 export function useDraftInput(ctx: DraftInputContext): DraftInput {
   const [clicks, setClicks] = useState<Constrained[]>([])
   const [hover, setHover] = useState<Constrained | null>(null)
+  const [typedLength, setTypedLength] = useState('')
   const { tool, settings, pending } = ctx
   const shapeTool = isDraftShape(tool) ? tool : tool === 'dimension' && clickDimension(settings) ? ('dimension' as const) : null
   const active = pending !== null || shapeTool !== null
@@ -80,6 +91,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
   const reset = useCallback(() => {
     setClicks([])
     setHover(null)
+    setTypedLength('')
   }, [])
 
   const commitShape = useCallback(
@@ -108,9 +120,9 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       const stays = PICK_ELEMENT_OPS.has(op)
       const again = () => {
         reset()
-        if (op === 'trim_extend_multiple' && picks[0]) setClicks([picks[0]])
+        if ((op === 'trim_extend_multiple' || op === 'match_type') && picks[0]) setClicks([picks[0]])
       }
-      const req = modifyRequest(op, picks, ctx.params, ctx.toStored, ctx.selectedIds)
+      const req = modifyRequest(op, picks, ctx.params, ctx.toStored, ctx.selectedIds, ctx.items)
       if (typeof req === 'string') {
         again()
         if (!stays && modifyPicks(op, ctx.params).length === 0) ctx.setPending(null)
@@ -159,7 +171,12 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         return
       }
       const [first, second] = picks.map((c) => ctx.toStored(c.at))
-      const leader = pending.elbow && second && first ? { to: second, elbow: first } : first ? { to: first } : null
+      const leader =
+        pending.elbow && second && first
+          ? { to: second, elbow: first, arrow: 'filled_arrow' as const }
+          : first
+            ? { to: first, arrow: 'filled_arrow' as const }
+            : null
       if (!leader) return
       ctx.send({ type: 'move_text_note', itemId: note.id, leaders: [...existing, leader] }, 'add a leader')
     },
@@ -230,7 +247,47 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
     return true
   }, [shapeTool, settings, clicks, ctx, commitShape])
 
+  const handleKey = useCallback(
+    (key: string): boolean => {
+      if (!shapeTool || shapeTool === 'dimension' || clicks.length === 0) return false
+      if (key === 'Backspace' && typedLength.length > 0) {
+        setTypedLength((s) => s.slice(0, -1))
+        return true
+      }
+      if (key === 'Enter' && typedLength.length > 0) {
+        const storedMm = parseLength(typedLength)
+        setTypedLength('')
+        if (storedMm === null || storedMm <= 0) {
+          ctx.onRefused(`"${typedLength}" isn't a valid length (try 14", 3'-6", or 150mm).`)
+          return true
+        }
+        const last = clicks[clicks.length - 1]?.at
+        if (!last) return true
+        const paperMm = storedMm / Math.max(ctx.storedPerPaperMm, 1e-6)
+        const target = listeningPoint(last, hover?.at ?? { x: last.x + 10, y: last.y }, paperMm)
+        if (!target) return true
+        const nextPt: Constrained = { at: target, snapLabel: null, snapKind: null, snapRef: null, tracking: hover?.tracking ?? null, itemId: null }
+        const next = [...clicks, nextPt]
+        const need = clicksFor(shapeTool, settings)
+        if ('fixed' in need && next.length >= need.fixed) commitShape(next)
+        else setClicks(next)
+        return true
+      }
+      if (key.length === 1 && /^[0-9.'"\-/ m]$/.test(key)) {
+        if (key === ' ' && typedLength.length === 0) return false
+        setTypedLength((s) => s + key)
+        return true
+      }
+      return false
+    },
+    [shapeTool, clicks, typedLength, ctx, hover, settings, commitShape],
+  )
+
   const cancel = useCallback(() => {
+    if (typedLength.length > 0) {
+      setTypedLength('')
+      return true
+    }
     if (clicks.length > 0) {
       reset()
       return true
@@ -241,16 +298,16 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       return true
     }
     return false
-  }, [clicks.length, pending, ctx, reset])
+  }, [typedLength.length, clicks.length, pending, ctx, reset])
 
   const apply = useCallback(() => runModify(clicks), [runModify, clicks])
 
   const prompt = useMemo(() => {
     if (pending?.kind === 'modify') return modifyPrompt(pending.op, clicks.length, ctx.selectedIds.length, ctx.params)
     if (pending?.kind === 'leader') return `${pending.elbow && clicks.length === 0 ? 'Click where the leader bends' : 'Click what the leader points at'}. Esc cancels.`
-    if (shapeTool) return `${shapePrompt(shapeTool, settings, clicks.length)}${hover?.snapLabel ? `  Snapped to the ${hover.snapLabel}.` : hover?.tracking ? `  Tracking ${Math.round(hover.tracking.angleDeg)}°.` : ''}`
+    if (shapeTool) return `${shapePrompt(shapeTool, settings, clicks.length)}${typedLength ? `  Length: ${typedLength} (Enter)` : hover?.snapLabel ? `  Snapped to the ${hover.snapLabel}.` : hover?.tracking ? `  Tracking ${Math.round(hover.tracking.angleDeg)}°.` : ''}`
     return null
-  }, [pending, clicks.length, ctx.selectedIds.length, ctx.params, shapeTool, settings, hover])
+  }, [pending, clicks.length, ctx.selectedIds.length, ctx.params, shapeTool, settings, hover, typedLength])
 
   const preview = useMemo(() => {
     const prims: Primitive[] = []
@@ -267,10 +324,10 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         drawDetailItem({ toPaper: ctx.toPaper, scale: ctx.storedPerPaperMm, prims }, item)
       }
     }
-    return { prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking) ? hover : null }
-  }, [clicks, hover, shapeTool, settings, ctx.toStored, ctx.toPaper, ctx.storedPerPaperMm, ctx.ownerId, active])
+    return { prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking) ? hover : null, typedLength, storedPerPaperMm: ctx.storedPerPaperMm }
+  }, [clicks, hover, shapeTool, settings, ctx.toStored, ctx.toPaper, ctx.storedPerPaperMm, ctx.ownerId, active, typedLength])
 
   const constrainDrag = useCallback((at: Vec2, from: Vec2 | null) => constrain(at, from), [constrain])
 
-  return { active, prompt, preview, down, move, finish, cancel, apply, constrain: constrainDrag }
+  return { active, prompt, preview, down, move, handleKey, finish, cancel, apply, constrain: constrainDrag }
 }

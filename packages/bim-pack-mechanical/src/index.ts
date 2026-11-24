@@ -52,3 +52,4 @@ export * from "./connect/terminals";
 export * from "./routing/size-system";
 export * from "./schedules/templates";
 export * from "./fields/vendor";
+export * from "./detail-symbols";

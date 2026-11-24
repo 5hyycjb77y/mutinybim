@@ -12,6 +12,7 @@ import {
   ListEnd,
   MoreHorizontal,
   Move,
+  Paintbrush,
   Pin,
   PinOff,
   RotateCw,
@@ -19,6 +20,7 @@ import {
   Scaling,
   Scissors,
   SeparatorVertical,
+  Slash,
   SquareRoundCorner,
   Trash2,
   X,
@@ -43,6 +45,7 @@ const MODIFY_ICON: Record<ModifyOpName, RibbonCommand['icon']> = {
   copy: CopyPlus,
   rotate: RotateCw,
   mirror: FlipHorizontal2,
+  mirror_pick: FlipHorizontal2,
   scale: Scaling,
   array: Grid3x3,
   polar_array: CircleDot,
@@ -54,6 +57,8 @@ const MODIFY_ICON: Record<ModifyOpName, RibbonCommand['icon']> = {
   split: Scissors,
   split_gap: SeparatorVertical,
   fillet_arc: SquareRoundCorner,
+  chamfer: Slash,
+  match_type: Paintbrush,
   pin: Pin,
   unpin: PinOff,
 }
@@ -62,6 +67,7 @@ const MODIFY_WHAT: Record<ModifyOpName, string> = {
   copy: 'Copy what is selected from a base point to a new one',
   rotate: 'Turn what is selected about a point by the angle you type',
   mirror: 'Flip what is selected across a line you click (or keep the original)',
+  mirror_pick: 'Flip what is selected across an existing detail line you click',
   scale: 'Grow or shrink what is selected about a point',
   array: 'Copies in a row: click the base point and where the next one goes',
   polar_array: 'Copies around a centre',
@@ -73,6 +79,8 @@ const MODIFY_WHAT: Record<ModifyOpName, string> = {
   split: 'Click a line or arc to cut it in two there (or twice, deleting the piece between)',
   split_gap: 'Click a line or arc to cut a gap of a typed length into it',
   fillet_arc: 'Click two lines: an arc of the radius you type rounds the corner, and the lines trim to it',
+  chamfer: 'Click two lines: bevel their corner by the D1 and D2 distances',
+  match_type: 'Click a source item, then click target items to copy its line style, fill or component',
   pin: 'Pin what is selected so Move, trims, splits and Delete leave it alone',
   unpin: 'Unpin what is selected so it can be changed again',
 }
@@ -244,6 +252,18 @@ function clipboardCommands(ctx: BuildingModelRibbonContext): RibbonCommand[] {
   ]
 }
 
+/** Mirror ▾: Draw Axis on the face, Pick Axis in the arrow menu. */
+function mirrorCommand(ctx: BuildingModelRibbonContext): RibbonCommand {
+  const face = draftOp(ctx, 'mirror')
+  return { ...face, id: 'draft-mirror-menu', split: true, children: [face, draftOp(ctx, 'mirror_pick')], testId: 'ribbon-draft-mirror' }
+}
+
+/** Fillet / Chamfer ▾: Fillet Arc on the face, Chamfer in the arrow menu. */
+function filletChamferCommand(ctx: BuildingModelRibbonContext): RibbonCommand {
+  const face = draftOp(ctx, 'fillet_arc')
+  return { ...face, id: 'draft-fillet-chamfer', split: true, children: [face, draftOp(ctx, 'chamfer')], testId: 'ribbon-draft-fillet-arc' }
+}
+
 /** The Modify, Geometry and Edit groups (shared by the Modify tab and the drawn-items tab). `modelToolReason` is why model tools are off here, if they are. */
 export function modifyGroups(ctx: BuildingModelRibbonContext, modelToolReason: string | null): RibbonGroup[] {
   return [
@@ -255,11 +275,11 @@ export function modifyGroups(ctx: BuildingModelRibbonContext, modelToolReason: s
         move(ctx),
         draftOp(ctx, 'copy'),
         rotate(ctx),
-        draftOp(ctx, 'mirror'),
-        { id: 'draft-modify-more', label: 'More', icon: MoreHorizontal, description: ctx.clipboard ? 'Copy and paste parts, scale, align and arrays' : 'Scale, align and arrays', children: [...clipboardCommands(ctx), draftOp(ctx, 'scale'), draftOp(ctx, 'align'), draftOp(ctx, 'array'), draftOp(ctx, 'polar_array')], testId: 'ribbon-draft-modify-more' },
+        mirrorCommand(ctx),
+        { id: 'draft-modify-more', label: 'More', icon: MoreHorizontal, description: ctx.clipboard ? 'Copy and paste parts, scale, align, match type and arrays' : 'Scale, align, match type and arrays', children: [...clipboardCommands(ctx), draftOp(ctx, 'match_type'), draftOp(ctx, 'scale'), draftOp(ctx, 'align'), draftOp(ctx, 'array'), draftOp(ctx, 'polar_array')], testId: 'ribbon-draft-modify-more' },
       ],
     },
-    { id: 'geometry', label: 'Geometry', shared: true, commands: [draftOp(ctx, 'offset'), trimExtend(ctx), split(ctx), draftOp(ctx, 'fillet_arc')] },
+    { id: 'geometry', label: 'Geometry', shared: true, commands: [draftOp(ctx, 'offset'), trimExtend(ctx), split(ctx), filletChamferCommand(ctx)] },
     { id: 'edit', label: 'Edit', shared: true, commands: [deleteCommand(ctx), pinCommand(ctx), measure(ctx, modelToolReason)] },
   ]
 }

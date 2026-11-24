@@ -7,6 +7,7 @@ import {
   HATCH_PATTERNS,
   LINE_PATTERNS,
   LINE_WEIGHTS_2D,
+  REGION_TONES,
   documentIndex,
   lineStyleFor,
   arcStartEndRadius,
@@ -84,6 +85,7 @@ const drawItem = z.discriminatedUnion("shape", [
     shape: z.literal("region"),
     points: z.array(pt).min(3).max(500),
     hatch: z.enum(HATCH_PATTERNS).default("diagonal"),
+    tone: z.enum(REGION_TONES).optional().describe("ink (default), halftone, or screened."),
     masking: z.boolean().optional().describe("White, hides what is under it."),
     boundary: z.boolean().optional().describe("Outline; default on."),
     spacing_in: z.number().min(0.02).max(1).optional().describe("Hatch spacing on paper."),
@@ -227,7 +229,13 @@ function commandFor(owner: Owner, input: SingleDrawInput, itemId: string): ViewC
         ...common,
         shape: "region",
         points: input.points.map(owner.p),
-        fill: { pattern: input.masking ? "solid" : (input.hatch ?? "diagonal"), ...(input.masking ? { masking: true } : {}), ...(input.boundary !== undefined ? { boundary: input.boundary } : {}), ...(input.spacing_in ? { spacingMm: input.spacing_in * IN } : {}) },
+        fill: {
+          pattern: input.masking ? "solid" : (input.hatch ?? "diagonal"),
+          ...(input.masking ? { masking: true } : {}),
+          ...(input.tone ? { tone: input.tone } : {}),
+          ...(input.boundary !== undefined ? { boundary: input.boundary } : {}),
+          ...(input.spacing_in ? { spacingMm: input.spacing_in * IN } : {}),
+        },
       };
     case "component":
       return {
@@ -353,6 +361,7 @@ export function registerBimDetailingTools(server: McpServer, caller: ResolveBimC
         return text({
           components: DETAIL_COMPONENTS.map((c) => ({ id: c.id, name: c.name, category: c.category, width_in: Math.round((c.widthMm / IN) * 100) / 100, height_in: Math.round((c.heightMm / IN) * 100) / 100, linear: c.linear === true })),
           hatch_patterns: HATCH_PATTERNS,
+          region_tones: REGION_TONES,
           line_patterns: LINE_PATTERNS,
           line_styles: DETAIL_LINE_STYLES.map((x) => ({ id: x.id, name: x.name })),
           line_weights: LINE_WEIGHTS_2D,

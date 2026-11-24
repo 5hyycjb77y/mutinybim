@@ -10,7 +10,7 @@ import { itemPath } from "./detailing";
  * Snapping to model elements (ducts, parts) is the view-input layer's job.
  */
 
-export const SNAP_KINDS = ["endpoint", "midpoint", "center", "intersection", "perpendicular", "nearest"] as const;
+export const SNAP_KINDS = ["endpoint", "midpoint", "center", "quadrant", "tangent", "intersection", "perpendicular", "nearest"] as const;
 export type SnapKind = (typeof SNAP_KINDS)[number];
 
 export interface DetailSnap {
@@ -61,7 +61,16 @@ function segIntersect(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2 | null {
 }
 
 /** Order of preference when two snaps are equally near: specific points before "nearest". */
-const RANK: Readonly<Record<SnapKind, number>> = { endpoint: 0, intersection: 1, center: 2, midpoint: 3, perpendicular: 4, nearest: 5 };
+const RANK: Readonly<Record<SnapKind, number>> = { endpoint: 0, intersection: 1, center: 2, quadrant: 3, midpoint: 4, tangent: 5, perpendicular: 6, nearest: 7 };
+
+/** Whether angle `a` (radians) lies within the counter-clockwise/clockwise sweep of an arc. */
+function angleInArcSweep(a: number, a0: number, a1: number, ccw: boolean): boolean {
+  const TAU = 2 * Math.PI;
+  const norm = (x: number) => ((x % TAU) + TAU) % TAU;
+  const span = ccw ? norm(a1 - a0) : norm(a0 - a1);
+  const delta = ccw ? norm(a - a0) : norm(a0 - a);
+  return delta <= span + 1e-6;
+}
 
 /** The snap a click at `at` (paper mm) lands on, or null. */
 export function detailSnap(items: readonly DrawingItem[], toPaper: (p: Vec2) => Vec2, at: Vec2, opts: SnapOptions): DetailSnap | null {
@@ -73,7 +82,37 @@ export function detailSnap(items: readonly DrawingItem[], toPaper: (p: Vec2) => 
   for (const item of items) {
     if (item.deleted || item.shape === "text" || item.shape === "dimension" || item.shape === "tag") continue;
     const segs = segments(item, toPaper);
-    if ((item.shape === "circle" || item.shape === "arc") && item.points[0]) consider("center", toPaper(item.points[0]), item.id);
+    if ((item.shape === "circle" || item.shape === "arc") && item.points[0] && item.points[1]) {
+      const c = toPaper(item.points[0]);
+      const p1 = toPaper(item.points[1]);
+      const r = len(sub(p1, c));
+      consider("center", c, item.id);
+      if (r > 1e-6) {
+        const isArc = item.shape === "arc" && item.points[2] !== undefined;
+        const p2 = isArc ? toPaper(item.points[2]!) : null;
+        const a0 = Math.atan2(p1.y - c.y, p1.x - c.x);
+        const a1 = p2 ? Math.atan2(p2.y - c.y, p2.x - c.x) : 0;
+        // Paper Y runs down, so stored CCW corresponds to clockwise in paper coords.
+        const paperCcw = !(item.ccw !== false);
+        const onCurve = (angle: number) => !isArc || angleInArcSweep(angle, a0, a1, paperCcw);
+        if (opts.kinds.has("quadrant")) {
+          for (const qAngle of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+            if (onCurve(qAngle)) consider("quadrant", { x: c.x + r * Math.cos(qAngle), y: c.y + r * Math.sin(qAngle) }, item.id);
+          }
+        }
+        if (opts.kinds.has("tangent") && opts.from) {
+          const d = sub(opts.from, c);
+          const distFrom = len(d);
+          if (distFrom > r + 1e-6) {
+            const base = Math.atan2(d.y, d.x);
+            const alpha = Math.acos(r / distFrom);
+            for (const tAngle of [base + alpha, base - alpha]) {
+              if (onCurve(tAngle)) consider("tangent", { x: c.x + r * Math.cos(tAngle), y: c.y + r * Math.sin(tAngle) }, item.id);
+            }
+          }
+        }
+      }
+    }
     if (item.shape === "line" || item.shape === "polyline" || item.shape === "rect" || item.shape === "region") {
       for (const p of item.points) consider("endpoint", toPaper(p), item.id);
     } else if (item.shape === "arc" || item.shape === "spline") {

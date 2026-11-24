@@ -40,6 +40,7 @@ import { createEditorDemo, type EditorDemo } from "../../bim-editor/demo/server"
 import { createElectricalDemoModel } from "./electrical-demo";
 import { createArchOverhaulDemoModel } from "./arch-overhaul-demo";
 import { enlargedPlansDemoModel } from "./enlarged-plans-demo";
+import { createMechanicalDetailsDemoModel } from "./mechanical-details-demo";
 
 // The kernel carries no trade: gas, plumbing and air systems are first-party add-ons, installed before any model is built.
 installFirstPartyAddOns();
@@ -79,18 +80,20 @@ const startingModel =
   process.env.BIM_DEV_MODEL === "showcase"
     ? createShowcaseDemoModel("showcase-demo")
     : process.env.BIM_DEV_MODEL === "arch-overhaul"
-    ? createArchOverhaulDemoModel("arch-overhaul-demo")
-    : process.env.BIM_DEV_MODEL === "electrical-plan"
-      ? createElectricalDemoModel("electrical-plan-demo")
-    : process.env.BIM_DEV_MODEL === "site-7301"
-      ? createPlacedDemoModel("site-7301", SITE_7301_ORIGIN)
-      : process.env.BIM_DEV_MODEL === "open-issue"
-        ? openIssueModel()
-        : process.env.BIM_DEV_MODEL === "sample-market-gas"
-          ? sampleMarketGasModel()
-          : process.env.BIM_DEV_MODEL === "enlarged-plans"
-            ? enlargedPlansDemoModel()
-            : createDemoModel("f-a-demo");
+      ? createArchOverhaulDemoModel("arch-overhaul-demo")
+      : process.env.BIM_DEV_MODEL === "electrical-plan"
+        ? createElectricalDemoModel("electrical-plan-demo")
+        : process.env.BIM_DEV_MODEL === "mechanical-details"
+          ? await createMechanicalDetailsDemoModel("mechanical-details-demo")
+          : process.env.BIM_DEV_MODEL === "site-7301"
+            ? createPlacedDemoModel("site-7301", SITE_7301_ORIGIN)
+            : process.env.BIM_DEV_MODEL === "open-issue"
+              ? openIssueModel()
+              : process.env.BIM_DEV_MODEL === "sample-market-gas"
+                ? sampleMarketGasModel()
+                : process.env.BIM_DEV_MODEL === "enlarged-plans"
+                  ? enlargedPlansDemoModel()
+                  : createDemoModel("f-a-demo");
 // Main plus branches, versions and copies, all in memory (bim-sync's in-memory branch host).
 const models = await InMemoryBranchHost.start(startingModel);
 const { sequencer, hub } = models.main;

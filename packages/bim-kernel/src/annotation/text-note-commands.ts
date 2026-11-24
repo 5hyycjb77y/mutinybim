@@ -5,6 +5,8 @@ import { DEFAULT_DETAIL_SCALE, DEFAULT_PLAN_SCALE, sheetPaperSize, type DrawingI
 import { round, roundVec } from "../geometry";
 import { KernelError, type TrackedReader } from "../model";
 import { asElementId, type BimElement, type ElementId, type ModelState, type Vec2 } from "../types";
+import { peerReads } from "../elements/feature";
+import { DRAFTING_CAD_STANDARDS_FEATURE } from "./detailing";
 import {
   DEFAULT_NOTE_SIZE_MM,
   NOTE_LIMITS,
@@ -12,6 +14,7 @@ import {
   noteContentProblem,
   noteLabel,
   noteLeaderSchema,
+  noteNeedsCadStandards,
   noteParagraphsSchema,
   normalizeParagraphs,
   type NoteLeader,
@@ -57,6 +60,8 @@ export const textNoteCommandSchemas = [
     /** Cap height, paper mm, for text without its own size. */
     textSize: size.optional(),
     lineSpacing: lineSpacingSchema.optional(),
+    /** Opaque paper-white background mask behind the note's text. */
+    mask: z.boolean().optional(),
     paragraphs: noteParagraphsSchema,
     /** Leader arrow target in the owner's coordinates. */
     leader: vec2.nullable().optional(),
@@ -71,6 +76,7 @@ export const textNoteCommandSchemas = [
     paragraphs: noteParagraphsSchema,
     textSize: size.optional(),
     lineSpacing: lineSpacingSchema.optional(),
+    mask: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("resize_text_note"),
@@ -86,6 +92,8 @@ export const textNoteCommandSchemas = [
     itemId: id,
     at: vec2.optional(),
     rotation: rotation.optional(),
+    /** Toggle opaque background mask behind the note's text. */
+    mask: z.boolean().optional(),
     /** null removes the leader. */
     leader: vec2.nullable().optional(),
     /** Replace every leader (an empty list removes them all). */
@@ -133,7 +141,7 @@ export function draftContentFingerprint(item: DrawingItem, paragraphs: readonly 
 /** Value of a note field for the commit's competing-edit check, or undefined if the field isn't a note field. */
 export function noteFieldValue(el: DrawingItem, field: string): string | undefined {
   if (field === NOTE_FIELDS.content) return canonicalJson({ paragraphs: el.note?.paragraphs ?? null, text: el.text ?? null, textSize: el.textSize ?? null, lineSpacing: el.note?.lineSpacing ?? null });
-  if (field === NOTE_FIELDS.box) return canonicalJson({ box: el.note?.box ?? null, leader: el.note?.leader ?? null });
+  if (field === NOTE_FIELDS.box) return canonicalJson({ box: el.note?.box ?? null, leader: el.note?.leader ?? null, ...(el.note?.mask !== undefined ? { mask: el.note.mask } : {}) });
   return undefined;
 }
 
@@ -218,6 +226,9 @@ export function executeTextNoteCommand(ctx: NoteCommandContext, command: TextNot
   switch (command.type) {
     case "create_text_note": {
       if (model.elements[command.itemId]) fail(`${command.itemId} is already used by another element`, [command.itemId], "already_exists");
+      if (noteNeedsCadStandards({ mask: command.mask, leaders: command.leaders }) && !peerReads(DRAFTING_CAD_STANDARDS_FEATURE)) {
+        fail("Note background masks and filled leader arrows can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [command.itemId]);
+      }
       const { owner, space, paper } = ownerOf(reader, command.ownerId);
       const at = roundVec(command.at);
       checkOnSheet(paper, at, command.itemId);
@@ -227,6 +238,7 @@ export function executeTextNoteCommand(ctx: NoteCommandContext, command: TextNot
         box: { width: round(command.width), height: command.height ?? null, rotation: normRotation(command.rotation ?? 0) },
         paragraphs,
         lineSpacing: command.lineSpacing ?? 1,
+        ...(command.mask ? { mask: true } : {}),
         ...leaderFields(command.leaders ?? (command.leader ? [{ to: command.leader }] : [])),
       };
       write({
@@ -251,9 +263,19 @@ export function executeTextNoteCommand(ctx: NoteCommandContext, command: TextNot
       }
       const { space, scale } = ownerOf(reader, item.ownerId);
       const { note, at } = asRich(item, space, scale);
+      if (command.mask !== undefined && !peerReads(DRAFTING_CAD_STANDARDS_FEATURE)) {
+        fail("Note background masks can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [item.id]);
+      }
       const paragraphs = checkContent(command.paragraphs, item.id);
       const { text: _plain, ...rest } = item;
-      const next: DrawingItem = { ...rest, points: [at], textSize: command.textSize ?? item.textSize ?? DEFAULT_NOTE_SIZE_MM, note: { ...note, paragraphs, lineSpacing: command.lineSpacing ?? note.lineSpacing } };
+      const { mask: _oldMask, ...noteWithoutMask } = note;
+      const nextMask = command.mask !== undefined ? command.mask : note.mask;
+      const next: DrawingItem = {
+        ...rest,
+        points: [at],
+        textSize: command.textSize ?? item.textSize ?? DEFAULT_NOTE_SIZE_MM,
+        note: { ...noteWithoutMask, paragraphs, lineSpacing: command.lineSpacing ?? note.lineSpacing, ...(nextMask ? { mask: true } : {}) },
+      };
       write(next);
       authored.push({ elementId: item.id, field: NOTE_FIELDS.content, value: contentValue(next) });
       if (at !== item.points[0]) authored.push({ elementId: item.id, field: NOTE_FIELDS.points, value: canonicalJson(next.points) });
@@ -276,12 +298,15 @@ export function executeTextNoteCommand(ctx: NoteCommandContext, command: TextNot
     }
     case "move_text_note": {
       const item = liveNote(reader, command.itemId);
-      if (command.at === undefined && command.rotation === undefined && command.leader === undefined && command.leaders === undefined) fail("Say where to move the note, how far to turn it, or where its leader points.", [item.id]);
+      if (command.at === undefined && command.rotation === undefined && command.mask === undefined && command.leader === undefined && command.leaders === undefined) fail("Say where to move the note, how far to turn it, or where its leader points.", [item.id]);
+      if (noteNeedsCadStandards({ mask: command.mask, leaders: command.leaders }) && !peerReads(DRAFTING_CAD_STANDARDS_FEATURE)) {
+        fail("Note background masks and filled leader arrows can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [item.id]);
+      }
       const { space, scale, paper } = ownerOf(reader, item.ownerId);
       const { note, at: oldAt } = asRich(item, space, scale);
       const at = command.at ? roundVec(command.at) : oldAt;
       checkOnSheet(paper, at, item.id);
-      const { leader: _leader, leaders: _leaders, ...withoutLeader } = note;
+      const { leader: _leader, leaders: _leaders, mask: _oldMask, ...withoutLeader } = note;
       const leaders: readonly NoteLeader[] =
         command.leaders !== undefined
           ? command.leaders
@@ -290,12 +315,18 @@ export function executeTextNoteCommand(ctx: NoteCommandContext, command: TextNot
             : command.leader === null
               ? []
               : [{ ...note.leader, to: command.leader }, ...(note.leaders ?? [])];
-      const nextNote: RichTextNote = { ...withoutLeader, box: { ...note.box, ...(command.rotation !== undefined ? { rotation: normRotation(command.rotation) } : {}) }, ...leaderFields(leaders) };
+      const nextMask = command.mask !== undefined ? command.mask : note.mask;
+      const nextNote: RichTextNote = {
+        ...withoutLeader,
+        box: { ...note.box, ...(command.rotation !== undefined ? { rotation: normRotation(command.rotation) } : {}) },
+        ...(nextMask ? { mask: true } : {}),
+        ...leaderFields(leaders),
+      };
       const { text: _plain, ...rest } = item;
       const next: DrawingItem = { ...rest, points: [at], note: nextNote };
       write(next);
       if (command.at) authored.push({ elementId: item.id, field: NOTE_FIELDS.points, value: canonicalJson(next.points) });
-      if (command.rotation !== undefined || command.leader !== undefined || command.leaders !== undefined) authored.push({ elementId: item.id, field: NOTE_FIELDS.box, value: boxValue(next) });
+      if (command.rotation !== undefined || command.mask !== undefined || command.leader !== undefined || command.leaders !== undefined) authored.push({ elementId: item.id, field: NOTE_FIELDS.box, value: boxValue(next) });
       if (!item.note) authored.push({ elementId: item.id, field: NOTE_FIELDS.content, value: contentValue(next) });
       return null;
     }

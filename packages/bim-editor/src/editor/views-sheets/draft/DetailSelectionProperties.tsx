@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { DETAIL_LINE_STYLES, HATCH_PATTERNS, detailComponent, detailLineStyleOf, documentIndex, lineStyleFor, type BatchCommand, type DetailLineStyleId, type DrawingItem, type HatchPattern, type ModelState, type RegionFill, type ViewCommand } from '@permitzip/bim-kernel'
+import { DETAIL_LINE_STYLES, HATCH_PATTERNS, REGION_TONES, detailComponent, detailLineStyleOf, documentIndex, lineStyleFor, type BatchCommand, type DetailLineStyleId, type DrawingItem, type HatchPattern, type ModelState, type RegionFill, type RegionTone, type ViewCommand } from '@permitzip/bim-kernel'
 import { Button } from '../../../ui/button'
 import { Field, FieldDescription, FieldLabel } from '../../../ui/field'
 import { Input } from '../../../ui/input'
@@ -21,7 +21,20 @@ const REGION_HATCH_LABEL: Record<HatchPattern, string> = {
   concrete: 'Concrete',
   earth: 'Earth',
   insulation_rigid: 'Rigid insulation',
-  masonry: 'Masonry',
+  masonry: 'Masonry / CMU',
+  steel_section: 'Steel section',
+  gravel: 'Gravel',
+  sand: 'Sand / plaster',
+  gypsum: 'Gypsum board',
+  wood_grain: 'Wood grain',
+  metal_deck: 'Metal deck',
+  roofing_membrane: 'Roofing membrane',
+  acoustic: 'Acoustic liner',
+}
+const REGION_TONE_LABEL: Record<RegionTone, string> = {
+  ink: 'Ink (black)',
+  halftone: 'Halftone (50% grey)',
+  screened: 'Screened (32% grey)',
 }
 
 /**
@@ -132,7 +145,12 @@ export function DetailSelectionProperties({
                 const nextFill: RegionFill =
                   v === 'masking'
                     ? { pattern: 'solid', grey: 1, masking: true, boundary: false }
-                    : { pattern: v as HatchPattern, boundary: first.fill?.boundary ?? true, ...(first.fill?.spacingMm ? { spacingMm: first.fill.spacingMm } : {}) }
+                    : {
+                        pattern: v as HatchPattern,
+                        boundary: first.fill?.boundary ?? true,
+                        ...(first.fill?.tone ? { tone: first.fill.tone } : {}),
+                        ...(first.fill?.spacingMm ? { spacingMm: first.fill.spacingMm } : {}),
+                      }
                 send({ type: 'update_drawing_item', itemId: first.id, fill: nextFill }, 'change the fill pattern')
               }}
             >
@@ -151,6 +169,35 @@ export function DetailSelectionProperties({
               </SelectContent>
             </Select>
           </Field>
+          {!first.fill?.masking && (
+            <Field>
+              <FieldLabel htmlFor="detail-region-tone">Fill tone</FieldLabel>
+              <Select
+                value={first.fill?.tone ?? 'ink'}
+                disabled={!canEdit || first.pinned === true}
+                onValueChange={(v) => {
+                  const tone = REGION_TONES.find((t) => t === v) ?? 'ink'
+                  const base: RegionFill = first.fill ?? { pattern: 'diagonal' }
+                  const { tone: _prev, ...rest } = base
+                  const nextFill: RegionFill = tone === 'ink' ? rest : { ...rest, tone }
+                  send({ type: 'update_drawing_item', itemId: first.id, fill: nextFill }, 'change the fill tone')
+                }}
+              >
+                <SelectTrigger id="detail-region-tone" size="sm" data-testid="detail-region-tone">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {REGION_TONES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {REGION_TONE_LABEL[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           {!first.fill?.masking && (
             <Field orientation="horizontal">
               <FieldLabel htmlFor="detail-region-boundary">Show boundary lines</FieldLabel>

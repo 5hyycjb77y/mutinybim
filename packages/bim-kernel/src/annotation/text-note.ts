@@ -1,8 +1,9 @@
 import type { DrawingItem } from "../documents";
+import type { Primitive } from "../drawing/sheet";
 import type { Vec2 } from "../types";
-import { DEFAULT_NOTE_SIZE_MM, NOTE_LIMITS, paragraphsFromPlain, type NoteParagraph, type RichTextNote } from "./rich-text";
+import { DEFAULT_NOTE_SIZE_MM, NOTE_LIMITS, paragraphsFromPlain, type NoteLeader, type NoteParagraph, type RichTextNote } from "./rich-text";
 import { layoutNote, pieceCharX, type NoteLayout } from "./text-layout";
-import { leaderPrims } from "./annotations";
+import { leaderPrimitives, leaderPrims } from "./annotations";
 
 /**
  * A note as it draws: its box's top-left on paper, rotation, and laid-out
@@ -17,6 +18,8 @@ export interface TextBlock {
   /** Degrees, clockwise on paper, about `origin`. */
   readonly rotation: number;
   readonly layout: NoteLayout;
+  /** Opaque paper-white background mask drawn behind the note's text so crossing lines stay broken. */
+  readonly mask?: boolean;
 }
 
 /** What a note item prints: its rich content, or a one-line note written before notes were rich, as an unwrapped box. */
@@ -61,7 +64,13 @@ export function noteOrigin(resolved: ResolvedNote, toPaper: (p: Vec2) => Vec2): 
 export function textBlockFor(item: DrawingItem, toPaper: (p: Vec2) => Vec2): TextBlock | null {
   const resolved = resolveNote(item);
   if (!resolved) return null;
-  return { itemId: item.id, origin: noteOrigin(resolved, toPaper), rotation: resolved.note.box.rotation, layout: layoutResolved(resolved) };
+  return {
+    itemId: item.id,
+    origin: noteOrigin(resolved, toPaper),
+    rotation: resolved.note.box.rotation,
+    layout: layoutResolved(resolved),
+    ...(resolved.note.mask ? { mask: true } : {}),
+  };
 }
 
 /** Lay out a note's content in its box. */
@@ -97,6 +106,43 @@ export function paperToBox(block: Pick<TextBlock, "origin" | "rotation">, paper:
 export function textBlockCorners(block: TextBlock): [Vec2, Vec2, Vec2, Vec2] {
   const { width, height } = block.layout;
   return [boxToPaper(block, { x: 0, y: 0 }), boxToPaper(block, { x: width, y: 0 }), boxToPaper(block, { x: width, y: height }), boxToPaper(block, { x: 0, y: height })];
+}
+
+/**
+ * Compute a clean horizontal shoulder elbow on paper (same level as the first
+ * line of `block`, extending horizontally from the edge nearest `to`) so
+ * moving a note keeps a crisp CAD leader shoulder automatically.
+ */
+export function noteAutoShoulderPaper(block: TextBlock, toPaper: Vec2, shoulderMm = 4.5): Vec2 {
+  const firstMid = block.layout.lines[0] ? block.layout.lines[0].top + block.layout.lines[0].height / 2 : block.layout.height / 2;
+  const localTo = paperToBox(block, toPaper);
+  const onRight = localTo.x >= block.layout.width / 2;
+  const startLocalX = onRight ? block.layout.width : 0;
+  const distX = Math.abs(localTo.x - startLocalX);
+  // Keep shoulder proportional if the target is very close so it never overshoots past the arrowhead.
+  const run = Math.min(shoulderMm, Math.max(1.5, distX * 0.45));
+  return boxToPaper(block, { x: onRight ? block.layout.width + run : -run, y: firstMid });
+}
+
+/**
+ * Recompute a note's leaders after the note box moves to `movedBlock` on paper:
+ * every leader that had a shoulder elbow (or is being dragged with a shoulder)
+ * stays dead-level with the note's first line and automatically flips sides if
+ * the user drags the note across the leader's arrow tip!
+ */
+export function noteLeadersAfterMove(
+  item: DrawingItem,
+  movedBlock: TextBlock,
+  toPaper: (p: Vec2) => Vec2,
+  toStored: (p: Vec2) => Vec2,
+): NoteLeader[] {
+  const all = [...(item.note?.leader ? [item.note.leader] : []), ...(item.note?.leaders ?? [])];
+  return all.map((l) => {
+    if (!l.elbow) return l;
+    const toP = toPaper(l.to);
+    const nextElbow = noteAutoShoulderPaper(movedBlock, toP);
+    return { ...l, elbow: toStored(nextElbow) };
+  });
 }
 
 /** Where a leader leaves the box: the middle of the first line, on the side nearer `toward`. */
@@ -135,22 +181,49 @@ export function noteCornersInModel(item: DrawingItem, scale: number): Vec2[] {
   return [...textBlockCorners(block).map((c) => ({ x: resolved.anchor.x + c.x * scale, y: resolved.anchor.y - c.y * scale })), ...leader];
 }
 
+/** Tight local box around the note's laid-out text lines, with drafting mask padding (paper mm). */
+export function textBlockMaskRect(block: TextBlock): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null {
+  const nonEmpty = block.layout.lines.filter((l) => l.pieces.some((p) => p.text.trim().length > 0));
+  if (nonEmpty.length === 0) return null;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const l of nonEmpty) {
+    if (l.left < minX) minX = l.left;
+    if (l.right > maxX) maxX = l.right;
+    if (l.top < minY) minY = l.top;
+    if (l.top + l.height > maxY) maxY = l.top + l.height;
+  }
+  const padX = 0.8;
+  const padY = 0.55;
+  return { x: minX - padX, y: minY - padY, width: Math.max(0.5, maxX - minX) + padX * 2, height: Math.max(0.5, maxY - minY) + padY * 2 };
+}
+
 /**
- * A note item drawn on paper: its block and leader linework, or null when it
+ * A note item drawn on paper: its block and leader linework/primitives, or null when it
  * isn't a note or (with `fits`) its box would print past where notes may go.
  */
-export function noteDrawing(item: DrawingItem, toPaper: (p: Vec2) => Vec2, fits?: (corners: readonly Vec2[]) => boolean): { block: TextBlock; leader: Array<[Vec2, Vec2]> } | null {
+export function noteDrawing(
+  item: DrawingItem,
+  toPaper: (p: Vec2) => Vec2,
+  fits?: (corners: readonly Vec2[]) => boolean,
+): { block: TextBlock; leader: Array<[Vec2, Vec2]>; primitives: Primitive[] } | null {
   const block = textBlockFor(item, toPaper);
   if (!block) return null;
   if (fits && !fits(textBlockCorners(block))) return null;
   const all = [...(item.note?.leader ? [item.note.leader] : []), ...(item.note?.leaders ?? [])];
   const leader: Array<[Vec2, Vec2]> = [];
+  const primitives: Primitive[] = [];
   for (const l of all) {
     const to = toPaper(l.to);
     const elbow = l.elbow ? toPaper(l.elbow) : undefined;
-    leader.push(...(elbow || l.arrow ? leaderPrims(leaderStart(block, elbow ?? to), to, elbow, l.arrow) : leaderSegments(block, to)));
+    const start = leaderStart(block, elbow ?? to);
+    leader.push(...(elbow || l.arrow ? leaderPrims(start, to, elbow, l.arrow) : leaderSegments(block, to)));
+    const rawPrims = elbow || l.arrow ? leaderPrimitives(start, to, elbow, l.arrow) : leaderSegments(block, to).map(([a, b]): Primitive => ({ kind: "line", a, b, pen: "thin" }));
+    for (const pr of rawPrims) primitives.push({ ...pr, noteId: item.id });
   }
-  return { block, leader };
+  return { block, leader, primitives };
 }
 
 /** SVG font family names the browser loads from the same files the PDF embeds (see `noteFontFaceCss`). */
@@ -179,6 +252,10 @@ export function textBlockToSvg(block: TextBlock, attrs = ""): string {
   const parts: string[] = [];
   const transform = `translate(${n(block.origin.x)} ${n(block.origin.y)})${block.rotation ? ` rotate(${n(block.rotation)})` : ""}`;
   parts.push(`<g transform="${transform}" data-note-id="${esc(block.itemId)}" font-family="'${NOTE_SVG_FONT_FAMILY}', 'Liberation Sans', Arimo, Arial, sans-serif" style="font-kerning:none;font-variant-ligatures:none;font-feature-settings:'kern' 0,'liga' 0;white-space:pre" xml:space="preserve"${attrs}>`);
+  if (block.mask) {
+    const r = textBlockMaskRect(block);
+    if (r) parts.push(`<rect x="${n(r.x)}" y="${n(r.y)}" width="${n(r.width)}" height="${n(r.height)}" fill="#fff" stroke="none"/>`);
+  }
   for (const line of block.layout.lines) {
     for (const p of line.pieces) {
       if (p.text.trim().length === 0) continue;

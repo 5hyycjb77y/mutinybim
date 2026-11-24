@@ -39,6 +39,15 @@ export interface PrimitiveStyle {
   readonly widthMm?: number;
 }
 
+/**
+ * Optional owner-item id attached to primitives emitted by an interactive
+ * annotation (e.g. a rich-text note's leaders) so the editor can hide them
+ * while the user is dragging that item live without repainting the whole sheet.
+ */
+interface PrimitiveOwner {
+  readonly noteId?: string;
+}
+
 export type Primitive =
   | ({
       readonly kind: "line";
@@ -47,12 +56,13 @@ export type Primitive =
       readonly pen: Pen;
       readonly dash?: readonly number[];
       readonly tone?: Tone;
-    } & PrimitiveStyle)
-  | ({ readonly kind: "rect"; readonly at: Vec2; readonly size: Vec2; readonly pen: Pen } & PrimitiveStyle)
+    } & PrimitiveStyle &
+      PrimitiveOwner)
+  | ({ readonly kind: "rect"; readonly at: Vec2; readonly size: Vec2; readonly pen: Pen } & PrimitiveStyle & PrimitiveOwner)
   /** A true vector circle outline on paper (center `at`, radius `r` paper mm) so circular plan symbols stay crisp at any zoom or print DPI. */
-  | ({ readonly kind: "circle"; readonly at: Vec2; readonly r: number; readonly pen: Pen; readonly dash?: readonly number[]; readonly tone?: Tone } & PrimitiveStyle)
+  | ({ readonly kind: "circle"; readonly at: Vec2; readonly r: number; readonly pen: Pen; readonly dash?: readonly number[]; readonly tone?: Tone } & PrimitiveStyle & PrimitiveOwner)
   /** A filled polygon with no outline (section poche, shaded surfaces). `grey`: 0 black, 1 white; a tone lightens it. `color` replaces the grey in colour; a monochrome print uses the grey. */
-  | ({ readonly kind: "fill"; readonly points: readonly Vec2[]; readonly grey: number; readonly tone?: Tone } & Pick<PrimitiveStyle, "color">)
+  | ({ readonly kind: "fill"; readonly points: readonly Vec2[]; readonly grey: number; readonly tone?: Tone } & Pick<PrimitiveStyle, "color"> & PrimitiveOwner)
   | ({
       readonly kind: "text";
       readonly at: Vec2;
@@ -75,7 +85,8 @@ export type Primitive =
       readonly vAlign?: "baseline" | "middle";
       /** Optional clickable http(s) URL (e.g. a manufacturer cut sheet link in a schedule cell). */
       readonly href?: string;
-    } & Pick<PrimitiveStyle, "color">);
+    } & Pick<PrimitiveStyle, "color"> &
+      PrimitiveOwner);
 
 /** A font a scene's text uses besides the standard sheet font: its id, family, weight and the file the writers load. */
 export interface SceneFont {

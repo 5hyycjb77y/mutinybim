@@ -32,7 +32,7 @@ Topics: duct, rectangular, size
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -58,7 +58,7 @@ Topics: duct, round, size
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -84,7 +84,7 @@ Topics: duct, oval, size
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -110,7 +110,7 @@ Topics: pipe, piping, size, water
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -136,7 +136,7 @@ Topics: connect, equipment, connector, from
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -162,7 +162,7 @@ Topics: continue, extend, run end
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -188,7 +188,7 @@ Topics: route, duct, pipe, run, slope, drain, sanitary, gravity, conduit, rise, 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -214,7 +214,7 @@ Topics: branch, tee, tap, wye, takeoff
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -241,7 +241,7 @@ Topics: riser, drop, vertical, stack
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -267,7 +267,7 @@ Topics: connect fixtures, drain, into, auto connect, many fixtures
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -293,7 +293,7 @@ Topics: system graphics, line pattern, line weight, line code, schematic, colour
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -320,7 +320,7 @@ Topics: fitting types, fitting library, elbows, takeoffs, pipe fittings, catalog
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },

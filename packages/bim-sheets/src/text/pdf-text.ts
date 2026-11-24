@@ -1,6 +1,6 @@
 import fontkit from "@pdf-lib/fontkit";
 import { degrees, rgb, type PDFDocument, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
-import { boxToPaper, type NoteFace, type TextBlock } from "@permitzip/bim-kernel";
+import { boxToPaper, textBlockMaskRect, type NoteFace, type TextBlock } from "@permitzip/bim-kernel";
 import { loadVerifiedFace, type NoteFontSource } from "./fonts";
 
 /**
@@ -41,6 +41,13 @@ export async function drawTextBlocks(doc: PDFDocument, page: PDFPage, blocks: re
 
   for (const block of blocks) {
     const rotate = degrees(-block.rotation);
+    if (block.mask) {
+      const r = textBlockMaskRect(block);
+      if (r) {
+        const at = toPdf(block, { x: r.x, y: r.y + r.height });
+        page.drawRectangle({ x: at.x, y: at.y, width: r.width * MM_TO_PT, height: r.height * MM_TO_PT, color: rgb(1, 1, 1), rotate });
+      }
+    }
     for (const line of block.layout.lines) {
       for (const piece of line.pieces) {
         if (piece.text.trim().length === 0) continue;

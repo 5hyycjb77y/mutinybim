@@ -278,7 +278,7 @@ Input: `project_id`, `model_id`, `view`, `categories`, `leaders`?, `include_tagg
 
 A rich text note (bold, italic, underline, lists, sizes; prints as shown) in a plan, section, detail view or on a sheet, with leaders to points, each with an optional elbow and an arrow, dot, tick or none. Points are view feet, or paper inches on a sheet (at_in). The box stays paper-sized at any scale.
 
-Input: `project_id`, `model_id`, `base_revision`?, `owner`, `text`?, `paragraphs`?, `at`, `width_in`?, `text_height_in`?, `leaders`?
+Input: `project_id`, `model_id`, `base_revision`?, `owner`, `text`?, `paragraphs`?, `at`, `width_in`?, `text_height_in`?, `mask`?, `leaders`?
 
 ### bim_edit_annotation
 

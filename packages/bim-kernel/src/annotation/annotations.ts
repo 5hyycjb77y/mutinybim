@@ -106,7 +106,7 @@ export interface TagSpec {
   readonly elbow?: Vec2 | "auto";
 }
 
-export const LEADER_ARROWS = ["arrow", "dot", "tick", "none"] as const;
+export const LEADER_ARROWS = ["arrow", "filled_arrow", "dot", "filled_dot", "tick", "none"] as const;
 
 const vec2 = z.object({ x: z.number().finite(), y: z.number().finite() });
 export const anchorRefSchema = z.object({ elementId: z.string().min(1).max(200), anchor: z.enum(ANCHORS), index: z.number().int().min(0).max(49).optional() }).strict();
@@ -658,7 +658,7 @@ function linearSegment(ctx: AnnotationDrawContext, itemId: string, pa: Vec2, pb:
   const mid = mul(add(a2, b2), 0.5);
   // Unidirectional text (always horizontal): above a horizontal or sloped line, beside a vertical one.
   const vertical = Math.abs(axis.x) < 0.3;
-  const side = offset >= 0 ? 1 : -1;
+  const side = n.x * (offset >= 0 ? 1 : -1) >= 0 ? 1 : -1;
   const textAt = vertical ? { x: mid.x + side * 1.5, y: mid.y + style.textSizeMm / 2 } : { x: mid.x, y: mid.y - 1.2 };
   const anchor: "start" | "middle" | "end" = vertical ? (side > 0 ? "start" : "end") : "middle";
   ctx.prims.push({ kind: "text", at: textAt, text: label, size: style.textSizeMm, anchor });
@@ -1465,6 +1465,7 @@ export function leaderPrims(from: Vec2, to: Vec2, elbow: Vec2 | undefined, arrow
   const head = Math.min(2.5, l / 3);
   switch (arrow ?? "arrow") {
     case "arrow":
+    case "filled_arrow":
       segs.push([to, add(sub(to, mul(u, head)), mul(n, head * 0.35))], [to, sub(sub(to, mul(u, head)), mul(n, head * 0.35))]);
       break;
     case "tick": {
@@ -1472,7 +1473,8 @@ export function leaderPrims(from: Vec2, to: Vec2, elbow: Vec2 | undefined, arrow
       segs.push([sub(to, t), add(to, t)]);
       break;
     }
-    case "dot": {
+    case "dot":
+    case "filled_dot": {
       const r = 0.6;
       for (let i = 0; i < 8; i++) {
         const a0 = (i * Math.PI) / 4;
@@ -1485,4 +1487,39 @@ export function leaderPrims(from: Vec2, to: Vec2, elbow: Vec2 | undefined, arrow
       break;
   }
   return segs;
+}
+
+/** A leader on paper as full drawing primitives, including solid filled NCS arrowheads and dots. */
+export function leaderPrimitives(from: Vec2, to: Vec2, elbow: Vec2 | undefined, arrow: (typeof LEADER_ARROWS)[number] | undefined): Primitive[] {
+  const kind = arrow ?? "arrow";
+  if (kind !== "filled_arrow" && kind !== "filled_dot") {
+    return leaderPrims(from, to, elbow, kind).map(([a, b]) => ({ kind: "line", a, b, pen: "thin" }));
+  }
+  const pts = elbow ? [from, elbow, to] : [from, to];
+  const out: Primitive[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    if (a && b) out.push({ kind: "line", a, b, pen: "thin" });
+  }
+  const last = pts[pts.length - 2] ?? from;
+  const d = sub(to, last);
+  const l = len(d);
+  if (l < 1) return out;
+  const u = mul(d, 1 / l);
+  const n = { x: -u.y, y: u.x };
+  if (kind === "filled_arrow") {
+    const head = Math.min(2.6, l / 2.5);
+    const back = sub(to, mul(u, head));
+    const half = head * 0.28;
+    out.push({ kind: "fill", points: [to, add(back, mul(n, half)), sub(back, mul(n, half))], grey: 0 });
+  } else {
+    const r = 0.65;
+    out.push({
+      kind: "fill",
+      points: Array.from({ length: 10 }, (_, i) => add(to, { x: r * Math.cos((i * Math.PI) / 5), y: r * Math.sin((i * Math.PI) / 5) })),
+      grey: 0,
+    });
+  }
+  return out;
 }

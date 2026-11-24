@@ -2282,7 +2282,11 @@ function drawItemInModel(p: Painter, item: DrawingItem, a: Vec2, b: Vec2 | undef
     return;
   }
   if (item.shape === "dimension" && item.dim) {
+    const startIdx = ctx.prims.length;
     drawDimension(ctx, item);
+    for (let i = startIdx; i < ctx.prims.length; i++) {
+      ctx.prims[i] = { ...ctx.prims[i]!, noteId: item.id };
+    }
     return;
   }
   switch (item.shape) {
@@ -2293,7 +2297,7 @@ function drawItemInModel(p: Painter, item: DrawingItem, a: Vec2, b: Vec2 | undef
       const drawn = noteDrawing(item, p.toPaper, (corners) => corners.every((c) => c.x >= lo.x - 1e-6 && c.x <= hi.x + 1e-6 && c.y >= lo.y - 1e-6 && c.y <= hi.y + 1e-6));
       if (!drawn) break;
       p.blocks.push(drawn.block);
-      for (const [s, e] of drawn.leader) p.prims.push({ kind: "line", a: s, b: e, pen: "thin" });
+      for (const pr of drawn.primitives) p.prims.push(pr);
       break;
     }
     case "line":
@@ -2605,7 +2609,7 @@ function drawSheetItems(prims: Primitive[], items: readonly DrawingItem[], block
         const drawn = noteDrawing(item, (q) => q);
         if (!drawn) break;
         blocks.push(drawn.block);
-        for (const [s, e] of drawn.leader) prims.push({ kind: "line", a: s, b: e, pen: "thin" });
+        for (const pr of drawn.primitives) prims.push(pr);
         break;
       }
       case "line":

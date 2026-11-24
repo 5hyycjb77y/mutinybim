@@ -38,6 +38,7 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
       );
   }
   for (const p of scene.primitives) {
+    if (p.noteId && opts.hideNoteIds?.has(p.noteId)) continue;
     if (p.kind === "line") {
       const dash = p.dash ? ` stroke-dasharray="${p.dash.join(" ")}"` : "";
       parts.push(

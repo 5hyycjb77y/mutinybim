@@ -566,8 +566,9 @@ export function registerBimAnnotationTools(server: McpServer, caller: ResolveBim
         at: pointInput.describe("The box's top-left: view feet, or paper inches on a sheet."),
         width_in: z.number().min(0.5).max(30).default(3),
         text_height_in: z.number().min(0.06).max(1).optional(),
+        mask: z.boolean().optional().describe("Opaque white paper mask behind the note so crossing linework stays clean."),
         leaders: z
-          .array(z.object({ to: pointInput, elbow: pointInput.optional(), arrow: z.enum(["arrow", "dot", "tick", "none"]).optional() }))
+          .array(z.object({ to: pointInput, elbow: pointInput.optional(), arrow: z.enum(["arrow", "filled_arrow", "dot", "filled_dot", "tick", "none"]).optional() }))
           .max(9)
           .optional(),
       },
@@ -586,6 +587,7 @@ export function registerBimAnnotationTools(server: McpServer, caller: ResolveBim
           width: (args.width_in ?? 3) * IN,
           textSize: args.text_height_in !== undefined ? args.text_height_in * IN : DEFAULT_NOTE_SIZE_MM,
           paragraphs: paragraphsForCommand(paragraphs),
+          ...(args.mask ? { mask: true } : {}),
           ...(args.leaders ? { leaders: args.leaders.map((l) => ({ to: owner.toStored(l.to), ...(l.elbow ? { elbow: owner.toStored(l.elbow) } : {}), ...(l.arrow ? { arrow: l.arrow } : {}) })) } : {}),
         };
       }),
@@ -619,7 +621,7 @@ export function registerBimAnnotationTools(server: McpServer, caller: ResolveBim
         elbow: z.union([z.literal("auto"), pointInput]).optional().describe('action tag: "auto" = elbow leader (also straightens a hand-placed bend); a point (view feet) places the bend.'),
         item_ids: z.array(z.string().min(1).max(200)).max(499).optional().describe("action spread: the other tags that move with item_id, clear of each other, with elbow leaders."),
         leaders: z
-          .array(z.object({ to: pointInput, elbow: pointInput.optional(), arrow: z.enum(["arrow", "dot", "tick", "none"]).optional() }))
+          .array(z.object({ to: pointInput, elbow: pointInput.optional(), arrow: z.enum(["arrow", "filled_arrow", "dot", "filled_dot", "tick", "none"]).optional() }))
           .max(9)
           .optional(),
       },

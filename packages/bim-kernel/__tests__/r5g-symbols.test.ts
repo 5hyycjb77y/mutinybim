@@ -9,6 +9,7 @@
  */
 import { DEFAULT_SETTINGS, buildViewScene, builtinPartType, builtinRegistry, detailComponent, planCommit, type Command, type ModelState, type Primitive } from "../src";
 import { ELECTRICAL_COMPONENTS, ELECTRICAL_PLAN_SYMBOLS } from "@permitzip/bim-pack-electrical";
+import { MECHANICAL_DETAIL_SYMBOLS } from "@permitzip/bim-pack-mechanical";
 import {
   BUILTIN_SYMBOL_REGISTRY,
   activeSymbolRegistry,
@@ -45,9 +46,13 @@ const SMOKE: SymbolDef = {
 };
 
 describe("r5g symbol registry", () => {
-  it("every electrical one-line symbol is a row of the Electrical pack (round 6: the kernel's own registry is empty), and drafts as the same symbol object (byte-identical prints)", () => {
+  it("every electrical and mechanical pack symbol is a row of its pack (round 6: the kernel's own registry is empty), and drafts as the same symbol object (byte-identical prints)", () => {
     expect(BUILTIN_SYMBOL_REGISTRY.rows).toEqual([]);
-    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual([...ELECTRICAL_COMPONENTS.map((c) => c.id), ...ELECTRICAL_PLAN_SYMBOLS.map((s) => s.id)]);
+    expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual([
+      ...ELECTRICAL_COMPONENTS.map((c) => c.id),
+      ...ELECTRICAL_PLAN_SYMBOLS.map((s) => s.id),
+      ...MECHANICAL_DETAIL_SYMBOLS.map((s) => s.id),
+    ]);
     for (const c of ELECTRICAL_COMPONENTS) {
       expect(detailComponent(c.id)).toBe(c);
       const row = symbolById(c.id);

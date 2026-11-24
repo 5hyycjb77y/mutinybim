@@ -56,6 +56,7 @@ import {
 import { openSchedule, scheduleV1ToV2, ScheduleDefinitionError, type ColumnValues, type RowSet } from "@permitzip/bim-kernel/schedules";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
+import { drafting, type DetailViewSpec } from "./kit-drafting";
 import { onWorking } from "./working";
 
 /**
@@ -794,6 +795,10 @@ export const documents = {
   /** An interior or exterior elevation looking from `from..to`; its live elevation marker prints on overlapping plans. Returns the view's id. */
   elevationView(ctx: ScriptContext, spec: VerticalViewSpec): string {
     return verticalView(ctx, "elevation", spec);
+  },
+  /** A 2D CAD drafting detail view (default scale 16 = 3/4" = 1'-0"). Alias for `drafting.view`. Returns the view's id. */
+  detailView(ctx: ScriptContext, spec: DetailViewSpec): string {
+    return drafting.view(ctx, spec);
   },
   /** A saved 3D view with its 3D crop box, projection, and camera (`lookFrom` preset or explicit `eye`/`target`, `fovDeg` 5–120°, `orthoHeight`). Returns the view's id. */
   view3d(ctx: ScriptContext, spec: View3dSpec): string {

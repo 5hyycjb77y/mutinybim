@@ -1,8 +1,11 @@
 import { z } from "zod";
 import type { DrawingItem } from "../documents";
-import type { Pen, Primitive } from "../drawing/sheet";
+import type { Pen, Primitive, Tone } from "../drawing/sheet";
 import type { Vec2 } from "../types";
 import { activeSymbolRegistry, draftingFormOf, symbolById } from "../categories/symbol-registry";
+
+/** Protocol feature gating CAD drafting standards: halftone/screened hatch tone, extended hatch patterns, opaque note masks, and filled leader arrows/dots. */
+export const DRAFTING_CAD_STANDARDS_FEATURE = "drafting:cad_standards";
 
 /**
  * Detailing: the drafting vocabulary of a detail (or any view, or a sheet) as
@@ -72,8 +75,13 @@ export function lineStyleFor(id: DetailLineStyleId): LineStyle {
   return { ...(s.weight !== "medium" ? { weight: s.weight } : {}), ...(s.pattern !== "solid" ? { pattern: s.pattern } : {}) };
 }
 
-export const HATCH_PATTERNS = ["solid", "diagonal", "diagonal_reverse", "crosshatch", "horizontal", "vertical", "dots", "concrete", "earth", "insulation_rigid", "masonry"] as const;
+export const LEGACY_HATCH_PATTERNS = ["solid", "diagonal", "diagonal_reverse", "crosshatch", "horizontal", "vertical", "dots", "concrete", "earth", "insulation_rigid", "masonry"] as const;
+export const EXTENDED_HATCH_PATTERNS = ["steel_section", "gravel", "sand", "gypsum", "wood_grain", "metal_deck", "roofing_membrane", "acoustic"] as const;
+export const HATCH_PATTERNS = [...LEGACY_HATCH_PATTERNS, ...EXTENDED_HATCH_PATTERNS] as const;
 export type HatchPattern = (typeof HATCH_PATTERNS)[number];
+const EXTENDED_HATCH_SET: ReadonlySet<string> = new Set(EXTENDED_HATCH_PATTERNS);
+export const REGION_TONES = ["ink", "halftone", "screened"] as const;
+export type RegionTone = (typeof REGION_TONES)[number];
 
 export interface RegionFill {
   readonly pattern: HatchPattern;
@@ -81,10 +89,18 @@ export interface RegionFill {
   readonly spacingMm?: number;
   /** Solid fill shade: 0 black, 1 white (default 0.8). */
   readonly grey?: number;
+  /** Hatch stroke or fill tone: black ink (default), halftone (50% grey), or screened (68% grey). */
+  readonly tone?: Tone;
   /** A masking region: white, no boundary, hides what was drawn before it. */
   readonly masking?: boolean;
   /** Draw the boundary (default true; masking regions never do). */
   readonly boundary?: boolean;
+}
+
+/** Whether a region fill uses fields or hatch patterns gated behind `DRAFTING_CAD_STANDARDS_FEATURE`. */
+export function regionFillNeedsCadStandards(fill: RegionFill | undefined): boolean {
+  if (!fill) return false;
+  return fill.tone !== undefined || EXTENDED_HATCH_SET.has(fill.pattern);
 }
 
 export interface ComponentPlacement {
@@ -135,7 +151,14 @@ export function categoryOf(item: Pick<DrawingItem, "shape" | "category" | "fill"
 
 export const lineStyleSchema = z.object({ weight: z.enum(LINE_WEIGHTS_2D).optional(), pattern: z.enum(LINE_PATTERNS).optional() }).strict();
 export const regionFillSchema = z
-  .object({ pattern: z.enum(HATCH_PATTERNS), spacingMm: z.number().min(0.5).max(20).optional(), grey: z.number().min(0).max(1).optional(), masking: z.boolean().optional(), boundary: z.boolean().optional() })
+  .object({
+    pattern: z.enum(HATCH_PATTERNS),
+    spacingMm: z.number().min(0.5).max(20).optional(),
+    grey: z.number().min(0).max(1).optional(),
+    tone: z.enum(["ink", "halftone", "screened"]).optional(),
+    masking: z.boolean().optional(),
+    boundary: z.boolean().optional(),
+  })
   .strict();
 export const componentPlacementSchema = z
   .object({
@@ -250,6 +273,7 @@ export function itemPath(item: DrawingItem): Vec2[] | null {
 interface HatchFamily {
   readonly angleDeg: number;
   readonly spacing: number;
+  readonly offset?: number;
   readonly dash?: readonly number[];
 }
 
@@ -274,6 +298,40 @@ const HATCH_FAMILIES: Readonly<Record<Exclude<HatchPattern, "solid" | "dots" | "
   masonry: [
     { angleDeg: 0, spacing: 2 },
     { angleDeg: 90, spacing: 4, dash: [2, 2] },
+  ],
+  steel_section: [
+    { angleDeg: 45, spacing: 2.8, offset: 0 },
+    { angleDeg: 45, spacing: 2.8, offset: 0.65 },
+  ],
+  gravel: [
+    { angleDeg: 25, spacing: 2.2, dash: [0.8, 1.8] },
+    { angleDeg: -35, spacing: 2.4, dash: [0.7, 2.0] },
+    { angleDeg: 80, spacing: 2.8, dash: [0.5, 2.3] },
+  ],
+  sand: [
+    { angleDeg: 0, spacing: 1.4, dash: [0.22, 1.4] },
+    { angleDeg: 60, spacing: 1.7, offset: 0.7, dash: [0.22, 1.7] },
+  ],
+  gypsum: [
+    { angleDeg: 0, spacing: 1.8, dash: [0.2, 2.2] },
+    { angleDeg: 45, spacing: 2.2, offset: 0.9, dash: [0.2, 2.5] },
+  ],
+  wood_grain: [
+    { angleDeg: 0, spacing: 1.2, dash: [5, 1.2, 2.2, 1.0] },
+    { angleDeg: 4, spacing: 2.6, offset: 0.6, dash: [3.5, 2.0] },
+  ],
+  metal_deck: [
+    { angleDeg: 0, spacing: 2.4 },
+    { angleDeg: 90, spacing: 3.2, dash: [1.2, 1.2] },
+    { angleDeg: 45, spacing: 3.2, dash: [0.9, 2.3] },
+  ],
+  roofing_membrane: [
+    { angleDeg: 0, spacing: 1.5, dash: [4.0, 1.2] },
+    { angleDeg: 0, spacing: 1.5, offset: 0.75, dash: [0.6, 1.8] },
+  ],
+  acoustic: [
+    { angleDeg: 45, spacing: 1.8, dash: [0.9, 1.1] },
+    { angleDeg: -45, spacing: 1.8, offset: 0.9, dash: [0.9, 1.1] },
   ],
 };
 
@@ -301,10 +359,12 @@ export function hatchSegments(poly: readonly Vec2[], pattern: HatchPattern, spac
   const families: readonly HatchFamily[] =
     pattern === "dots" ? [{ angleDeg: 0, spacing: 2, dash: [0.2, 1.8] }] : pattern === "concrete" ? [{ angleDeg: 30, spacing: 2.5, dash: [0.25, 2.2] }, { angleDeg: -60, spacing: 3.5, dash: [0.6, 3.4] }] : HATCH_FAMILIES[pattern];
   for (const fam of families) {
-    const spacing = spacingMm ? spacingMm * (fam.spacing / (families[0]?.spacing ?? fam.spacing)) : fam.spacing;
+    const scaleRatio = spacingMm ? spacingMm / (families[0]?.spacing ?? fam.spacing) : 1;
+    const spacing = spacingMm ? fam.spacing * scaleRatio : fam.spacing;
+    const offset = (fam.offset ?? 0) * scaleRatio;
     const local = poly.map((p) => rotate(p, -fam.angleDeg));
     const ys = local.map((p) => p.y);
-    const y0 = Math.ceil(Math.min(...ys) / spacing) * spacing;
+    const y0 = Math.ceil((Math.min(...ys) - offset) / spacing) * spacing + offset;
     for (let y = y0; y <= Math.max(...ys); y += spacing) {
       const xs = scanCrossings(local, y);
       for (let i = 0; i + 1 < xs.length; i += 2) {
@@ -329,7 +389,7 @@ export type SymbolPrim =
 export interface Symbol2D {
   readonly id: string;
   readonly name: string;
-  readonly category: "insulation" | "duct" | "pipe" | "supports" | "valves" | "anchors" | "structure" | "electrical";
+  readonly category: "insulation" | "duct" | "pipe" | "supports" | "valves" | "anchors" | "structure" | "electrical" | "annotation";
   /** Default size, mm (model mm in a view). */
   readonly widthMm: number;
   readonly heightMm: number;
@@ -503,6 +563,77 @@ const MECHANICAL_COMPONENTS: readonly Symbol2D[] = [
     heightMm: 3 * IN,
     prims: [{ k: "fill", pts: [[0, 0], [1, 0], [1, 0.1], [0.1, 0.1], [0.1, 1], [0, 1]], grey: 0 }],
   },
+  {
+    id: "break_line",
+    name: "Break line (with cut-side whiteout mask)",
+    category: "annotation",
+    widthMm: 24 * IN,
+    heightMm: 4 * IN,
+    linear: true,
+    prims: [
+      // Opaque paper-white cut mask following the exact zig-zag profile on the +Y (left) side
+      // so the masked half of any wall/deck/duct is cleanly wiped out right up to the zig-zag teeth.
+      {
+        k: "fill",
+        pts: [
+          [0, 0.5],
+          [0.42, 0.5],
+          [0.46, 0.95],
+          [0.54, 0.05],
+          [0.58, 0.5],
+          [1, 0.5],
+          [1, 2.2],
+          [0, 2.2],
+        ],
+        grey: 1,
+      },
+      { k: "line", pts: [[0, 0.5], [0.42, 0.5], [0.46, 0.95], [0.54, 0.05], [0.58, 0.5], [1, 0.5]], pen: "thin" },
+    ],
+  },
+  {
+    id: "flow_arrow",
+    name: "Direction arrow",
+    category: "annotation",
+    widthMm: 8 * IN,
+    heightMm: 3 * IN,
+    prims: [
+      { k: "line", pts: [[0, 0.5], [0.68, 0.5]], pen: "medium" },
+      { k: "fill", pts: [[1, 0.5], [0.62, 0.88], [0.62, 0.12]], grey: 0 },
+    ],
+  },
+  {
+    id: "centerline_mark",
+    name: "Centreline symbol (CL)",
+    category: "annotation",
+    widthMm: 3 * IN,
+    heightMm: 4 * IN,
+    prims: [
+      { k: "line", pts: [[0.56, 0.95], [0.22, 0.95], [0.06, 0.78], [0.06, 0.42], [0.22, 0.25], [0.56, 0.25]], pen: "thin" },
+      { k: "line", pts: [[0.44, 0.72], [0.44, 0.05], [0.94, 0.05]], pen: "thin" },
+    ],
+  },
+  {
+    id: "slope_arrow",
+    name: "Slope indicator arrow",
+    category: "annotation",
+    widthMm: 12 * IN,
+    heightMm: 3 * IN,
+    prims: [
+      { k: "line", pts: [[0, 0.5], [0.8, 0.5]], pen: "thin" },
+      { k: "fill", pts: [[1, 0.5], [0.74, 0.85], [0.74, 0.15]], grey: 0 },
+    ],
+  },
+  {
+    id: "section_cut_arrow",
+    name: "Section direction arrow",
+    category: "annotation",
+    widthMm: 6 * IN,
+    heightMm: 6 * IN,
+    prims: [
+      { k: "fill", pts: [[0.5, 1], [0.1, 0.35], [0.9, 0.35]], grey: 0 },
+      { k: "line", pts: [[0.5, 0.35], [0.5, 0]], pen: "wide" },
+    ],
+  },
 ];
 
 /** The kernel's own detail components (valves, hangers, sections). A pack's symbols join them through `detailComponents()`. */
@@ -630,9 +761,9 @@ export function drawDetailItem(ctx: DetailDrawContext, item: DrawingItem): boole
         ctx.prims.push({ kind: "fill", points: paper, grey: 1 });
         return true;
       }
-      if (fill.pattern === "solid") ctx.prims.push({ kind: "fill", points: paper, grey: fill.grey ?? 0.8 });
+      if (fill.pattern === "solid") ctx.prims.push({ kind: "fill", points: paper, grey: fill.grey ?? 0.8, ...(fill.tone ? { tone: fill.tone } : {}) });
       else ctx.prims.push({ kind: "fill", points: paper, grey: 1 });
-      for (const [a, b, d] of hatchSegments(paper, fill.pattern, fill.spacingMm)) ctx.prims.push({ kind: "line", a, b, pen: "thin", ...(d ? { dash: d } : {}) });
+      for (const [a, b, d] of hatchSegments(paper, fill.pattern, fill.spacingMm)) ctx.prims.push({ kind: "line", a, b, pen: "thin", ...(d ? { dash: d } : {}), ...(fill.tone ? { tone: fill.tone } : {}) });
       if (fill.boundary !== false) polyLines(ctx.prims, [...paper, ...(paper[0] ? [paper[0]] : [])], pen, dash);
       return true;
     }

@@ -5,6 +5,7 @@ import { units } from "./define";
 import { building, equipment } from "./kit-building";
 import { checks } from "./kit-checks";
 import { documents } from "./kit-documents";
+import { drafting } from "./kit-drafting";
 import { electrical } from "./kit-electrical";
 import { parts } from "./kit-parts";
 import { routes } from "./kit-routes";
@@ -78,7 +79,7 @@ export interface ScriptKitWarning {
   readonly message: string;
 }
 
-const KIT_NAMESPACES: Readonly<Record<string, object>> = { units, routes, parts, building, equipment, documents, checks, electrical };
+const KIT_NAMESPACES: Readonly<Record<string, object>> = { units, routes, parts, building, equipment, documents, drafting, checks, electrical };
 const KIT_IMPORT = /\bimport\s*\{([^}]*)\}\s*from\s*["']@permitzip\/bim-script["'];?/;
 
 /** Up to four real names close to a wrong one: those that contain it or are contained in it first, then those that start the same. */
@@ -117,7 +118,7 @@ export function kitUseWarnings(source: string): ScriptKitWarning[] {
   const commented = (line: number) => /^\s*(\/\/|\*|\/\*)/.test(lines[line - 1] ?? "");
   const seen = new Set<string>();
 
-  for (const m of source.matchAll(/(?<![.\w$])(units|routes|parts|building|equipment|documents|checks)\.([A-Za-z_$][\w$]*)/g)) {
+  for (const m of source.matchAll(/(?<![.\w$"'`])(units|routes|parts|building|equipment|documents|drafting|checks|electrical)\.([A-Za-z_$][\w$]*)/g)) {
     const ns = m[1] ?? "";
     const member = m[2] ?? "";
     const kit = KIT_NAMESPACES[ns];

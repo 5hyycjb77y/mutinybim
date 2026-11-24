@@ -13,6 +13,7 @@ interface Working {
   readonly model: () => ModelState;
   readonly packs: PackSet | undefined;
   readonly touchedIds?: () => readonly string[];
+  readonly features?: ReadonlySet<string>;
 }
 
 const WORKING = new WeakMap<ScriptContext, Working>();
@@ -46,4 +47,9 @@ export function onWorkingWithTouched<T>(ctx: ScriptContext, helper: string, read
 export function onWorkingIfAny<T>(ctx: ScriptContext, read: (model: ModelState) => T): T | undefined {
   const w = WORKING.get(ctx);
   return w ? withPackSet(w.packs, () => read(w.model())) : undefined;
+}
+
+/** Whether the server/slice backing this script advertises a protocol feature. */
+export function hasSliceFeature(ctx: ScriptContext, feature: string): boolean {
+  return WORKING.get(ctx)?.features?.has(feature) ?? false;
 }

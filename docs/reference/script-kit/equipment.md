@@ -23,7 +23,7 @@ Topics: place equipment, rooftop unit, rtu, water heater, panel, fixture, device
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -50,7 +50,7 @@ Topics: wall host, wall face, rehost, hostOnWall, receptacle, switch, flush on w
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -78,7 +78,7 @@ Topics: switching, switch leg, 0-10v, dimmer, occupancy sensor, controls, lighti
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },

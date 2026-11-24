@@ -22,7 +22,7 @@ Topics: clash, clash check, coordination, lint, interference, clearance, dedicat
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -52,7 +52,7 @@ Topics: clash, clash report, coordination, bim_run_script, clearance, summary
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },

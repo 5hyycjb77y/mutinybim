@@ -1,11 +1,14 @@
 import {
+  boxToPaper,
   calloutBoundaryPolygon,
   calloutSyncCommands,
   dimensionPoints,
   endsOf,
   figureFrame,
   modifyCommand,
+  paperToBox,
   resolveNote,
+  textBlockFor,
   type BatchCommand,
   type DrawingItem,
   type ModelState,
@@ -328,7 +331,20 @@ export function gripCommand(input: {
     case 'leader-tip':
     case 'leader-elbow': {
       if (!resolveNote(item)) return null
-      const leaders = noteLeaders(item).map((l, i) => (i !== grip.index ? l : grip.kind === 'leader-tip' ? { ...l, to: toStored(to) } : { ...l, elbow: toStored(to) }))
+      const leaders = noteLeaders(item).map((l, i) => {
+        if (i !== grip.index) return l
+        if (grip.kind === 'leader-tip') return { ...l, to: toStored(to) }
+        // Snap elbow cleanly to horizontal shoulder with the note's first line when within 2.5 paper mm
+        const block = textBlockFor(item, toPaper)
+        if (block) {
+          const firstMid = block.layout.lines[0] ? block.layout.lines[0].top + block.layout.lines[0].height / 2 : block.layout.height / 2
+          const local = paperToBox(block, to)
+          if (Math.abs(local.y - firstMid) <= 2.5) {
+            return { ...l, elbow: toStored(boxToPaper(block, { x: local.x, y: firstMid })) }
+          }
+        }
+        return { ...l, elbow: toStored(to) }
+      })
       return { type: 'move_text_note', itemId: item.id, leaders }
     }
   }

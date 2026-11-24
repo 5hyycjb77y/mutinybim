@@ -1,12 +1,14 @@
 import {
   DETAIL_COMPONENTS,
   DRAFTING_SCHEMA_VERSION,
-  draftingVersionOf,
-  detailComponents,
+  arcStartEndRadius,
   chainLines,
   detailComponent,
+  detailComponents,
   detailSnap,
+  draftingVersionOf,
   polygonLines,
+  tangentEndArc,
   trackAngle,
   type BatchCommand,
   type DimSpec,
@@ -17,6 +19,7 @@ import {
   type LinePattern,
   type LineWeight2D,
   type ModifyOp,
+  type RegionTone,
   type SnapKind,
   type Vec2,
   type ViewCommand,
@@ -37,6 +40,8 @@ export interface DraftSettings {
   readonly weight: LineWeight2D
   readonly pattern: LinePattern
   readonly hatch: HatchPattern
+  /** Filled region ink density: black ink, 50% halftone, or 32% screened. */
+  readonly regionTone: RegionTone
   /** The Region tool draws a masking region (white, no outline) instead of a hatch. */
   readonly masking: boolean
   readonly symbolId: string
@@ -58,10 +63,11 @@ export const DEFAULT_DRAFT_SETTINGS: DraftSettings = {
   weight: 'medium',
   pattern: 'solid',
   hatch: 'diagonal',
+  regionTone: 'halftone',
   masking: false,
   symbolId: DETAIL_COMPONENTS[0]?.id ?? 'gate_valve',
   battThickness: '2"',
-  snaps: ['endpoint', 'midpoint', 'center', 'intersection', 'perpendicular'],
+  snaps: ['endpoint', 'midpoint', 'center', 'quadrant', 'intersection', 'perpendicular'],
   ortho: false,
   polarDeg: null,
   dimKind: 'linear',
@@ -87,15 +93,32 @@ export interface ModifyParams {
   readonly gap: string
   /** Fillet Arc: the arc's radius. */
   readonly arcRadius: string
+  /** Chamfer: distance back along the first and second lines. */
+  readonly chamferD1: string
+  readonly chamferD2: string
 }
 
-export const DEFAULT_MODIFY_PARAMS: ModifyParams = { angle: '90', factor: '2', count: '3', distance: '6"', copy: false, offsetMode: 'numerical', offsetCopy: true, deleteInner: false, gap: '1"', arcRadius: '6"' }
+export const DEFAULT_MODIFY_PARAMS: ModifyParams = {
+  angle: '90',
+  factor: '2',
+  count: '3',
+  distance: '6"',
+  copy: false,
+  offsetMode: 'numerical',
+  offsetCopy: true,
+  deleteInner: false,
+  gap: '1"',
+  arcRadius: '6"',
+  chamferD1: '4"',
+  chamferD2: '4"',
+}
 
 export const MODIFY_OPS = [
   'move',
   'copy',
   'rotate',
   'mirror',
+  'mirror_pick',
   'scale',
   'array',
   'polar_array',
@@ -107,6 +130,8 @@ export const MODIFY_OPS = [
   'split',
   'split_gap',
   'fillet_arc',
+  'chamfer',
+  'match_type',
   'pin',
   'unpin',
 ] as const
@@ -117,7 +142,16 @@ export type ModifyOpName = (typeof MODIFY_OPS)[number]
  * (BIM drafting-view conventions): the clicks name the lines, and the tool
  * stays in hand for the next ones until Esc.
  */
-export const PICK_ELEMENT_OPS: ReadonlySet<ModifyOpName> = new Set<ModifyOpName>(['trim_extend_corner', 'trim_extend_single', 'trim_extend_multiple', 'split', 'split_gap', 'fillet_arc'])
+export const PICK_ELEMENT_OPS: ReadonlySet<ModifyOpName> = new Set<ModifyOpName>([
+  'trim_extend_corner',
+  'trim_extend_single',
+  'trim_extend_multiple',
+  'split',
+  'split_gap',
+  'fillet_arc',
+  'chamfer',
+  'match_type',
+])
 
 /** Something waiting for clicks besides a drawing tool: a modify operation, or a leader for a note. */
 export type DraftPending = { readonly kind: 'modify'; readonly op: ModifyOpName } | { readonly kind: 'leader'; readonly noteId: string; readonly elbow: boolean } | null
@@ -126,7 +160,8 @@ export const MODIFY_LABEL: Record<ModifyOpName, string> = {
   move: 'Move',
   copy: 'Copy',
   rotate: 'Rotate',
-  mirror: 'Mirror',
+  mirror: 'Mirror (draw axis)',
+  mirror_pick: 'Mirror (pick axis)',
   scale: 'Scale',
   array: 'Array',
   polar_array: 'Radial array',
@@ -138,6 +173,8 @@ export const MODIFY_LABEL: Record<ModifyOpName, string> = {
   split: 'Split Element',
   split_gap: 'Split with Gap',
   fillet_arc: 'Fillet Arc',
+  chamfer: 'Chamfer',
+  match_type: 'Match Type',
   pin: 'Pin',
   unpin: 'Unpin',
 }
@@ -148,6 +185,7 @@ export const MODIFY_PICKS: Record<ModifyOpName, readonly string[]> = {
   copy: ['Click the base point', 'Click where the copy goes'],
   rotate: ['Click the centre to turn about'],
   mirror: ['Click the first point of the mirror line', 'Click the second point of the mirror line'],
+  mirror_pick: ['Click an existing line to mirror across'],
   scale: ['Click the base point that stays put'],
   array: ['Click the base point', 'Click where the next copy goes'],
   polar_array: ['Click the centre of the array'],
@@ -159,6 +197,8 @@ export const MODIFY_PICKS: Record<ModifyOpName, readonly string[]> = {
   split: ['Click the line or arc where it splits'],
   split_gap: ['Click the line or arc where the gap goes'],
   fillet_arc: ['Click the first line', 'Click the second line'],
+  chamfer: ['Click the first line', 'Click the second line'],
+  match_type: ['Click the source item whose style to copy', 'Click each target item to receive that style'],
   pin: [],
   unpin: [],
 }
@@ -172,17 +212,20 @@ export function modifyPicks(op: ModifyOpName, params: Pick<ModifyParams, 'delete
 
 /** Which picks name an element rather than a point. */
 const ITEM_PICKS: Partial<Record<ModifyOpName, readonly number[]>> = {
+  mirror_pick: [0],
   trim_extend_corner: [0, 1],
   trim_extend_single: [0, 1],
   trim_extend_multiple: [0, 1],
   split: [0, 1],
   split_gap: [0],
   fillet_arc: [0, 1],
+  chamfer: [0, 1],
+  match_type: [0, 1],
 }
 
-/** UI-only drawing tools: a polygon is drawn as joined lines, not stored as its own shape. */
-export type DraftToolShape = DrawingShape | 'polygon'
-export const DRAFT_SHAPES = ['arc', 'circle', 'polyline', 'polygon', 'spline', 'region', 'component', 'repeat', 'batt'] as const satisfies readonly DraftToolShape[]
+/** UI-only drawing tools: polygon, start-end-radius arc and tangent-end arc compile to stored lines/arcs. */
+export type DraftToolShape = DrawingShape | 'polygon' | 'arc_radius' | 'arc_tangent'
+export const DRAFT_SHAPES = ['arc', 'arc_radius', 'arc_tangent', 'circle', 'polyline', 'polygon', 'spline', 'region', 'component', 'repeat', 'batt'] as const satisfies readonly DraftToolShape[]
 export type DraftShape = (typeof DRAFT_SHAPES)[number]
 export function isDraftShape(tool: string): tool is DraftShape {
   return (DRAFT_SHAPES as readonly string[]).includes(tool)
@@ -204,6 +247,8 @@ export function clicksFor(tool: DraftShape | 'dimension', s: Pick<DraftSettings,
     case 'batt':
       return { fixed: 2 }
     case 'arc':
+    case 'arc_radius':
+    case 'arc_tangent':
       return { fixed: 3 }
     case 'polyline':
     case 'spline':
@@ -219,9 +264,11 @@ export function clicksFor(tool: DraftShape | 'dimension', s: Pick<DraftSettings,
 
 const SHAPE_PROMPTS: Record<DraftShape, readonly string[]> = {
   arc: ['Click the centre of the arc', 'Click where the arc starts', 'Click where it ends (counter-clockwise)'],
-  circle: ['Click the centre', 'Click a point on the circle'],
-  polyline: ['Click the first point', 'Click the next point. Each segment is its own line, joined to the last. Click the first point again to close, or Enter to finish'],
-  polygon: ['Click the centre', 'Click a corner (or the middle of a side, circumscribed)'],
+  arc_radius: ['Click where the arc starts', 'Click where the arc ends', 'Click a point on the bulge of the arc'],
+  arc_tangent: ['Click the start point', 'Click a point along the tangent direction', 'Click where the arc ends'],
+  circle: ['Click the centre', 'Click a point on the circle (or type radius + Enter)'],
+  polyline: ['Click the first point', 'Click the next point (or type length + Enter). Click the first point again to close, or Enter to finish'],
+  polygon: ['Click the centre', 'Click a corner (or type radius + Enter)'],
   spline: ['Click the first point', 'Click the next point. Enter or double-click finishes'],
   region: ['Click the first corner', 'Click the next corner', 'Click the next corner. Enter or double-click closes it'],
   component: ['Click where the component goes (its bottom-left corner)'],
@@ -291,6 +338,8 @@ export interface Constrained {
   readonly at: Vec2
   /** What it snapped to, in words, for the marker's tooltip and the hint. */
   readonly snapLabel: string | null
+  /** Snap kind, for distinct CAD snap glyphs (square, triangle, diamond, tangent, etc.). */
+  readonly snapKind?: SnapKind | null
   /** A dimension point's element / item it follows. */
   readonly snapRef: SnapPoint['ref'] | null
   /** The tracking line drawn from the last point, when tracking. */
@@ -299,7 +348,16 @@ export interface Constrained {
   readonly itemId: string | null
 }
 
-const SNAP_WORDS: Record<SnapKind, string> = { endpoint: 'endpoint', midpoint: 'midpoint', center: 'centre', intersection: 'intersection', perpendicular: 'perpendicular', nearest: 'nearest point' }
+const SNAP_WORDS: Record<SnapKind, string> = {
+  endpoint: 'endpoint',
+  midpoint: 'midpoint',
+  center: 'centre',
+  quadrant: 'quadrant',
+  tangent: 'tangent',
+  intersection: 'intersection',
+  perpendicular: 'perpendicular',
+  nearest: 'nearest point',
+}
 
 /**
  * Where a click lands: a model / dimension snap point first (it is followed),
@@ -334,20 +392,20 @@ export function constrainPoint(input: {
   }
   if (input.pickElement) {
     const snap = detailSnap(input.items, input.toPaper, at, { kinds: new Set<SnapKind>(['nearest']), reachMm })
-    return snap ? { at: snap.at, snapLabel: SNAP_WORDS.nearest, snapRef: null, tracking: null, itemId: snap.itemId } : { at, snapLabel: null, snapRef: null, tracking: null, itemId: null }
+    return snap ? { at: snap.at, snapLabel: SNAP_WORDS.nearest, snapKind: 'nearest', snapRef: null, tracking: null, itemId: snap.itemId } : { at, snapLabel: null, snapKind: null, snapRef: null, tracking: null, itemId: null }
   }
-  if (bestAnchor) return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapRef: bestAnchor.ref, tracking: null, itemId: input.items.some((i) => i.id === bestAnchor.ref.elementId) ? bestAnchor.ref.elementId : null }
+  if (bestAnchor) return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapKind: 'endpoint', snapRef: bestAnchor.ref, tracking: null, itemId: input.items.some((i) => i.id === bestAnchor.ref.elementId) ? bestAnchor.ref.elementId : null }
   const kinds = new Set<SnapKind>(settings.snaps)
   if (input.nearest) kinds.add('nearest')
   if (kinds.size > 0) {
     const snap = detailSnap(input.items, input.toPaper, at, { kinds, reachMm, ...(from ? { from } : {}) })
-    if (snap) return { at: snap.at, snapLabel: SNAP_WORDS[snap.kind], snapRef: null, tracking: null, itemId: snap.itemId }
+    if (snap) return { at: snap.at, snapLabel: SNAP_WORDS[snap.kind], snapKind: snap.kind, snapRef: null, tracking: null, itemId: snap.itemId }
   }
   if (from && (settings.ortho || settings.polarDeg)) {
     const t = trackFrom(from, at, settings.ortho ? 90 : (settings.polarDeg ?? 90), input.trackBaseDeg ?? 0)
-    if (t) return { at: t.at, snapLabel: null, snapRef: null, tracking: { from, angleDeg: t.angleDeg }, itemId: null }
+    if (t) return { at: t.at, snapLabel: null, snapKind: null, snapRef: null, tracking: { from, angleDeg: t.angleDeg }, itemId: null }
   }
-  return { at, snapLabel: null, snapRef: null, tracking: null, itemId: null }
+  return { at, snapLabel: null, snapKind: null, snapRef: null, tracking: null, itemId: null }
 }
 
 /** Paper y runs down: turning counter-clockwise by `deg` on screen. */
@@ -390,6 +448,27 @@ export function shapeCommand(input: {
   switch (tool) {
     case 'arc':
       return { ...base, shape: 'arc', points: pts.slice(0, 3), ccw: true }
+    case 'arc_radius': {
+      const [s, e, through] = pts
+      if (!s || !e || !through) return 'Click start, end, and a point on the arc.'
+      // Compute circumcircle radius through (s, e, through) so dragging sets the exact bulge cleanly.
+      const ax = s.x, ay = s.y, bx = e.x, by = e.y, cx = through.x, cy = through.y
+      const d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+      if (Math.abs(d) < 1e-6) return 'The three points are in a straight line — click off the chord to bulge the arc.'
+      const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
+      const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
+      const radius = Math.hypot(s.x - ux, s.y - uy)
+      const built = arcStartEndRadius(s, e, radius, through)
+      if (!built) return 'Could not construct an arc through those three points.'
+      return { ...base, shape: 'arc', points: built.points, ccw: built.ccw }
+    }
+    case 'arc_tangent': {
+      const [s, dirPt, e] = pts
+      if (!s || !dirPt || !e) return 'Click the start, a point along the tangent, and the end.'
+      const built = tangentEndArc(s, { x: dirPt.x - s.x, y: dirPt.y - s.y }, e)
+      if (!built) return 'Click an end point off the tangent line.'
+      return { ...base, shape: 'arc', points: built.points, ccw: built.ccw }
+    }
     case 'circle':
       return { ...base, shape: 'circle', points: pts.slice(0, 2) }
     case 'polyline': {
@@ -412,7 +491,12 @@ export function shapeCommand(input: {
       return pts.length >= 2 ? { ...base, shape: tool, points: pts } : 'Click at least two points.'
     case 'region':
       if (pts.length < 3) return 'A region needs three corners or more.'
-      return { ...base, shape: 'region', points: pts, fill: settings.masking ? { pattern: 'solid', masking: true } : { pattern: settings.hatch } }
+      return {
+        ...base,
+        shape: 'region',
+        points: pts,
+        fill: settings.masking ? { pattern: 'solid', masking: true } : { pattern: settings.hatch, ...(settings.regionTone !== 'ink' ? { tone: settings.regionTone } : {}) },
+      }
     case 'component':
       if (!symbol) return 'Pick a component from the library first.'
       return { ...base, shape: 'component', points: pts.slice(0, 1), component: { symbolId: symbol.id } }
@@ -465,7 +549,13 @@ export function dimensionCommand(input: {
 }
 
 /** The modify operation from its picks (paper mm) and typed values, in stored coordinates. */
-export function modifyOperation(op: ModifyOpName, picks: readonly Constrained[], params: ModifyParams, toStored: (p: Vec2) => Vec2): ModifyOp | string {
+export function modifyOperation(
+  op: ModifyOpName,
+  picks: readonly Constrained[],
+  params: ModifyParams,
+  toStored: (p: Vec2) => Vec2,
+  items?: readonly DrawingItem[],
+): ModifyOp | string {
   const p = picks.map((c) => toStored(c.at))
   const num = (text: string, what: string): number | string => {
     const v = Number(text)
@@ -501,6 +591,13 @@ export function modifyOperation(op: ModifyOpName, picks: readonly Constrained[],
     }
     case 'mirror':
       return a && b ? { op, a, b, ...(params.copy ? { copy: true } : {}) } : 'Click two points on the mirror line.'
+    case 'mirror_pick': {
+      const axisId = picks[0]?.itemId
+      const axis = axisId ? items?.find((i) => i.id === axisId) : undefined
+      if (!axis || axis.shape !== 'line' || axis.points.length < 2) return 'Click a straight detail line to mirror across.'
+      const [p0, p1] = axis.points
+      return p0 && p1 ? { op: 'mirror', a: p0, b: p1, ...(params.copy ? { copy: true } : {}) } : 'Click a straight detail line to mirror across.'
+    }
     case 'align':
       return a && b && c ? { op, from: a, a: b, b: c } : 'Click the point to line up, then two points on the line.'
     case 'offset': {
@@ -534,6 +631,18 @@ export function modifyOperation(op: ModifyOpName, picks: readonly Constrained[],
       if (!(radius > 0)) return 'Type a radius above zero (Trim/Extend to Corner makes a sharp corner).'
       return a && b ? { op, radius, near1: a, near2: b } : 'Click the two lines to round the corner between.'
     }
+    case 'chamfer': {
+      const d1 = length(params.chamferD1, 'first chamfer distance')
+      if (typeof d1 === 'string') return d1
+      const d2 = params.chamferD2.trim() ? length(params.chamferD2, 'second chamfer distance') : d1
+      if (typeof d2 === 'string') return d2
+      if (!(d1 > 0) || !(d2 > 0)) return 'Type chamfer distances above zero.'
+      return a && b ? { op, d1, d2, near1: a, near2: b } : 'Click the two lines to bevel their corner.'
+    }
+    case 'match_type': {
+      const sourceId = picks[0]?.itemId
+      return sourceId ? { op, sourceId } : 'Click the source item first.'
+    }
     case 'pin':
     case 'unpin':
       return { op }
@@ -542,17 +651,25 @@ export function modifyOperation(op: ModifyOpName, picks: readonly Constrained[],
 
 /**
  * The operation and the elements it acts on: the clicked elements for the
- * pick-the-element tools (Trim/Extend, Split, Fillet Arc), else what is
- * selected.
+ * pick-the-element tools (Trim/Extend, Split, Fillet Arc, Chamfer, Match Type),
+ * else what is selected.
  */
-export function modifyRequest(op: ModifyOpName, picks: readonly Constrained[], params: ModifyParams, toStored: (p: Vec2) => Vec2, selectedIds: readonly string[]): { readonly operation: ModifyOp; readonly ids: readonly string[] } | string {
-  const operation = modifyOperation(op, picks, params, toStored)
+export function modifyRequest(
+  op: ModifyOpName,
+  picks: readonly Constrained[],
+  params: ModifyParams,
+  toStored: (p: Vec2) => Vec2,
+  selectedIds: readonly string[],
+  items?: readonly DrawingItem[],
+): { readonly operation: ModifyOp; readonly ids: readonly string[] } | string {
+  const operation = modifyOperation(op, picks, params, toStored, items)
   if (typeof operation === 'string') return operation
   if (!PICK_ELEMENT_OPS.has(op)) return { operation, ids: selectedIds }
   const at = (i: number) => picks[i]?.itemId ?? null
   switch (op) {
     case 'trim_extend_corner':
-    case 'fillet_arc': {
+    case 'fillet_arc':
+    case 'chamfer': {
       const first = at(0)
       const second = at(1)
       if (!first || !second) return 'Click right on two drawn lines.'
@@ -565,6 +682,13 @@ export function modifyRequest(op: ModifyOpName, picks: readonly Constrained[], p
       const target = at(1)
       if (!boundary || !target) return 'Click the boundary, then the line to trim or extend.'
       if (boundary === target) return 'Pick a different line than the boundary.'
+      return { operation, ids: [target] }
+    }
+    case 'match_type': {
+      const source = at(0)
+      const target = at(1)
+      if (!source || !target) return 'Click the source item, then the item to match.'
+      if (source === target) return 'Pick a different item than the source.'
       return { operation, ids: [target] }
     }
     case 'split':
@@ -612,4 +736,52 @@ export function componentGroups(): Array<{ category: string; items: Array<{ id: 
   const out = new Map<string, Array<{ id: string; name: string }>>()
   for (const c of detailComponents()) out.set(c.category, [...(out.get(c.category) ?? []), { id: c.id, name: c.name }])
   return [...out].map(([category, items]) => ({ category, items }))
+}
+
+/**
+ * Listening dimension helper: compute the point `lengthPaperMm` from `from`
+ * along the ray toward `toward` (defaults to +X if `toward` coincides with `from`).
+ */
+export function listeningPoint(from: Vec2, toward: Vec2, lengthPaperMm: number): Vec2 | null {
+  if (!Number.isFinite(lengthPaperMm) || lengthPaperMm <= 0) return null
+  const dx = toward.x - from.x
+  const dy = toward.y - from.y
+  const d = Math.hypot(dx, dy)
+  const ux = d > 1e-6 ? dx / d : 1
+  const uy = d > 1e-6 ? dy / d : 0
+  return { x: from.x + ux * lengthPaperMm, y: from.y + uy * lengthPaperMm }
+}
+
+/**
+ * Window (left-to-right: fully enclosed) vs crossing (right-to-left: touched or enclosed)
+ * marquee hit-test over drafted items in paper coordinates.
+ */
+export function marqueeHits(items: readonly DrawingItem[], toPaper: (p: Vec2) => Vec2, a: Vec2, b: Vec2): string[] {
+  const minX = Math.min(a.x, b.x)
+  const maxX = Math.max(a.x, b.x)
+  const minY = Math.min(a.y, b.y)
+  const maxY = Math.max(a.y, b.y)
+  const crossing = b.x < a.x
+  const hits: string[] = []
+  for (const item of items) {
+    if (item.points.length === 0) continue
+    const pts = item.points.map(toPaper)
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+    for (const p of pts) {
+      if (p.x < x0) x0 = p.x
+      if (p.y < y0) y0 = p.y
+      if (p.x > x1) x1 = p.x
+      if (p.y > y1) y1 = p.y
+    }
+    if (item.shape === 'circle' && pts[0] && pts[1]) {
+      const r = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+      x0 = pts[0].x - r; x1 = pts[0].x + r; y0 = pts[0].y - r; y1 = pts[0].y + r
+    }
+    if (crossing) {
+      if (x1 >= minX && x0 <= maxX && y1 >= minY && y0 <= maxY) hits.push(item.id)
+    } else {
+      if (x0 >= minX && x1 <= maxX && y0 >= minY && y1 <= maxY) hits.push(item.id)
+    }
+  }
+  return hits
 }

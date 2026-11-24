@@ -426,6 +426,62 @@ export interface ClashReport {
   readonly by_rule: Readonly<Record<string, number>>;
   readonly findings?: readonly unknown[];
 }
+export type DetailLineStyleId = "thin" | "medium" | "wide" | "heavy" | "hidden" | "overhead" | "dashed" | "match" | "center" | "phantom" | "dotted";
+export type LineWeight2D = "thin" | "medium" | "wide" | "heavy";
+export type LinePattern2D = "solid" | "dashed" | "hidden" | "center" | "phantom" | "dotted";
+export type DraftingCategory = "detail_lines" | "detail_regions" | "detail_components" | "insulation" | "centerlines" | "hidden_lines" | "reference";
+export type HatchPattern = "solid" | "diagonal" | "diagonal_reverse" | "crosshatch" | "horizontal" | "vertical" | "dots" | "concrete" | "earth" | "insulation_rigid" | "masonry" | "steel_section" | "gravel" | "sand" | "gypsum" | "wood_grain" | "metal_deck" | "roofing_membrane" | "acoustic";
+export type RegionTone = "ink" | "halftone" | "screened";
+export type NoteLeaderArrow = "arrow" | "filled_arrow" | "dot" | "filled_dot" | "tick" | "none";
+export type NoteAlign = "left" | "center" | "right";
+export interface DraftStyleSpec { lineStyle?: DetailLineStyleId; weight?: LineWeight2D; pattern?: LinePattern2D; category?: DraftingCategory; group?: string }
+export type DraftRectGeometry = { corner: PlanPoint; opposite: PlanPoint } | { at: PlanPoint; width: Measure; height: Measure };
+export interface DetailViewSpec { name: string; scale?: number; discipline?: string; crop?: { from: PlanPoint; to: PlanPoint }; id?: string }
+export interface DraftLeaderSpec { to: PlanPoint; elbow?: "auto" | PlanPoint | null; arrow?: NoteLeaderArrow }
+export interface DraftNoteSpec {
+  view: string; at: PlanPoint; text?: string;
+  paragraphs?: readonly { align?: NoteAlign; list?: "bullet" | "number"; runs: readonly { text: string; bold?: boolean; italic?: boolean; underline?: boolean; size?: number }[] }[];
+  width?: Measure; textHeight?: Measure; align?: NoteAlign; bold?: boolean; italic?: boolean; underline?: boolean;
+  mask?: boolean; textStyleId?: string; leaders?: readonly DraftLeaderSpec[]; id?: string;
+}
+export interface CalloutStackEntry { text: string; to?: PlanPoint | readonly PlanPoint[]; arrow?: NoteLeaderArrow; bold?: boolean; id?: string }
+export interface DraftCalloutStackSpec {
+  view: string; side: "left" | "right"; x: Measure; topY: Measure;
+  width?: Measure; textHeight?: Measure; gap?: Measure; mask?: boolean; arrow?: NoteLeaderArrow;
+  notes: readonly CalloutStackEntry[];
+}
+export type DraftModifyOp =
+  | { op: "move"; dx: Measure; dy: Measure; disjoin?: boolean }
+  | { op: "copy"; dx: Measure; dy: Measure }
+  | { op: "rotate"; center: PlanPoint; angleDeg: number; copy?: boolean }
+  | { op: "scale"; center: PlanPoint; factor: number }
+  | { op: "mirror"; axisFrom: PlanPoint; axisTo: PlanPoint; copy?: boolean }
+  | { op: "linear_array"; dx: Measure; dy: Measure; count: number; group?: boolean }
+  | { op: "radial_array"; center: PlanPoint; angleDeg: number; count: number; group?: boolean }
+  | { op: "align"; from: PlanPoint; axisFrom: PlanPoint; axisTo: PlanPoint }
+  | { op: "offset"; distance: Measure; side: PlanPoint; copy?: boolean }
+  | { op: "trim_corner"; keepA: PlanPoint; keepB: PlanPoint }
+  | { op: "trim_single"; boundaryId: string; pick: PlanPoint }
+  | { op: "trim_multiple"; boundaryId: string; picks: readonly PlanPoint[] }
+  | { op: "trim"; boundaryId: string; keep: PlanPoint }
+  | { op: "extend"; boundaryId: string; near: PlanPoint }
+  | { op: "split"; at: PlanPoint; to?: PlanPoint }
+  | { op: "split_gap"; at: PlanPoint; gap: Measure }
+  | { op: "fillet"; radius: Measure; near1?: PlanPoint; near2?: PlanPoint }
+  | { op: "chamfer"; distanceA: Measure; distanceB?: Measure; near1?: PlanPoint; near2?: PlanPoint }
+  | { op: "drag_end"; end: 0 | 1 | "start" | "end"; to: PlanPoint; disjoin?: boolean }
+  | { op: "pin" | "unpin" | "delete" }
+  | { op: "match_type"; sourceId: string };
+export interface DetailAudit {
+  readonly ok: boolean; readonly clean: boolean; readonly viewId: string; readonly scale: number;
+  readonly itemCount: number; readonly noteCount: number; readonly dimensionCount: number; readonly dimCount: number;
+  readonly boundsMm: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } } | null;
+  readonly textOverlaps: readonly { readonly aId: string; readonly aText: string; readonly bId: string; readonly bText: string; readonly overlapAreaMm2: number }[];
+  readonly lineCrossings: readonly { readonly itemId: string; readonly text: string; readonly crossingCount: number }[];
+  readonly clippedItems: readonly string[];
+  readonly orphanedDimensions: readonly string[];
+  readonly issues: readonly string[];
+}
 `;
 
 function member(e: KitEntry): string {

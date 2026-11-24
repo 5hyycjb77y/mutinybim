@@ -88,13 +88,16 @@ export interface NoteBox {
   readonly rotation: number;
 }
 
+export const NOTE_LEADER_ARROWS = ["arrow", "filled_arrow", "dot", "filled_dot", "tick", "none"] as const;
+export type NoteLeaderArrow = (typeof NOTE_LEADER_ARROWS)[number];
+
 export interface NoteLeader {
   /** Where the arrow points, in the owner's coordinates (paper mm on a sheet, model mm in a view). */
   readonly to: { readonly x: number; readonly y: number };
   /** A bend on the way, same coordinates (an elbowed leader). */
   readonly elbow?: { readonly x: number; readonly y: number };
-  /** Arrowhead; absent: an open arrow. */
-  readonly arrow?: "arrow" | "dot" | "tick" | "none";
+  /** Arrowhead; absent: an open arrow. `filled_arrow` / `filled_dot` draw solid NCS terminators. */
+  readonly arrow?: NoteLeaderArrow;
 }
 
 export interface RichTextNote {
@@ -104,9 +107,18 @@ export interface RichTextNote {
   readonly paragraphs: readonly NoteParagraph[];
   /** Multiple of the font's natural line height. */
   readonly lineSpacing: number;
+  /** Opaque paper-white background mask behind the note's text so crossing linework stays broken and readable. */
+  readonly mask?: boolean;
   readonly leader?: NoteLeader;
   /** More leaders from the same note (one note pointing at several things). */
   readonly leaders?: readonly NoteLeader[];
+}
+
+/** Whether a note's mask or leaders use shapes gated behind `DRAFTING_CAD_STANDARDS_FEATURE`. */
+export function noteNeedsCadStandards(spec: { readonly mask?: boolean; readonly leaders?: readonly NoteLeader[]; readonly leader?: NoteLeader | null }): boolean {
+  if (spec.mask !== undefined) return true;
+  const all = [...(spec.leader ? [spec.leader] : []), ...(spec.leaders ?? [])];
+  return all.some((l) => l.arrow === "filled_arrow" || l.arrow === "filled_dot");
 }
 
 const SUPPORTED: ReadonlySet<number> = new Set(NOTE_FONT_CODEPOINTS);
@@ -166,7 +178,7 @@ export const noteBoxSchema = z
   .strict();
 
 const leaderPoint = z.object({ x: z.number().finite(), y: z.number().finite() });
-export const noteLeaderSchema = z.object({ to: leaderPoint, elbow: leaderPoint.optional(), arrow: z.enum(["arrow", "dot", "tick", "none"]).optional() }).strict();
+export const noteLeaderSchema = z.object({ to: leaderPoint, elbow: leaderPoint.optional(), arrow: z.enum(NOTE_LEADER_ARROWS).optional() }).strict();
 
 export const lineSpacingSchema = z.number().finite().min(NOTE_LIMITS.minLineSpacing).max(NOTE_LIMITS.maxLineSpacing);
 
@@ -176,6 +188,7 @@ export const richTextNoteSchema = z
     box: noteBoxSchema,
     paragraphs: noteParagraphsSchema,
     lineSpacing: lineSpacingSchema,
+    mask: z.boolean().optional(),
     leader: noteLeaderSchema.optional(),
     leaders: z.array(noteLeaderSchema).max(8).readonly().optional(),
   })

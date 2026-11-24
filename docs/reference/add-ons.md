@@ -132,6 +132,7 @@ Air and hydronic networks served by equipment; ventilation and pressurization.
 | Route constraints | 3 |
 | Service inline codes | 8 |
 | Services | 13 |
+| Symbols | 12 |
 | Tag field aliases | 1 |
 | Tag style presets | 4 |
 

@@ -23,7 +23,8 @@ import {
 } from "@permitzip/bim-pack/runtime";
 import { guard, isDuctDesignCommand, ductDesignCommandSchemas, refuse, type BlockTableDef, type FieldProviderRow, type NetworkAdapterItem, type PackCommandDef, type PressureTargetRow, type TagFieldAliasRow, type TagStylePresetRow } from "@permitzip/bim-kernel";
 import { MECHANICAL_MANIFEST } from "@permitzip/bim-kernel/packs";
-import { CONNECTOR_FACE_POINT, CONNECTOR_END_TYPE_POINT, DISCIPLINE_POINT, ELEMENT_KIND_POINT, FITTING_FAMILY_POINT, LIBRARY_ROWS_POINT, LINKED_PLAN_DISPLAY_POINT, LINKED_REFERENCE_POINT, LOAD_SECTION_POINT, SERVICE_LINE_CODE_POINT, SERVICE_POINT } from "@permitzip/bim-kernel";
+import { CONNECTOR_FACE_POINT, CONNECTOR_END_TYPE_POINT, DISCIPLINE_POINT, ELEMENT_KIND_POINT, FITTING_FAMILY_POINT, LIBRARY_ROWS_POINT, LINKED_PLAN_DISPLAY_POINT, LINKED_REFERENCE_POINT, LOAD_SECTION_POINT, SERVICE_LINE_CODE_POINT, SERVICE_POINT, SYMBOL_POINT } from "@permitzip/bim-kernel";
+import { MECHANICAL_DETAIL_SYMBOLS } from "./detail-symbols";
 import { MECHANICAL_LINKED_PLAN_DISPLAY } from "./linked-plan-display";
 import { MECHANICAL_LINKED_REFERENCE } from "./linked-reference";
 import { MECHANICAL_SCHEDULE_TEMPLATES } from "./schedules/templates";
@@ -152,6 +153,7 @@ export const MECHANICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(MEASURE_RULE_POINT, [MECHANICAL_MEASURE_RULE]),
   contribute(DIAGRAM_GRAPH_POINT, [AIR_SCHEMATIC_GRAPH_ROW]),
   contribute(DIAGRAM_LAYOUT_POINT, [AIR_SCHEMATIC_LAYOUT_ROW]),
+  contribute(SYMBOL_POINT, MECHANICAL_DETAIL_SYMBOLS),
   contribute(LIBRARY_ROWS_POINT, [...MECHANICAL_SCHEDULE_TEMPLATES, ...MECHANICAL_KEYNOTE_TABLES]),
 ];
 
