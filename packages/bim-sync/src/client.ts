@@ -841,6 +841,13 @@ export class SyncClient implements SyncAdapter {
       clientSessionId: this.clientSessionId,
     };
     this.pending.push(request);
+    // Reuse the prediction we just computed on `view` so the immediate view()
+    // read (emitView / preview solids) doesn't execute the command twice.
+    this.viewCache = {
+      confirmed: this.confirmed,
+      pending: [...this.pending],
+      view: { ...predicted.model, revision: view.revision },
+    };
     this.submitted.set(request.idempotencyKey, request);
     if (!this.sentAt.has(request.idempotencyKey)) this.sentAt.set(request.idempotencyKey, startedAt);
     this.send({ type: "command", request });
