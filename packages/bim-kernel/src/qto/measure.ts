@@ -1,8 +1,10 @@
 import { elementClass } from "../categories/element";
 import { elementTypeValue } from "../elements/types";
+import { elementsOfKind } from "../store";
 import { activePackSet } from "../packs/scope";
 import type { PackSet } from "../packs/set";
 import { polygonAreaAndCentroid } from "../placement/geometric-math";
+import { columnVerticalSpan } from "../placement/top-tie";
 import { activeClassRegistry } from "../registry";
 import { spaceAreaM2 } from "../spaces/space-geometry";
 import type { BimElement } from "../types";
@@ -184,11 +186,23 @@ const COLUMN_RULE: MeasureRuleDef = {
   id: "kernel.column",
   label: "Columns",
   kinds: ["column"],
-  measures: [primary(COUNT), MASS_UNIT],
+  measures: [primary(COUNT), { ...LENGTH, from: "column height (base offset to top constraint or height)" }, { key: "qto.volume", kind: "volume", unit: "m3", from: "width × depth × height", label: "Volume" }, MASS_UNIT],
+  reads(_el, elements) {
+    const ids: string[] = [];
+    for (const other of elementsOfKind(elements, "level")) ids.push(other.id);
+    return ids;
+  },
   measure(el, elements) {
     if (el.kind !== "column") return {};
-    const out: Record<string, number> = { "qto.count": 1 };
+    const lvlId = el.placement?.levelId;
+    const baseLevel = lvlId ? elements[lvlId] : undefined;
+    const floorMm = baseLevel?.kind === "level" ? baseLevel.elevationMm : 0;
+    const span = columnVerticalSpan(elements, el, floorMm);
+    const length = span.heightMm / MM_PER_M;
+    const out: Record<string, number> = { "qto.count": 1, "qto.length": length };
+    if (el.size.x > 0 && el.size.y > 0 && span.heightMm > 0) out["qto.volume"] = (el.size.x * el.size.y * span.heightMm) / (MM2_PER_M2 * MM_PER_M);
     withUnitMass(out, elements, el, 1);
+    if (out["qto.mass"] === undefined) withLinearMass(out, elements, el, length);
     return out;
   },
 };

@@ -23,6 +23,7 @@
     "@permitzip/bim-pack-electrical": "*",
     "@permitzip/bim-pack-plumbing": "*",
     "@permitzip/bim-pack-mechanical": "*",
-    "@permitzip/bim-pack-architecture": "*"
+    "@permitzip/bim-pack-architecture": "*",
+    "@permitzip/bim-pack-structural": "*"
   }
 }

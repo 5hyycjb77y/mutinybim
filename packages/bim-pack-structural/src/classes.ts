@@ -13,5 +13,5 @@ export const STRUCTURAL_CLASSES: readonly PackClass[] = [
   { id: "struct.column", label: "Columns", discipline: "structure", ifc: { entity: "IfcColumn" }, recognize: { elementKinds: ["column"] }, drawsUnder: "structure" },
   { id: "struct.beam", label: "Beams", discipline: "structure", ifc: { entity: "IfcBeam" }, recognize: { elementKinds: ["beam"] }, drawsUnder: "structure" },
   // The AEC library's row of the same id (Structural's library rows) replaces it with the same content.
-  { id: "struct.footing", label: "Footings", discipline: "structure", ifc: { entity: "IfcFooting" }, recognize: { elementKinds: ["component"], where: [{ path: "category", op: "equals", value: "footing" }] } },
+  { id: "struct.footing", label: "Footings", discipline: "structure", ifc: { entity: "IfcFooting" }, recognize: { elementKinds: ["component"], where: [{ path: "category", op: "equals", value: "footing" }] }, drawsUnder: "structure" },
 ];

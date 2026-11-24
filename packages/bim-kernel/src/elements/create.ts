@@ -8,7 +8,7 @@ import { REGISTRY_ID_MAX_LENGTH, REGISTRY_ID_PATTERN } from "../ids";
 import type { TrackedReader } from "../model";
 import { OPENING_SILL_KEY, hostLineOf, openingSillProblem } from "../hosting/rows";
 import { hostedIds } from "../qto/hosted";
-import { SURFACE_BIND_TARGETS, type GeometricPlacement, type LinePlacement, type SurfaceBinding } from "../placement/geometric";
+import { SURFACE_BIND_TARGETS, type GeometricPlacement, type LinePlacement, type PointPlacement, type SurfaceBinding } from "../placement/geometric";
 import { surfaceFaceRow } from "../surfaces/faces";
 import { MIN_TIED_HEIGHT_MM, tiedHeightMm, topTieRow } from "../placement/top-tie";
 import { areaOf } from "../placement/geometric-math";
@@ -17,7 +17,7 @@ import { builtinRegistry } from "../registry/builtin";
 import { kindRowOf } from "../kinds/rows";
 import { currentSchemaVersion } from "../schema-version/registry";
 import { elementsOfKind } from "../store";
-import { asElementId, type BimElement, type Beam, type Column, type ElementId, type ElementTypeElement, type GridLine, type Level, type Opening, type ParamValue, type Partition, type Slab, type Vec2, type Wall } from "../types";
+import { asElementId, type BimElement, type Beam, type Column, type Component, type ElementId, type ElementTypeElement, type GridLine, type Level, type Opening, type ParamValue, type Partition, type Slab, type Vec2, type Wall } from "../types";
 import { ELEMENTS_CREATE_FEATURE } from "./create-feature";
 import { ELEMENT_TYPES_FEATURE, isCoreElement, peerReads, type CoreElement } from "./feature";
 import { starterElementType, starterTypeRecord } from "./starter-types";
@@ -88,17 +88,30 @@ export function checkSurfaceBindings(reader: TrackedReader, kind: string, name: 
 const drawPlacementSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("point"), position: vec2Schema, rotationDeg: z.number().finite().min(-3600).max(3600).optional() }).strict(),
   z.object({ kind: z.literal("line"), start: vec2Schema, end: vec2Schema }).strict(),
-  z.object({ kind: z.literal("area"), outline: z.array(vec2Schema).min(3).max(2000), holes: z.array(z.array(vec2Schema).min(3).max(2000)).max(200).optional() }).strict(),
+  z
+    .object({
+      kind: z.literal("area"),
+      outline: z.array(vec2Schema).min(3).max(2000),
+      holes: z.array(z.array(vec2Schema).min(3).max(2000)).max(200).optional(),
+      spanDirectionDeg: z.number().finite().min(-360).max(360).optional(),
+    })
+    .strict(),
 ]);
 
 const common = {
   kind: kindSchema,
+  /** Optional explicit class id (`zz.partition`). Absent: recognised from kind and values. */
+  classId: z.string().max(REGISTRY_ID_MAX_LENGTH).regex(REGISTRY_ID_PATTERN, "a namespaced class id").optional(),
   typeId: idSchema.optional(),
   values: valuesSchema.optional(),
   size: sizeSchema.optional(),
-  /** A name or label (a grid's "A", a reference plane's "Face of slab edge"). Absent: a grid takes the next label. */
+  /** A name or label (a grid's "A", a beam's section name, a component's type name). Absent: a grid takes the next label. */
   label: z.string().trim().min(1).max(120).optional(),
-  /** Line-drawn kinds with a height (a wall): the level the top runs up to, so the height follows both levels. Absent: `size.heightMm`. */
+  /** Component category when `kind: "component"`. */
+  category: z.string().trim().min(1).max(60).optional(),
+  /** Material name when `kind: "column"`. */
+  material: z.string().trim().min(1).max(60).optional(),
+  /** Kinds with a height (walls, columns): the level the top runs up to, so the height follows both levels. Absent: `size.heightMm`. */
   topLevelId: idSchema.optional(),
   /** With `topLevelId`: how far above (negative: below) that level the top sits. */
   topOffsetMm: z.number().finite().min(-100_000).max(100_000).optional(),
@@ -106,7 +119,7 @@ const common = {
   topSurface: surfaceBindingSchema.optional(),
   /** Line-drawn kinds with a height: the base stands on the floor under the line (or one element's face). */
   baseSurface: surfaceBindingSchema.optional(),
-  /** Line-drawn kinds with a height: how far above its level the base stands (never beside baseSurface, which carries its own offset). */
+  /** Elevation offset above the element's level, mm (never beside baseSurface, which carries its own offset). */
   baseOffsetMm: z.number().finite().min(-100_000).max(100_000).optional(),
 };
 
@@ -156,7 +169,7 @@ export type CreateCommand = CreateElement | CreateElements | CreateHosted;
 export const CREATE_COMMAND_TYPES: readonly string[] = ["create_element", "create_elements", "create_hosted"];
 
 type DrawPlacement = CreateElement["placement"];
-type Common = Pick<CreateElement, "kind" | "typeId" | "values" | "size" | "label" | "topLevelId" | "topOffsetMm" | "topSurface" | "baseSurface" | "baseOffsetMm">;
+type Common = Pick<CreateElement, "kind" | "classId" | "typeId" | "values" | "size" | "label" | "category" | "material" | "topLevelId" | "topOffsetMm" | "topSurface" | "baseSurface" | "baseOffsetMm">;
 
 /** How each kernel kind is drawn: on a line, an area or a point. Kinds missing here are made by their own commands. */
 const DRAWN: Readonly<Record<string, "line" | "area" | "point">> = {
@@ -166,6 +179,7 @@ const DRAWN: Readonly<Record<string, "line" | "area" | "point">> = {
   reference_plane: "line",
   slab: "area",
   column: "point",
+  component: "point",
 };
 
 /** Kernel kinds with their own command, so the refusal can say which. */
@@ -301,7 +315,7 @@ function linePlacement(level: Level, start: Vec2, end: Vec2, top: TopLevel | nul
     startOffsetMm: input.baseOffsetMm ?? 0,
     endOffsetMm: input.baseOffsetMm ?? 0,
     lateral: "center",
-    vertical: "bottom",
+    vertical: input.kind === "beam" ? "top" : "bottom",
     ...(top?.stored ? { topLevelId: top.level.id, ...(top.offsetMm ? { topOffsetMm: top.offsetMm } : {}) } : {}),
     // Heights from bound surfaces are worked out when the edit finishes (`placement/surface-follow.ts`).
     ...(input.topSurface ? { topSurface: toBinding(input.topSurface) } : {}),
@@ -327,9 +341,23 @@ function topLevelFor(d: Draft, level: Level, input: Common): TopLevel | null {
   const top = d.reader.find(asElementId(input.topLevelId));
   if (top?.kind !== "level") refuse("element_not_found", `${input.topLevelId} isn't a level in this model; pick the level the top runs up to`);
   const offsetMm = input.topOffsetMm ?? 0;
-  if (top.elevationMm + offsetMm - level.elevationMm < MIN_TIED_HEIGHT_MM) refuse("invalid_value", `${top.name} isn't above ${level.name}, so the ${words(input.kind).toLowerCase()} would have no height; pick a level above it`, [top.id]);
+  const baseOffsetMm = input.baseOffsetMm ?? 0;
+  if (top.elevationMm + offsetMm - (level.elevationMm + baseOffsetMm) < MIN_TIED_HEIGHT_MM) refuse("invalid_value", `${top.name} isn't above ${level.name}, so the ${words(input.kind).toLowerCase()} would have no height; pick a level above it`, [top.id]);
   return { level: top, offsetMm, stored: peerReads(WALLS_TOP_CONSTRAINT_FEATURE) };
 }
+
+/** Check an explicit `classId` on a drawn element against the active class registry. */
+function checkClassId(classId: string, kind: string): void {
+  if (classId.startsWith("firm:")) return;
+  const cls = activeClassRegistry().getClass(classId);
+  if (!cls) refuse("invalid_value", `"${classId}" isn't a class this model knows`);
+  if (cls.abstract) refuse("invalid_value", `${cls.label} is a grouping of classes, not one to give an element; choose one of its classes`);
+  const kinds = cls.recognize?.elementKinds ?? [];
+  if (kinds.length > 0 && !kinds.includes(kind)) refuse("invalid_value", `${cls.label} is a class of ${kinds.map((k) => `${k.replace(/_/g, " ")}s`).join(" and ")}, not ${kind.replace(/_/g, " ")}s`);
+}
+
+/** Kinds that accept a vertical offset above their level (`baseOffsetMm`). */
+const OFFSET_KINDS: ReadonlySet<string> = new Set(["wall", "column", "beam", "slab", "component"]);
 
 function gridLabelFor(d: Draft, given: string | undefined, start: Vec2, end: Vec2): string {
   const used = [...elementsOfKind(d.reader.model.elements, "grid").map((g) => g.label.trim()), ...d.gridLabels];
@@ -346,8 +374,10 @@ const sameVec = (a: Vec2, b: Vec2): boolean => a.x === b.x && a.y === b.y;
 function draw(d: Draft, id: string, level: Level, input: Common, placement: DrawPlacement): BimElement {
   const eid = fresh(d, id);
   const type = typeFor(d, input.typeId, input.kind);
+  if (input.classId !== undefined) checkClassId(input.classId, input.kind);
   const base = { id: eid, version: 0, authoredRev: {} };
   const core = {
+    ...(input.classId !== undefined ? { classId: input.classId } : {}),
     ...(type ? { typeId: type.id } : {}),
     ...(input.values && Object.keys(input.values).length > 0 ? { values: input.values as Readonly<Record<string, ParamValue>> } : {}),
   };
@@ -355,7 +385,8 @@ function draw(d: Draft, id: string, level: Level, input: Common, placement: Draw
   const size = { ...(type ? starterElementType(type.id)?.size : undefined), ...input.size };
   let el: BimElement;
   const face = DRAWN[input.kind] === undefined ? kindRowOf(input.kind)?.create : undefined;
-  if ((input.topSurface || input.baseSurface || input.baseOffsetMm !== undefined) && (face || placement.kind !== "line")) refuse("invalid_value", `${article(words(input.kind))} keeps no height of its own here, so its top and base can't follow a surface; leave them out`);
+  if ((input.topSurface || input.baseSurface) && (face || placement.kind !== "line")) refuse("invalid_value", `${article(words(input.kind))} keeps no height of its own here, so its top and base can't follow a surface; leave them out`);
+  if (input.baseOffsetMm !== undefined && (face || !OFFSET_KINDS.has(input.kind))) refuse("invalid_value", `${article(words(input.kind))} keeps no height, so its base can't be raised off its level; leave the base offset out`);
   if (face) {
     if (input.topLevelId !== undefined) refuse("invalid_value", `${article(words(input.kind))}'s top is set by the add-on that defines it, not a top level here; leave the top level out`);
     const made = face.make(
@@ -383,7 +414,6 @@ function draw(d: Draft, id: string, level: Level, input: Common, placement: Draw
       ...(input.baseSurface ? { baseSurface: toBinding(input.baseSurface) } : {}),
     });
     if (input.topSurface && input.size?.heightMm !== undefined) refuse("invalid_value", "Give either a height or the surface the top runs to, not both");
-    if (input.baseOffsetMm !== undefined && !topTieRow(input.kind)) refuse("invalid_value", `${article(words(input.kind))} keeps no height, so its base can't be raised off its level; leave the base offset out`);
     if (input.baseOffsetMm !== undefined && input.baseSurface) refuse("invalid_value", "A base on the floor under it carries its own offset; give the offset there, not as a base offset");
     const top = topLevelFor(d, level, input);
     const p = linePlacement(level, start, end, top, input);
@@ -411,16 +441,61 @@ function draw(d: Draft, id: string, level: Level, input: Common, placement: Draw
       }
     }
   } else if (placement.kind === "area") {
+    topLevelFor(d, level, input);
     const outline = placement.outline.map(roundVec);
     const holes = (placement.holes ?? []).map((h) => h.map(roundVec));
-    const p: GeometricPlacement = { kind: "area", levelId: level.id, outline, ...(holes.length > 0 ? { holes } : {}), offsetMm: 0, vertical: "top" };
+    const p: GeometricPlacement = {
+      kind: "area",
+      levelId: level.id,
+      outline,
+      ...(holes.length > 0 ? { holes } : {}),
+      offsetMm: input.baseOffsetMm ?? 0,
+      vertical: "top",
+      ...(placement.spanDirectionDeg !== undefined ? { spanDirectionDeg: placement.spanDirectionDeg } : {}),
+    };
     if (areaOf(p).planAreaMm2 <= 0) refuse("invalid_value", `${article(words(input.kind))}'s outline, less its holes, has no area; click at least three corners that enclose something`);
     const slab: Slab = { ...base, ...core, kind: "slab", outline, thickness: size.thicknessMm ?? DEFAULTS.slabThicknessMm, placement: p };
     el = finished(slab, level);
+  } else if (input.kind === "component") {
+    topLevelFor(d, level, input);
+    const position = roundVec(placement.position);
+    const rotationDeg = placement.rotationDeg ?? 0;
+    const p: PointPlacement = { kind: "point", levelId: level.id, position, offsetMm: input.baseOffsetMm ?? 0, rotationDeg };
+    const component: Component = {
+      ...base,
+      ...core,
+      kind: "component",
+      category: input.category ?? "furniture",
+      typeName: type?.name ?? input.label ?? "Component",
+      position,
+      size: { x: size.widthMm ?? DEFAULTS.columnSizeMm, y: size.depthMm ?? size.widthMm ?? DEFAULTS.columnSizeMm },
+      rotationDeg,
+      placement: p,
+    };
+    el = finished(component, level);
   } else {
     const position = roundVec(placement.position);
-    const p: GeometricPlacement = { kind: "point", levelId: level.id, position, offsetMm: 0, rotationDeg: placement.rotationDeg ?? 0 };
-    const column: Column = { ...base, ...core, kind: "column", material: DEFAULTS.columnMaterial, position, size: { x: size.widthMm ?? DEFAULTS.columnSizeMm, y: size.depthMm ?? size.widthMm ?? DEFAULTS.columnSizeMm }, placement: p };
+    const top = topLevelFor(d, level, input);
+    const p: PointPlacement = {
+      kind: "point",
+      levelId: level.id,
+      position,
+      offsetMm: input.baseOffsetMm ?? 0,
+      rotationDeg: placement.rotationDeg ?? 0,
+      ...(top?.stored ? { topLevelId: top.level.id, ...(top.offsetMm ? { topOffsetMm: top.offsetMm } : {}) } : {}),
+    };
+    const tiedHeight = top ? tiedHeightMm({ ...p, topLevelId: top.level.id, ...(top.offsetMm ? { topOffsetMm: top.offsetMm } : {}) }, (lid) => (lid === level.id ? level.elevationMm : lid === top.level.id ? top.level.elevationMm : null)) : null;
+    const resolvedHeight = tiedHeight ?? (size.heightMm !== undefined ? Math.round(size.heightMm * 10) / 10 : undefined);
+    const column: Column = {
+      ...base,
+      ...core,
+      kind: "column",
+      material: input.material ?? DEFAULTS.columnMaterial,
+      position,
+      size: { x: size.widthMm ?? DEFAULTS.columnSizeMm, y: size.depthMm ?? size.widthMm ?? DEFAULTS.columnSizeMm },
+      ...(resolvedHeight !== undefined ? { height: resolvedHeight } : {}),
+      placement: p,
+    };
     el = finished(column, level);
   }
   d.working[eid] = el;

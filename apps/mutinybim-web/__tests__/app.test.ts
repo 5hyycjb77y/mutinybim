@@ -343,5 +343,6 @@ test("starterModel('...', 'sample') seeds the multi-discipline showcase with vie
   expect(els.some((e) => e.kind === "wall")).toBe(true);
   expect(els.some((e) => e.kind === "view" && e.viewType === "three_d")).toBe(true);
   expect(els.some((e) => e.kind === "sheet" && e.number === "A-101")).toBe(true);
+  expect(els.some((e) => e.kind === "sheet" && e.number === "S-101")).toBe(true);
   expect(els.some((e) => e.kind === "sheet" && e.number === "E-101")).toBe(true);
 });

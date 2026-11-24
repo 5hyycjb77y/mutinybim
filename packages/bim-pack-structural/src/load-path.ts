@@ -154,7 +154,7 @@ function bearingColumn(columns: Buckets<FrameColumn>, beam: FrameBeam, at: Vec2,
   let best: FrameColumn | null = null;
   let bestD = Infinity;
   for (const c of columns.near(at)) {
-    const reaches = c.topLevelId === beam.levelId || Math.abs(c.topZMm - z) <= BEARING_HEIGHT_MM;
+    const reaches = c.topLevelId === beam.levelId || Math.abs(c.topZMm - z) <= BEARING_HEIGHT_MM || (c.baseZMm < z - 100 && z <= c.topZMm + BEARING_HEIGHT_MM);
     const d = dist(c.position, at);
     if (reaches && d <= c.radiusMm + BEARING_SLACK_MM && d < bestD) {
       best = c;

@@ -1,6 +1,8 @@
 import {
   CALC_POINT,
+  CLASS_PLAN_GRAPHICS_POINT,
   CLASS_POINT,
+  CLASS_SOLIDS_POINT,
   DERIVED_ZONE_RULE_POINT,
   LIBRARY_ROWS_POINT,
   LINKED_PLAN_DISPLAY_POINT,
@@ -19,16 +21,19 @@ import {
   type RuleDef,
 } from "@permitzip/bim-pack/runtime";
 import { STRUCTURAL_MANIFEST } from "@permitzip/bim-kernel/packs";
+import { STRUCTURAL_BODIES } from "./bodies";
 import { SIMPLE_BEAM_CALC } from "./calc";
 import { GRAVITY_LOAD_SERVICE, STRUCT_CLASSES, STRUCT_PARAMETER_SET } from "./catalog";
 import { STRUCTURAL_CLASSES } from "./classes";
 import { STRUCTURAL_FIELD_PROVIDER } from "./fields";
+import { STRUCTURAL_PLAN_GRAPHICS } from "./graphics";
 import { STRUCT_LIBRARY_ROWS } from "./library-rows";
 import { STRUCTURAL_LINKED_PLAN_DISPLAY } from "./linked-plan-display";
 import { STRUCTURAL_LINKED_REFERENCE } from "./linked-reference";
 import { FOOTING_UNSUPPORTED_RULE_ID, FOOTING_UNSUPPORTED_RULE_VERSION, footingUnsupported } from "./lint";
 import { LIVE_LOAD_RATE_TARGET, STRUCT_RATE_VALUES, STRUCT_SPACE_USES } from "./live-loads";
 import { LOAD_PATH_ADAPTER } from "./load-path";
+import { STRUCTURAL_SCHEDULE_TEMPLATES } from "./schedules";
 import { TRIBUTARY_PURPOSE, TRIBUTARY_RULE } from "./tributary-zone";
 
 export const STRUCT_PACK_ID = STRUCTURAL_MANIFEST.id;
@@ -69,7 +74,9 @@ export const STRUCTURAL_PACK = definePack(STRUCTURAL_MANIFEST, [
   contribute(SPACE_USE_RATE_VALUE_POINT, STRUCT_RATE_VALUES),
   contribute(LINT_RULE_POINT, [FOOTING_UNSUPPORTED_RULE]),
   contribute(CALC_POINT, [SIMPLE_BEAM_CALC]),
-  contribute(LIBRARY_ROWS_POINT, STRUCT_LIBRARY_ROWS),
+  contribute(LIBRARY_ROWS_POINT, [...STRUCT_LIBRARY_ROWS, ...STRUCTURAL_SCHEDULE_TEMPLATES]),
+  contribute(CLASS_PLAN_GRAPHICS_POINT, STRUCTURAL_PLAN_GRAPHICS),
+  contribute(CLASS_SOLIDS_POINT, STRUCTURAL_BODIES),
   contribute(LINKED_PLAN_DISPLAY_POINT, STRUCTURAL_LINKED_PLAN_DISPLAY),
   contribute(LINKED_REFERENCE_POINT, STRUCTURAL_LINKED_REFERENCE),
 ]);

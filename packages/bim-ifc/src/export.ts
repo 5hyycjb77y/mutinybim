@@ -4,6 +4,7 @@ import {
   ZONE_PURPOSE_POINT,
   activeClassRegistry,
   activeServiceRegistry,
+  classSolidsOf,
   gridAxisFamily,
   fieldProviderRegistry,
   hostLineOf,
@@ -14,6 +15,8 @@ import {
   buildClassIndex,
   ceilingRole,
   ceilingSlope,
+  columnVerticalSpan,
+  wallBaseAtMm,
   fittingBody,
   fittingMesh,
   ifcOrganizationProperties,
@@ -56,7 +59,7 @@ import {
   type Zone,
 } from "@permitzip/bim-kernel";
 import { activePackSet } from "@permitzip/bim-kernel/packs";
-import { elementTypeOf } from "@permitzip/bim-kernel/elements";
+import { elementTypeOf, elementTypeValue } from "@permitzip/bim-kernel/elements";
 import { LEGACY_QUANTITY_KEYS, QUANTITY_BINDINGS } from "@permitzip/bim-units";
 import { GeometryWriter, type Section, type Vec3 } from "./geometry";
 import { derivedIfcGuid, isIfcGuid, isUuid, projectNamespace, relationshipIfcGuid, uuidToIfcGuid } from "./guid";
@@ -463,7 +466,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   const typicalMembers = new Map<string, { readonly levelId: string | null; readonly items: StepRef[] }>();
   const groupMembers = new Map<string, StepRef[]>();
 
-  const writeType = (key: string, entity: string, predefined: string | null, name: string, elementType: string | null, bag: PropertyBag | null): { ref: StepRef; guid: string; members: StepRef[] } => {
+  const writeType = (key: string, entity: string, predefined: string | null, name: string, elementType: string | null, bag: PropertyBag | null, extraEnums: Readonly<Record<string, string>> = {}): { ref: StepRef; guid: string; members: StepRef[] } => {
     const existing = typeObjects.get(key);
     if (existing) return existing;
     const guid = guids.derived(`type:${key}`);
@@ -475,7 +478,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const members = predefinedTypes(entity);
     const tail = ownAttributes(entity).map((a): StepValue => {
       if (a === "PredefinedType") return en(predefined && members.has(predefined) ? predefined : "NOTDEFINED");
-      if (a === "OperationType" || a === "PartitioningType") return en("NOTDEFINED");
+      if (a === "OperationType" || a === "PartitioningType") return en(extraEnums[a] ?? "NOTDEFINED");
       return $;
     });
     const ref = g.add(entity.toUpperCase(), [str(guid), $, str255(name), $, $, sets.length > 0 ? list(sets.map((s) => s.ref)) : $, $, $, elementType ? str255(elementType) : $, ...tail]);
@@ -485,12 +488,13 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     return entry;
   };
 
-  const writeElement = (el: BimElement, cls: ResolvedIfcClass, name: string | null, tag: string | null, placement: StepRef | null, body: StepRef | null, extra: Readonly<Record<string, number>> = {}): Product => {
+  const writeElement = (el: BimElement, cls: ResolvedIfcClass, name: string | null, tag: string | null, placement: StepRef | null, body: StepRef | null, extra: Readonly<Record<string, number | string>> = {}): Product => {
     const guid = guids.record(el);
     const tail = ownAttributes(cls.entity).map((a): StepValue => {
       if (a === "PredefinedType") return cls.predefinedType ? en(cls.predefinedType) : $;
       const v = extra[a];
-      return v !== undefined && v > 0 ? real(v) : $;
+      if (typeof v === "string" && v.trim() !== "") return en(v);
+      return typeof v === "number" && v > 0 ? real(v) : $;
     });
     const ref = g.add(cls.entity.toUpperCase(), [str(guid), $, opt(name), $, opt(cls.objectType), placement ?? $, body ?? $, opt(tag), ...tail]);
     byEntity[cls.entity] = (byEntity[cls.entity] ?? 0) + 1;
@@ -592,7 +596,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     } else if (el.kind === "wall") {
       const dx = el.end.x - el.start.x;
       const dy = el.end.y - el.start.y;
-      const placement = geo.placement(frame, geo.turned({ x: el.start.x, y: el.start.y, z: 0 }, (Math.atan2(dy, dx) * 180) / Math.PI));
+      const placement = geo.placement(frame, geo.turned({ x: el.start.x, y: el.start.y, z: wallBaseAtMm(el, 0) }, (Math.atan2(dy, dx) * 180) / Math.PI));
       product = writeElement(el, cls, el.wallType || null, null, placement, geo.strip(Math.hypot(dx, dy), el.thickness, el.height));
       if (cls.typeEntity && el.wallType && !elementTypeOf(els, el)) writeType(`wall:${el.wallType}|${cls.entity}`, cls.typeEntity, cls.predefinedType, el.wallType, null, null).members.push(product.ref);
     } else if (el.kind === "slab") {
@@ -604,11 +608,30 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const line = hostEl ? hostLineOf(hostEl, els) : null;
       const v = hostVoidsOf(els, el.hostId).find((x) => x.elementId === el.id);
       const sill = v ? Math.min(...v.profile.map((q) => q.y)) : 0;
+      const hostBase = hostEl ? wallBaseAtMm(hostEl, el.offset) : 0;
       const angle = line ? (Math.atan2(line.end.y - line.start.y, line.end.x - line.start.x) * 180) / Math.PI : 0;
       const depth = line?.widthMm ?? 0;
-      const placement = geo.placement(frame, geo.turned({ x: el.position.x, y: el.position.y, z: sill }, angle));
+      const placement = geo.placement(frame, geo.turned({ x: el.position.x, y: el.position.y, z: hostBase + sill }, angle));
       const body = el.width > 0 && el.height > 0 && depth > 0 ? geo.box({ x: -el.width / 2, y: -depth / 2, z: 0 }, { x: el.width / 2, y: depth / 2, z: el.height }) : null;
-      product = writeElement(el, cls, el.mark.trim() || null, el.mark.trim() || null, placement, body, { OverallWidth: el.width, OverallHeight: el.height });
+      const resolveIfcDoorOp = (): string => {
+        const op = elementTypeValue(els, el, "architecture.door_operation");
+        if (typeof op === "string" && op.trim()) return op.trim().toUpperCase();
+        const hand = elementTypeValue(els, el, "architecture.door_handing");
+        if (typeof hand === "string") {
+          const h = hand.trim().toUpperCase();
+          if (h === "RH" || h === "RHR") return "SINGLE_SWING_RIGHT";
+          if (h === "LH" || h === "LHR") return "SINGLE_SWING_LEFT";
+        }
+        return "SINGLE_SWING_LEFT";
+      };
+      const rawWinPart = el.openingType === "window" ? elementTypeValue(els, el, "architecture.window_partitioning") : undefined;
+      const extraOpening: Record<string, number | string> = {
+        OverallWidth: el.width,
+        OverallHeight: el.height,
+        ...(el.openingType === "door" ? { OperationType: resolveIfcDoorOp() } : {}),
+        ...(typeof rawWinPart === "string" && rawWinPart.trim() ? { PartitioningType: rawWinPart.trim().toUpperCase() } : {}),
+      };
+      product = writeElement(el, cls, el.mark.trim() || null, el.mark.trim() || null, placement, body, extraOpening);
     } else if (el.kind === "run_segment") {
       const placement = geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 }));
       const s = el.size;
@@ -646,21 +669,96 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       if (ceilingSlope(el)) warn(`${el.id}: a sloped ceiling is written flat at its stated height, so its body is only right where that height is measured`);
       product = writeElement(el, cls, ceilingRole(el).label, null, placement, geo.prism(el.outline, el.heightMm, CEILING_BOARD_MM, el.holes));
       hostSpace = el.spaceId && spaceRefs.has(el.spaceId) ? el.spaceId : null;
+    } else if (el.kind === "column") {
+      const baseLevel = levelId ? els[levelId] : undefined;
+      const floorMm = baseLevel?.kind === "level" ? baseLevel.elevationMm : 0;
+      const span = columnVerticalSpan(els, el, floorMm);
+      const rotation = el.placement?.kind === "point" && el.placement.rotationDeg ? el.placement.rotationDeg : 0;
+      const placement = geo.placement(frame, geo.turned({ x: el.position.x, y: el.position.y, z: span.baseZMm - floorMm }, rotation));
+      const body = el.size.x > 0 && el.size.y > 0 && span.heightMm > 0 ? geo.box({ x: -el.size.x / 2, y: -el.size.y / 2, z: 0 }, { x: el.size.x / 2, y: el.size.y / 2, z: span.heightMm }) : null;
+      const mark = stringField(el, "mark") ?? (typeof el.values?.mark === "string" && el.values.mark.trim() ? el.values.mark.trim() : null);
+      const name = mark ?? (typeof el.values?.["struct.section"] === "string" ? el.values["struct.section"] : null) ?? el.material;
+      product = writeElement(el, cls, name, mark, placement, body);
+    } else if (el.kind === "beam") {
+      const dx = el.end.x - el.start.x;
+      const dy = el.end.y - el.start.y;
+      const len = Math.hypot(dx, dy);
+      const p = el.placement?.kind === "line" ? el.placement : null;
+      let depth = 400;
+      let width = 180;
+      const classParts = classSolidsOf(el, { elements: els, floorMm: 0 }, activeClassRegistry());
+      if (classParts && classParts.length > 0 && len > 1e-3) {
+        const nx = -dy / len;
+        const ny = dx / len;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        let minW = Infinity;
+        let maxW = -Infinity;
+        for (const part of classParts) {
+          const blocks = part.shape.form === "prisms" ? part.shape.blocks : part.shape.form === "prism" ? [part.shape] : [];
+          for (const b of blocks) {
+            minZ = Math.min(minZ, b.z0);
+            maxZ = Math.max(maxZ, b.z1);
+            for (const q of b.outline) {
+              const proj = (q.x - el.start.x) * nx + (q.y - el.start.y) * ny;
+              minW = Math.min(minW, proj);
+              maxW = Math.max(maxW, proj);
+            }
+          }
+        }
+        if (Number.isFinite(minZ) && Number.isFinite(maxZ) && maxZ - minZ > 1) depth = maxZ - minZ;
+        if (Number.isFinite(minW) && Number.isFinite(maxW) && maxW - minW > 1) width = maxW - minW;
+      }
+      const startOff = p?.startOffsetMm ?? 0;
+      const endOff = p?.endOffsetMm ?? 0;
+      const vAlign = p?.vertical ?? "top";
+      const zShift = vAlign === "bottom" ? depth : vAlign === "center" ? depth / 2 : 0;
+      const isSloped = Math.abs(endOff - startOff) > 1e-3;
+      const placement = isSloped
+        ? geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 }))
+        : geo.placement(frame, geo.turned({ x: el.start.x, y: el.start.y, z: startOff + zShift - depth }, (Math.atan2(dy, dx) * 180) / Math.PI));
+      const body =
+        len > 0
+          ? isSloped
+            ? geo.sweep(
+                { x: el.start.x, y: el.start.y, z: startOff + zShift - depth / 2 },
+                { x: el.end.x, y: el.end.y, z: endOff + zShift - depth / 2 },
+                { width, height: depth },
+              )
+            : geo.strip(len, width, depth)
+          : null;
+      const mark = stringField(el, "mark") ?? (typeof el.values?.mark === "string" && el.values.mark.trim() ? el.values.mark.trim() : null);
+      const name = mark ?? (el.sectionName.trim() || null);
+      product = writeElement(el, cls, name, mark, placement, body);
     } else {
-      // Every other kind: placed at its stated point, with a body only where the kernel states a box.
+      // Every other kind: placed at its stated point, with a body where the kernel states a box (e.g. pad footings).
       const pos: unknown = Reflect.get(el, "position");
       const p = typeof pos === "object" && pos !== null ? { x: finite(Reflect.get(pos, "x")), y: finite(Reflect.get(pos, "y")), z: finite(Reflect.get(pos, "z")) } : null;
       const rotation = numberField(el, "rotationDeg") ?? 0;
-      const placement = p ? geo.placement(frame, geo.turned(p, rotation)) : null;
-      const name = stringField(el, "mark") ?? stringField(el, "label") ?? stringField(el, "typeName") ?? stringField(el, "sectionName");
-      product = writeElement(el, cls, name, stringField(el, "mark"), placement, null);
+      const offsetZ = el.kind === "component" && el.placement?.kind === "point" ? el.placement.offsetMm : 0;
+      const placement = p ? geo.placement(frame, geo.turned({ x: p.x, y: p.y, z: p.z + offsetZ }, rotation)) : null;
+      let body: StepRef | null = null;
+      if (el.kind === "component" && el.category === "footing" && el.size.x > 0 && el.size.y > 0) {
+        const rawThick = elementTypeValue(els, el, "struct.footing_thickness_mm");
+        const thickMm = typeof rawThick === "number" && Number.isFinite(rawThick) && rawThick > 0 ? rawThick : 18 * 25.4;
+        body = geo.box({ x: -el.size.x / 2, y: -el.size.y / 2, z: -thickMm }, { x: el.size.x / 2, y: el.size.y / 2, z: 0 });
+      }
+      const mark = stringField(el, "mark") ?? (el.kind !== "load_point" && "values" in el && el.values && typeof el.values.mark === "string" && el.values.mark.trim() ? el.values.mark.trim() : null);
+      const name = mark ?? stringField(el, "label") ?? stringField(el, "typeName") ?? stringField(el, "sectionName");
+      product = writeElement(el, cls, name, mark, placement, body);
     }
 
     const elementType = el.kind === "part" ? null : elementTypeOf(els, el);
     if (elementType) {
       const tb = new PropertyBag();
       parameterValues(tb, elementType.values ?? {}, "MutinyBIM_Type");
-      writeType(`etype:${elementType.id}|${cls.entity}`, cls.typeEntity ?? "IfcBuildingElementProxyType", cls.predefinedType, elementType.name, null, tb).members.push(product.ref);
+      const rawOp = elementType.values?.["architecture.door_operation"];
+      const rawPart = elementType.values?.["architecture.window_partitioning"];
+      const extraEnums: Record<string, string> = {
+        ...(typeof rawOp === "string" && rawOp.trim() ? { OperationType: rawOp.trim().toUpperCase() } : {}),
+        ...(typeof rawPart === "string" && rawPart.trim() ? { PartitioningType: rawPart.trim().toUpperCase() } : {}),
+      };
+      writeType(`etype:${elementType.id}|${cls.entity}`, cls.typeEntity ?? "IfcBuildingElementProxyType", cls.predefinedType, elementType.name, null, tb, extraEnums).members.push(product.ref);
     }
     organizationSets(bag, el);
     attachSets(product.ref, product.guid, el.id, bag);

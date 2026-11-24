@@ -291,3 +291,26 @@ export function wallBodyProfile(el: BimElement): readonly WallBodyPoint[] | null
     { atMm: Math.round(length), baseMm: b, topMm: b + el.height },
   ];
 }
+
+/**
+ * The base elevation (mm above the wall's own level) at distance `sMm` along
+ * the wall from its start. Matches the base surface `hostSolidBlocks` cuts
+ * voids against (`bodyProfile`, `startOffsetMm`, and `endOffsetMm`), or `0`
+ * when the wall stands flat on its level.
+ */
+export function wallBaseAtMm(el: BimElement, sMm: number): number {
+  const profile = wallBodyProfile(el);
+  if (!profile || profile.length < 2) return 0;
+  let stretch: readonly [WallBodyPoint, WallBodyPoint] | null = null;
+  for (let i = 0; i + 1 < profile.length; i++) {
+    const p = profile[i] as WallBodyPoint;
+    const q = profile[i + 1] as WallBodyPoint;
+    if (q.atMm - p.atMm < 1e-6) continue;
+    stretch = [p, q];
+    if (sMm <= q.atMm) break;
+  }
+  if (!stretch) return profile[0]?.baseMm ?? 0;
+  const [p, q] = stretch;
+  const run = q.atMm - p.atMm;
+  return p.baseMm + ((q.baseMm - p.baseMm) / run) * (sMm - p.atMm);
+}

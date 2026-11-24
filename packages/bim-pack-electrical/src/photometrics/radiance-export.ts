@@ -225,7 +225,7 @@ export function exportRadianceScene(
         const halfW = Math.max(100, op.width * 0.5);
         const s0 = Math.max(0, op.offset - halfW);
         const s1 = Math.min(len, op.offset + halfW);
-        const sillVal = op.values?.["arch.sill_height"] ?? op.values?.sill_height;
+        const sillVal = op.values?.["opening.sill_mm"] ?? op.values?.["arch.sill_height"] ?? op.values?.sill_height;
         const sillMm = typeof sillVal === "number" && Number.isFinite(sillVal) ? sillVal : op.openingType === "window" ? 900 : 0;
         const oz0 = z0 + sillMm;
         const oz1 = Math.min(z1, oz0 + Math.max(100, op.height));

@@ -97,11 +97,23 @@ export function elementClass(elements: Elements, el: BimElement, categories: Cat
   const candidates = [...(r.byKind.get(el.kind) ?? []), ...(type?.kind === "part_type" ? (r.byPartCategory.get(type.definition.category) ?? []) : []), ...r.anyKind];
   let best: ClassId | null = null;
   let bestDepth = -1;
+  let bestConditions = -1;
+  // Honor explicit `classId` (ElementCore), matching `registry/recognition.ts`:
+  // a deeper recognized subclass (e.g. a firm class extending `el.classId`) may
+  // still specialize it, while shallower catch-alls never override it.
+  const explicit = "classId" in el && typeof el.classId === "string" ? categories.classes.getClass(el.classId) : undefined;
+  if (explicit && !explicit.abstract) {
+    best = explicit.id;
+    bestDepth = r.depth.get(explicit.id) ?? 0;
+    bestConditions = Number.MAX_SAFE_INTEGER;
+  }
   for (const cls of candidates) {
     const d = r.depth.get(cls.id) ?? 0;
-    if (d <= bestDepth || !recognizes(cls, el, elements)) continue;
+    const conds = cls.recognize?.where?.length ?? 0;
+    if (d < bestDepth || (d === bestDepth && conds <= bestConditions) || !recognizes(cls, el, elements)) continue;
     best = cls.id;
     bestDepth = d;
+    bestConditions = conds;
   }
   perRegistry.set(el, best);
   return best;

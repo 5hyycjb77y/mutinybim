@@ -19,6 +19,8 @@ import { addOnMarkedPoint, addOnRun, addOnTagCategory, addOnTagText, isAddOnReco
 import { tagFieldAliases } from "./tag-types";
 import { outlineAreaMm2, spaceAreaM2, spaceOutlines } from "../spaces/space-geometry";
 import { ceilingForm, ceilingHeightAtPoint, ceilingRole } from "../ceilings/read";
+import { columnVerticalSpan } from "../placement/top-tie";
+import { wallBaseAtMm } from "../placement/surface-bind";
 import { partPlanOutline, type PlanOutline } from "../drawing/part-outline";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { linkedAnchorInSection, linkedAnchorItem, linkedAnchorPoint, missingLinkedAnchorWords } from "../reference-geometry/linked-anchors";
@@ -206,6 +208,14 @@ function lineOf(model: Pick<ModelState, "elements">, el: BimElement): [Point3, P
         { ...el.start, z: 0 },
         { ...el.end, z: 0 },
       ];
+    case "beam": {
+      const p = el.placement?.kind === "line" ? el.placement : null;
+      const lvlZ = p ? levelZ(model, p.levelId) : (viewModelLevel(model, el.partition?.level)?.elevationMm ?? 0);
+      return [
+        { ...el.start, z: lvlZ + (p?.startOffsetMm ?? 0) },
+        { ...el.end, z: lvlZ + (p?.endOffsetMm ?? 0) },
+      ];
+    }
     default: {
       void model;
       const run = addOnRun(el);
@@ -395,8 +405,14 @@ function pointOf(model: Pick<ModelState, "elements">, el: BimElement): Point3 | 
     case "part":
       return { ...el.position, z: levelZ(model, el.levelId) + el.offsetMm };
     case "column": {
-      const colLvl = el.placement?.kind === "point" ? levelZ(model, el.placement.levelId) : (viewModelLevel(model, el.partition?.level)?.elevationMm ?? 0);
-      return { ...el.position, z: colLvl + 1500 };
+      const fallback = viewModelLevel(model, el.partition?.level)?.elevationMm ?? 0;
+      const span = columnVerticalSpan(model.elements, el, fallback);
+      return { ...el.position, z: (span.baseZMm + span.topZMm) / 2 };
+    }
+    case "component": {
+      const lvlZ = el.placement?.kind === "point" ? levelZ(model, el.placement.levelId) : (viewModelLevel(model, el.partition?.level)?.elevationMm ?? 0);
+      const off = el.placement?.kind === "point" ? el.placement.offsetMm : 0;
+      return { ...el.position, z: lvlZ + off };
     }
     case "opening": {
       const host = model.elements[el.hostId];
@@ -404,9 +420,10 @@ function pointOf(model: Pick<ModelState, "elements">, el: BimElement): Point3 | 
         host?.kind === "wall" && host.placement?.kind === "line"
           ? levelZ(model, host.placement.levelId)
           : (viewModelLevel(model, host?.partition?.level ?? el.partition?.level)?.elevationMm ?? 0);
+      const hostBase = host ? wallBaseAtMm(host, el.offset) : 0;
       const rawSill = (el as unknown as { readonly values?: Readonly<Record<string, unknown>> }).values?.["opening.sill_mm"];
       const sillMm = typeof rawSill === "number" ? rawSill : el.openingType === "window" ? 915 : 0;
-      return { ...el.position, z: hostZ + sillMm + el.height / 2 };
+      return { ...el.position, z: hostZ + hostBase + sillMm + el.height / 2 };
     }
     case "run_fitting":
       return el.position;

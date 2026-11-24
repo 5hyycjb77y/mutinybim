@@ -43,6 +43,8 @@ export interface PathReader {
   readonly type: FieldType;
   /** Steps through relationships before the field (empty for an own field). */
   readonly steps: readonly RelationshipDef[];
+  /** Wide model dependencies declared on the underlying registry field (e.g. structural load-path inputs). */
+  readonly deps?: FieldDef["deps"];
   /** The value can reach many elements (needs an aggregate or expand column). */
   readonly many: boolean;
   /** Depends on model state no read set captures (v1 live electrical fields): every change re-reads it. */
@@ -121,6 +123,7 @@ function registryReader(registry: Registry, classId: string, path: string): Path
   return {
     type,
     steps: d.steps,
+    ...(field.deps ? { deps: field.deps } : {}),
     many: d.many,
     coarse: false,
     read(el, elements, reads) {

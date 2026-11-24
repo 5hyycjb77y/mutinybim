@@ -8,6 +8,7 @@
  */
 import {
   colourNumber,
+  columnVerticalSpan,
   fittingBody,
   fittingMesh,
   flexRings,
@@ -45,6 +46,7 @@ import {
   KNOWN_COMPONENT_CATEGORIES,
   asCeiling,
   hostSolidBlocks,
+  wallBaseAtMm,
   wallBodyProfile,
   hostVoidsOf,
   kindRowOf,
@@ -535,8 +537,8 @@ function rawElementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVAT
         const halfD = Math.max(el.thickness / 2, 55);
         const mulW = 55;
         const h = el.height;
-        const zBot = floor;
-        const zTop = floor + h;
+        const zBot = floor + wallBaseAtMm(el, len / 2);
+        const zTop = zBot + h;
         const frameBlocks: PrismBlock[] = [
           // Bottom sill track & top head track
           boxBlock(0, len, -halfD, halfD, zBot, zBot + 70),
@@ -647,23 +649,16 @@ function rawElementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVAT
       ];
     }
     case "column": {
-      const nextZ = nextLevelAboveMm(model, floor);
-      let colH = nextZ !== null && nextZ > floor ? nextZ - floor : rules.floorToFloorMm;
-      if (el.placement?.kind === "point" && model) {
-        const p = el.placement as { readonly topLevelId?: string; readonly topOffsetMm?: number; readonly heightMm?: number };
-        if (typeof p.topLevelId === "string") {
-          const topLvl = model.elements[p.topLevelId];
-          if (topLvl?.kind === "level" && topLvl.elevationMm > floor) colH = topLvl.elevationMm - floor + (p.topOffsetMm ?? 0);
-        } else if (typeof p.heightMm === "number" && p.heightMm > 0) {
-          colH = p.heightMm;
-        }
-      }
-      const rawHeight = (el as { readonly height?: number }).height;
-      if (typeof rawHeight === "number" && rawHeight > 0) colH = rawHeight;
-      // Stop cleanly at the underside of an overhead slab on the top level so columns never poke through a roof or floor deck.
-      if (model && nextZ !== null && Math.abs(floor + colH - nextZ) < 50) {
+      const span = model ? columnVerticalSpan(model.elements, el, floor, rules.floorToFloorMm) : null;
+      const baseZ = span ? span.baseZMm : floor + (el.placement?.kind === "point" ? el.placement.offsetMm : 0);
+      let colH = span ? span.heightMm : (typeof el.height === "number" && el.height > 0 ? el.height : rules.floorToFloorMm);
+      const hasExplicitTopOffset = (el.placement?.kind === "point" || el.placement?.kind === "line") && el.placement.topOffsetMm !== undefined && el.placement.topOffsetMm !== 0;
+      const isLevelTiedOrInferred = span !== null && span.topLevelId !== null;
+      const topZ = baseZ + colH;
+      // Stop cleanly at the underside of an overhead slab at the column's top level when level-tied/inferred and no explicit top offset already accounts for it.
+      if (model && isLevelTiedOrInferred && !hasExplicitTopOffset) {
         for (const slab of elementsOfKind(model.elements, "slab")) {
-          if (Math.abs(floorOf(slab, rules, model) - nextZ) > 50) continue;
+          if (Math.abs(floorOf(slab, rules, model) - topZ) > 50) continue;
           const xs = slab.outline.map((q) => q.x);
           const ys = slab.outline.map((q) => q.y);
           if (xs.length >= 3 && el.position.x >= Math.min(...xs) && el.position.x <= Math.max(...xs) && el.position.y >= Math.min(...ys) && el.position.y <= Math.max(...ys)) {
@@ -672,30 +667,43 @@ function rawElementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVAT
           }
         }
       }
+      const rotDeg = el.placement?.kind === "point" ? el.placement.rotationDeg : 0;
       return [
         {
           ...base,
           group: "structure",
           shape: "box",
-          center: kernelToScene(el.position.x, el.position.y, floor + colH / 2),
+          center: kernelToScene(el.position.x, el.position.y, baseZ + colH / 2),
           size: [el.size.x * MM, colH * MM, el.size.y * MM],
-          yaw: 0,
+          yaw: (rotDeg * Math.PI) / 180,
         },
       ];
     }
     case "beam": {
       const dx = el.end.x - el.start.x;
       const dy = el.end.y - el.start.y;
-      const len = Math.hypot(dx, dy);
-      if (len === 0) return [];
+      const planLen = Math.hypot(dx, dy);
+      if (planLen === 0) return [];
+      const depth = 400;
+      const width = 200;
+      const p = el.placement?.kind === "line" ? el.placement : null;
+      const dz = p ? p.endOffsetMm - p.startOffsetMm : 0;
+      const len3D = Math.hypot(planLen, dz);
+      const pitch = Math.abs(dz) > 1e-6 ? Math.atan2(dz, planLen) : 0;
+      const centerZ = p
+        ? floor + (p.startOffsetMm + p.endOffsetMm) / 2 + (p.vertical === "bottom" ? depth / 2 : p.vertical === "center" ? 0 : -depth / 2)
+        : floor + rules.floorToFloorMm - 300;
+      const h = p ? depth : 600;
+      const w = p ? width : 300;
       return [
         {
           ...base,
           group: "structure",
           shape: "box",
-          center: kernelToScene((el.start.x + el.end.x) / 2, (el.start.y + el.end.y) / 2, floor + rules.floorToFloorMm - 300),
-          size: [len * MM, 600 * MM, 300 * MM],
+          center: kernelToScene((el.start.x + el.end.x) / 2, (el.start.y + el.end.y) / 2, centerZ),
+          size: [len3D * MM, h * MM, w * MM],
           yaw: planAngleToSceneYaw(dx, dy),
+          ...(pitch !== 0 ? { pitch } : {}),
         },
       ];
     }

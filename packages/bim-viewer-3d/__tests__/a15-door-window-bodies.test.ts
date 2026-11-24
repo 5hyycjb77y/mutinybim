@@ -17,7 +17,7 @@
  * `elementSolid` returns null (no class solids point existed).
  */
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
-import type { ModelState } from "@permitzip/bim-kernel";
+import { planGapsOf, type ModelState, type Wall } from "@permitzip/bim-kernel";
 import { twoLevels, type Log } from "../../bim-kernel/__tests__/a13a-fixtures";
 import { elementSolid } from "../../bim-kernel/src/drawing/solids";
 import { MM } from "../src/coords";
@@ -156,5 +156,135 @@ describe("a15-door-window-bodies", () => {
       workByType.set(type, (workByType.get(type) ?? new Set<string>()).add(`${bodies.length} solids, ${triangles} triangles`));
     }
     expect(Object.fromEntries([...workByType].map(([type, shapes]) => [type, [...shapes]]))).toEqual({ door: ["1 solids, 48 triangles"], window: ["2 solids, 72 triangles"] });
+  });
+
+  it("window and door 3D/section bodies follow a host wall's startOffsetMm (matching the wall boolean cutout)", () => {
+    const m = twoLevels("a15-offset");
+    // Clerestory wall raised 1200 mm above L1 (startOffsetMm = 1200)
+    m.ok({
+      type: "create_element",
+      elementId: "w-clerestory",
+      kind: "wall",
+      levelId: "L1",
+      baseOffsetMm: 1200,
+      size: { thicknessMm: 200, heightMm: 2400 },
+      placement: { kind: "line", start: { x: 0, y: 0 }, end: { x: 6000, y: 0 } },
+    });
+    m.ok({
+      type: "create_hosted",
+      elementId: "win-high",
+      kind: "opening",
+      openingType: "window",
+      mark: "W-HI",
+      hostId: "w-clerestory",
+      s: 3000,
+      side: 1,
+      size: { widthMm: 1200, heightMm: 1200 },
+    });
+
+    // Wall boolean cutout sits at 1200 + 900 = 2100 .. 1200 + 2100 = 3300 mm.
+    const wallPts = corners(solidsOf(m, "w-clerestory")[0] as Solid);
+    expect(bounds(wallPts).min.z).toBe(1200);
+    expect(bounds(wallPts).max.z).toBe(3600);
+    expect(wallPts.some((p) => p.x === 2400 && p.z === 2100)).toBe(true);
+    expect(wallPts.some((p) => p.x === 2400 && p.z === 3300)).toBe(true);
+
+    // 3D window frame and glazing MUST align with the exact same Z span [2100, 3300]!
+    const winSolids = solidsOf(m, "win-high");
+    const frameBounds = bounds(corners(winSolids.find((s) => s.group === "filler") as Solid));
+    const glassBounds = bounds(corners(winSolids.find((s) => s.group === "glazing") as Solid));
+    expect(frameBounds.min.z).toBe(2100);
+    expect(frameBounds.max.z).toBe(3300);
+    expect(glassBounds.min.z).toBe(2190);
+    expect(glassBounds.max.z).toBe(3250);
+
+    // 2D section/elevation solid uses the same aligned Z span.
+    const secSolid = elementSolid(m.head as ModelState, m.head.elements["win-high"]!, 0);
+    const secZs = secSolid?.pieces.flatMap((p) => [...p.r0, ...p.r1].map((pt) => pt.z)) ?? [];
+    expect(Math.min(...secZs)).toBe(2100);
+    expect(Math.max(...secZs)).toBe(3300);
+
+    // Plan cut at 1219 mm is below the 2100 mm sill, so it produces no plan gap.
+    expect(planGapsOf(m.head.elements, "w-clerestory")).toEqual([]);
+
+    // Door hosted in a wall raised 600 mm above L1 aligns at [600, 2700].
+    m.ok({
+      type: "create_element",
+      elementId: "w-curb",
+      kind: "wall",
+      levelId: "L1",
+      baseOffsetMm: 600,
+      size: { thicknessMm: 200, heightMm: 3000 },
+      placement: { kind: "line", start: { x: 0, y: 4000 }, end: { x: 6000, y: 4000 } },
+    });
+    m.ok({
+      type: "create_hosted",
+      elementId: "d-curb",
+      kind: "opening",
+      openingType: "door",
+      mark: "D-HI",
+      hostId: "w-curb",
+      s: 3000,
+      side: 1,
+      size: { widthMm: 900, heightMm: 2100 },
+    });
+    const doorBounds = bounds(corners(solidsOf(m, "d-curb")[0] as Solid));
+    expect(doorBounds.min.z).toBe(600);
+    expect(doorBounds.max.z).toBe(2700);
+
+    // Curtain wall raised 1200 mm above L1 sits at [1200, 4200].
+    m.ok({
+      type: "create_element",
+      elementId: "w-curtain",
+      kind: "wall",
+      levelId: "L1",
+      baseOffsetMm: 1200,
+      size: { thicknessMm: 150, heightMm: 3000 },
+      placement: { kind: "line", start: { x: 0, y: 8000 }, end: { x: 4800, y: 8000 } },
+      values: { "architecture.wall_function": "CURTAIN" },
+    });
+    const curtainSolids = solidsOf(m, "w-curtain");
+    const curtainFrame = bounds(corners(curtainSolids.find((s) => s.group === "filler") as Solid));
+    expect(curtainFrame.min.z).toBe(1200);
+    expect(curtainFrame.max.z).toBe(4200);
+  });
+
+  it("window follows a sloped host wall base (startOffsetMm != endOffsetMm) at its midpoint", () => {
+    const m = twoLevels("a15-sloped");
+    m.ok({
+      type: "create_element",
+      elementId: "w-slope",
+      kind: "wall",
+      levelId: "L1",
+      size: { thicknessMm: 200, heightMm: 3000 },
+      placement: { kind: "line", start: { x: 0, y: 0 }, end: { x: 6000, y: 0 } },
+    });
+    m.ok({
+      type: "create_hosted",
+      elementId: "win-slope",
+      kind: "opening",
+      openingType: "window",
+      mark: "W-SL",
+      hostId: "w-slope",
+      s: 3000,
+      side: 1,
+      size: { widthMm: 1200, heightMm: 1200 },
+    });
+    const wall = m.head.elements["w-slope"] as Wall;
+    const slopedModel: ModelState = {
+      ...(m.head as ModelState),
+      elements: {
+        ...m.head.elements,
+        "w-slope": {
+          ...wall,
+          placement: wall.placement?.kind === "line" ? { ...wall.placement, startOffsetMm: 0, endOffsetMm: 1000 } : wall.placement,
+        },
+      },
+    };
+    const winSolids = elementSolids(slopedModel.elements["win-slope"]!, undefined, slopedModel);
+    const frameBounds = bounds(corners(winSolids.find((s) => s.group === "filler") as Solid));
+    // Midpoint at s = 3000 on 6000 mm wall has base = 500 mm -> sill = 1400, head = 2600.
+    expect(frameBounds.min.z).toBe(1400);
+    expect(frameBounds.max.z).toBe(2600);
   });
 });

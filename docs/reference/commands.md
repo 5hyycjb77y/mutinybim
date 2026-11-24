@@ -388,12 +388,15 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 
 - elementId: string
 - levelId: string
-- placement: { kind: "point"; position: { x: number; y: number }; rotationDeg?: number } | { kind: "line"; start: { x: number; y: number }; end: { x: number; y: number } } | { kind: "area"; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][] }
+- placement: { kind: "point"; position: { x: number; y: number }; rotationDeg?: number } | { kind: "line"; start: { x: number; y: number }; end: { x: number; y: number } } | { kind: "area"; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][]; spanDirectionDeg?: number }
 - kind: string
+- classId?: string
 - typeId?: string
 - values?: object
 - size?: { thicknessMm?: number; heightMm?: number; widthMm?: number; depthMm?: number }
 - label?: string
+- category?: string
+- material?: string
 - topLevelId?: string
 - topOffsetMm?: number
 - topSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number }
@@ -415,10 +418,13 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - points: { x: number; y: number }[]
 - closed?: boolean
 - kind: string
+- classId?: string
 - typeId?: string
 - values?: object
 - size?: { thicknessMm?: number; heightMm?: number; widthMm?: number; depthMm?: number }
 - label?: string
+- category?: string
+- material?: string
 - topLevelId?: string
 - topOffsetMm?: number
 - topSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number }
@@ -1277,7 +1283,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 ## set_element_placement
 
 - elementId: string
-- placement: { kind: "point"; levelId: string; position: { x: number; y: number }; offsetMm: number; rotationDeg: number } | { kind: "line"; levelId: string; start: { x: number; y: number }; end: { x: number; y: number }; startOffsetMm: number; endOffsetMm: number; lateral: "left"|"center"|"right"; vertical: "top"|"center"|"bottom"; rollDeg?: number; topLevelId?: string; topOffsetMm?: number; topSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number }; baseSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number } } | { kind: "path"; levelId: string; start: { x: number; y: number }; segments: { kind: "line"; to: {…} } | { kind: "arc"; to: {…}; bulge: number }[]; startStationMm?: number; profile?: { stationMm: number; elevationMm: number }[]; offsetMm: number; lateral: "left"|"center"|"right" } | { kind: "area"; levelId: string; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][]; offsetMm: number; vertical: "top"|"center"|"bottom"; spanDirectionDeg?: number; slope?: { directionDeg: number; rise: number } } | null
+- placement: { kind: "point"; levelId: string; position: { x: number; y: number }; offsetMm: number; rotationDeg: number; topLevelId?: string; topOffsetMm?: number } | { kind: "line"; levelId: string; start: { x: number; y: number }; end: { x: number; y: number }; startOffsetMm: number; endOffsetMm: number; lateral: "left"|"center"|"right"; vertical: "top"|"center"|"bottom"; rollDeg?: number; topLevelId?: string; topOffsetMm?: number; topSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number }; baseSurface?: { to: "structure"|"ceiling"|"roof"|"floor"; elementId?: string; face?: "top"|"underside"; offsetMm?: number } } | { kind: "path"; levelId: string; start: { x: number; y: number }; segments: { kind: "line"; to: {…} } | { kind: "arc"; to: {…}; bulge: number }[]; startStationMm?: number; profile?: { stationMm: number; elevationMm: number }[]; offsetMm: number; lateral: "left"|"center"|"right" } | { kind: "area"; levelId: string; outline: { x: number; y: number }[]; holes?: { x: number; y: number }[][]; offsetMm: number; vertical: "top"|"center"|"bottom"; spanDirectionDeg?: number; slope?: { directionDeg: number; rise: number } } | null
 - heightMm?: number
 
 ## set_element_thickness

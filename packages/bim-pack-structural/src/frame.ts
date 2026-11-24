@@ -169,12 +169,26 @@ function readColumn(levels: readonly LevelRow[], placementOf: PlacementOf, c: Co
   const z0 = at.z0;
   const radiusMm = Math.max(c.size.x, c.size.y) / 2;
   if (p.kind === "line") {
-    const top = p.topLevelId ? levels.find((l) => l.id === p.topLevelId)?.elevationMm ?? null : null;
-    return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm: z0 + Math.min(p.startOffsetMm, p.endOffsetMm), topZMm: top ?? z0 + Math.max(p.startOffsetMm, p.endOffsetMm), topLevelId: p.topLevelId ?? null };
+    const topLvl = p.topLevelId ? levels.find((l) => l.id === p.topLevelId) ?? null : null;
+    const baseZMm = z0 + Math.min(p.startOffsetMm, p.endOffsetMm);
+    const topZMm = topLvl !== null ? topLvl.elevationMm + (p.topOffsetMm ?? 0) : typeof c.height === "number" && c.height > 0 ? baseZMm + c.height : z0 + Math.max(p.startOffsetMm, p.endOffsetMm);
+    return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm, topZMm, topLevelId: topLvl?.id ?? p.topLevelId ?? null };
   }
-  // A point-placed column runs from its level to the next level up.
+  const baseZMm = z0 + p.offsetMm;
+  if (p.topLevelId !== undefined) {
+    const topLvl = levels.find((l) => l.id === p.topLevelId) ?? null;
+    if (topLvl !== null) {
+      return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm, topZMm: topLvl.elevationMm + (p.topOffsetMm ?? 0), topLevelId: topLvl.id };
+    }
+  }
+  if (typeof c.height === "number" && Number.isFinite(c.height) && c.height > 0) {
+    const topZMm = baseZMm + c.height;
+    const topLvl = levels.find((l) => Math.abs(l.elevationMm - topZMm) <= 50) ?? null;
+    return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm, topZMm, topLevelId: topLvl?.id ?? null };
+  }
+  // A point-placed column with no explicit height or top level runs from its level to the next level up.
   const above = levelAbove(levels, z0);
-  return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm: z0 + p.offsetMm, topZMm: above?.elevationMm ?? z0 + p.offsetMm, topLevelId: above?.id ?? null };
+  return { id: c.id, label: nameOf(c, c.id), levelId: p.levelId, position: c.position, radiusMm, baseZMm, topZMm: above?.elevationMm ?? baseZMm, topLevelId: above?.id ?? null };
 }
 
 const isFooting = (k: ComponentElement) => k.category === "footing" || k.classId === "struct.footing_pad";
@@ -240,7 +254,8 @@ function read(elements: Elements): Frame {
 
   for (const part of elementsOfKind(elements, "part")) {
     const type = elements[part.typeId];
-    const raw = type?.kind === "part_type" ? paramValue(type.definition, part.values, OPERATING_WEIGHT_STORAGE.name) : part.values[OPERATING_WEIGHT_STORAGE.name];
+    const readWeight = (key: string) => (type?.kind === "part_type" ? paramValue(type.definition, part.values, key) : part.values[key]);
+    const raw = readWeight(OPERATING_WEIGHT_STORAGE.name) ?? readWeight("operating_weight") ?? readWeight(STRUCT_KEYS.operatingWeight);
     if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) continue;
     // Mass in pounds times standard gravity: the weight in newtons.
     const weight = fromCanonical("force", qty("mass", raw, OPERATING_WEIGHT_STORAGE.unit) * STANDARD_GRAVITY);

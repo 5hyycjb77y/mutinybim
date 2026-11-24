@@ -99,6 +99,8 @@ export interface PlanGraphicsContext {
   readonly drawing: "view" | "sheet";
   /** A ceiling plan: looking up at the ceiling, so what runs below it is seen beyond. */
   readonly lookingUp: boolean;
+  /** The view's discipline id when set. */
+  readonly discipline?: string;
   /** The connector end joined to `ref`, or null when nothing is connected there. */
   connectedTo(ref: ConnectorRef): ConnectorRef | null;
 }

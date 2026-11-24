@@ -53,7 +53,17 @@ const vertical = z.enum(["top", "center", "bottom"]);
 const offset = z.number().finite().min(-1_000_000).max(1_000_000);
 
 export const geometricPlacementSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("point"), levelId: idSchema, position: vec2Schema, offsetMm: offset, rotationDeg: z.number().finite().min(-3600).max(3600) }).strict(),
+  z
+    .object({
+      kind: z.literal("point"),
+      levelId: idSchema,
+      position: vec2Schema,
+      offsetMm: offset,
+      rotationDeg: z.number().finite().min(-3600).max(3600),
+      topLevelId: idSchema.optional(),
+      topOffsetMm: offset.optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("line"),
@@ -280,8 +290,14 @@ type PlacementInput = z.infer<typeof geometricPlacementSchema>;
 function toPlacement(p: PlacementInput): GeometricPlacement {
   const levelId = asElementId(p.levelId);
   switch (p.kind) {
-    case "point":
-      return { ...p, levelId };
+    case "point": {
+      const { topLevelId, topOffsetMm, ...rest } = p;
+      return {
+        ...rest,
+        levelId,
+        ...(topLevelId !== undefined ? { topLevelId: asElementId(topLevelId), ...(topOffsetMm ? { topOffsetMm } : {}) } : {}),
+      };
+    }
     case "line": {
       const { topLevelId, topOffsetMm, topSurface, baseSurface, ...rest } = p;
       return {
@@ -378,7 +394,7 @@ function checkPlacement(reader: TrackedReader, el: CoreElement, p: GeometricPlac
   if (!allowed.includes(p.kind)) refuse("unsupported_geometry", `${name} can't be placed as ${p.kind === "area" ? "an area" : `a ${p.kind}`}; it takes ${allowed.map((k) => (k === "area" ? "an area" : `a ${k}`)).join(" or ")}`, [el.id]);
   const level = reader.find(asElementId(p.levelId));
   if (level?.kind !== "level") refuse("element_not_found", `${name} can't be placed on ${p.levelId}: it isn't a level in this model`, [el.id]);
-  if (p.kind === "line" && p.topLevelId !== undefined && reader.find(asElementId(p.topLevelId))?.kind !== "level") refuse("element_not_found", `${name}'s top level ${p.topLevelId} isn't a level in this model`, [el.id]);
+  if ((p.kind === "line" || p.kind === "point") && p.topLevelId !== undefined && reader.find(asElementId(p.topLevelId))?.kind !== "level") refuse("element_not_found", `${name}'s top level ${p.topLevelId} isn't a level in this model`, [el.id]);
   if (p.kind === "line") checkSurfaceBindings(reader, el.kind, name, el.id, p);
   if (p.kind === "line" && sameVec(p.start, p.end)) refuse("invalid_value", `${name} would start and end at the same point`, [el.id]);
   if (p.kind === "path" && p.profile) {
@@ -422,7 +438,7 @@ function withTopOrHeight(reader: TrackedReader, el: CoreElement, heightMm: numbe
     if (tied === null && tiedHeightMm(p, elevation) === null) refuse("invalid_value", `${levelName(reader, p.topLevelId)} isn't above ${levelName(reader, p.levelId)}, so ${name} would have no height; pick a level above it`, [el.id]);
     const next = tied && isCoreElement(tied) ? tied : el;
     // A peer that doesn't store ties (`walls:top_constraint`) is sent the height it works out to.
-    if (peerReads(WALLS_TOP_CONSTRAINT_FEATURE) || next.placement?.kind !== "line") return next;
+    if (peerReads(WALLS_TOP_CONSTRAINT_FEATURE) || (next.placement?.kind !== "line" && next.placement?.kind !== "point")) return next;
     const { topLevelId: _top, topOffsetMm: _offset, ...untied } = next.placement;
     return { ...next, placement: untied };
   }
@@ -613,7 +629,7 @@ export function executeElementCommand(model: ModelState, command: ElementCommand
         // Unbound now: the body profile its surfaces gave goes with them.
         const next = tied.kind === "wall" && tied.bodyProfile !== undefined && !surfaceBoundPlacement(tied) ? withoutProfile(tied) : tied;
         write(el, next);
-        summary = p.kind === "line" && p.topSurface ? `${coreElementName(el)}'s top now runs to ${surfaceBindingWords(p.topSurface)}` : p.kind === "line" && p.topLevelId !== undefined ? `${coreElementName(el)} now runs up to ${levelName(reader, p.topLevelId)}` : command.heightMm !== undefined ? `${coreElementName(el)} is now ${Math.round(command.heightMm)} mm tall, not tied to a level` : `Placed ${coreElementName(el)} as ${p.kind === "area" ? "an area" : `a ${p.kind}`}`;
+        summary = p.kind === "line" && p.topSurface ? `${coreElementName(el)}'s top now runs to ${surfaceBindingWords(p.topSurface)}` : (p.kind === "line" || p.kind === "point") && p.topLevelId !== undefined ? `${coreElementName(el)} now runs up to ${levelName(reader, p.topLevelId)}` : command.heightMm !== undefined ? `${coreElementName(el)} is now ${Math.round(command.heightMm)} mm tall, not tied to a level` : `Placed ${coreElementName(el)} as ${p.kind === "area" ? "an area" : `a ${p.kind}`}`;
         break;
       }
       case "set_element_thickness": {

@@ -227,7 +227,7 @@ function buildOcclusionIndex(model: ModelState): OcclusionIndex {
     const host = model.elements[op.hostId];
     if (!host || host.kind !== "wall") continue;
     const baseZ = resolveElementBaseZ(host, levels, sortedLevels);
-    const sillVal = op.values?.["arch.sill_height"] ?? op.values?.sill_height;
+    const sillVal = op.values?.["opening.sill_mm"] ?? op.values?.["arch.sill_height"] ?? op.values?.sill_height;
     const sillMm = typeof sillVal === "number" && Number.isFinite(sillVal) ? sillVal : op.openingType === "window" ? 900 : 0;
     const halfW = op.width * 0.5;
     const cutout: WallOpeningCutout = {

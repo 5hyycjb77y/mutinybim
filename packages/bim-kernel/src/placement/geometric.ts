@@ -34,6 +34,10 @@ export interface PointPlacement {
   readonly offsetMm: number;
   /** Counter-clockwise from east. */
   readonly rotationDeg: number;
+  /** The level the top end is tied to (for point-placed vertical members). Absent: unconnected `height` or storey height. */
+  readonly topLevelId?: ElementId;
+  /** With `topLevelId`: how far above (negative: below) the top level the top sits. Absent: 0. */
+  readonly topOffsetMm?: number;
 }
 
 export interface LinePlacement {

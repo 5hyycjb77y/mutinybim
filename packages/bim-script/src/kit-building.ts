@@ -179,14 +179,174 @@ export interface WallSpec extends Omit<ChainSpec, "points" | "closed"> {
   readonly to: PlanPoint;
 }
 
+/** IFC4 door operation enums plus friendly lowercase aliases accepted by `building.door`. */
+export type DoorOperation =
+  | "SINGLE_SWING_LEFT"
+  | "SINGLE_SWING_RIGHT"
+  | "DOUBLE_DOOR_SINGLE_SWING"
+  | "DOUBLE_SWING_LEFT"
+  | "DOUBLE_SWING_RIGHT"
+  | "DOUBLE_DOOR_DOUBLE_SWING"
+  | "SLIDING_TO_LEFT"
+  | "SLIDING_TO_RIGHT"
+  | "DOUBLE_DOOR_SLIDING"
+  | "FOLDING_TO_LEFT"
+  | "FOLDING_TO_RIGHT"
+  | "DOUBLE_DOOR_FOLDING"
+  | "REVOLVING"
+  | "ROLLINGUP"
+  | "SWING_FIXED_LEFT"
+  | "SWING_FIXED_RIGHT"
+  | "USERDEFINED"
+  | "NOTDEFINED"
+  | "single_left"
+  | "single_right"
+  | "double"
+  | "double_swing"
+  | "double_acting_left"
+  | "double_acting_right"
+  | "double_acting_pair"
+  | "sliding_left"
+  | "sliding_right"
+  | "sliding_double"
+  | "folding_left"
+  | "folding_right"
+  | "folding_double"
+  | "bifold_left"
+  | "bifold_right"
+  | "bifold_double"
+  | "overhead"
+  | "rolling"
+  | "revolving"
+  | "swing_fixed_left"
+  | "swing_fixed_right";
+
+export type DoorSwing = "inward" | "outward" | "INWARD" | "OUTWARD";
+export type DoorHanding = "LH" | "RH" | "LHR" | "RHR";
+
+/** IFC4 window partitioning enums plus friendly lowercase aliases accepted by `building.window`. */
+export type WindowPartitioning =
+  | "SINGLE_PANEL"
+  | "DOUBLE_PANEL_VERTICAL"
+  | "DOUBLE_PANEL_HORIZONTAL"
+  | "TRIPLE_PANEL_VERTICAL"
+  | "TRIPLE_PANEL_HORIZONTAL"
+  | "TRIPLE_PANEL_BOTTOM"
+  | "TRIPLE_PANEL_TOP"
+  | "TRIPLE_PANEL_LEFT"
+  | "TRIPLE_PANEL_RIGHT"
+  | "USERDEFINED"
+  | "NOTDEFINED"
+  | "single"
+  | "double_vertical"
+  | "double_hung"
+  | "double_horizontal"
+  | "triple_vertical"
+  | "triple_horizontal"
+  | "triple_bottom"
+  | "triple_top"
+  | "triple_left"
+  | "triple_right";
+
+const DOOR_OPERATION_MAP: Readonly<Record<string, string>> = {
+  SINGLE_SWING_LEFT: "SINGLE_SWING_LEFT",
+  SINGLE_SWING_RIGHT: "SINGLE_SWING_RIGHT",
+  DOUBLE_DOOR_SINGLE_SWING: "DOUBLE_DOOR_SINGLE_SWING",
+  DOUBLE_SWING_LEFT: "DOUBLE_SWING_LEFT",
+  DOUBLE_SWING_RIGHT: "DOUBLE_SWING_RIGHT",
+  DOUBLE_DOOR_DOUBLE_SWING: "DOUBLE_DOOR_DOUBLE_SWING",
+  SLIDING_TO_LEFT: "SLIDING_TO_LEFT",
+  SLIDING_TO_RIGHT: "SLIDING_TO_RIGHT",
+  DOUBLE_DOOR_SLIDING: "DOUBLE_DOOR_SLIDING",
+  FOLDING_TO_LEFT: "FOLDING_TO_LEFT",
+  FOLDING_TO_RIGHT: "FOLDING_TO_RIGHT",
+  DOUBLE_DOOR_FOLDING: "DOUBLE_DOOR_FOLDING",
+  REVOLVING: "REVOLVING",
+  ROLLINGUP: "ROLLINGUP",
+  SWING_FIXED_LEFT: "SWING_FIXED_LEFT",
+  SWING_FIXED_RIGHT: "SWING_FIXED_RIGHT",
+  USERDEFINED: "USERDEFINED",
+  NOTDEFINED: "NOTDEFINED",
+  single_left: "SINGLE_SWING_LEFT",
+  single_right: "SINGLE_SWING_RIGHT",
+  double: "DOUBLE_DOOR_SINGLE_SWING",
+  double_swing: "DOUBLE_DOOR_SINGLE_SWING",
+  double_acting_left: "DOUBLE_SWING_LEFT",
+  double_acting_right: "DOUBLE_SWING_RIGHT",
+  double_acting_pair: "DOUBLE_DOOR_DOUBLE_SWING",
+  sliding_left: "SLIDING_TO_LEFT",
+  sliding_right: "SLIDING_TO_RIGHT",
+  sliding_double: "DOUBLE_DOOR_SLIDING",
+  folding_left: "FOLDING_TO_LEFT",
+  folding_right: "FOLDING_TO_RIGHT",
+  folding_double: "DOUBLE_DOOR_FOLDING",
+  bifold_left: "FOLDING_TO_LEFT",
+  bifold_right: "FOLDING_TO_RIGHT",
+  bifold_double: "DOUBLE_DOOR_FOLDING",
+  overhead: "ROLLINGUP",
+  rolling: "ROLLINGUP",
+  revolving: "REVOLVING",
+  swing_fixed_left: "SWING_FIXED_LEFT",
+  swing_fixed_right: "SWING_FIXED_RIGHT",
+};
+
+const WINDOW_PARTITIONING_MAP: Readonly<Record<string, string>> = {
+  SINGLE_PANEL: "SINGLE_PANEL",
+  DOUBLE_PANEL_VERTICAL: "DOUBLE_PANEL_VERTICAL",
+  DOUBLE_PANEL_HORIZONTAL: "DOUBLE_PANEL_HORIZONTAL",
+  TRIPLE_PANEL_VERTICAL: "TRIPLE_PANEL_VERTICAL",
+  TRIPLE_PANEL_HORIZONTAL: "TRIPLE_PANEL_HORIZONTAL",
+  TRIPLE_PANEL_BOTTOM: "TRIPLE_PANEL_BOTTOM",
+  TRIPLE_PANEL_TOP: "TRIPLE_PANEL_TOP",
+  TRIPLE_PANEL_LEFT: "TRIPLE_PANEL_LEFT",
+  TRIPLE_PANEL_RIGHT: "TRIPLE_PANEL_RIGHT",
+  USERDEFINED: "USERDEFINED",
+  NOTDEFINED: "NOTDEFINED",
+  single: "SINGLE_PANEL",
+  double_vertical: "DOUBLE_PANEL_VERTICAL",
+  double_hung: "DOUBLE_PANEL_HORIZONTAL",
+  double_horizontal: "DOUBLE_PANEL_HORIZONTAL",
+  triple_vertical: "TRIPLE_PANEL_VERTICAL",
+  triple_horizontal: "TRIPLE_PANEL_HORIZONTAL",
+  triple_bottom: "TRIPLE_PANEL_BOTTOM",
+  triple_top: "TRIPLE_PANEL_TOP",
+  triple_left: "TRIPLE_PANEL_LEFT",
+  triple_right: "TRIPLE_PANEL_RIGHT",
+};
+
+const HANDED_DOOR_FLIP: Readonly<Record<string, string>> = {
+  SINGLE_SWING_LEFT: "SINGLE_SWING_RIGHT",
+  SINGLE_SWING_RIGHT: "SINGLE_SWING_LEFT",
+  DOUBLE_SWING_LEFT: "DOUBLE_SWING_RIGHT",
+  DOUBLE_SWING_RIGHT: "DOUBLE_SWING_LEFT",
+  SWING_FIXED_LEFT: "SWING_FIXED_RIGHT",
+  SWING_FIXED_RIGHT: "SWING_FIXED_LEFT",
+  SLIDING_TO_LEFT: "SLIDING_TO_RIGHT",
+  SLIDING_TO_RIGHT: "SLIDING_TO_LEFT",
+  FOLDING_TO_LEFT: "FOLDING_TO_RIGHT",
+  FOLDING_TO_RIGHT: "FOLDING_TO_LEFT",
+};
+
+function normalizeDoorOperation(op: string): string {
+  const mapped = DOOR_OPERATION_MAP[op] ?? DOOR_OPERATION_MAP[op.toUpperCase()] ?? DOOR_OPERATION_MAP[op.toLowerCase()];
+  if (!mapped) throw new Error(`Unknown door operation "${op}". Use an IFC4 operation (e.g. SINGLE_SWING_LEFT, SINGLE_SWING_RIGHT, DOUBLE_DOOR_SINGLE_SWING, DOUBLE_SWING_LEFT, SLIDING_TO_LEFT, DOUBLE_DOOR_SLIDING, FOLDING_TO_LEFT, DOUBLE_DOOR_FOLDING, ROLLINGUP, REVOLVING, SWING_FIXED_LEFT) or alias (single_left, single_right, double, sliding_left, overhead, revolving).`);
+  return mapped;
+}
+
+function normalizeWindowPartitioning(part: string): string {
+  const mapped = WINDOW_PARTITIONING_MAP[part] ?? WINDOW_PARTITIONING_MAP[part.toUpperCase()] ?? WINDOW_PARTITIONING_MAP[part.toLowerCase()];
+  if (!mapped) throw new Error(`Unknown window partitioning "${part}". Use SINGLE_PANEL, DOUBLE_PANEL_VERTICAL, DOUBLE_PANEL_HORIZONTAL, TRIPLE_PANEL_VERTICAL, etc. (or aliases single, double_vertical, double_hung, triple_vertical).`);
+  return mapped;
+}
+
 export interface OpeningSpec {
-  /** The wall it sits in (its id). */
+  /** The wall it sits in. */
   readonly wall: string;
   /** Distance along the wall from its start to the opening's centre. */
   readonly along: Measure;
   readonly width?: Measure;
   readonly height?: Measure;
-  /** How high its bottom sits above the floor of its wall (a window's sill); the kernel refuses one that puts its head above the wall. */
+  /** How high its bottom sits above the floor of its wall (a window's sill); the kernel refuses one that puts the head above the wall. */
   readonly sill?: Measure;
   /** Which face it opens to: 1 or -1 (the wall's left or right, looking from its start). */
   readonly side?: 1 | -1;
@@ -194,20 +354,43 @@ export interface OpeningSpec {
   readonly mark?: string;
   /** Optional registered material id (from `building.materials()`), stored as `values["material.id"]`. */
   readonly material?: string;
+  /** Optional frame depth across the host wall (`architecture.frame_depth`); defaults to host wall thickness. */
+  readonly frameDepth?: Measure;
+  /** Whether the opening is in the exterior envelope (`architecture.is_external`). */
+  readonly external?: boolean;
   readonly values?: Values;
   readonly id?: string;
 }
 
-function opening(ctx: ScriptContext, openingType: string, spec: OpeningSpec): string {
+export interface DoorSpec extends OpeningSpec {
+  /** Door operation type (IFC4 enum or alias, e.g. `"SINGLE_SWING_RIGHT"`, `"DOUBLE_DOOR_SINGLE_SWING"`, `"SLIDING_TO_LEFT"`, `"ROLLINGUP"`, `"REVOLVING"`, `"SWING_FIXED_LEFT"`, or `"double"`, `"overhead"`). */
+  readonly operation?: DoorOperation;
+  /** Convenience hinge side (`"left"` or `"right"`): picks `SINGLE_SWING_LEFT` / `SINGLE_SWING_RIGHT` when `operation` is omitted, or swaps left/right on a handed operation. */
+  readonly hinge?: "left" | "right";
+  /** Swing direction (`"inward"` → side `1` / wall left face, `"outward"` → side `-1` / wall right face); explicit `side` wins if both are given. */
+  readonly swing?: DoorSwing;
+  /** Standard US hardware handing (`"LH"`, `"RH"`, `"LHR"`, `"RHR"`): sets `architecture.door_handing` and defaults hinge + swing side when `operation` / `side` are omitted. */
+  readonly handing?: DoorHanding;
+  /** Optional fire-protection rating (e.g. `"20 min"`, `"45 min"`, `"90 min"`), stored as `arch.fire_rating`. */
+  readonly fireRating?: string;
+}
+
+export interface WindowSpec extends OpeningSpec {
+  /** Window sash/panel partitioning (IFC4 enum or alias, e.g. `"DOUBLE_PANEL_HORIZONTAL"`, `"TRIPLE_PANEL_VERTICAL"`, or `"double_hung"`, `"double_vertical"`). */
+  readonly partitioning?: WindowPartitioning;
+}
+
+function opening(ctx: ScriptContext, openingType: string, spec: OpeningSpec, extraValues?: Values, resolvedSide?: 1 | -1): string {
   const size = sizeMm({ width: spec.width, height: spec.height });
-  const mergedValues =
-    spec.values || spec.sill || spec.material
-      ? {
-          ...(spec.values ?? {}),
-          ...(spec.sill ? { [OPENING_SILL_KEY]: mm(spec.sill, "Sill height") } : {}),
-          ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
-        }
-      : undefined;
+  const merged: Record<string, string | number | boolean> = {
+    ...(spec.values ?? {}),
+    ...(extraValues ?? {}),
+    ...(spec.sill ? { [OPENING_SILL_KEY]: mm(spec.sill, "Sill height") } : {}),
+    ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+    ...(spec.frameDepth ? { "architecture.frame_depth": mm(spec.frameDepth, "Frame depth") } : {}),
+    ...(spec.external !== undefined ? { "architecture.is_external": spec.external } : {}),
+  };
+  const side = resolvedSide ?? spec.side ?? 1;
   const command: CreateHosted = {
     type: "create_hosted",
     elementId: spec.id ?? ctx.id(openingType),
@@ -215,14 +398,42 @@ function opening(ctx: ScriptContext, openingType: string, spec: OpeningSpec): st
     openingType,
     hostId: spec.wall,
     s: mm(spec.along, "Distance along the wall"),
-    side: spec.side ?? 1,
+    side,
     ...(spec.typeId ? { typeId: spec.typeId } : {}),
     ...(spec.mark ? { mark: spec.mark } : {}),
-    ...(mergedValues ? { values: mergedValues } : {}),
+    ...(Object.keys(merged).length > 0 ? { values: merged } : {}),
     ...(size ? { size } : {}),
   };
   ctx.edit(command);
   return command.elementId;
+}
+
+function resolveDoorSpecValues(spec: DoorSpec): { readonly values: Values; readonly side: 1 | -1 } {
+  const extra: Record<string, string | number | boolean> = {};
+  let op = spec.operation ? normalizeDoorOperation(spec.operation) : undefined;
+  if (spec.hinge) {
+    if (!op) op = spec.hinge === "right" ? "SINGLE_SWING_RIGHT" : "SINGLE_SWING_LEFT";
+    else if (spec.hinge === "right" && op.endsWith("_LEFT") && HANDED_DOOR_FLIP[op]) op = HANDED_DOOR_FLIP[op];
+    else if (spec.hinge === "left" && op.endsWith("_RIGHT") && HANDED_DOOR_FLIP[op]) op = HANDED_DOOR_FLIP[op];
+  }
+  const handing = spec.handing ? spec.handing.toUpperCase() as DoorHanding : undefined;
+  if (handing) {
+    extra["architecture.door_handing"] = handing;
+    if (!op) op = handing === "RH" || handing === "RHR" ? "SINGLE_SWING_RIGHT" : "SINGLE_SWING_LEFT";
+  }
+  if (op) extra["architecture.door_operation"] = op;
+  const swingUpper = spec.swing ? spec.swing.toUpperCase() : undefined;
+  if (swingUpper === "INWARD" || swingUpper === "OUTWARD") extra["architecture.door_swing"] = swingUpper;
+  if (spec.fireRating !== undefined) extra["arch.fire_rating"] = spec.fireRating;
+
+  // Explicit `side` wins over `swing` and `handing`.
+  const side: 1 | -1 =
+    spec.side ??
+    (swingUpper === "OUTWARD" ? -1 : swingUpper === "INWARD" ? 1 : handing === "LHR" || handing === "RHR" ? -1 : 1);
+  if (spec.side !== undefined && (swingUpper !== undefined || handing !== undefined)) {
+    extra["host.side"] = spec.side;
+  }
+  return { values: extra, side };
 }
 
 export interface SpaceSpec {
@@ -421,15 +632,28 @@ export const building = {
     const { from, to, ...rest } = spec;
     return chain(ctx, "wall", { ...rest, points: [from, to] }).element(1);
   },
-  /** A floor slab with this outline (and optional stairwell/atrium `holes`); returns its id. */
+  /** A floor or structural deck slab with this outline (and optional stairwell/atrium `holes`, one-way `spanDirectionDeg`, and live-load `occupancy`); returns its id. */
   floor(
     ctx: ScriptContext,
     spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base"> & {
       readonly holes?: readonly (readonly PlanPoint[])[];
+      readonly spanDirectionDeg?: number;
+      readonly baseOffset?: Measure;
+      readonly classId?: string;
+      readonly occupancy?: string;
+      readonly mark?: string;
     },
   ): string {
     const size = sizeMm({ thickness: spec.thickness });
-    const mergedValues = spec.material || spec.values ? { ...(spec.values ?? {}), ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}) } : undefined;
+    const mergedValues =
+      spec.material || spec.values || spec.occupancy || spec.mark
+        ? {
+            ...(spec.values ?? {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+            ...(spec.occupancy ? { "struct.occupancy": spec.occupancy } : {}),
+            ...(spec.mark ? { mark: spec.mark } : {}),
+          }
+        : undefined;
     const command: CreateElement = {
       type: "create_element",
       elementId: spec.id ?? ctx.id("slab"),
@@ -439,8 +663,11 @@ export const building = {
         kind: "area",
         outline: spec.points.map((p, i) => planMm(p, `Outline point ${i + 1}`)),
         ...(spec.holes ? { holes: spec.holes.map((h, i) => h.map((p, j) => planMm(p, `Slab hole ${i + 1} corner ${j + 1}`))) } : {}),
+        ...(spec.spanDirectionDeg !== undefined ? { spanDirectionDeg: spec.spanDirectionDeg } : {}),
       },
+      ...(spec.classId ? { classId: spec.classId } : {}),
       ...(spec.typeId ? { typeId: spec.typeId } : {}),
+      ...(spec.baseOffset ? { baseOffsetMm: mm(spec.baseOffset, "Slab offset") } : {}),
       ...(size ? { size } : {}),
       ...(mergedValues ? { values: mergedValues } : {}),
       ...(spec.label ? { label: spec.label } : {}),
@@ -551,7 +778,7 @@ export const building = {
     ctx.edit(command);
     return command.elementId;
   },
-  /** A structural or architectural column at a plan point; returns its id. */
+  /** A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`; returns its id. */
   column(
     ctx: ScriptContext,
     spec: {
@@ -561,20 +788,145 @@ export const building = {
       readonly depth?: Measure;
       readonly height?: Measure;
       readonly topLevel?: string;
+      readonly topOffset?: Measure;
+      readonly baseOffset?: Measure;
+      readonly rotationDeg?: number;
+      readonly typeId?: string;
+      readonly classId?: string;
+      readonly section?: string;
+      readonly grade?: string;
+      readonly mark?: string;
+      readonly columnMaterial?: string;
       readonly material?: string;
+      readonly values?: Readonly<Record<string, number | string | boolean>>;
       readonly id?: string;
     },
   ): string {
     const size = sizeMm({ width: spec.width, depth: spec.depth, height: spec.height });
+    const mergedValues =
+      spec.material || spec.values || spec.section || spec.grade || spec.mark
+        ? {
+            ...(spec.values ?? {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+            ...(spec.section ? { "struct.section": spec.section } : {}),
+            ...(spec.grade ? { "struct.grade": spec.grade } : {}),
+            ...(spec.mark ? { mark: spec.mark } : {}),
+          }
+        : undefined;
     const command: CreateElement = {
       type: "create_element",
       elementId: spec.id ?? ctx.id("col"),
       levelId: levelOf(ctx, spec.level),
       kind: "column",
-      placement: { kind: "point", position: planMm(spec.at, "Column point") },
+      placement: {
+        kind: "point",
+        position: planMm(spec.at, "Column point"),
+        ...(spec.rotationDeg !== undefined ? { rotationDeg: spec.rotationDeg } : {}),
+      },
+      ...(spec.classId ? { classId: spec.classId } : spec.section ? { classId: "struct.column_steel" } : {}),
+      ...(spec.typeId ? { typeId: spec.typeId } : {}),
+      ...(spec.columnMaterial ? { material: spec.columnMaterial } : spec.section ? { material: "steel" } : {}),
       ...(size ? { size } : {}),
-      ...(spec.topLevel ? { topLevelId: levelOf(ctx, spec.topLevel) } : {}),
-      ...(spec.material ? { values: { [MATERIAL_ID_KEY]: spec.material } } : {}),
+      ...(spec.topLevel ? { topLevelId: levelOf(ctx, spec.topLevel, "The top level") } : {}),
+      ...(spec.topOffset ? { topOffsetMm: mm(spec.topOffset, "Top offset") } : {}),
+      ...(spec.baseOffset ? { baseOffsetMm: mm(spec.baseOffset, "Base offset") } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`), with optional AISC `section`, `grade`, `camber`, and `mark`; returns its id. */
+  beam(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly from: PlanPoint;
+      readonly to: PlanPoint;
+      readonly section?: string;
+      readonly grade?: string;
+      readonly camber?: Measure;
+      readonly mark?: string;
+      readonly baseOffset?: Measure;
+      readonly typeId?: string;
+      readonly classId?: string;
+      readonly material?: string;
+      readonly values?: Readonly<Record<string, number | string | boolean>>;
+      readonly id?: string;
+    },
+  ): string {
+    const mergedValues =
+      spec.material || spec.values || spec.section || spec.grade || spec.camber || spec.mark
+        ? {
+            ...(spec.values ?? {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+            ...(spec.section ? { "struct.section": spec.section } : {}),
+            ...(spec.grade ? { "struct.grade": spec.grade } : {}),
+            ...(spec.camber ? { "struct.camber": mm(spec.camber, "Beam camber") } : {}),
+            ...(spec.mark ? { mark: spec.mark } : {}),
+          }
+        : undefined;
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("beam"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "beam",
+      placement: { kind: "line", start: planMm(spec.from, "Beam start"), end: planMm(spec.to, "Beam end") },
+      ...(spec.classId ? { classId: spec.classId } : spec.section ? { classId: "struct.beam_steel" } : {}),
+      ...(spec.typeId ? { typeId: spec.typeId } : {}),
+      ...(spec.section ? { label: spec.section } : {}),
+      ...(spec.baseOffset ? { baseOffsetMm: mm(spec.baseOffset, "Beam offset") } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
+  /** A concrete pad footing (`struct.footing_pad`) centered at `at` below `level` (plus optional `baseOffset`); returns its id. */
+  footing(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly at: PlanPoint;
+      readonly width: Measure;
+      readonly depth?: Measure;
+      readonly thickness?: Measure;
+      readonly rotationDeg?: number;
+      readonly baseOffset?: Measure;
+      readonly mark?: string;
+      readonly label?: string;
+      readonly typeId?: string;
+      readonly classId?: string;
+      readonly material?: string;
+      readonly values?: Readonly<Record<string, number | string | boolean>>;
+      readonly id?: string;
+    },
+  ): string {
+    const size = sizeMm({ width: spec.width, depth: spec.depth ?? spec.width });
+    const mergedValues =
+      spec.material || spec.values || spec.thickness || spec.mark
+        ? {
+            ...(spec.values ?? {}),
+            ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+            ...(spec.thickness ? { "struct.footing_thickness_mm": mm(spec.thickness, "Footing thickness") } : {}),
+            ...(spec.mark ? { mark: spec.mark } : {}),
+          }
+        : undefined;
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("ftg"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "component",
+      category: "footing",
+      classId: spec.classId ?? "struct.footing_pad",
+      placement: {
+        kind: "point",
+        position: planMm(spec.at, "Footing point"),
+        ...(spec.rotationDeg !== undefined ? { rotationDeg: spec.rotationDeg } : {}),
+      },
+      ...(spec.typeId ? { typeId: spec.typeId } : {}),
+      ...(spec.label ? { label: spec.label } : {}),
+      ...(spec.baseOffset ? { baseOffsetMm: mm(spec.baseOffset, "Footing offset") } : {}),
+      ...(size ? { size } : {}),
+      ...(mergedValues ? { values: mergedValues } : {}),
     };
     ctx.edit(command);
     return command.elementId;
@@ -651,13 +1003,55 @@ export const building = {
   elements(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {
     return chain(ctx, kind, spec);
   },
-  /** A door in a wall; returns its id. */
-  door(ctx: ScriptContext, spec: OpeningSpec): string {
-    return opening(ctx, "door", spec);
+  /** A door in a wall with full operation, swing direction, hinge side, handing, and fire rating support; returns its id. */
+  door(ctx: ScriptContext, spec: DoorSpec): string {
+    const { values, side } = resolveDoorSpecValues(spec);
+    return opening(ctx, "door", spec, values, side);
   },
-  /** A window in a wall; returns its id. */
-  window(ctx: ScriptContext, spec: OpeningSpec): string {
-    return opening(ctx, "window", spec);
+  /** Flip an existing door's hinge/hand (`"hinge"`), swing face (`"swing"`), or both (`"both"`). */
+  flipDoor(ctx: ScriptContext, doorId: string, which: "hinge" | "swing" | "both" = "swing"): void {
+    const el = ctx.model.get(doorId);
+    if (el.kind !== "opening" || el.openingType !== "door") throw new Error(`${doorId} is not a door.`);
+    const vals = el.values ?? {};
+    const patch: Record<string, string | number | boolean | null> = {};
+    if (which === "swing" || which === "both") {
+      const curSide =
+        vals["host.side"] === -1
+          ? -1
+          : vals["host.side"] === 1
+            ? 1
+            : String(vals["architecture.door_swing"] ?? "").toUpperCase() === "OUTWARD"
+              ? -1
+              : String(vals["architecture.door_handing"] ?? "").toUpperCase().endsWith("R")
+                ? -1
+                : 1;
+      const nextSide: 1 | -1 = curSide === 1 ? -1 : 1;
+      patch["host.side"] = nextSide;
+      if (typeof vals["architecture.door_swing"] === "string") patch["architecture.door_swing"] = nextSide === -1 ? "OUTWARD" : "INWARD";
+      if (typeof vals["architecture.door_handing"] === "string") {
+        const h = vals["architecture.door_handing"].toUpperCase();
+        const flipSwing: Readonly<Record<string, string>> = { LH: "LHR", LHR: "LH", RH: "RHR", RHR: "RH" };
+        if (flipSwing[h]) patch["architecture.door_handing"] = flipSwing[h]!;
+      }
+    }
+    if (which === "hinge" || which === "both") {
+      const curOp = typeof vals["architecture.door_operation"] === "string" ? vals["architecture.door_operation"].toUpperCase() : "SINGLE_SWING_LEFT";
+      const nextOp = HANDED_DOOR_FLIP[curOp];
+      if (!nextOp) throw new Error(`Door ${doorId} (${curOp}) is symmetric and has no hinge side to flip.`);
+      patch["architecture.door_operation"] = nextOp;
+      const curH = typeof patch["architecture.door_handing"] === "string" ? patch["architecture.door_handing"] : typeof vals["architecture.door_handing"] === "string" ? vals["architecture.door_handing"].toUpperCase() : undefined;
+      if (curH) {
+        const flipHinge: Readonly<Record<string, string>> = { LH: "RH", RH: "LH", LHR: "RHR", RHR: "LHR" };
+        if (flipHinge[curH]) patch["architecture.door_handing"] = flipHinge[curH]!;
+      }
+    }
+    ctx.edit({ type: "set_element_values", elementIds: [doorId], values: patch });
+  },
+  /** A window in a wall with optional sill height, partitioning, frame depth, and external flag; returns its id. */
+  window(ctx: ScriptContext, spec: WindowSpec): string {
+    const extra: Record<string, string | number | boolean> = {};
+    if (spec.partitioning) extra["architecture.window_partitioning"] = normalizeWindowPartitioning(spec.partitioning);
+    return opening(ctx, "window", spec, extra);
   },
   /** A space (room) on a level, with its number and name; returns its id. */
   space(ctx: ScriptContext, spec: SpaceSpec): string {

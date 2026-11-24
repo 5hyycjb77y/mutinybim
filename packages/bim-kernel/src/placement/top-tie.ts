@@ -1,16 +1,20 @@
 import { lineLevelId } from "../joins/rows";
-import type { BimElement, ElementId, Level } from "../types";
-import type { LinePlacement } from "./geometric";
+import { elementsOfKind } from "../store";
+import type { BimElement, Column, ElementId, Level } from "../types";
+import type { LinePlacement, PointPlacement } from "./geometric";
 
 /**
- * A line-placed element whose top is tied to a level: its body runs from its
- * base level (plus the placement's start offset) up to the top level (plus
+ * A line- or point-placed element whose top is tied to a level: its body runs
+ * from its base level (plus its base offset) up to the top level (plus
  * `topOffsetMm`), and follows either level when it moves. Kernel rows say
  * where each kind keeps its height; a kind with no row derives its top on
- * read (stairs, columns).
+ * read.
  */
 
 type Elements = Readonly<Record<string, BimElement>>;
+
+/** A placement whose top can tie to a level (line or point). */
+export type TopTiePlacement = LinePlacement | PointPlacement;
 
 /** Where a kind keeps the height a top tie writes. */
 export interface TopTieRow {
@@ -27,6 +31,12 @@ ROWS.set("wall", {
   withHeight: (el, heightMm) => (el.kind === "wall" ? { ...el, height: heightMm } : el),
 });
 
+ROWS.set("column", {
+  kind: "column",
+  height: (el) => (el.kind === "column" && typeof el.height === "number" ? el.height : null),
+  withHeight: (el, heightMm) => (el.kind === "column" ? { ...el, height: heightMm } : el),
+});
+
 export function topTieRow(kind: string): TopTieRow | undefined {
   return ROWS.get(kind);
 }
@@ -34,10 +44,10 @@ export function topTieRow(kind: string): TopTieRow | undefined {
 /** Lowest body a tie may give: below this the top level is at or under the base. */
 export const MIN_TIED_HEIGHT_MM = 1;
 
-/** The element's line placement when its top is tied to a level, else null. */
-export function topTieOf(el: BimElement): LinePlacement | null {
+/** The element's placement when its top is tied to a level, else null. */
+export function topTieOf(el: BimElement): TopTiePlacement | null {
   const p = "placement" in el ? el.placement : undefined;
-  return p && typeof p === "object" && p.kind === "line" && typeof p.topLevelId === "string" ? p : null;
+  return p && typeof p === "object" && (p.kind === "line" || p.kind === "point") && typeof p.topLevelId === "string" ? p : null;
 }
 
 /**
@@ -45,13 +55,52 @@ export function topTieOf(el: BimElement): LinePlacement | null {
  * is missing, or the top level isn't above the base. `elevation` reads a
  * level's elevation (a level change in progress passes its new ones).
  */
-export function tiedHeightMm(p: LinePlacement, elevation: (levelId: ElementId) => number | null): number | null {
+export function tiedHeightMm(p: TopTiePlacement, elevation: (levelId: ElementId) => number | null): number | null {
   if (p.topLevelId === undefined) return null;
   const base = elevation(p.levelId);
   const top = elevation(p.topLevelId);
   if (base === null || top === null) return null;
-  const height = Math.round(top + (p.topOffsetMm ?? 0) - (base + p.startOffsetMm));
+  const baseOffset = p.kind === "line" ? p.startOffsetMm : p.offsetMm;
+  const height = Math.round(top + (p.topOffsetMm ?? 0) - (base + baseOffset));
   return height >= MIN_TIED_HEIGHT_MM ? height : null;
+}
+
+/** Resolved vertical span (world mm) of a column: honours `topLevelId` + `topOffsetMm`, `height`, vertical line placement, or fallback storey height. */
+export function columnVerticalSpan(
+  elements: Elements,
+  el: Column,
+  fallbackFloorMm: number,
+  defaultHeightMm = 10 * 304.8,
+): { readonly baseZMm: number; readonly topZMm: number; readonly heightMm: number; readonly topLevelId: ElementId | null } {
+  const p = el.placement;
+  const baseLevel = p ? elements[p.levelId] : undefined;
+  const levelZ = baseLevel?.kind === "level" ? baseLevel.elevationMm : fallbackFloorMm;
+  const baseOffset = p?.kind === "point" ? p.offsetMm : p?.kind === "line" ? Math.min(p.startOffsetMm, p.endOffsetMm) : 0;
+  const baseZMm = levelZ + baseOffset;
+
+  if (p && (p.kind === "point" || p.kind === "line") && p.topLevelId !== undefined) {
+    const topLvl = elements[p.topLevelId];
+    if (topLvl?.kind === "level") {
+      const topZMm = topLvl.elevationMm + (p.topOffsetMm ?? 0);
+      if (topZMm > baseZMm) return { baseZMm, topZMm, heightMm: topZMm - baseZMm, topLevelId: topLvl.id };
+    }
+  }
+  if (typeof el.height === "number" && Number.isFinite(el.height) && el.height > 0) {
+    return { baseZMm, topZMm: baseZMm + el.height, heightMm: el.height, topLevelId: null };
+  }
+  if (p?.kind === "line") {
+    const lineTop = levelZ + Math.max(p.startOffsetMm, p.endOffsetMm);
+    if (lineTop > baseZMm) return { baseZMm, topZMm: lineTop, heightMm: lineTop - baseZMm, topLevelId: null };
+  }
+  const searchAbove = Math.max(levelZ, baseZMm);
+  let nextLevel: Level | null = null;
+  for (const l of elementsOfKind(elements, "level")) {
+    if (l.elevationMm > searchAbove + 1 && (!nextLevel || l.elevationMm < nextLevel.elevationMm)) nextLevel = l;
+  }
+  if (nextLevel) {
+    return { baseZMm, topZMm: nextLevel.elevationMm, heightMm: nextLevel.elevationMm - baseZMm, topLevelId: nextLevel.id };
+  }
+  return { baseZMm, topZMm: baseZMm + defaultHeightMm, heightMm: defaultHeightMm, topLevelId: null };
 }
 
 /** A level's elevation in `elements`, or null when it isn't a level. */

@@ -1,4 +1,5 @@
 import { lineJoinsOf, type LineJoins } from "../joins/solve";
+import { wallBaseAtMm } from "../placement/surface-bind";
 import { hostedIds } from "../qto/hosted";
 import { tiltedZ, type Tilt } from "../geometry";
 import type { BimElement, Vec2, WallBodyPoint } from "../types";
@@ -175,9 +176,11 @@ function profiledBlocks(j: LineJoins, spans: readonly Span[], profile: readonly 
     for (const s of spans) {
       if (s.b <= st.a || s.a >= st.b) continue;
       block(from, s.a, st.base, baseTilt, st.top, topTilt);
-      // A sill follows the base; a head is level, from the base under the void's middle.
-      if (s.lo > 0) block(s.a, s.b, st.base, baseTilt, st.base + s.lo, baseTilt);
-      block(s.a, s.b, baseAt((s.a + s.b) / 2) + s.hi, undefined, st.top, topTilt);
+      // Both sill and head of a hosted opening are level, anchored from the wall base under the void's midpoint
+      // so the wall cutout and horizontal door/window frame align cleanly at both jambs even over a sloped wall base.
+      const midBase = baseAt((s.a + s.b) / 2);
+      if (s.lo > 0) block(s.a, s.b, st.base, baseTilt, midBase + s.lo, undefined);
+      block(s.a, s.b, midBase + s.hi, undefined, st.top, topTilt);
       from = Math.max(from, s.b);
     }
     block(from, Infinity, st.base, baseTilt, st.top, topTilt);
@@ -187,9 +190,13 @@ function profiledBlocks(j: LineJoins, spans: readonly Span[], profile: readonly 
 
 /** Along-the-host ranges a plan shows as gaps: voids that span the cut height. */
 export function planGapsOf(elements: Elements, hostId: string, cutMm: number = PLAN_CUT_HEIGHT_MM): Array<{ readonly a: number; readonly b: number }> {
+  const host = elements[hostId];
   return hostVoidsOf(elements, hostId)
     .map(spanOf)
-    .filter((s) => s.lo <= cutMm && s.hi >= cutMm && s.b > s.a)
+    .filter((s) => {
+      const base = host ? wallBaseAtMm(host, (s.a + s.b) / 2) : 0;
+      return base + s.lo <= cutMm && base + s.hi >= cutMm && s.b > s.a;
+    })
     .sort((x, y) => x.a - y.a)
     .map((s) => ({ a: s.a, b: s.b }));
 }

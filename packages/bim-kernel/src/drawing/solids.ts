@@ -20,6 +20,7 @@ import { meshEdges, type WorldMesh } from "./mesh-projection";
 import { loadPointPosition } from "../load-points/model";
 import { hostSolidBlocks } from "../hosting/voids";
 import { wallBodyProfile } from "../placement/surface-bind";
+import { columnVerticalSpan } from "../placement/top-tie";
 
 /**
  * Elements as 3D solids for sections, 3D views and plan hiding. A solid is a
@@ -56,6 +57,7 @@ export interface ElementSolid {
 
 const ROUND_SAMPLES = 16;
 const DEFAULT_WALL_HEIGHT_MM = 10 * 304.8;
+const BUILDING_ROLE: SolidRole = "architecture";
 
 const cross3 = (a: RunPoint, b: RunPoint): RunPoint => p3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
 const lift = (p: RunPoint, dz: number): RunPoint => p3(p.x, p.y, p.z + dz);
@@ -264,13 +266,47 @@ export function elementSolid(model: ModelState, el: BimElement, floorMm: number)
       // A wall whose top or base follows a surface (or stands off its level) is drawn from its body profile: sloped under a pitched roof, stepped under two floors.
       const profile = wallBodyProfile(el);
       const blocks = hostSolidBlocks(model.elements, el, height, profile);
-      return { owner: el.id, category: "walls", role: "architecture", pieces: blocks?.map((b) => prism(b.outline, floorMm + b.z0, floorMm + b.z1, b.tilt0, b.tilt1)) ?? [prism(outline, floorMm, floorMm + height)] };
+      return { owner: el.id, category: "walls", role: BUILDING_ROLE, pieces: blocks?.map((b) => prism(b.outline, floorMm + b.z0, floorMm + b.z1, b.tilt0, b.tilt1)) ?? [prism(outline, floorMm, floorMm + height)] };
     }
     case "column": {
       const hx = el.size.x / 2;
       const hy = el.size.y / 2;
       const c = el.position;
-      return { owner: el.id, category: "structure", role: "architecture", pieces: [prism([{ x: c.x - hx, y: c.y - hy }, { x: c.x + hx, y: c.y - hy }, { x: c.x + hx, y: c.y + hy }, { x: c.x - hx, y: c.y + hy }], floorMm, floorMm + DEFAULT_WALL_HEIGHT_MM)] };
+      const span = columnVerticalSpan(model.elements, el, floorMm, DEFAULT_WALL_HEIGHT_MM);
+      const rad = el.placement?.kind === "point" && el.placement.rotationDeg ? (el.placement.rotationDeg * Math.PI) / 180 : 0;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const rot = (dx: number, dy: number): Vec2 => ({ x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos });
+      return {
+        owner: el.id,
+        category: "structure",
+        role: BUILDING_ROLE,
+        pieces: [prism([rot(-hx, -hy), rot(hx, -hy), rot(hx, hy), rot(-hx, hy)], span.baseZMm, span.topZMm)],
+      };
+    }
+    case "beam": {
+      const d = sub(el.end, el.start);
+      const len = Math.hypot(d.x, d.y);
+      if (len < 1e-6) return null;
+      const u = { x: d.x / len, y: d.y / len };
+      const n = perp(u);
+      const halfW = 100;
+      const depth = 400;
+      const p = el.placement?.kind === "line" ? el.placement : null;
+      const startOff = p?.startOffsetMm ?? 0;
+      const endOff = p?.endOffsetMm ?? 0;
+      const vAlign = p?.vertical ?? "top";
+      const zShift = vAlign === "bottom" ? depth : vAlign === "center" ? depth / 2 : 0;
+      const zTopStart = floorMm + startOff + zShift;
+      const dz = endOff - startOff;
+      const tilt = Math.abs(dz) > 1e-6 ? { at: el.start, rise: { x: (dz / len) * u.x, y: (dz / len) * u.y } } : undefined;
+      const outline = [
+        { x: el.start.x + n.x * halfW, y: el.start.y + n.y * halfW },
+        { x: el.end.x + n.x * halfW, y: el.end.y + n.y * halfW },
+        { x: el.end.x - n.x * halfW, y: el.end.y - n.y * halfW },
+        { x: el.start.x - n.x * halfW, y: el.start.y - n.y * halfW },
+      ];
+      return { owner: el.id, category: "structure", role: BUILDING_ROLE, pieces: [prism(outline, zTopStart - depth, zTopStart, tilt, tilt)] };
     }
     case "load_point": {
       // A short octagonal stub at its pipe end ("nub"), so it shows and can be picked in 3D.

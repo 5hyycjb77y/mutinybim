@@ -56,6 +56,33 @@ function groupOf(c: RegisteredCategory, known: boolean): string {
   return 'General'
 }
 
+/** Order rows inside one group so children appear immediately beneath their parent while preserving sibling order. */
+function orderTreeRows(rows: readonly RegisteredCategory[]): RegisteredCategory[] {
+  const byId = new Set(rows.map((r) => r.id))
+  const childrenOf = new Map<string, RegisteredCategory[]>()
+  const roots: RegisteredCategory[] = []
+  for (const r of rows) {
+    if (r.parent && byId.has(r.parent)) {
+      const list = childrenOf.get(r.parent) ?? []
+      list.push(r)
+      childrenOf.set(r.parent, list)
+    } else {
+      roots.push(r)
+    }
+  }
+  const out: RegisteredCategory[] = []
+  const visited = new Set<string>()
+  const visit = (r: RegisteredCategory) => {
+    if (visited.has(r.id)) return
+    visited.add(r.id)
+    out.push(r)
+    for (const child of childrenOf.get(r.id) ?? []) visit(child)
+  }
+  for (const root of roots) visit(root)
+  for (const r of rows) visit(r)
+  return out
+}
+
 interface Props {
   readonly view: ViewElement
   readonly canEdit: boolean
@@ -96,7 +123,7 @@ export function CategoryGraphicsTable({ view, canEdit, disabledHint, onPatch, se
     const others = [...byGroup.keys()].filter((g) => !known.includes(g)).sort((a, b) => a.localeCompare(b))
     return [...GROUP_ORDER.filter((g) => byGroup.has(g)), ...others]
       .sort((a, b) => (a === own ? -1 : b === own ? 1 : 0))
-      .map((g) => ({ name: g, rows: byGroup.get(g) ?? [] }))
+      .map((g) => ({ name: g, rows: orderTreeRows(byGroup.get(g) ?? []) }))
   }, [categories, query, viewDiscipline, overrides])
 
   // The first group (the view's own discipline) starts open; a search opens every group it matches in.
@@ -197,6 +224,8 @@ function CategoryRow({ view, category: c, categories, canEdit, disabledHint, onE
   const own: CategoryOverride = view.props?.categoryOverrides?.[c.id] ?? {}
   const legacyWeights = isViewCategory(c.id) ? view.props?.lineWeights?.[c.id] : undefined
   const parent = c.parent ? categories.get(c.parent)?.label : undefined
+  const depth = Math.max(0, categories.lineage(c.id).length - 1)
+  const indent = depth === 0 ? '' : depth === 1 ? 'pl-3' : 'pl-6'
   const name = c.label.toLowerCase()
   const weightSelect = (kind: 'cut' | 'projection') => {
     const value = own.lineWeights?.[kind] ?? legacyWeights?.[kind] ?? 'default'
@@ -225,8 +254,8 @@ function CategoryRow({ view, category: c, categories, canEdit, disabledHint, onE
   return (
     <TableRow data-testid={`graphics-row-${c.id}`}>
       <TableCell className="px-1 py-1">
-        <span className={c.parent ? 'pl-3 font-normal' : 'font-medium'}>{c.label}</span>
-        {parent && <span className="block pl-3 text-[11px] text-muted-foreground">follows {parent}</span>}
+        <span className={depth > 0 ? `${indent} font-normal` : 'font-medium'}>{c.label}</span>
+        {parent && <span className={`block ${indent} text-[11px] text-muted-foreground`}>follows {parent}</span>}
       </TableCell>
       <TableCell className="px-1 py-1 text-center">
         <Checkbox aria-label={`Show ${name}`} checked={look.visible} disabled={!canEdit} title={disabledHint} onCheckedChange={(v) => onEdit(c, { field: 'visible', value: v === true }, `${v === true ? 'show' : 'hide'} ${name}`)} />

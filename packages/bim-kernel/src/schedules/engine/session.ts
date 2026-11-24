@@ -230,6 +230,7 @@ function pinnedCalculations(pins: readonly SchedulePin[] | undefined): { readonl
 class Planner {
   readonly problems: ScheduleProblem[] = [];
   readonly relationships = new Set<string>();
+  readonly fieldDeps: Array<NonNullable<PathReader["deps"]>> = [];
   coarse = false;
 
   constructor(
@@ -284,6 +285,7 @@ class Planner {
       return null;
     }
     if (r.coarse) this.coarse = true;
+    if (r.deps) this.fieldDeps.push(r.deps);
     for (const s of r.steps) this.relationships.add(s.id);
     return r;
   }
@@ -302,6 +304,7 @@ class Planner {
     for (const f of res.formula.dependencies.fields) {
       const r = this.readers.first(this.classes, f);
       if (r?.coarse) this.coarse = true;
+      if (r?.deps) this.fieldDeps.push(r.deps);
       for (const s of r?.steps ?? []) this.relationships.add(s.id);
     }
     return res.formula;
@@ -659,6 +662,10 @@ class Session implements ScheduleSession {
       for (const k of rel.deps.elementKinds ?? []) kinds.add(k);
       if (rel.deps.sources) for (const k of connectorEndsTable().rootKinds) kinds.add(k);
       if (rel.deps.connections) connections = true;
+    }
+    for (const dep of planner.fieldDeps) {
+      for (const k of dep.elementKinds ?? []) kinds.add(k);
+      if (dep.connections) connections = true;
     }
     if (src.kind === "related") connections = true;
     this.wide = { kinds, connections, any: planner.coarse };

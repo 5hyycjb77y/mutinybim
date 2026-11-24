@@ -8,11 +8,13 @@ Every example below is a complete script that passes the kit's checks; the kit's
 
 - [`building.walls`](#buildingwalls): Walls along the points, one per leg; `closed` joins the last point to the first.
 - [`building.wall`](#buildingwall): One wall from `from` to `to`; returns its id. `height`, `top` and `base` as for building.walls: a partition run to the ceiling, an exterior wall up to the structure above.
-- [`building.floor`](#buildingfloor): A floor slab with this outline (and optional stairwell/atrium `holes`) and `material`; returns its id.
+- [`building.floor`](#buildingfloor): A floor or structural deck slab with this outline (and optional stairwell/atrium `holes`, one-way `spanDirectionDeg`, live-load `occupancy`, `classId`, and `material`); returns its id.
 - [`building.roof`](#buildingroof): A flat, single-slope shed, two-slope gable, or four-slope hip roof (`architecture.roof`) with optional `form`, `slopeRise`, `slopeDirectionDeg`, `baseOffset`, and `material`; returns its id.
 - [`building.stair`](#buildingstair): A stair (`architecture.stair`) supporting straight runs, 90° L-shape, and 180° U-shape switchbacks with landings; returns its id.
 - [`building.grid`](#buildinggrid): A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.
-- [`building.column`](#buildingcolumn): A structural or architectural column at a plan point; returns its id.
+- [`building.column`](#buildingcolumn): A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`, optional `baseOffset`, `rotationDeg`, AISC `section`, `grade`, and `mark`; returns its id.
+- [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+- [`building.footing`](#buildingfooting): A concrete pad footing (`struct.footing_pad`) centered at `at` below `level` with `width`, `depth`, `thickness`, and `mark`; returns its id.
 - [`building.curtainWall`](#buildingcurtainwall): A glazed architectural storefront / curtain wall from `from` to `to` with automatic 3D/plan mullions and optional `mullionMaterial`; returns its id.
 - [`building.moveWall`](#buildingmovewall): Move a wall by a plan delta, carrying joined walls and collinear slab/ceiling/roof edges unless `disjoin: true`.
 - [`building.moveOpening`](#buildingmoveopening): Slide a hosted door or window along its host wall by a plan delta (without moving the host wall).
@@ -24,7 +26,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.unlock`](#buildingunlock): Unpin / unlock previously locked elements.
 - [`building.elements`](#buildingelements): Any kind the registry draws on a line (a beam, a grid line, a pack's own kind), by its id, along the points.
 - [`building.door`](#buildingdoor): A door in a wall, its centre `along` the wall from its start; returns its id.
-- [`building.window`](#buildingwindow): A window in a wall, its centre `along` the wall from its start, its bottom `sill` above the wall's floor (the type's sill, else 900 mm, when left out; the kernel refuses a sill that puts the head above the wall); returns its id.
+- [`building.flipDoor`](#buildingflipdoor): Flips an existing door's swing face (`"swing"`), hinge/hand (`"hinge"`, works on single swing, double-acting, swing+fixed, sliding, and folding doors), or both (`"both"`).
+- [`building.window`](#buildingwindow): A window in a wall, its centre `along` the wall from its start, its bottom `sill` above the wall's floor (the type's sill, else 900 mm, when left out; the kernel refuses a sill that puts the head above the wall); supports `partitioning` (`SINGLE_PANEL`, `DOUBLE_PANEL_VERTICAL`, `DOUBLE_PANEL_HORIZONTAL`/`"double_hung"`, `TRIPLE_PANEL_VERTICAL`, etc.), `frameDepth`, and `external`; returns its id.
 - [`building.space`](#buildingspace): A space (room) with its number and name, on a level; returns its id.
 - [`building.level`](#buildinglevel): A level at an elevation; returns its id.
 - [`building.spaceInWalls`](#buildingspaceinwalls): A room found from the walls around a point: the kernel traces the enclosure and refuses an open room in words; returns the space's id.
@@ -96,13 +99,13 @@ export default defineScript({
 
 ## building.floor
 
-A floor slab with this outline (and optional stairwell/atrium `holes`) and `material`; returns its id.
+A floor or structural deck slab with this outline (and optional stairwell/atrium `holes`, one-way `spanDirectionDeg`, live-load `occupancy`, `classId`, and `material`); returns its id.
 
 ```ts
-floor(ctx: ScriptContext, spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base"> & { readonly holes?: readonly (readonly PlanPoint[])[] }): string
+floor(ctx: ScriptContext, spec: Omit<ChainSpec, "closed" | "topLevel" | "topOffset" | "top" | "base"> & { readonly holes?: readonly (readonly PlanPoint[])[]; readonly spanDirectionDeg?: number; readonly baseOffset?: Measure; readonly classId?: string; readonly occupancy?: string; readonly mark?: string }): string
 ```
 
-Topics: floor, slab, roof deck, holes, stairwell, material
+Topics: floor, slab, roof deck, floor deck, span direction, holes, stairwell, material, structure
 
 <details><summary>Example script</summary>
 
@@ -113,7 +116,7 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    building.floor(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], thickness: units.in(6), material: "architecture.concrete_slab" });
+    building.floor(ctx, { level: "L2", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], thickness: units.in(6), classId: "struct.floor_deck", spanDirectionDeg: 90, occupancy: "office_space", material: "architecture.concrete_slab" });
   },
 });
 ```
@@ -200,13 +203,13 @@ export default defineScript({
 
 ## building.column
 
-A structural or architectural column at a plan point; returns its id.
+A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`, optional `baseOffset`, `rotationDeg`, AISC `section`, `grade`, and `mark`; returns its id.
 
 ```ts
-column(ctx: ScriptContext, spec: { readonly level: string; readonly at: PlanPoint; readonly width?: Measure; readonly depth?: Measure; readonly height?: Measure; readonly topLevel?: string; readonly material?: string; readonly id?: string }): string
+column(ctx: ScriptContext, spec: { readonly level: string; readonly at: PlanPoint; readonly width?: Measure; readonly depth?: Measure; readonly height?: Measure; readonly topLevel?: string; readonly topOffset?: Measure; readonly baseOffset?: Measure; readonly rotationDeg?: number; readonly typeId?: string; readonly classId?: string; readonly section?: string; readonly grade?: string; readonly mark?: string; readonly columnMaterial?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
 ```
 
-Topics: column, structure, architecture
+Topics: column, structure, architecture, height, top level, top offset, steel
 
 <details><summary>Example script</summary>
 
@@ -217,7 +220,59 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    building.column(ctx, { level: "L1", at: { x: units.ft(16), y: units.ft(12) }, width: units.in(12), depth: units.in(12), height: units.ft(12), material: "architecture.steel" });
+    building.column(ctx, { level: "L1", at: { x: units.ft(16), y: units.ft(12) }, topLevel: "L2", topOffset: units.in(-8), section: "W8X31", grade: "A992", mark: "C1A" });
+  },
+});
+```
+
+</details>
+
+## building.beam
+
+A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+
+```ts
+beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
+```
+
+Topics: beam, framing, steel, wide flange, structure
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", mark: "B1" });
+  },
+});
+```
+
+</details>
+
+## building.footing
+
+A concrete pad footing (`struct.footing_pad`) centered at `at` below `level` with `width`, `depth`, `thickness`, and `mark`; returns its id.
+
+```ts
+footing(ctx: ScriptContext, spec: { readonly level: string; readonly at: PlanPoint; readonly width: Measure; readonly depth?: Measure; readonly thickness?: Measure; readonly rotationDeg?: number; readonly baseOffset?: Measure; readonly mark?: string; readonly label?: string; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
+```
+
+Topics: footing, foundation, pad footing, concrete, structure
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    building.footing(ctx, { level: "L1", at: { x: units.ft(16), y: units.ft(12) }, width: units.ft(5), depth: units.ft(5), thickness: units.in(18), mark: "F1A" });
   },
 });
 ```
@@ -498,13 +553,13 @@ export default defineScript({
 
 ## building.door
 
-A door in a wall, its centre `along` the wall from its start; returns its id.
+A door in a wall, its centre `along` the wall from its start; returns its id. Supports `operation` (all IFC4 types: `SINGLE_SWING_LEFT`, `SINGLE_SWING_RIGHT`, `DOUBLE_DOOR_SINGLE_SWING`, `DOUBLE_SWING_LEFT`/`RIGHT`, `DOUBLE_DOOR_DOUBLE_SWING`, `SLIDING_TO_LEFT`/`RIGHT`, `DOUBLE_DOOR_SLIDING`, `FOLDING_TO_LEFT`/`RIGHT`, `DOUBLE_DOOR_FOLDING`, `ROLLINGUP`, `REVOLVING`, `SWING_FIXED_LEFT`/`RIGHT`, plus lowercase aliases like `double`, `sliding_left`, `overhead`), `hinge` (`"left" | "right"`), `swing` (`"inward" | "outward"`) / `side` (`1 | -1`), `handing` (`"LH" | "RH" | "LHR" | "RHR"`), `fireRating`, and `frameDepth`.
 
 ```ts
-door(ctx: ScriptContext, spec: OpeningSpec): string
+door(ctx: ScriptContext, spec: DoorSpec): string
 ```
 
-Topics: door, opening, architecture
+Topics: door, opening, architecture, swing, handing, operation, double door, sliding door, overhead door
 
 <details><summary>Example script</summary>
 
@@ -516,7 +571,36 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
-    building.door(ctx, { wall: walls.element(1), along: units.ft(5), width: units.in(36), height: units.in(84), mark: "101" });
+    building.door(ctx, { wall: walls.element(1), along: units.ft(5), width: units.in(36), height: units.in(84), mark: "101", operation: "SINGLE_SWING_RIGHT", swing: "inward" });
+    building.door(ctx, { wall: walls.element(3), along: units.ft(10), width: units.ft(6), height: units.ft(7), mark: "102", operation: "DOUBLE_DOOR_SINGLE_SWING", swing: "outward" });
+  },
+});
+```
+
+</details>
+
+## building.flipDoor
+
+Flips an existing door's swing face (`"swing"`), hinge/hand (`"hinge"`, works on single swing, double-acting, swing+fixed, sliding, and folding doors), or both (`"both"`).
+
+```ts
+flipDoor(ctx: ScriptContext, doorId: string, which?: "hinge" | "swing" | "both"): void
+```
+
+Topics: door, flip, swing, hinge, handing, architecture
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const d = building.door(ctx, { wall: walls.element(1), along: units.ft(5), width: units.in(36), height: units.in(84), mark: "101" });
+    building.flipDoor(ctx, d, "both");
   },
 });
 ```
@@ -525,13 +609,13 @@ export default defineScript({
 
 ## building.window
 
-A window in a wall, its centre `along` the wall from its start, its bottom `sill` above the wall's floor (the type's sill, else 900 mm, when left out; the kernel refuses a sill that puts the head above the wall); returns its id.
+A window in a wall, its centre `along` the wall from its start, its bottom `sill` above the wall's floor (the type's sill, else 900 mm, when left out; the kernel refuses a sill that puts the head above the wall); supports `partitioning` (`SINGLE_PANEL`, `DOUBLE_PANEL_VERTICAL`, `DOUBLE_PANEL_HORIZONTAL`/`"double_hung"`, `TRIPLE_PANEL_VERTICAL`, etc.), `frameDepth`, and `external`; returns its id.
 
 ```ts
-window(ctx: ScriptContext, spec: OpeningSpec): string
+window(ctx: ScriptContext, spec: WindowSpec): string
 ```
 
-Topics: window, opening, glazing, architecture, sill, sill height
+Topics: window, opening, glazing, architecture, sill, sill height, partitioning
 
 <details><summary>Example script</summary>
 
@@ -543,7 +627,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
-    building.window(ctx, { wall: walls.element(2), along: units.ft(10), width: units.in(48), height: units.in(48), sill: units.ft(3) });
+    building.window(ctx, { wall: walls.element(2), along: units.ft(10), width: units.in(48), height: units.in(48), sill: units.ft(3), partitioning: "DOUBLE_PANEL_HORIZONTAL" });
   },
 });
 ```

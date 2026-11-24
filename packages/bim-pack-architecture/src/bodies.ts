@@ -1,5 +1,5 @@
-import { hostLineOf, hostVoidRow, type BimElement, type ClassSolidPart, type ClassSolidsRow, type KindSolidContext, type Vec2 } from "@permitzip/bim-kernel";
-import { DOOR_OPERATION_KEY, WINDOW_PARTITIONING_KEY } from "./graphics";
+import { hostLineOf, hostVoidRow, wallBaseAtMm, type BimElement, type ClassSolidPart, type ClassSolidsRow, type KindSolidContext, type Vec2 } from "@permitzip/bim-kernel";
+import { resolveDoorOperation, resolveDoorSide, WINDOW_PARTITIONING_KEY } from "./graphics";
 import { valueOf } from "./values";
 
 /**
@@ -14,8 +14,6 @@ import { valueOf } from "./values";
 
 /** The type's frame depth across the wall, mm; absent: the wall's thickness. */
 export const FRAME_DEPTH_KEY = "architecture.frame_depth";
-/** The opening's side, as `create_hosted` stores it (-1: the wall's right). */
-const HOST_SIDE_KEY = "host.side";
 
 /** Jamb and head face width, mm. */
 const FRAME_FACE_MM = 50;
@@ -74,7 +72,8 @@ function holeOf(el: BimElement, ctx: KindSolidContext): Hole | null {
   const u = { x: dx / len, y: dy / len };
   const wallMm = line.widthMm > 0 ? line.widthMm : FRAME_FACE_MM * 2;
   const frameMm = Math.min(positive(valueOf(el, ctx.elements, FRAME_DEPTH_KEY)) ?? wallMm, wallMm + 2 * SILL_PROUD_MM);
-  return { start: line.start, u, n: { x: -u.y, y: u.x }, a, b, lo: ctx.floorMm + lo, hi: ctx.floorMm + hi, wallMm, frameMm, side: valueOf(el, ctx.elements, HOST_SIDE_KEY) === -1 ? -1 : 1 };
+  const hostBaseMm = host ? wallBaseAtMm(host, (a + b) / 2) : 0;
+  return { start: line.start, u, n: { x: -u.y, y: u.x }, a, b, lo: ctx.floorMm + hostBaseMm + lo, hi: ctx.floorMm + hostBaseMm + hi, wallMm, frameMm, side: resolveDoorSide(el, ctx.elements) };
 }
 
 /** A box in the wall: `s0..s1` along it, `d0..d1` across it from its centreline (toward its left), `z0..z1` up. */
@@ -101,9 +100,10 @@ export const DOOR_BODY: ClassSolidsRow = {
     if (!h) return null;
     const out: ClassSolidPart[] = [];
     frame(h, h.lo, out);
-    const op = String(valueOf(el, ctx.elements, DOOR_OPERATION_KEY) ?? "SINGLE_SWING_LEFT");
+    const op = resolveDoorOperation(el, ctx.elements);
     const face = (h.side * h.frameMm) / 2;
-    const [d0, d1] = op.includes("SLIDING") ? [-LEAF_MM / 2, LEAF_MM / 2] : [Math.min(face, face - h.side * LEAF_MM), Math.max(face, face - h.side * LEAF_MM)];
+    const centered = op.includes("SLIDING") || op === "DOUBLE_SWING_LEFT" || op === "DOUBLE_SWING_RIGHT" || op === "DOUBLE_DOOR_DOUBLE_SWING" || op === "REVOLVING";
+    const [d0, d1] = centered ? [-LEAF_MM / 2, LEAF_MM / 2] : [Math.min(face, face - h.side * LEAF_MM), Math.max(face, face - h.side * LEAF_MM)];
     const s0 = h.a + FRAME_FACE_MM;
     const s1 = h.b - FRAME_FACE_MM;
     const top = h.hi - FRAME_FACE_MM;
@@ -143,7 +143,36 @@ export const DOOR_BODY: ClassSolidsRow = {
           out.push(box(h, s0, s1, d0, d1, z0, z1));
         }
       }
-    } else if (op.startsWith("DOUBLE_")) {
+    } else if (op.includes("FOLDING")) {
+      // Multi-panel bi-fold door leaves with narrow reveal gaps between panels
+      const count = op === "DOUBLE_DOOR_FOLDING" ? 4 : 2;
+      const panelW = (s1 - s0) / count;
+      for (let i = 0; i < count; i++) {
+        const a = s0 + i * panelW + (i === 0 ? 0 : LEAF_GAP_MM / 2);
+        const b = s0 + (i + 1) * panelW - (i === count - 1 ? 0 : LEAF_GAP_MM / 2);
+        out.push(box(h, a, b, d0, d1, h.lo, top));
+      }
+    } else if (op === "REVOLVING") {
+      // Revolving door: center hub shaft + crossed wings spanning the vestibule
+      const mid = (s0 + s1) / 2;
+      const r = Math.max(150, (s1 - s0) / 2);
+      const hub = 45;
+      out.push(box(h, mid - hub, mid + hub, -hub, hub, h.lo, top));
+      out.push(box(h, mid - r, mid + r, -GLASS_MM / 2, GLASS_MM / 2, h.lo + 80, top - 80, "glazing"));
+      out.push(box(h, mid - GLASS_MM / 2, mid + GLASS_MM / 2, -r, r, h.lo + 80, top - 80, "glazing"));
+    } else if (op === "SWING_FIXED_LEFT" || op === "SWING_FIXED_RIGHT") {
+      // Active swinging leaf (60%) + vertical mullion + glazed fixed sidelite (40%)
+      const clear = s1 - s0;
+      const split = op === "SWING_FIXED_LEFT" ? s0 + clear * 0.6 : s1 - clear * 0.6;
+      const mul = 40;
+      out.push(box(h, split - mul / 2, split + mul / 2, -h.frameMm / 2, h.frameMm / 2, h.lo, top));
+      const [actA, actB, fixA, fixB] = op === "SWING_FIXED_LEFT" ? [s0, split - mul / 2, split + mul / 2, s1] : [split + mul / 2, s1, s0, split - mul / 2];
+      out.push(box(h, actA, actB, d0, d1, h.lo, top));
+      if (fixB - fixA > 40) {
+        out.push(box(h, fixA, fixB, -GLASS_MM / 2, GLASS_MM / 2, h.lo + 80, top - 40, "glazing"));
+        out.push(box(h, fixA, fixB, -LEAF_MM / 2, LEAF_MM / 2, h.lo, h.lo + 80));
+      }
+    } else if (op.startsWith("DOUBLE_DOOR")) {
       const mid = (s0 + s1) / 2;
       out.push(box(h, s0, mid - LEAF_GAP_MM / 2, d0, d1, h.lo, top));
       out.push(box(h, mid + LEAF_GAP_MM / 2, s1, d0, d1, h.lo, top));

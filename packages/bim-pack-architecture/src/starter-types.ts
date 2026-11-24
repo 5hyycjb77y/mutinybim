@@ -35,7 +35,7 @@ export const ARCHITECTURE_STARTER_TYPES: readonly StarterElementTypeRow[] = [
     description: "One flush leaf, 3 ft wide and 7 ft tall, hinged on one jamb",
     forKinds: ["opening"],
     variant: "door",
-    values: { "material.id": "architecture.wood_door" },
+    values: { "architecture.door_operation": "SINGLE_SWING_LEFT", "material.id": "architecture.wood_door" },
     size: { widthMm: mm(36), heightMm: mm(84) },
     toolDefault: true,
   },

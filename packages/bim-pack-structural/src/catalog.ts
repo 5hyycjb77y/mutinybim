@@ -11,9 +11,9 @@ import { WIDE_FLANGE_SECTIONS } from "./sections";
  */
 
 export const STRUCT_CLASSES: readonly PackClass[] = [
-  { id: "struct.beam_steel", label: "Steel beams", discipline: "structure", parent: "struct.beam", ifc: { entity: "IfcBeam", predefinedType: "BEAM", typeEntity: "IfcBeamType" }, drawsUnder: "structure", description: "A rolled steel beam placed along a line, with a section from the catalogue." },
-  { id: "struct.column_steel", label: "Steel columns", discipline: "structure", parent: "struct.column", ifc: { entity: "IfcColumn", predefinedType: "COLUMN", typeEntity: "IfcColumnType" }, drawsUnder: "structure", description: "A rolled steel column placed along a vertical line from its base to its top." },
-  { id: "struct.footing_pad", label: "Pad footings", discipline: "structure", parent: "struct.footing", ifc: { entity: "IfcFooting", predefinedType: "PAD_FOOTING", typeEntity: "IfcFootingType" }, drawsUnder: "structure", description: "A spread footing under one column, placed at a point." },
+  { id: "struct.beam_steel", label: "Steel beams", discipline: "structure", parent: "struct.beam", ifc: { entity: "IfcBeam", predefinedType: "BEAM", typeEntity: "IfcBeamType" }, description: "A rolled steel beam placed along a line, with a section from the catalogue." },
+  { id: "struct.column_steel", label: "Steel columns", discipline: "structure", parent: "struct.column", ifc: { entity: "IfcColumn", predefinedType: "COLUMN", typeEntity: "IfcColumnType" }, description: "A rolled steel column placed along a vertical line from its base to its top." },
+  { id: "struct.footing_pad", label: "Pad footings", discipline: "structure", parent: "struct.footing", ifc: { entity: "IfcFooting", predefinedType: "PAD_FOOTING", typeEntity: "IfcFootingType" }, description: "A spread footing under one column, placed at a point." },
   { id: "struct.roof_deck", label: "Roof decks", discipline: "structure", parent: "arch.slab", ifc: { entity: "IfcSlab", predefinedType: "ROOF", typeEntity: "IfcSlabType" }, drawsUnder: "structure", description: "A one-way roof deck over an area, spanning between beams in its span direction." },
   { id: "struct.floor_deck", label: "Floor decks", discipline: "structure", parent: "arch.slab", ifc: { entity: "IfcSlab", predefinedType: "FLOOR", typeEntity: "IfcSlabType" }, drawsUnder: "structure", description: "A one-way floor deck over an area, spanning between beams in its span direction." },
 ];
@@ -37,6 +37,7 @@ export const STRUCT_PARAMETER_SET: PackParameterSet = {
     { key: "struct.section", label: "Section", classes: MEMBERS, valueType: "choice", choices: WIDE_FLANGE_SECTIONS.map((s) => s.id), group: "Structural", description: "A wide-flange section from the Structural pack's catalogue.", ifc: { pset: "MutinyBIM_Structural", property: "Section" } },
     { key: "struct.grade", label: "Steel grade", classes: MEMBERS, valueType: "choice", choices: ["A992", "A36", "A572 Gr. 50"], group: "Structural", ifc: { pset: "MutinyBIM_Structural", property: "Grade" } },
     { key: "struct.occupancy", label: "Live load use", classes: DECKS, valueType: "text", group: "Structural", description: "The use the deck's live load comes from (struct.roof_ordinary, office_space).", ifc: { pset: "MutinyBIM_Structural", property: "LiveLoadUse" } },
+    { key: "struct.footing_thickness_mm", label: "Footing thickness", classes: ["struct.footing_pad"], valueType: "quantity", kind: "length", unit: "mm", group: "Structural", description: "Thickness of a concrete pad footing below its top of footing elevation.", ifc: { pset: "MutinyBIM_Structural", property: "FootingThickness" } },
   ],
 };
 

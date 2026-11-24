@@ -1,4 +1,8 @@
 import {
+  activeClassRegistry,
+  classSolidsOf,
+  columnVerticalSpan,
+  wallBaseAtMm,
   ductOuterSize,
   mountedPositions,
   partConvexPieces,
@@ -12,6 +16,7 @@ import {
   sizeWidth,
   widthAxisFor,
   type BimElement,
+  type ClassSolidPart,
   type ModelState,
   type PartInstance,
   type PartTypeElement,
@@ -186,6 +191,32 @@ function primsBox(el: PartInstance, prims: readonly ResolvedPrimitive[], z: numb
   return aabbOfPoints(pieces.flatMap((p) => p.points));
 }
 
+function tiltedZAt(z: number, tilt: { readonly at: { readonly x: number; readonly y: number }; readonly rise: { readonly x: number; readonly y: number } } | undefined, q: { readonly x: number; readonly y: number }): number {
+  return tilt ? z + tilt.rise.x * (q.x - tilt.at.x) + tilt.rise.y * (q.y - tilt.at.y) : z;
+}
+
+function classSolidConvexes(parts: readonly ClassSolidPart[]): Convex[] {
+  const out: Convex[] = [];
+  for (const part of parts) {
+    const s = part.shape;
+    if (s.form === "prism" && s.outline.length >= 3) {
+      out.push(prismConvex(s.outline, s.z0, s.z1));
+    } else if (s.form === "prisms") {
+      for (const b of s.blocks) {
+        if (b.outline.length < 3) continue;
+        if (b.tilt0 || b.tilt1) {
+          const r0 = b.outline.map((q) => p3(q.x, q.y, tiltedZAt(b.z0, b.tilt0, q)));
+          const r1 = b.outline.map((q) => p3(q.x, q.y, tiltedZAt(b.z1, b.tilt1, q)));
+          out.push(loftConvex(r0, r1));
+        } else {
+          out.push(prismConvex(b.outline, b.z0, b.z1));
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** The element as a body, or null when it has no body the lint tests (annotations, documents, systems). */
 export function elementShape(elements: Elements, el: BimElement, levelElevationByName: (name: string) => number | null): ElementShape | null {
   switch (el.kind) {
@@ -265,7 +296,9 @@ export function elementShape(elements: Elements, el: BimElement, levelElevationB
       const nx = (-dy / l) * (el.thickness / 2);
       const ny = (dx / l) * (el.thickness / 2);
       const named = levelElevationByName(el.partition?.level ?? "");
-      const floor = named ?? 0;
+      const hasPlacementLevel = el.placement?.kind === "line" && Boolean(el.placement.levelId) && elements[el.placement.levelId]?.kind === "level";
+      const floor = hasPlacementLevel && el.placement?.kind === "line" ? levelElevation(elements, el.placement.levelId) : (named ?? 0);
+      const baseZ = floor + wallBaseAtMm(el, l / 2);
       const height = el.height > 0 ? el.height : DEFAULT_WALL_HEIGHT_MM;
       const outline = [
         { x: el.start.x + nx, y: el.start.y + ny },
@@ -273,14 +306,74 @@ export function elementShape(elements: Elements, el: BimElement, levelElevationB
         { x: el.end.x - nx, y: el.end.y - ny },
         { x: el.start.x - nx, y: el.start.y - ny },
       ];
-      const piece = prismConvex(outline, floor, floor + height);
-      return { role: "architecture", ...(named === null ? { layer: el.partition?.level ?? "" } : {}), box: aabbOfPoints(piece.points), pieces: () => [piece] };
+      const piece = prismConvex(outline, baseZ, baseZ + height);
+      return { role: "architecture", ...(!hasPlacementLevel && named === null ? { layer: el.partition?.level ?? "" } : {}), box: aabbOfPoints(piece.points), pieces: () => [piece] };
     }
     case "column": {
       const named = levelElevationByName(el.partition?.level ?? "");
       const floor = named ?? 0;
-      const box: Aabb = { min: p3(el.position.x - el.size.x / 2, el.position.y - el.size.y / 2, floor), max: p3(el.position.x + el.size.x / 2, el.position.y + el.size.y / 2, floor + DEFAULT_WALL_HEIGHT_MM) };
+      const span = columnVerticalSpan(elements, el, floor, DEFAULT_WALL_HEIGHT_MM);
+      const rad = el.placement?.kind === "point" && el.placement.rotationDeg ? (el.placement.rotationDeg * Math.PI) / 180 : 0;
+      if (Math.abs(rad) > 1e-6) {
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const hx = el.size.x / 2;
+        const hy = el.size.y / 2;
+        const rot = (dx: number, dy: number) => ({ x: el.position.x + dx * cos - dy * sin, y: el.position.y + dx * sin + dy * cos });
+        const piece = prismConvex([rot(-hx, -hy), rot(hx, -hy), rot(hx, hy), rot(-hx, hy)], span.baseZMm, span.topZMm);
+        return { role: "structure", ...(named === null ? { layer: el.partition?.level ?? "" } : {}), box: aabbOfPoints(piece.points), pieces: () => [piece] };
+      }
+      const box: Aabb = { min: p3(el.position.x - el.size.x / 2, el.position.y - el.size.y / 2, span.baseZMm), max: p3(el.position.x + el.size.x / 2, el.position.y + el.size.y / 2, span.topZMm) };
       return { role: "structure", ...(named === null ? { layer: el.partition?.level ?? "" } : {}), box, pieces: () => [boxConvex(box)] };
+    }
+    case "beam": {
+      const dx = el.end.x - el.start.x;
+      const dy = el.end.y - el.start.y;
+      const l = Math.hypot(dx, dy);
+      if (l < 1e-3) return null;
+      const p = el.placement?.kind === "line" ? el.placement : null;
+      const baseLvl = p ? elements[p.levelId] : undefined;
+      const named = baseLvl?.kind === "level" ? baseLvl.elevationMm : levelElevationByName(el.partition?.level ?? "");
+      const floor = named ?? 0;
+      const classParts = classSolidsOf(el, { elements, floorMm: floor }, activeClassRegistry());
+      if (classParts && classParts.length > 0) {
+        const pieces = classSolidConvexes(classParts);
+        if (pieces.length > 0) {
+          return { role: "structure", ...(named === null ? { layer: el.partition?.level ?? "" } : {}), box: aabbOfPoints(pieces.flatMap((c) => c.points)), pieces: () => pieces };
+        }
+      }
+      const depth = 400;
+      const halfW = 100;
+      const vAlign = p?.vertical ?? "top";
+      const zShift = vAlign === "bottom" ? depth : vAlign === "center" ? depth / 2 : 0;
+      const zTopStart = floor + (p?.startOffsetMm ?? 0) + zShift;
+      const zTopEnd = floor + (p?.endOffsetMm ?? 0) + zShift;
+      const nx = (-dy / l) * halfW;
+      const ny = (dx / l) * halfW;
+      const outline = [
+        { x: el.start.x + nx, y: el.start.y + ny },
+        { x: el.end.x + nx, y: el.end.y + ny },
+        { x: el.end.x - nx, y: el.end.y - ny },
+        { x: el.start.x - nx, y: el.start.y - ny },
+      ];
+      const piece =
+        Math.abs(zTopEnd - zTopStart) > 1e-6
+          ? loftConvex(
+              [
+                p3(outline[0]!.x, outline[0]!.y, zTopStart - depth),
+                p3(outline[1]!.x, outline[1]!.y, zTopEnd - depth),
+                p3(outline[2]!.x, outline[2]!.y, zTopEnd - depth),
+                p3(outline[3]!.x, outline[3]!.y, zTopStart - depth),
+              ],
+              [
+                p3(outline[0]!.x, outline[0]!.y, zTopStart),
+                p3(outline[1]!.x, outline[1]!.y, zTopEnd),
+                p3(outline[2]!.x, outline[2]!.y, zTopEnd),
+                p3(outline[3]!.x, outline[3]!.y, zTopStart),
+              ],
+            )
+          : prismConvex(outline, zTopStart - depth, zTopStart);
+      return { role: "structure", ...(named === null ? { layer: el.partition?.level ?? "" } : {}), box: aabbOfPoints(piece.points), pieces: () => [piece] };
     }
     case "slab": {
       if (el.outline.length < 3) return null;

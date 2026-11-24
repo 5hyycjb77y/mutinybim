@@ -12,12 +12,16 @@ export { ROOM_BOUNDING_INSTANCE_KEY as ROOM_BOUNDING_KEY } from "@permitzip/bim-
  */
 
 export const SMOKE_BARRIER_KEY = "architecture.smoke_barrier";
+export const DOOR_OPERATION_KEY = "architecture.door_operation";
+export const DOOR_SWING_KEY = "architecture.door_swing";
+export const DOOR_HANDING_KEY = "architecture.door_handing";
+export const WINDOW_PARTITIONING_KEY = "architecture.window_partitioning";
 
 const WALL_FUNCTIONS = ["STANDARD", "PARTITIONING", "PLUMBINGWALL", "SHEAR", "PARAPET", "CURTAIN", "MOVABLE", "SOLIDWALL", "ELEMENTEDWALL", "POLYGONAL", "RETAININGWALL", "WAVEWALL", "USERDEFINED", "NOTDEFINED"];
 const ROOF_FORMS = ["FLAT", "SHED", "GABLE", "HIP"];
 const STAIR_FORMS = ["STRAIGHT", "L_SHAPE", "U_SHAPE"];
 const STAIR_TURNS = ["LEFT", "RIGHT"];
-const DOOR_OPERATIONS = [
+export const DOOR_OPERATIONS = [
   "SINGLE_SWING_LEFT",
   "SINGLE_SWING_RIGHT",
   "DOUBLE_DOOR_SINGLE_SWING",
@@ -36,8 +40,10 @@ const DOOR_OPERATIONS = [
   "SWING_FIXED_RIGHT",
   "USERDEFINED",
   "NOTDEFINED",
-];
-const WINDOW_PARTITIONING = ["SINGLE_PANEL", "DOUBLE_PANEL_VERTICAL", "DOUBLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_VERTICAL", "TRIPLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_BOTTOM", "TRIPLE_PANEL_TOP", "TRIPLE_PANEL_LEFT", "TRIPLE_PANEL_RIGHT", "USERDEFINED", "NOTDEFINED"];
+] as const;
+export const DOOR_SWING_DIRECTIONS = ["INWARD", "OUTWARD"] as const;
+export const DOOR_HANDINGS = ["LH", "RH", "LHR", "RHR"] as const;
+export const WINDOW_PARTITIONING = ["SINGLE_PANEL", "DOUBLE_PANEL_VERTICAL", "DOUBLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_VERTICAL", "TRIPLE_PANEL_HORIZONTAL", "TRIPLE_PANEL_BOTTOM", "TRIPLE_PANEL_TOP", "TRIPLE_PANEL_LEFT", "TRIPLE_PANEL_RIGHT", "USERDEFINED", "NOTDEFINED"] as const;
 const SLAB_FUNCTIONS = ["FLOOR", "ROOF", "LANDING", "BASESLAB", "USERDEFINED", "NOTDEFINED"];
 
 const OWN_PSET = "MutinyBIM_Architecture";
@@ -52,9 +58,11 @@ export const ARCHITECTURE_PARAMETER_SET: PackParameterSet = {
     { key: "architecture.load_bearing", label: "Load bearing", classes: ["arch.wall", "arch.slab"], valueType: "boolean", group: "Identity", ifc: { pset: "Pset_WallCommon", property: "LoadBearing" } },
     { key: "architecture.acoustic_rating", label: "Acoustic rating", classes: ["arch.wall", "arch.door", "arch.window", "arch.ceiling"], valueType: "text", group: "Ratings", description: "A sound class (STC 50).", ifc: { pset: "Pset_WallCommon", property: "AcousticRating" } },
     { key: SMOKE_BARRIER_KEY, label: "Smoke barrier", classes: ["arch.wall", "arch.door"], valueType: "boolean", group: "Ratings", ifc: { pset: OWN_PSET, property: "SmokeBarrier" } },
-    { key: "architecture.door_operation", label: "Operation", classes: ["arch.door"], valueType: "choice", choices: DOOR_OPERATIONS, group: "Identity", ifc: { pset: OWN_PSET, property: "OperationType" } },
+    { key: DOOR_OPERATION_KEY, label: "Operation", classes: ["arch.door"], valueType: "choice", choices: [...DOOR_OPERATIONS], group: "Identity", description: "IFC4 door operation type (single/double swing, double-acting, sliding, folding, overhead rolling, revolving, or swing-with-fixed-panel).", ifc: { pset: OWN_PSET, property: "OperationType" } },
+    { key: DOOR_SWING_KEY, label: "Swing direction", classes: ["arch.door"], valueType: "choice", choices: [...DOOR_SWING_DIRECTIONS], group: "Identity", description: "Which side of the host wall the door opens toward (INWARD = wall left face +1, OUTWARD = wall right face -1; overridden by explicit host.side).", ifc: { pset: OWN_PSET, property: "SwingDirection" } },
+    { key: DOOR_HANDING_KEY, label: "Handing", classes: ["arch.door"], valueType: "choice", choices: [...DOOR_HANDINGS], group: "Identity", description: "Standard hardware handing (LH, RH, LHR, RHR); defaults hinge and swing side when operation/side are unset.", ifc: { pset: OWN_PSET, property: "Handing" } },
     { key: "architecture.frame_depth", label: "Frame depth", classes: ["arch.door", "arch.window"], valueType: "quantity", kind: "length", unit: "mm", group: "Dimensions", description: "How deep the frame is across the wall; blank: as deep as the wall." },
-    { key: "architecture.window_partitioning", label: "Partitioning", classes: ["arch.window"], valueType: "choice", choices: WINDOW_PARTITIONING, group: "Identity", ifc: { pset: OWN_PSET, property: "PartitioningType" } },
+    { key: WINDOW_PARTITIONING_KEY, label: "Partitioning", classes: ["arch.window"], valueType: "choice", choices: [...WINDOW_PARTITIONING], group: "Identity", ifc: { pset: OWN_PSET, property: "PartitioningType" } },
     { key: "architecture.slab_function", label: "Floor function", classes: ["arch.slab"], valueType: "choice", choices: SLAB_FUNCTIONS, group: "Identity", description: "A floor, a roof, a landing or a base slab; its IFC slab type.", ifc: { pset: OWN_PSET, property: "SlabFunction" } },
     { key: "architecture.roof_form", label: "Roof form", classes: ["arch.roof"], valueType: "choice", choices: ROOF_FORMS, group: "Identity", description: "Flat, single-slope shed, pitched gable, or four-slope hip roof.", ifc: { pset: OWN_PSET, property: "RoofForm" } },
     { key: "architecture.stair_form", label: "Stair form", classes: ["arch.stair"], valueType: "choice", choices: STAIR_FORMS, group: "Identity", description: "Straight run, 90° L-shape quarter-turn with landing, or 180° U-shape switchback with mid-landing.", ifc: { pset: OWN_PSET, property: "StairForm" } },

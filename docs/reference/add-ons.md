@@ -181,7 +181,8 @@ Steel beams, columns and pad footings, a wide-flange catalogue, live load by use
 
 | What it contributes | Items |
 | --- | --- |
-| Add-on library rows | 2 |
+| Add-on library rows | 5 |
+| Bodies by class | 3 |
 | Calculations | 1 |
 | Derived-zone rules | 1 |
 | Element classes | 9 |
@@ -191,6 +192,7 @@ Steel beams, columns and pad footings, a wide-flange catalogue, live load by use
 | Lint rules | 1 |
 | Network adapters | 1 |
 | Parameter sets | 1 |
+| Plan graphics by class | 5 |
 | Services | 1 |
 | Space uses | 1 |
 | Space-use rate values | 4 |

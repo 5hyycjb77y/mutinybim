@@ -120,7 +120,11 @@ const inRoom: RelationshipResolver = (el, ctx) => {
 
 // ---------------------------------------------------------------- base fields
 
-const markOf = (el: BimElement): string | null => ("mark" in el && typeof el.mark === "string" ? textOrNull(el.mark) : null);
+const markOf = (el: BimElement): string | null => {
+  if ("mark" in el && typeof el.mark === "string") return textOrNull(el.mark);
+  if (el.kind !== "load_point" && "values" in el && el.values && typeof el.values.mark === "string") return textOrNull(el.values.mark);
+  return null;
+};
 
 function typeNameOf(elements: Elements, el: BimElement): string | null {
   if (el.kind === "part") {

@@ -16,19 +16,27 @@ import type { ViewDisplay } from './ViewPropertiesPanel'
 export interface ViewDisplayPrefs {
   /** False until the saved choices have arrived (or failed to). */
   readonly loaded: boolean
-  /** What a view opens on: the person's saved choice, else sections on their drawing and the rest on the live model. */
+  /** What a view opens on: the person's saved choice, else paper space (`drawing`) for 2D orthographic views and `model` for 3D and schedules. */
   readonly displayFor: (view: Pick<ViewElement, 'id' | 'viewType'>) => ViewDisplay
   /** Remember the person's pick for a view (saved in the background; a failure says so). */
   readonly remember: (viewId: string, display: ViewDisplay) => void
 }
 
 /**
- * What a view opens on the moment it is made: plans and ceiling plans as the
- * printed drawing (what goes on the sheet), the rest on the live model. The
- * person's later pick is remembered as usual.
+ * Default display for a view type when the person hasn't saved a choice:
+ * every 2D orthographic view (plans, ceiling plans, sections, elevations,
+ * details) opens in paper space (`drawing`), while 3D views and schedules
+ * open in `model` (live 3D / spreadsheet).
  */
+export function defaultViewDisplay(viewType: ViewElement['viewType']): ViewDisplay {
+  return viewType === 'floor_plan' || viewType === 'ceiling_plan' || viewType === 'section' || viewType === 'elevation' || viewType === 'detail'
+    ? 'drawing'
+    : 'model'
+}
+
+/** What a newly created view opens on: alias for `defaultViewDisplay`. */
 export function newViewDisplay(viewType: ViewElement['viewType']): ViewDisplay {
-  return viewType === 'floor_plan' || viewType === 'ceiling_plan' || viewType === 'section' ? 'drawing' : 'model'
+  return defaultViewDisplay(viewType)
 }
 
 function isDisplays(value: unknown): value is { displays: Record<string, ViewDisplay> } {
@@ -77,7 +85,7 @@ export function useViewDisplayPrefsFrom(port: ViewPrefsPort, projectId: string):
     return () => controller.abort()
   }, [port, projectId])
 
-  const displayFor = useCallback<ViewDisplayPrefs['displayFor']>((view) => saved[view.id] ?? (view.viewType === 'section' ? 'drawing' : 'model'), [saved])
+  const displayFor = useCallback<ViewDisplayPrefs['displayFor']>((view) => saved[view.id] ?? defaultViewDisplay(view.viewType), [saved])
 
   const remember = useCallback<ViewDisplayPrefs['remember']>(
     (viewId, display) => {

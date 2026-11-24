@@ -14,7 +14,7 @@ import type { Pen } from "./sheet";
  */
 
 /** What `drawing` and `detail` a plan graphics face is asked for, over one model. */
-export function planGraphicsContext(model: ModelState, opts: { readonly scale: number; readonly levelId: string; readonly detail: PlanGraphicsContext["detail"]; readonly drawing: PlanGraphicsContext["drawing"]; readonly lookingUp?: boolean }): PlanGraphicsContext {
+export function planGraphicsContext(model: ModelState, opts: { readonly scale: number; readonly levelId: string; readonly detail: PlanGraphicsContext["detail"]; readonly drawing: PlanGraphicsContext["drawing"]; readonly lookingUp?: boolean; readonly discipline?: string }): PlanGraphicsContext {
   return {
     elements: model.elements,
     scale: opts.scale,
@@ -22,6 +22,7 @@ export function planGraphicsContext(model: ModelState, opts: { readonly scale: n
     detail: opts.detail,
     drawing: opts.drawing,
     lookingUp: opts.lookingUp ?? false,
+    ...(opts.discipline ? { discipline: opts.discipline } : {}),
     connectedTo: (ref: ConnectorRef) => {
       const c = connectionAt(model, ref);
       return c ? otherEnd(c, ref) : null;

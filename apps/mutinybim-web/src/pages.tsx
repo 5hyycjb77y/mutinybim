@@ -551,7 +551,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
         </CardHeader>
         <CardContent>
           {models.length === 0 ? (
-            <ModelEmpty title="No models yet">Make your first one below. Start blank (one level), or from the sample building showcase (two-story creative studio with architecture, HVAC, electrical, plumbing, live diagrams, schedules and a 12-sheet Arch D set).</ModelEmpty>
+            <ModelEmpty title="No models yet">Make your first one below. Start blank (one level), or from the sample building showcase (two-story creative studio with architecture, structural steel & foundations, HVAC, electrical, plumbing, live diagrams, schedules and a 19-sheet Arch D set).</ModelEmpty>
           ) : (
             <ul className="flex flex-col gap-2" data-testid="own-models">
               {models.map((m) => (
@@ -614,7 +614,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
                 <input type="radio" name="start" value="blank" defaultChecked className="accent-(--mutiny-selection)" /> A blank model with one level
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="radio" name="start" value="sample" className="accent-(--mutiny-selection)" /> The sample building showcase (two-story creative studio with architecture, MEP systems, live diagrams, schedules and 12 Arch D sheets)
+                <input type="radio" name="start" value="sample" className="accent-(--mutiny-selection)" /> The sample building showcase (two-story creative studio with architecture, structural steel & foundations, MEP systems, live diagrams, schedules and 19 Arch D sheets)
               </label>
             </fieldset>
             <div>

@@ -66,6 +66,7 @@ import { draftingCategoryId } from "../categories/registry";
 import { DEFAULT_LOOK, categoryLook, hasCategoryOverrides, lookTone, resolveChain, type CategoryLook } from "../categories/resolve";
 import { SYSTEM_LINE_PATTERNS, SYSTEM_PATTERN_DASH } from "../routing/system-graphics";
 import { elementSolid, hull2, kindHasBody, planPointsOf, type ElementSolid, type SolidRole } from "./solids";
+import { columnVerticalSpan } from "../placement/top-tie";
 import { cameraProjector, projectSolidInBox } from "./view3d-drawing";
 import { boxAabb, boxKeepPlanes, boxOverRect, elementFloorMm, viewCropBox3d } from "../view3d";
 import { drawViewGraphics } from "../layout/view-graphics-point";
@@ -378,9 +379,10 @@ function levelElements(model: ModelState, view: ViewElement): BimElement[] {
   // floor plans also include level-spanning elements (`KindRow.spansLevels`) from the level below.
   if (view.viewType === "floor_plan" || view.viewType === "ceiling_plan") {
     const grids = elementsOfKind(model.elements, "grid");
+    const columns = elementsOfKind(model.elements, "column");
     const spanningKinds = view.viewType === "floor_plan" ? elementKindTable().kinds.filter((k) => kindRowOf(k)?.spansLevels) : [];
     const spanning = spanningKinds.length > 0 ? recordsOfKinds(model.elements, spanningKinds) : [];
-    if (grids.length > 0 || spanning.length > 0) {
+    if (grids.length > 0 || spanning.length > 0 || columns.length > 0) {
       const seen = new Set(own.map((e) => e.id));
       for (const g of grids) {
         if (!seen.has(g.id)) {
@@ -388,20 +390,28 @@ function levelElements(model: ModelState, view: ViewElement): BimElement[] {
           seen.add(g.id);
         }
       }
-      if (spanning.length > 0) {
-        const viewLvl = viewModelLevel(model, view.props?.level);
-        if (viewLvl) {
-          const allLevels = modelLevels(model).sort((a, b) => a.elevationMm - b.elevationMm);
-          const idx = allLevels.findIndex((l) => l.id === viewLvl.id);
-          const below = idx > 0 ? allLevels[idx - 1] : undefined;
-          for (const el of spanning) {
-            if (seen.has(el.id)) continue;
-            const r = el as unknown as { readonly levelId?: string; readonly topLevelId?: string };
-            const landsHere = r.topLevelId === viewLvl.id || (!r.topLevelId && below && r.levelId === below.id);
-            if (landsHere) {
-              own.push(el);
-              seen.add(el.id);
-            }
+      const viewLvl = viewModelLevel(model, view.props?.level);
+      if (viewLvl && columns.length > 0) {
+        for (const col of columns) {
+          if (seen.has(col.id)) continue;
+          const span = columnVerticalSpan(model.elements, col, ownFloor(model, col, 0));
+          if (span.baseZMm < viewLvl.elevationMm - 1 && span.topZMm > viewLvl.elevationMm + 1) {
+            own.push(col);
+            seen.add(col.id);
+          }
+        }
+      }
+      if (spanning.length > 0 && viewLvl) {
+        const allLevels = modelLevels(model).sort((a, b) => a.elevationMm - b.elevationMm);
+        const idx = allLevels.findIndex((l) => l.id === viewLvl.id);
+        const below = idx > 0 ? allLevels[idx - 1] : undefined;
+        for (const el of spanning) {
+          if (seen.has(el.id)) continue;
+          const r = el as unknown as { readonly levelId?: string; readonly topLevelId?: string };
+          const landsHere = r.topLevelId === viewLvl.id || (!r.topLevelId && below && r.levelId === below.id);
+          if (landsHere) {
+            own.push(el);
+            seen.add(el.id);
           }
         }
       }
@@ -805,7 +815,7 @@ function drawPlan(
   const shownAs = organizationDisplay(model, view);
   const outsideRange = planViewRangeExcludes(model, view);
   const resolvedLevelId = viewModelLevel(model, view.props?.level)?.id ?? view.props?.level ?? "";
-  const graphicsCtx = planGraphicsContext(model, { scale: frame.scale, levelId: resolvedLevelId, detail: display.detail, drawing: "view", lookingUp: ceiling });
+  const graphicsCtx = planGraphicsContext(model, { scale: frame.scale, levelId: resolvedLevelId, detail: display.detail, drawing: "view", lookingUp: ceiling, ...(view.props?.discipline ? { discipline: view.props.discipline } : {}) });
   // Other levels' work in this plan's height range, with the floor each stands on (already tested against the range).
   const reached = new Map<string, number>();
   const others: BimElement[] = [];
@@ -1122,7 +1132,15 @@ function drawPlan(
         const hx = el.size.x / 2;
         const hy = el.size.y / 2;
         const c = el.position;
-        polygonIn(p, [add(c, { x: -hx, y: -hy }), add(c, { x: hx, y: -hy }), add(c, { x: hx, y: hy }), add(c, { x: -hx, y: hy })], look.lineWeights.cut ?? "heavy", tone);
+        const rad = el.placement?.kind === "point" && el.placement.rotationDeg ? (el.placement.rotationDeg * Math.PI) / 180 : 0;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const corner = (dx: number, dy: number): Vec2 => ({ x: c.x + dx * cos - dy * sin, y: c.y + dx * sin + dy * cos });
+        polygonIn(p, [corner(-hx, -hy), corner(hx, -hy), corner(hx, hy), corner(-hx, hy)], look.lineWeights.cut ?? "heavy", tone);
+        break;
+      }
+      case "beam": {
+        lineIn(p, el.start, el.end, look.lineWeights.projection ?? "medium", tone, p.dash);
         break;
       }
       case "tag": {

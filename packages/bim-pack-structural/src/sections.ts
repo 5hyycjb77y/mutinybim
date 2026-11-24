@@ -12,6 +12,9 @@ export interface WideFlangeSection {
   readonly id: string;
   readonly label: string;
   readonly depth: Quantity<"length">;
+  readonly flangeWidth: Quantity<"length">;
+  readonly webThickness: Quantity<"length">;
+  readonly flangeThickness: Quantity<"length">;
   /** Nominal weight per length. Under standard gravity lb/ft of steel is lbf/ft of load, so it is a line load. */
   readonly weight: Quantity<"line_load">;
   readonly area: Quantity<"area">;
@@ -25,11 +28,24 @@ export interface WideFlangeSection {
 
 const AISC_TABLE_1_1 = "AISC Steel Construction Manual, 16th Ed., Table 1-1";
 
-function w(id: string, depthIn: number, weightPlf: number, areaIn2: number, ixIn4: number, sxIn3: number): WideFlangeSection {
+function w(
+  id: string,
+  depthIn: number,
+  flangeWidthIn: number,
+  webThicknessIn: number,
+  flangeThicknessIn: number,
+  weightPlf: number,
+  areaIn2: number,
+  ixIn4: number,
+  sxIn3: number,
+): WideFlangeSection {
   return Object.freeze({
     id,
     label: id.replace("X", "×"),
     depth: qty("length", depthIn, "in"),
+    flangeWidth: qty("length", flangeWidthIn, "in"),
+    webThickness: qty("length", webThicknessIn, "in"),
+    flangeThickness: qty("length", flangeThicknessIn, "in"),
     weight: qty("line_load", weightPlf, "plf"),
     area: qty("area", areaIn2, "in2"),
     ix: qty("second_moment_of_area", ixIn4, "in4"),
@@ -40,14 +56,14 @@ function w(id: string, depthIn: number, weightPlf: number, areaIn2: number, ixIn
 }
 
 export const WIDE_FLANGE_SECTIONS: readonly WideFlangeSection[] = Object.freeze([
-  w("W8X31", 8.0, 31, 9.13, 110, 27.5),
-  w("W10X33", 9.73, 33, 9.71, 171, 35.0),
-  w("W12X26", 12.2, 26, 7.65, 204, 33.4),
-  w("W14X22", 13.7, 22, 6.49, 199, 29.0),
-  w("W16X26", 15.7, 26, 7.68, 301, 38.4),
-  w("W18X35", 17.7, 35, 10.3, 510, 57.6),
-  w("W21X44", 20.7, 44, 13.0, 843, 81.6),
-  w("W24X55", 23.6, 55, 16.2, 1350, 114),
+  w("W8X31", 8.0, 8.0, 0.285, 0.435, 31, 9.13, 110, 27.5),
+  w("W10X33", 9.73, 7.96, 0.29, 0.435, 33, 9.71, 171, 35.0),
+  w("W12X26", 12.2, 6.49, 0.23, 0.38, 26, 7.65, 204, 33.4),
+  w("W14X22", 13.7, 5.0, 0.23, 0.335, 22, 6.49, 199, 29.0),
+  w("W16X26", 15.7, 5.5, 0.25, 0.345, 26, 7.68, 301, 38.4),
+  w("W18X35", 17.7, 6.0, 0.3, 0.425, 35, 10.3, 510, 57.6),
+  w("W21X44", 20.7, 6.5, 0.35, 0.45, 44, 13.0, 843, 81.6),
+  w("W24X55", 23.6, 7.01, 0.395, 0.505, 55, 16.2, 1350, 114),
 ]);
 
 const BY_ID = new Map(WIDE_FLANGE_SECTIONS.map((s) => [s.id, s]));

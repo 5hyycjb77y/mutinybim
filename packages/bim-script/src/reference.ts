@@ -278,7 +278,13 @@ export interface AssemblyThermalSummary {
   readonly missingThermalMaterials: readonly string[];
 }
 export interface ChainHandle { readonly prefix: string; element(n: number): string }
-export interface OpeningSpec { wall: string; along: Measure; width?: Measure; height?: Measure; sill?: Measure; side?: 1 | -1; typeId?: string; mark?: string; material?: string; values?: Record<string, string | number | boolean>; id?: string }
+export type DoorOperation = "SINGLE_SWING_LEFT" | "SINGLE_SWING_RIGHT" | "DOUBLE_DOOR_SINGLE_SWING" | "DOUBLE_SWING_LEFT" | "DOUBLE_SWING_RIGHT" | "DOUBLE_DOOR_DOUBLE_SWING" | "SLIDING_TO_LEFT" | "SLIDING_TO_RIGHT" | "DOUBLE_DOOR_SLIDING" | "FOLDING_TO_LEFT" | "FOLDING_TO_RIGHT" | "DOUBLE_DOOR_FOLDING" | "REVOLVING" | "ROLLINGUP" | "SWING_FIXED_LEFT" | "SWING_FIXED_RIGHT" | "USERDEFINED" | "NOTDEFINED" | "single_left" | "single_right" | "double" | "double_swing" | "double_acting_left" | "double_acting_right" | "double_acting_pair" | "sliding_left" | "sliding_right" | "sliding_double" | "folding_left" | "folding_right" | "folding_double" | "bifold_left" | "bifold_right" | "bifold_double" | "overhead" | "rolling" | "revolving" | "swing_fixed_left" | "swing_fixed_right";
+export type DoorSwing = "inward" | "outward" | "INWARD" | "OUTWARD";
+export type DoorHanding = "LH" | "RH" | "LHR" | "RHR";
+export type WindowPartitioning = "SINGLE_PANEL" | "DOUBLE_PANEL_VERTICAL" | "DOUBLE_PANEL_HORIZONTAL" | "TRIPLE_PANEL_VERTICAL" | "TRIPLE_PANEL_HORIZONTAL" | "TRIPLE_PANEL_BOTTOM" | "TRIPLE_PANEL_TOP" | "TRIPLE_PANEL_LEFT" | "TRIPLE_PANEL_RIGHT" | "USERDEFINED" | "NOTDEFINED" | "single" | "double_vertical" | "double_hung" | "double_horizontal" | "triple_vertical" | "triple_horizontal" | "triple_bottom" | "triple_top" | "triple_left" | "triple_right";
+export interface OpeningSpec { wall: string; along: Measure; width?: Measure; height?: Measure; sill?: Measure; side?: 1 | -1; typeId?: string; mark?: string; material?: string; frameDepth?: Measure; external?: boolean; values?: Record<string, string | number | boolean>; id?: string }
+export interface DoorSpec extends OpeningSpec { operation?: DoorOperation; hinge?: "left" | "right"; swing?: DoorSwing; handing?: DoorHanding; fireRating?: string }
+export interface WindowSpec extends OpeningSpec { partitioning?: WindowPartitioning }
 export interface PlacedPart { readonly id: string; connector(connectorId: string): RouteEnd }
 export type SystemLinePattern = "solid" | "dashed" | "dotted" | "dash_dot" | "dash_dot_dot" | "dash_dot_dot_dot" | "long_dash";
 export type SystemLineWeight = "thin" | "medium" | "wide" | "heavy";

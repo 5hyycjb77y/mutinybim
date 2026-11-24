@@ -114,6 +114,9 @@ export function fieldDefOf(field: SharedFieldItem, source: RegistrySource): Fiel
 }
 
 function addClass(b: ReturnType<Registry["extend"]>, base: Registry, item: ClassItem, source: RegistrySource): void {
+  const existing = item.replaces ? base.getClass(item.key) : undefined;
+  const drawsUnder = item.drawsUnder ?? existing?.drawsUnder;
+  const symbolId = item.symbolId ?? existing?.symbolId;
   const cls = {
     id: item.key,
     label: item.label,
@@ -123,11 +126,11 @@ function addClass(b: ReturnType<Registry["extend"]>, base: Registry, item: Class
     ...(item.ifc === undefined ? {} : { ifc: item.ifc }),
     ...(item.recognize === undefined ? {} : { recognize: item.recognize }),
     ...(item.description === undefined ? {} : { description: item.description }),
-    ...(item.drawsUnder === undefined ? {} : { drawsUnder: item.drawsUnder }),
-    ...(item.symbolId === undefined ? {} : { symbolId: item.symbolId }),
+    ...(drawsUnder === undefined ? {} : { drawsUnder }),
+    ...(symbolId === undefined ? {} : { symbolId }),
     source,
   };
-  if (item.replaces && base.getClass(item.key)) b.replaceClass(cls);
+  if (existing) b.replaceClass(cls);
   else b.addClass(cls);
 }
 

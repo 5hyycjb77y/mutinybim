@@ -299,6 +299,8 @@ export interface Column extends ModelElementBase, ElementCore {
   readonly material: ColumnMaterial;
   readonly position: Vec2;
   readonly size: Vec2;
+  /** Unconnected or level-tied height, mm. Absent on older records (falls back to storey height). */
+  readonly height?: number;
 }
 
 export interface Beam extends ModelElementBase, ElementCore {

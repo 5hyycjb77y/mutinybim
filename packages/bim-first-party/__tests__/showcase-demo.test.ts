@@ -12,10 +12,11 @@
  * - Renders all 12 Arch D construction sheets cleanly via `buildSheetSceneFor`
  * - Leaves the legacy `createDemoModel("f-a-demo")` mechanical fixture untouched
  */
-import { buildSheetSceneFor, ceilingGridCellCenter, elementValues, evaluateDiagram, resolveElementMaterial, sceneToSvg, TILE_2FT_MM, TILE_4FT_MM, validateModel } from "@permitzip/bim-kernel";
+import { buildSheetSceneFor, ceilingGridCellCenter, columnVerticalSpan, elementValues, evaluateDiagram, resolveElementMaterial, sceneToSvg, TILE_2FT_MM, TILE_4FT_MM, validateModel } from "@permitzip/bim-kernel";
 import { evaluateEgressPhotometrics, evaluateNormalPhotometrics } from "@permitzip/bim-pack-electrical";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { plumbingDiagramGraph } from "@permitzip/bim-pack-plumbing";
+import { beamStrips, footingUnsupportedAll, frameOf, structuralLoadPath } from "@permitzip/bim-pack-structural";
 import { createShowcaseDemoModel } from "../src/seed";
 
 describe("createShowcaseDemoModel", () => {
@@ -173,7 +174,7 @@ describe("createShowcaseDemoModel", () => {
     }
   });
 
-  it("renders all 15 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
+  it("renders all 19 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
     const sheets = active.filter((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet");
     expect(sheets.map((s) => s.number).sort()).toEqual([
       "A-101",
@@ -191,6 +192,10 @@ describe("createShowcaseDemoModel", () => {
       "M-201",
       "P-101",
       "P-102",
+      "S-101",
+      "S-102",
+      "S-201",
+      "S-301",
     ]);
 
     const normal = evaluateNormalPhotometrics(model, { gridSpacingFt: 2, interReflectance: true });
@@ -220,7 +225,66 @@ describe("createShowcaseDemoModel", () => {
         expect(svg).toContain("PHOTOMETRIC SUMMARY SCHEDULE");
         expect(svg).toContain("EMERGENCY / EGRESS LIGHTING COMPLIANCE SCHEDULE");
       }
+      if (sh.number === "S-101") {
+        expect(svg).toContain("PAD FOOTING SCHEDULE");
+        expect(svg).toContain("F1A");
+        expect(svg).toContain("C25B");
+      }
+      if (sh.number === "S-102") {
+        expect(svg).toContain("FLOOR DECK (50 PSF LL)");
+        expect(svg).toContain("ROOF DECK (20 PSF LL)");
+        expect(svg).toContain("W18×35");
+      }
+      if (sh.number === "S-301") {
+        expect(svg).toContain("STRUCTURAL COLUMN SCHEDULE");
+        expect(svg).toContain("STRUCTURAL BEAM FRAMING SCHEDULE");
+        expect(svg).toContain("W10×33");
+        expect(svg).toContain("W16×26");
+      }
     }
+  });
+
+  it("exercises the full @permitzip/bim-pack-structural gravity load path, column constraints, tributary zones, and footing lint", () => {
+    // 1. Level-tied, continuous multi-story, and fixed-height columns preserve exact vertical spans
+    const continuous = model.elements["col-l1-1"];
+    const l1Grid = model.elements["col-l1-1a"];
+    const balcony = model.elements["col-l1-2s"];
+    expect(continuous?.kind).toBe("column");
+    expect(l1Grid?.kind).toBe("column");
+    expect(balcony?.kind).toBe("column");
+    if (continuous?.kind === "column" && l1Grid?.kind === "column" && balcony?.kind === "column") {
+      // Continuous L1 → ROOF (22'-0" - 4" = 21'-8" = 6604 mm)
+      expect(columnVerticalSpan(model.elements, continuous, 0).heightMm).toBeCloseTo(22 * 304.8 - Math.round(4 * 25.4), 0);
+      // Level-tied L1 → L2 (12'-0" - 4" = 11'-8" = 3556 mm)
+      expect(columnVerticalSpan(model.elements, l1Grid, 0).heightMm).toBeCloseTo(12 * 304.8 - Math.round(4 * 25.4), 0);
+      // Explicit fixed-height exterior balcony column (11'-4" = 3454 mm)
+      expect(columnVerticalSpan(model.elements, balcony, 0).heightMm).toBeCloseTo(12 * 304.8 - Math.round(8 * 25.4), 0);
+    }
+
+    // 2. Full gravity load path: Roof & Floor decks + RTU-1 equipment weight → Beams → Columns → Pad Footings
+    const lp = structuralLoadPath(model);
+    expect(lp.unsupportedBeamEnds).toEqual([]);
+    expect(lp.problems).toEqual([]);
+    expect(lp.beams.length).toBeGreaterThanOrEqual(30);
+    expect(lp.columns.length).toBe(25);
+    expect(lp.footings.length).toBe(16);
+    for (const f of lp.footings) {
+      expect(f.load.total).toBeGreaterThan(0);
+    }
+    // RTU-1 (620 lb operating weight on East Roof) transfers into East Studio footings
+    expect(lp.footings.some((f) => f.load.equipment > 0)).toBe(true);
+    // Continuous column C25B receives both L2 floor and Roof gravity reactions
+    const c25bLoad = lp.columns.find((c) => c.id === "col-l1-1");
+    expect(c25bLoad?.load.dead ?? 0).toBeGreaterThan(0);
+    expect(c25bLoad?.load.live ?? 0).toBeGreaterThan(0);
+
+    // 3. Tributary zones computed for one-way structural deck framing beams
+    const frame = frameOf(model);
+    const strips = frame.beams.flatMap((b) => beamStrips(frame, b));
+    expect(strips.length).toBeGreaterThanOrEqual(10);
+
+    // 4. Structural lint: zero unsupported columns (every L1 column bears on a pad footing)
+    expect(footingUnsupportedAll(model)).toEqual([]);
   });
 
   it("integrates vent trees onto sanitary risers only, never onto domestic water risers", () => {
