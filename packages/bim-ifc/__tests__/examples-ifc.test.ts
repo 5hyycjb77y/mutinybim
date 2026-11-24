@@ -37,12 +37,13 @@ async function build(...scripts: ScriptDefinition[]): Promise<ModelState> {
 const PROJECT = { id: "2c9a7e14-5b3d-4f86-a1e0-7d4c3b2a1f09", name: "Synthetic examples" };
 const TIME_STAMP = "2026-11-12T00:00:00";
 
-/** The model's IFC 4.3 export, read back as STEP. */
-function exported(model: ModelState): StepFile {
-  const file = readStep(exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP }).text);
+/** The model's IFC 4.3 export and its checked STEP contents. */
+function exported(model: ModelState): { source: string; file: StepFile } {
+  const source = exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP }).text;
+  const file = readStep(source);
   expect(file.schemas).toEqual(["IFC4X3_ADD2"]);
   expect(danglingReferences(file)).toEqual([]);
-  return file;
+  return { source, file };
 }
 
 /** The entity at `#id`, or a failure naming it. */
@@ -84,8 +85,7 @@ describe("small-office", () => {
   let file: StepFile;
   beforeAll(async () => {
     model = await build(smallOffice);
-    source = exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP }).text;
-    file = readStep(source);
+    ({ source, file } = exported(model));
   });
 
   function readBack(input: string) {
@@ -153,7 +153,7 @@ describe("small-office", () => {
 describe("rooftop-unit", () => {
   let file: StepFile;
   beforeAll(async () => {
-    file = exported(await build(rooftopUnit));
+    file = exported(await build(rooftopUnit)).file;
   });
 
   it("writes the duct run: four segments swept at the sized section and two elbows, each run in its system with the unit", () => {
@@ -206,7 +206,7 @@ describe("electrical-room", () => {
   let file: StepFile;
   let board: ReadEntity;
   beforeAll(async () => {
-    file = exported(await build(electricalRoom, setPanelValues));
+    file = exported(await build(electricalRoom, setPanelValues)).file;
     board = only(file, "IFCELECTRICDISTRIBUTIONBOARD");
   });
 
@@ -239,7 +239,7 @@ describe("electrical-room", () => {
         ...(mode === "unrated" ? { electrical: undefined } : { adapter: "sample-other" }),
       } : element,
     ]));
-    const output = exported({ ...model, elements });
+    const output = exported({ ...model, elements }).file;
     const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits).toHaveLength(2);
     for (const circuit of circuits) {
