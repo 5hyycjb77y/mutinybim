@@ -130,16 +130,8 @@ export function DiagramLayer({ model, view, toPaper, toDrawing, paperOf, selecte
   // Bigger boxes first, so a panel's own target sits over the bus of what feeds it (and a pipe over the floor it crosses).
   const boxes = evaluation.boxes.map((b, i) => ({ b, i })).sort((x, y) => (y.b.max.x - y.b.min.x) * (y.b.max.y - y.b.min.y) - (x.b.max.x - x.b.min.x) * (x.b.max.y - x.b.min.y) || x.i - y.i)
   const warned = new Set(evaluation.warnings.map((w) => w.elementId))
-  // Text of what is selected, and standalone text that does not cover an equipment/run target,
-  // can be dragged on its own without stealing single-click selection from unselected nodes.
-  const overBox = (t: DiagramTextBox) => evaluation.boxes.some((b) => b.min.x < t.max.x && t.min.x < b.max.x && b.min.y < t.max.y && t.min.y < b.max.y)
-  const movableTexts = evaluation.texts.filter(
-    (t) =>
-      t.text.trim() !== '' &&
-      (t.elementId === null
-        ? !overBox(t)
-        : selected.has(t.elementId) || evaluation.boxes.some((b, i) => b.pipe && b.elementId === t.elementId && lit.has(i))),
-  )
+  // Every non-empty text label on a live diagram (equipment marks, run tags, titles) is directly draggable in one gesture!
+  const movableTexts = evaluation.texts.filter((t) => t.text.trim() !== '')
   const startDrag = (e: React.PointerEvent<SVGRectElement>, d: Omit<Drag, 'from' | 'to' | 'root'>) => {
     // Left button only (a right-click opens the menu).
     if (e.button > 0) return
