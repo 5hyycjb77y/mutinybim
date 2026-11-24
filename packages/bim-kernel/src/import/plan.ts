@@ -183,7 +183,11 @@ function planInScope(source: ImportSource, opts: PlanImportOptions): IfcImportPl
     if (own) converted.set(product.sourceId, own.id);
     line(cls.id, cls.id, cls.label).converted += 1;
   }
-  for (const u of source.unreadable) stay(u.entity, null, entityWords(u.entity), u.reason, u.count);
+  for (const u of source.unreadable) {
+    const match = u.classHint && map.choose({ entity: u.entity, ...u.classHint });
+    const cls = match?.ok ? match.choice.cls : match?.cls;
+    stay(cls?.id ?? u.entity, cls?.id ?? null, cls?.label ?? entityWords(u.entity), u.reason, u.count);
+  }
 
   const classes: ImportClassLine[] = [...lines.values()]
     .map((l) => ({ classId: l.classId, label: l.label, converted: l.converted, linked: [...l.linked].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count) }))
