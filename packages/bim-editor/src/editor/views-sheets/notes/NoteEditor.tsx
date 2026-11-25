@@ -97,22 +97,12 @@ export function NoteEditor({ origin, rotation, width, height, paper, pxPerMm, si
           latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
           return true
         }
-        if (event.key === 'Enter' && !event.shiftKey) {
-          // Cmd/Ctrl+Enter always commits; plain Enter commits unless editing inside a bullet/numbered list (Shift+Enter adds a newline).
-          const inList = (() => {
-            const $from = view.state.selection.$from
-            for (let d = $from.depth; d > 0; d--) {
-              const name = $from.node(d).type.name
-              if (name === 'listItem' || name === 'bulletList' || name === 'orderedList') return true
-            }
-            return false
-          })()
-          if (event.metaKey || event.ctrlKey || !inList) {
-            event.preventDefault()
-            event.stopPropagation()
-            latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
-            return true
-          }
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          // Cmd/Ctrl+Enter commits and closes; plain Enter inserts a new line or list item.
+          event.preventDefault()
+          event.stopPropagation()
+          latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
+          return true
         }
         return false
       },

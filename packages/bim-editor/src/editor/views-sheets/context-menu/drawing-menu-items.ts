@@ -162,8 +162,8 @@ export function drawingMenuItems(target: DrawingMenuTarget, ctx: DrawingMenuCont
     items: [
       { id: 'properties', label: 'Properties', hint: 'Selects it and shows its properties.', ...(ctx.canSelect ? {} : { disabledReason: SELECT_UNAVAILABLE }) },
       { id: 'select_like', label: 'Select all like this', hint: `${like.length} in this view`, ...(ctx.canSelect ? {} : { disabledReason: SELECT_UNAVAILABLE }) },
-      { id: 'hide_element_in_view', label: 'Hide element in view', hint: `Hides only ${title} in this view.`, ...(hideElementWhy ? { disabledReason: hideElementWhy } : {}) },
-      { id: 'hide_in_view', label: hide ? `Hide category (${hide.label})` : 'Hide category in view', ...(hide ? { hint: `Hides every ${hide.label} in this view.` } : {}), ...(hideWhy ? { disabledReason: hideWhy } : {}) },
+      { id: 'hide_element_in_view', label: 'Hide in view', hint: `Hides only ${title} in this view.`, ...(hideElementWhy ? { disabledReason: hideElementWhy } : {}) },
+      { id: 'hide_in_view', label: hide ? `Hide category (${hide.label})` : 'Hide category', ...(hide ? { hint: `Hides every ${hide.label} in this view.` } : {}), ...(hideWhy ? { disabledReason: hideWhy } : {}) },
       {
         id: 'lock_element',
         label: elLocked ? 'Unlock element' : 'Lock element',

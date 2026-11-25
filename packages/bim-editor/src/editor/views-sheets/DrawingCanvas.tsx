@@ -1140,6 +1140,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       else if (active && !insideRect(active.rect, at)) toast(`Draw inside ${active.view.name}'s frame, or press Esc to finish editing the view.`)
       else {
         e.preventDefault()
+        if (tool === 'line' || tool === 'rect') e.currentTarget.setPointerCapture(e.pointerId)
         draftInput.down(at)
       }
       return

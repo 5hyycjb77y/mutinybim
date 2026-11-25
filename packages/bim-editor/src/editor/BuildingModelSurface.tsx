@@ -3836,7 +3836,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               onUseArchitectLevels={() => setLevelRequest('architect')}
             />
           )}
-          {toolHint && !dragHint && !blocker && !showDrawing && (
+          {toolHint && !dragHint && !blocker && (
             <ToolHintBar text={toolHint} tone={toolHint === refusal ? 'warning' : 'info'} style={propertiesOpen ? { right: propertiesWidth + 24 } : undefined} />
           )}
           {showDrawing && <TrackpadHint />}

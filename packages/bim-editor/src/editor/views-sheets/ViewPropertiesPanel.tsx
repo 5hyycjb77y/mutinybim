@@ -544,7 +544,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
       {view.viewType !== 'three_d' && (
         <>
           <Separator />
-          <LayoutSection surface={PROPERTIES_SURFACE} id="vp-drafting" title="Drafting categories" defaultCollapsed>
+          <LayoutSection surface={PROPERTIES_SURFACE} id="vp-drafting" title="Drafting categories">
             <FieldGroup className="gap-1.5">
               {DRAFTING_CATEGORIES.map((c) => (
                 <Field key={c} orientation="horizontal">
@@ -660,7 +660,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
       )}
 
       <Separator />
-      <LayoutSection surface={PROPERTIES_SURFACE} id="vp-crop" title="Crop region" defaultCollapsed>
+      <LayoutSection surface={PROPERTIES_SURFACE} id="vp-crop" title="Crop region">
         {view.viewType === 'three_d' && crop3d ? <Crop3dFields controls={crop3d} canEdit={canEdit} disabledHint={disabledHint} /> : <CropFields view={view} canEdit={canEdit} disabledHint={disabledHint} onCrop={setCrop} onQuickCrop={setQuickCrop} />}
       </LayoutSection>
       </>

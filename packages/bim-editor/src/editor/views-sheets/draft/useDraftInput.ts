@@ -97,7 +97,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
     (
       at: Vec2,
       from: Vec2 | null,
-      opts: { nearest?: boolean; anchors?: boolean; pickElement?: boolean; chainPoints?: readonly Vec2[]; allowCloseLoop?: boolean } = {},
+      opts: { nearest?: boolean; anchors?: boolean; preferAnchors?: boolean; pickElement?: boolean; chainPoints?: readonly Vec2[]; allowCloseLoop?: boolean } = {},
     ) =>
       constrainPoint({
         at,
@@ -108,6 +108,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         reachMm: ctx.reachMm,
         trackBaseDeg: ctx.trackBaseDeg ?? 0,
         ...(opts.anchors !== false ? { anchors: ctx.anchors, graphicsIndex: ctx.graphicsIndex ?? null } : {}),
+        ...(opts.preferAnchors ? { preferAnchors: true } : {}),
         ...(opts.chainPoints && opts.chainPoints.length > 0 ? { chainPoints: opts.chainPoints } : {}),
         ...(opts.allowCloseLoop ? { allowCloseLoop: true } : {}),
         ...(opts.nearest ? { nearest: true } : {}),
@@ -243,9 +244,11 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       const curClicks = clicksRef.current
       const chainPoints = curClicks.map((pt) => pt.at)
       const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && curClicks.length >= 3
-      const c = constrain(raw, curClicks[curClicks.length - 1]?.at ?? null, {
+      const trackOrigin = shapeTool === 'rect' ? null : (curClicks[curClicks.length - 1]?.at ?? null)
+      const c = constrain(raw, trackOrigin, {
         anchors: true,
-        chainPoints,
+        preferAnchors: shapeTool === 'dimension',
+        chainPoints: shapeTool === 'rect' ? [] : chainPoints,
         allowCloseLoop,
         nearest: shapeTool === 'dimension' && curClicks.length === 0 && (settings.dimKind === 'radial' || settings.dimKind === 'diameter'),
       })
@@ -273,7 +276,10 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       const curClicks = clicksRef.current
       if (curClicks.length !== 1) return
       if (Math.hypot(raw.x - started.x, raw.y - started.y) < 2) return
-      const endC = constrain(raw, curClicks[0]!.at, { anchors: true, chainPoints: [curClicks[0]!.at] })
+      const endC = constrain(raw, shapeTool === 'rect' ? null : curClicks[0]!.at, {
+        anchors: true,
+        chainPoints: shapeTool === 'rect' ? [] : [curClicks[0]!.at],
+      })
       commitShape([curClicks[0]!, endC])
     },
     [shapeTool, constrain, commitShape],
@@ -285,11 +291,11 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         if (hover) setHover(null)
         return
       }
-      const last = clicks[clicks.length - 1]?.at ?? null
+      const last = shapeTool === 'rect' ? null : (clicks[clicks.length - 1]?.at ?? null)
       const needsItem = pending?.kind === 'modify' && pickNeedsItem(pending.op, clicks.length)
-      const chainPoints = clicks.map((pt) => pt.at)
+      const chainPoints = shapeTool === 'rect' ? [] : clicks.map((pt) => pt.at)
       const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && clicks.length >= 3
-      setHover(constrain(raw, last, { anchors: !needsItem, chainPoints, allowCloseLoop, pickElement: needsItem }))
+      setHover(constrain(raw, last, { anchors: !needsItem, preferAnchors: shapeTool === 'dimension', chainPoints, allowCloseLoop, pickElement: needsItem }))
     },
     [active, hover, clicks, pending, constrain, shapeTool],
   )

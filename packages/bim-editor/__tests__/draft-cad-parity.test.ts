@@ -286,4 +286,55 @@ describe('bim-editor CAD drafting parity (slice b)', () => {
     expect(wallSnap.at).toEqual({ x: 100, y: 50 })
     expect(wallSnap.snapLabel).toBe('wall corner')
   })
+
+  test('detail CAD endpoint snap wins over detail-item anchor label, and polar 90° does not hard-lock diagonals', () => {
+    const existing = lineItem('ln-1', 0, 0, 50, 0)
+    const endSnap = constrainPoint({
+      at: { x: 50.8, y: 0.6 },
+      from: null,
+      items: [existing],
+      toPaper: identity,
+      settings: DEFAULT_DRAFT_SETTINGS,
+      reachMm: 3,
+      anchors: [{ at: { x: 50, y: 0 }, label: 'line corner', ref: { elementId: 'ln-1', anchor: 'end' } }],
+    })
+    expect(endSnap.snapLabel).toBe('endpoint')
+    expect(endSnap.at).toEqual({ x: 50, y: 0 })
+
+    // 28° diagonal stays diagonal under default polarDeg: 90 (4° magnetic tolerance, not 45° ortho lock)
+    const diag = constrainPoint({
+      at: { x: 228, y: 122 },
+      from: { x: 0, y: 0 },
+      items: [],
+      toPaper: identity,
+      settings: DEFAULT_DRAFT_SETTINGS,
+      reachMm: 3,
+    })
+    expect(diag.tracking).toBeNull()
+    expect(diag.at).toEqual({ x: 228, y: 122 })
+
+    // Within 2° of horizontal still tracks cleanly at 0°
+    const nearHoriz = constrainPoint({
+      at: { x: 100, y: 2 },
+      from: { x: 0, y: 0 },
+      items: [],
+      toPaper: identity,
+      settings: DEFAULT_DRAFT_SETTINGS,
+      reachMm: 3,
+    })
+    expect(nearHoriz.tracking?.angleDeg).toBe(0)
+    expect(nearHoriz.at.y).toBeCloseTo(0, 3)
+
+    // Explicit ortho: true still locks 28° to 0°
+    const orthoSnap = constrainPoint({
+      at: { x: 228, y: 122 },
+      from: { x: 0, y: 0 },
+      items: [],
+      toPaper: identity,
+      settings: { ...DEFAULT_DRAFT_SETTINGS, ortho: true },
+      reachMm: 3,
+    })
+    expect(orthoSnap.tracking?.angleDeg).toBe(0)
+    expect(orthoSnap.at.y).toBeCloseTo(0, 3)
+  })
 })

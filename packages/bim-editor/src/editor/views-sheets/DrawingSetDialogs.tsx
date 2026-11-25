@@ -487,9 +487,7 @@ export function IssueSetDialog({ projectId, modelId, model, save, canIssue, bloc
   const [revDate, setRevDate] = useState(today)
   const [revText, setRevText] = useState('ISSUED FOR PERMIT')
   const [accepted, setAccepted] = useState(false)
-  const [errorsAccepted, setErrorsAccepted] = useState(false)
   const qualityReport = useMemo(() => runPrePrintQualityGate(model), [model])
-  const unacknowledgedErrors = (qualityReport?.errors.length ?? 0) > 0 && !errorsAccepted
   const [issued, setIssued] = useState<Extract<IssueSetResult, { status: 'issued' | 'already_issued' }> | null>(null)
   const [verifyIssue, setVerifyIssue] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -563,7 +561,7 @@ export function IssueSetDialog({ projectId, modelId, model, save, canIssue, bloc
   }
   const rowMissing = addRow && (!revNumber.trim() || !revDate.trim() || !revText.trim())
   const codeBlocked = status?.codeCheck && !status.codeCheck.ok ? status.codeCheck.words : null
-  const reason = !canIssue ? blockedReason : !ready ? null : picked.size === 0 ? 'Pick at least one sheet.' : codeBlocked ? `${codeBlocked}. Each signer opens the sheet and chooses Re-check and sign, or Override with a reason.` : unacknowledgedErrors ? `Acknowledge the ${qualityReport?.errors.length ?? 0} quality gate error(s) before issuing.` : !name.trim() ? 'Name the issue.' : rowMissing ? 'The revision row needs a number, a date and a description.' : differs && !accepted ? 'Print the set again, or confirm you checked the sheets that changed.' : null
+  const reason = !canIssue ? blockedReason : !ready ? null : picked.size === 0 ? 'Pick at least one sheet.' : codeBlocked ? `${codeBlocked}. Each signer opens the sheet and chooses Re-check and sign, or Override with a reason.` : !name.trim() ? 'Name the issue.' : rowMissing ? 'The revision row needs a number, a date and a description.' : differs && !accepted ? 'Print the set again, or confirm you checked the sheets that changed.' : null
 
   return (
     <Dialog open onOpenChange={(open) => !open && !busy && onCancel()}>
@@ -600,8 +598,6 @@ export function IssueSetDialog({ projectId, modelId, model, save, canIssue, bloc
             <PrePrintQualityGate
               model={model}
               report={qualityReport}
-              errorsAccepted={errorsAccepted}
-              onErrorsAcceptedChange={setErrorsAccepted}
             />
             <Alert className={differs ? 'border-warning-300 bg-warning-50' : 'border-success-300 bg-success-50'} data-testid="issue-print-check" data-status={ready.comparison.status}>
               <AlertTitle>{differs ? 'Changed since the last print' : 'Matches the last print'}</AlertTitle>

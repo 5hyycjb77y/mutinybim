@@ -383,6 +383,8 @@ export function constrainPoint(input: {
   readonly reachMm: number
   /** Points dimensions and detail lines follow (model ends and edges). */
   readonly anchors?: readonly SnapPoint[]
+  /** When true (dimensions), prefer anchor snaps over detail-line CAD snaps so dimensions bind to corners. */
+  readonly preferAnchors?: boolean
   /** Real rendered model graphics index (wall corners/faces, grid lines/intersections). */
   readonly graphicsIndex?: GraphicsSnapIndex | null
   /** Vertices already clicked in the current polyline / region / line chain. */
@@ -417,7 +419,7 @@ export function constrainPoint(input: {
     }
   }
 
-  // 2. Model / dimension anchor points.
+  // 2. Model / dimension anchor points (preferred ahead of detail CAD snaps for dimensions or non-detail model elements).
   let bestAnchor: SnapPoint | null = null
   let bestD = reachMm
   for (const a of input.anchors ?? []) {
@@ -427,7 +429,10 @@ export function constrainPoint(input: {
       bestD = d
     }
   }
-  if (bestAnchor) return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapKind: 'endpoint', snapRef: bestAnchor.ref, tracking: null, itemId: input.items.some((i) => i.id === bestAnchor.ref.elementId) ? bestAnchor.ref.elementId : null }
+  const anchorIsDetailItem = bestAnchor !== null && input.items.some((i) => i.id === bestAnchor.ref.elementId)
+  if (bestAnchor && (input.preferAnchors || !anchorIsDetailItem)) {
+    return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapKind: 'endpoint', snapRef: bestAnchor.ref, tracking: null, itemId: anchorIsDetailItem ? bestAnchor.ref.elementId : null }
+  }
 
   // 3. Existing detail linework snaps (endpoint, midpoint, intersection, perpendicular, etc.).
   const kinds = new Set<SnapKind>(settings.snaps)
@@ -435,6 +440,9 @@ export function constrainPoint(input: {
   if (kinds.size > 0) {
     const snap = detailSnap(input.items, input.toPaper, at, { kinds, reachMm, ...(from ? { from } : {}) })
     if (snap) return { at: snap.at, snapLabel: SNAP_WORDS[snap.kind], snapKind: snap.kind, snapRef: null, tracking: null, itemId: snap.itemId }
+  }
+  if (bestAnchor) {
+    return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapKind: 'endpoint', snapRef: bestAnchor.ref, tracking: null, itemId: anchorIsDetailItem ? bestAnchor.ref.elementId : null }
   }
 
   // 4. Real model graphics snaps (wall corners, wall faces, grids, intersections, and chain corner alignment guides).
@@ -457,9 +465,9 @@ export function constrainPoint(input: {
     }
   }
 
-  // 5. Ortho / polar tracking (90° soft magnetic snap by default, Revit style).
+  // 5. Ortho / polar tracking (Ortho locks to 90° with 45° tolerance; Polar uses gentle 4° magnetic snap).
   if (from && (settings.ortho || settings.polarDeg)) {
-    const t = trackFrom(from, at, settings.ortho ? 90 : (settings.polarDeg ?? 90), input.trackBaseDeg ?? 0)
+    const t = trackFrom(from, at, settings.ortho ? 90 : (settings.polarDeg ?? 90), input.trackBaseDeg ?? 0, settings.ortho ? 45 : 4)
     if (t) return { at: t.at, snapLabel: null, snapKind: null, snapRef: null, tracking: { from, angleDeg: t.angleDeg }, itemId: null }
   }
   return { at, snapLabel: null, snapKind: null, snapRef: null, tracking: null, itemId: null }
@@ -472,10 +480,10 @@ function turnPaper(v: Vec2, deg: number): Vec2 {
 }
 
 /** Ortho / polar tracking whose steps start from `baseDeg` (the working angle on paper) instead of paper-right. */
-export function trackFrom(from: Vec2, at: Vec2, incrementDeg: number, baseDeg: number): { at: Vec2; angleDeg: number } | null {
-  if (baseDeg === 0) return trackAngle(from, at, incrementDeg)
+export function trackFrom(from: Vec2, at: Vec2, incrementDeg: number, baseDeg: number, toleranceDeg?: number): { at: Vec2; angleDeg: number } | null {
+  if (baseDeg === 0) return trackAngle(from, at, incrementDeg, toleranceDeg)
   const local = turnPaper(sub(at, from), -baseDeg)
-  const t = trackAngle({ x: 0, y: 0 }, local, incrementDeg)
+  const t = trackAngle({ x: 0, y: 0 }, local, incrementDeg, toleranceDeg)
   if (!t) return null
   const back = turnPaper(t.at, baseDeg)
   return { at: { x: from.x + back.x, y: from.y + back.y }, angleDeg: (((t.angleDeg + baseDeg) % 360) + 360) % 360 }

@@ -97,7 +97,7 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
             data-testid="view-circuit-style"
           >
             {STYLES.map((s) => {
-              const label = optionLabels?.[`circuitStyle.${s.value}`] ?? s.label
+              const label = optionLabels?.[`pathStyle.${s.value}`] ?? s.label
               return (
                 <ToggleGroupItem key={s.value} value={s.value} aria-label={label} data-testid={`view-circuit-style-${s.value}`}>
                   {label}
