@@ -73,7 +73,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@types/three": "0.185.3",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "@typescript-eslint/eslint-plugin": "8.57.2",
     "@typescript-eslint/parser": "8.57.2",
     "babel-plugin-jest-hoist": "30.4.0",
@@ -103,7 +103,7 @@
     "tsx": "4.23.13",
     "typescript": "5.9.3",
     "web-ifc": "0.0.78",
-    "ws": "8.21.3",
+    "ws": "8.23.0",
     "zod": "4.6.7"
   }
 }
