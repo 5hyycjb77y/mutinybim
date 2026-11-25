@@ -37,12 +37,13 @@ async function build(...scripts: ScriptDefinition[]): Promise<ModelState> {
 const PROJECT = { id: "2c9a7e14-5b3d-4f86-a1e0-7d4c3b2a1f09", name: "Synthetic examples" };
 const TIME_STAMP = "2026-11-12T00:00:00";
 
-/** The model's IFC 4.3 export, read back as STEP. */
-function exported(model: ModelState): StepFile {
-  const file = readStep(exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP }).text);
+/** The model's IFC 4.3 export and its checked STEP contents. */
+function exported(model: ModelState): { source: string; file: StepFile } {
+  const source = exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP }).text;
+  const file = readStep(source);
   expect(file.schemas).toEqual(["IFC4X3_ADD2"]);
   expect(danglingReferences(file)).toEqual([]);
-  return file;
+  return { source, file };
 }
 
 /** The entity at `#id`, or a failure naming it. */
@@ -79,22 +80,50 @@ function psets(file: StepFile, e: ReadEntity): Record<string, Record<string, unk
 const related = (file: StepFile, rel: string, owner: number, members: number, of: number) => ofType(file, rel).filter((r) => ref(r, owner) === of).flatMap((r) => refs(r, members));
 
 describe("small-office", () => {
+  let model: ModelState;
+  let source: string;
   let file: StepFile;
   beforeAll(async () => {
-    file = exported(await build(smallOffice));
+    model = await build(smallOffice);
+    ({ source, file } = exported(model));
   });
 
-  it("imports Level 2 at its original 12 ft elevation (#62)", async () => {
-    const model = await build(smallOffice);
-    const out = exportIfc({ model, project: PROJECT, timeStamp: TIME_STAMP });
+  function readBack(input: string) {
     const empty: ModelState = { ...model, modelId: "small-office-readback", elements: {}, connections: [] };
-    const back = importIfc(out.text, {
+    return importIfc(input, {
       model: empty, referenceId: "ref", sourceKey: "small-office", sourceId: "v1",
       label: "Small office", disciplines: ["architecture"],
     });
+  }
+
+  it("imports Level 2 at its original 12 ft elevation (#62)", () => {
+    const back = readBack(source);
     const levels = back.records.filter((record) => record.kind === "level");
     expect(levels).toHaveLength(2);
     expect(levels.find((level) => level.name === "Level 2")?.elevationMm).toBeCloseTo(12 * FT, 6);
+  });
+
+  it("accounts for all 12 walls when one wall refers to a missing placement", () => {
+    const walls = ofType(file, "IFCWALL");
+    expect(walls).toHaveLength(12);
+    const wall = walls[0]!;
+    const guid = text(wall, 0)!;
+    const line = source.split("\n").find((row) => row.startsWith(`#${wall.id}=IFCWALL(`))!;
+    const placementAndBody = `,#${ref(wall, 5)},#${ref(wall, 6)},`;
+    const damaged = source.replace(line, line.replace(placementAndBody, `,#999999,#${ref(wall, 6)},`));
+    expect(danglingReferences(readStep(damaged))).toEqual([999999]);
+
+    const intact = readBack(source);
+    expect(intact.report.classes.find((c) => c.classId === "arch.wall")).toMatchObject({ converted: 12, linked: [] });
+    const back = readBack(damaged);
+    expect(back.records.filter((r) => r.kind === "wall")).toHaveLength(11);
+    expect(back.converted.has(guid)).toBe(false);
+    const row = back.report.classes.find((c) => c.classId === "arch.wall");
+    expect(row).toMatchObject({
+      converted: 11, linked: [{ count: 1, reason: expect.stringContaining(guid) }],
+    });
+    expect(row?.linked[0]?.reason).toMatch(/placement.*#999999.*missing/i);
+    expect(back.report.converted + back.report.stayLinked).toBe(intact.report.converted + intact.report.stayLinked);
   });
 
   it("writes each storey at its elevation, with its six walls in it", () => {
@@ -124,7 +153,7 @@ describe("small-office", () => {
 describe("rooftop-unit", () => {
   let file: StepFile;
   beforeAll(async () => {
-    file = exported(await build(rooftopUnit));
+    file = exported(await build(rooftopUnit)).file;
   });
 
   it("writes the duct run: four segments swept at the sized section and two elbows, each run in its system with the unit", () => {
@@ -177,7 +206,7 @@ describe("electrical-room", () => {
   let file: StepFile;
   let board: ReadEntity;
   beforeAll(async () => {
-    file = exported(await build(electricalRoom, setPanelValues));
+    file = exported(await build(electricalRoom, setPanelValues)).file;
     board = only(file, "IFCELECTRICDISTRIBUTIONBOARD");
   });
 
@@ -210,7 +239,7 @@ describe("electrical-room", () => {
         ...(mode === "unrated" ? { electrical: undefined } : { adapter: "sample-other" }),
       } : element,
     ]));
-    const output = exported({ ...model, elements });
+    const output = exported({ ...model, elements }).file;
     const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits).toHaveLength(2);
     for (const circuit of circuits) {
@@ -262,7 +291,7 @@ describe("electrical-room", () => {
     const panel = Object.values(model.elements).find((e) => e.kind === "part" && e.mark === "LP-1");
     if (!panel) throw new Error("no LP-1");
     const elements = Object.fromEntries(Object.entries(model.elements).filter(([id]) => id !== panel.id));
-    const output = exported({ ...model, elements });
+    const output = exported({ ...model, elements }).file;
     expect(ofType(output, "IFCELECTRICDISTRIBUTIONBOARD")).toHaveLength(0);
     const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits).toHaveLength(2);
@@ -284,7 +313,7 @@ describe("electrical-room", () => {
         return [id, { ...e, source: rest }];
       }),
     ) as typeof model.elements;
-    const output = exported({ ...model, elements });
+    const output = exported({ ...model, elements }).file;
     const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits).toHaveLength(2);
     for (const circuit of circuits) {

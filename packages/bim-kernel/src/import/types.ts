@@ -132,8 +132,13 @@ export interface ImportSource {
   readonly storeys: readonly ImportStorey[];
   readonly groups: readonly ImportGroup[];
   readonly products: readonly ImportProduct[];
-  /** Products the reader saw but could not read at all, and why (counts by entity). */
-  readonly unreadable: readonly { readonly entity: string; readonly count: number; readonly reason: string }[];
+  /** Products the reader could not read. A class hint puts a skipped occurrence on its usual report line. */
+  readonly unreadable: readonly {
+    readonly entity: string;
+    readonly count: number;
+    readonly reason: string;
+    readonly classHint?: Pick<ImportProduct, "predefinedType" | "objectType">;
+  }[];
 }
 
 /** One class's line in the report. */

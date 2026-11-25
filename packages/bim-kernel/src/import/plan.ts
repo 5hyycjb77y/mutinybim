@@ -191,7 +191,11 @@ function planInScope(source: ImportSource, opts: PlanImportOptions): IfcImportPl
     if (own) converted.set(product.sourceId, own.id);
     line(cls.id, cls.id, cls.label).converted += 1;
   }
-  for (const u of source.unreadable) stay(u.entity, null, entityWords(u.entity), u.reason, u.count);
+  for (const u of source.unreadable) {
+    const match = u.classHint && map.choose({ entity: u.entity, ...u.classHint });
+    const cls = match?.ok ? match.choice.cls : match?.cls;
+    stay(cls?.id ?? u.entity, cls?.id ?? null, cls?.label ?? entityWords(u.entity), u.reason, u.count);
+  }
 
   // Groups a class takes that no record came from: one note per class, ahead of the per-product notes, so what the file grouped isn't lost silently.
   const leftGroups = new Map<string, { label: string; names: string[] }>();
