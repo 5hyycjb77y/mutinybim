@@ -4149,7 +4149,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           {...(partEditor.spot ? { newCategory: 'generic' as const } : {})}
           firmLibrary={
             firmLibrary.status.state === 'ready'
-              ? { canWrite: firmLibrary.canWrite, ...(firmLibrary.canWrite ? {} : { reason: 'Your role can place firm library parts but not add them' }), save: firmLibrary.save }
+              ? { canWrite: firmLibrary.canWrite, itemsById: firmLibrary.itemsById, ...(firmLibrary.canWrite ? {} : { reason: 'Your role can place firm library parts but not add them' }), save: firmLibrary.afterPublish }
               : undefined
           }
           onClose={() => setPartEditor(null)}

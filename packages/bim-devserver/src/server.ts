@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { WebSocketServer } from "ws";
-import { branchModelId, buildSheetScene, buildSheetSceneFor, demoSheetDefinition, elementValues, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
+import { asRevision, branchModelId, buildSheetScene, buildSheetSceneFor, definitionTypes, demoSheetDefinition, elementValues, exampleRooftopUnit, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
 import { createDemoModel, createPlacedDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { captureSnapshot, issueFromSnapshot, renderSheetPdf } from "@permitzip/bim-sheets";
 import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
@@ -41,6 +41,7 @@ import { createElectricalDemoModel } from "./electrical-demo";
 import { createArchOverhaulDemoModel } from "./arch-overhaul-demo";
 import { enlargedPlansDemoModel } from "./enlarged-plans-demo";
 import { createMechanicalDetailsDemoModel } from "./mechanical-details-demo";
+import type { LocalFirmParts } from "./firm-parts";
 
 // The kernel carries no trade: gas, plumbing and air systems are first-party add-ons, installed before any model is built.
 installFirstPartyAddOns();
@@ -76,6 +77,21 @@ function openIssueModel(): ModelState {
 /** The 7492 Sample Market propane system as drawn, every pipe 3/4" (e2e/building-model-gas-zones.spec.ts). */
 const sampleMarketGasModel = (): ModelState => buildSampleMarketGas();
 
+/** Project A has a drawn family to publish. Project B starts with a roof to place it on. */
+function firmPartsDemo(id: "firm-parts-a" | "firm-parts-b"): ModelState {
+  let model = createDemoModel(id);
+  const setup: Command[] = [{ type: "create_level", levelId: "roof", name: "Roof", elevationMm: 0 }];
+  if (id === "firm-parts-a") {
+    setup.push({ type: "save_part_types", label: "Rooftop unit on curb", types: definitionTypes(exampleRooftopUnit()) });
+  }
+  for (const command of setup) {
+    const result = executeCommand(model, command);
+    if (!result.ok) throw new Error(`[bim-devserver] ${id}: ${result.error.message}`);
+    model = { ...result.model, revision: asRevision(model.revision + 1) };
+  }
+  return model;
+}
+
 const startingModel =
   process.env.BIM_DEV_MODEL === "showcase"
     ? createShowcaseDemoModel("showcase-demo")
@@ -93,7 +109,9 @@ const startingModel =
                 ? sampleMarketGasModel()
                 : process.env.BIM_DEV_MODEL === "enlarged-plans"
                   ? enlargedPlansDemoModel()
-                  : createDemoModel("f-a-demo");
+                  : process.env.BIM_DEV_MODEL === "firm-parts-a" || process.env.BIM_DEV_MODEL === "firm-parts-b"
+                    ? firmPartsDemo(process.env.BIM_DEV_MODEL)
+                    : createDemoModel("f-a-demo");
 // Main plus branches, versions and copies, all in memory (bim-sync's in-memory branch host).
 const models = await InMemoryBranchHost.start(startingModel);
 const { sequencer, hub } = models.main;
@@ -207,8 +225,8 @@ if (externalAuthority && !signInUrl) {
 }
 
 /** Which model server the editor page opens, and the sign-in it presents there. */
-async function demoConfig(res: ServerResponse, url: URL): Promise<void> {
-  if (!externalAuthority || !signInUrl) return send(res, 200, "application/json", JSON.stringify({ authority: "in-process" }));
+async function demoConfig(res: ServerResponse, url: URL, firmParts: LocalFirmParts | null): Promise<void> {
+  if (!externalAuthority || !signInUrl) return send(res, 200, "application/json", JSON.stringify({ authority: "in-process", firmPartsId: firmParts?.id }));
   const name = (url.searchParams.get("name") ?? "You").slice(0, 60);
   const answer = await fetch(`${signInUrl}/token?name=${encodeURIComponent(name)}`);
   if (!answer.ok) {
@@ -223,9 +241,40 @@ async function demoConfig(res: ServerResponse, url: URL): Promise<void> {
   return send(res, 200, "application/json", JSON.stringify({ authority: "external", authorityUrl: externalAuthority, token: body.access_token, userId: body.user_id, displayName: name }));
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () => Promise<string>, css: string) {
+async function serveFirmParts(req: IncomingMessage, res: ServerResponse, url: URL, catalog: LocalFirmParts) {
+  const json = (status: number, body: unknown) => send(res, status, "application/json", JSON.stringify(body));
+  if (!["localhost", "127.0.0.1"].includes(url.hostname) || (req.headers.origin && req.headers.origin !== url.origin)) {
+    return json(403, { error: "Open the local editor on this computer to use its catalog." });
+  }
+  if (url.searchParams.get("library") !== catalog.id) return json(412, { error: "The editor is connected to a different parts catalog." });
+  if (req.method === "GET") return json(200, catalog.list());
+  if (req.method !== "POST") return json(405, { error: "Use GET to list parts or POST to publish." });
+  if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") return json(415, { error: "The publish request must be JSON." });
+
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    length += chunk.length;
+    if (length > 8 * 1024 * 1024) {
+      req.resume();
+      return json(413, { error: "The part definition exceeds the 8 MiB local catalog limit." });
+    }
+    chunks.push(chunk);
+  }
+  let request: unknown;
+  try {
+    request = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return json(400, { error: "The publish request could not be read as JSON." });
+  }
+  const result = catalog.publish(request);
+  return json(result.status, result.body);
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () => Promise<string>, css: string, firmParts: LocalFirmParts | null) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  if (req.method === "GET" && url.pathname === "/demo-config.json") return demoConfig(res, url);
+  if (req.method === "GET" && url.pathname === "/demo-config.json") return demoConfig(res, url, firmParts);
+  if (firmParts && url.pathname === "/api/bim/library/part-types") return serveFirmParts(req, res, url, firmParts);
   if (req.method === "GET" && url.pathname === "/feasibility") return send(res, 200, "text/html; charset=utf-8", INDEX_HTML);
   if (req.method === "GET" && url.pathname === "/feasibility/client.js") return send(res, 200, "text/javascript", await clientJs());
   if (req.method === "GET" && url.pathname === "/feasibility/viewer.css") return send(res, 200, "text/css", css);
@@ -306,8 +355,10 @@ async function main() {
   };
   await clientJs();
 
+  const catalogPath = process.env.BIM_DEV_FIRM_PARTS_DB;
+  const firmParts = catalogPath && !externalAuthority ? new (await import("./firm-parts")).LocalFirmParts(catalogPath) : null;
   const server = createServer((req, res) => {
-    handle(req, res, clientJs, css).catch((err) => {
+    handle(req, res, clientJs, css, firmParts).catch((err) => {
       console.error("[bim-devserver] request failed", { url: req.url, err });
       send(res, 500, "text/plain", "Server error: see devserver log");
     });
@@ -362,15 +413,18 @@ async function main() {
   // The WebSocket server re-emits listen errors; the http server handler above reports them.
   wss.on("error", (err) => console.error("[bim-devserver] websocket server error", err.message));
 
-  server.listen(port, () => {
+  server.on("close", () => firmParts?.close());
+  server.listen({ port, host: firmParts ? "127.0.0.1" : undefined }, () => {
+    const address = server.address();
+    const listenPort = typeof address === "object" && address ? address.port : port;
     if (editor) {
-      console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${port}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
+      console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${listenPort}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
       console.log(`[bim-devserver] editor build ${editorMode === "eager" ? "starting now" : "starts on the first editor page"} (cached in ${editor.outDir})`);
     } else {
       console.log("[bim-devserver] editor off (BIM_DEV_EDITOR=off)");
     }
-    console.log(`[bim-devserver] MutinyBIM F-a demo at http://localhost:${port}/feasibility  (open twice: ?name=Priya and ?name=Avery)`);
-    console.log(`[bim-devserver] model ${mainModelId} at ws://127.0.0.1:${port}/sync  (pid ${process.pid}; branches and versions kept until it stops)`);
+    console.log(`[bim-devserver] MutinyBIM F-a demo at http://localhost:${listenPort}/feasibility  (open twice: ?name=Priya and ?name=Avery)`);
+    console.log(`[bim-devserver] model ${mainModelId} at ws://127.0.0.1:${listenPort}/sync  (pid ${process.pid}; branches and versions kept until it stops)`);
     if (editorMode === "eager") editor?.warm();
   });
 }

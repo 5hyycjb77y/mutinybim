@@ -5,7 +5,9 @@ import { definitionTypes, PART_CATEGORY_LABELS, partTypeDefinitionSchema, type P
 import type { EditorDataAnswer, EditorDataHost, EditorHostCapabilities } from '@permitzip/bim-editor-host'
 import { useEditorHost } from '@permitzip/bim-editor/host'
 import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
+import { partItemSizes, type LibraryPartTypeEntry } from '../../contracts/bim/firm-part-versions'
 import type { CatalogEntry } from '../model-session'
+import { fetchLibraryPartTypesFrom, LibraryReadError } from './part-type-library'
 
 /**
  * The firm part library for the Building Model: every size of every firm part
@@ -21,7 +23,8 @@ export type FirmLibraryStatus = { state: 'idle' | 'loading' | 'ready' | 'none' }
 
 interface Loaded {
   readonly canWrite: boolean
-  readonly definitions: readonly PartTypeDefinition[]
+  readonly itemsById?: ReadonlyMap<string, LibraryPartTypeEntry>
+  readonly parts: readonly { readonly key?: string; readonly definition: PartTypeDefinition }[]
 }
 
 function parseLibrary(body: unknown): Loaded {
@@ -29,13 +32,13 @@ function parseLibrary(body: unknown): Loaded {
   const canWrite = Reflect.get(body, 'canWrite') === true
   const parts: unknown = Reflect.get(body, 'parts')
   if (!Array.isArray(parts)) throw new Error('The firm library answered without its parts')
-  const definitions: PartTypeDefinition[] = []
+  const definitions: { definition: PartTypeDefinition }[] = []
   for (const p of parts) {
     const parsed = partTypeDefinitionSchema.safeParse(typeof p === 'object' && p !== null ? Reflect.get(p, 'definition') : null)
-    if (parsed.success) definitions.push(parsed.data)
+    if (parsed.success) definitions.push({ definition: parsed.data })
     else console.error('[firm-library] a part did not parse; leaving it out', parsed.error.issues[0])
   }
-  return { canWrite, definitions }
+  return { canWrite, parts: definitions }
 }
 
 async function errorText(res: EditorDataAnswer): Promise<string> {
@@ -52,31 +55,47 @@ export function useFirmPartLibrary(wanted: boolean) {
   return useFirmPartLibraryFrom(host.data.firmLibrary, wanted, host.capabilities)
 }
 
+async function readParts(port: NonNullable<EditorDataHost['firmLibrary']>): Promise<Loaded> {
+  if (port.publishPartTypeAtRevision) {
+    const { canPublish, partTypes } = await fetchLibraryPartTypesFrom(port)
+    return { canWrite: canPublish, parts: partTypes, itemsById: new Map(partTypes.map(p => [p.id, p])) }
+  }
+  const res = await port.firmParts()
+  if (!res.ok) throw new LibraryReadError(await errorText(res), res.status)
+  return parseLibrary(await res.json())
+}
+
 export function useFirmPartLibraryFrom(port: EditorDataHost['firmLibrary'], wanted: boolean, capabilities?: EditorHostCapabilities | null) {
   const [status, setStatus] = useState<FirmLibraryStatus>({ state: 'idle' })
   const [loaded, setLoaded] = useState<Loaded | null>(null)
 
-  // State changes only after the request answers, so the first load can run from an effect.
-  const fetchLibrary = useCallback(async () => {
+  const lastRequest = useRef(0)
+  const fetchLibrary = useCallback(async (): Promise<string | null> => {
+    const request = ++lastRequest.current
     if (!port) {
       console.info('[firm-library] this host has no firm library; Place part offers the built-in and model parts')
       setLoaded(null)
       setStatus({ state: 'none' })
-      return
+      return null
     }
     try {
-      const res = await port.firmParts()
-      if (res.status === 403 || res.status === 401) {
-        setLoaded(null)
-        setStatus({ state: 'none' })
-        return
+      const next = await readParts(port)
+      if (request === lastRequest.current) {
+        setLoaded(next)
+        setStatus({ state: 'ready' })
       }
-      if (!res.ok) throw new Error(await errorText(res))
-      setLoaded(parseLibrary(await res.json()))
-      setStatus({ state: 'ready' })
+      return null
     } catch (err) {
+      if (request !== lastRequest.current) return null
+      setLoaded(null)
+      if (err instanceof LibraryReadError && (err.status === 403 || err.status === 401)) {
+        setStatus({ state: 'none' })
+        return err.message
+      }
       console.error('[firm-library] load failed', err)
-      setStatus({ state: 'failed', message: err instanceof Error ? err.message : 'the library did not load' })
+      const message = err instanceof Error ? err.message : 'the library did not load'
+      setStatus({ state: 'failed', message })
+      return message
     }
   }, [port])
   const load = useCallback(async () => {
@@ -84,19 +103,18 @@ export function useFirmPartLibraryFrom(port: EditorDataHost['firmLibrary'], want
     await fetchLibrary()
   }, [fetchLibrary])
 
-  const started = useRef(false)
   useEffect(() => {
-    if (!wanted || started.current) return
-    started.current = true
-    void fetchLibrary()
+    if (wanted) void fetchLibrary()
+    return () => { ++lastRequest.current }
   }, [wanted, fetchLibrary])
 
   const entries = useMemo((): CatalogEntry[] => {
     if (!loaded) return []
     const out: CatalogEntry[] = []
-    for (const def of loaded.definitions) {
+    for (const { key, definition } of loaded.parts) {
       try {
-        for (const t of definitionTypes(def)) out.push({ typeId: t.typeId, definition: t.definition, inModel: false, library: 'firm', categoryLabel: PART_CATEGORY_LABELS[def.category] })
+        const sizes = key === undefined ? definitionTypes(definition) : partItemSizes({ key, definition })
+        for (const t of sizes) out.push({ typeId: t.typeId, definition: t.definition, inModel: false, library: 'firm', categoryLabel: PART_CATEGORY_LABELS[definition.category] })
       } catch (err) {
         console.error('[firm-library] sizes could not be listed', err)
       }
@@ -109,13 +127,13 @@ export function useFirmPartLibraryFrom(port: EditorDataHost['firmLibrary'], want
       if (!port) return `Not saved to the firm library: ${unavailableWords(FIRM_PART_LIBRARY, capabilities)}`
       const res = await port.importPartType({ definition })
       if (!res.ok) return `Not saved to the firm library: ${await errorText(res)}`
-      await load()
-      return null
+      return fetchLibrary()
     },
-    [port, capabilities, load],
+    [port, capabilities, fetchLibrary],
   )
 
   // Wanted but not answered yet reads as loading.
   const shown: FirmLibraryStatus = status.state === 'idle' && wanted ? { state: 'loading' } : status
-  return { status: shown, entries, canWrite: loaded?.canWrite ?? false, save, retry: load }
+  const afterPublish = port?.publishPartTypeAtRevision ? fetchLibrary : save
+  return { status: shown, entries, canWrite: loaded?.canWrite ?? false, itemsById: loaded?.itemsById, save, afterPublish, retry: load }
 }

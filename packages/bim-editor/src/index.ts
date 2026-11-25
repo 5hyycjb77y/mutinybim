@@ -4,6 +4,7 @@ export {
   historyRouter,
   memoryPreferences,
   type LocalEditorHostOptions,
+  type LocalFirmPartsPort,
   createLocalDataHost,
   jsonAnswer,
   CONNECT_AGENT_DOC_HREF,

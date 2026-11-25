@@ -135,6 +135,16 @@ npm run proof-packs -- origin/main HEAD   # the proof-pack commit rule over a ra
 
 `BIM_DEV_PORT=3096 npm run demo` starts the demo on another port.
 
+To keep a reusable parts catalog on this computer, run the in-process demo with
+`BIM_DEV_FIRM_PARTS_DB="$HOME/mutinybim-parts.sqlite" npm run demo`.
+This starts the editor on loopback. Publish a drawn part and its sizes in one
+project, then open **Place part** in another. Restart with the same database
+file to keep revisions and publish receipts. If a save reply was lost, opening
+the editor at the same address with the same browser profile and demo name
+recovers the original publish. Demo project models still live in memory.
+The [RTU-10 walkthrough](packages/bim-editor/demo/firm-parts.md) includes two
+sample projects for trying publish, placement and update review.
+
 ## Repository map
 
 Package names use the `@permitzip/bim-*` prefix. Tagged releases publish

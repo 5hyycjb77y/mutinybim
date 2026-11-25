@@ -18,6 +18,7 @@ import {
   type Sketch,
   type SketchConstraint,
 } from '@permitzip/bim-kernel'
+import { newElementId } from '../placement'
 
 /**
  * The part editor's working copy and the edits its tools make. Pure: every
@@ -40,7 +41,7 @@ const EMPTY_MODEL = (id: string): PartModel => ({ id, referencePlanes: [], sketc
 
 /** A new part: three size parameters, their planes, nothing drawn yet. */
 export function blankDraft(groupName = 'New part', category: PartCategory = 'mechanical_equipment'): Draft {
-  const id = modelIdFor(groupName)
+  const id = newElementId('part')
   const definition = partDefinition(groupName, {
     typeName: 'Standard',
     category,
