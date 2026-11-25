@@ -126,6 +126,34 @@ it('recovers the original receipt after a lost reply, server restart, and anothe
   }
 }, 90000)
 
+it('declines colliding size IDs, clears the browser intent, and accepts the corrected family', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'mutiny-parts-names-'))
+  let server: Awaited<ReturnType<typeof startServer>> | undefined
+  try {
+    server = await startServer(path.join(dir, 'catalog.sqlite'))
+    const { origin } = server
+    const { firmPartsId } = await (await fetch(`${origin}/demo-config.json`)).json()
+    const browser = profile()
+    const wire: typeof fetch = (url, init) => fetch(new URL(String(url), origin), init)
+    const client = createDemoFirmParts(firmPartsId, 'Priya', () => browser, wire)
+    const definition = exampleRooftopUnit()
+    const model = definition.model!
+    const types = model.types.map(row => row.name === 'RTU-10' ? { ...row, name: 'RTU 5' } : row)
+    const refused = await client.publishPartTypeAtRevision({
+      requestId: 'duplicate-sizes', baseRevision: 0, definition: { ...definition, model: { ...model, types } },
+    })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toMatchObject({ error: expect.stringMatching(/RTU-5 and RTU 5.*rename/i) })
+    expect(browser.length).toBe(0)
+    expect((await (await client.partTypes()).json()).partTypes).toHaveLength(0)
+    const corrected = await client.publishPartTypeAtRevision({ requestId: 'renamed', baseRevision: 0, definition })
+    expect(await corrected.json()).toMatchObject({ status: 'saved', receipt: { revision: 1 } })
+  } finally {
+    await server?.stop()
+    await rm(dir, { recursive: true, force: true })
+  }
+}, 90000)
+
 it('admits one winner when two independent server processes publish different edits from the same base', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'mutiny-parts-race-'))
   const servers: Awaited<ReturnType<typeof startServer>>[] = []

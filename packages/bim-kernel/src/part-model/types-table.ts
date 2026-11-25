@@ -22,18 +22,27 @@ export interface DefinitionType {
   readonly definition: PartTypeDefinition;
 }
 
+/** Size names must remain distinct when converted to project type IDs. */
+export function sizeNameCollision(rows: readonly { name: string }[]): string | null {
+  const seen = new Map<string, string>();
+  for (const row of rows) {
+    const slug = typeSlug(row.name);
+    const clash = seen.get(slug);
+    if (clash !== undefined) return `Types ${clash} and ${row.name} would get the same id; rename one`;
+    seen.set(slug, row.name);
+  }
+  return null;
+}
+
 /** The part types a definition saves as: one per types-table row, or itself when the table is empty. */
 export function definitionTypes(def: PartTypeDefinition): DefinitionType[] {
   const model = def.model;
   if (!model || model.types.length === 0) return [{ typeId: model ? `${model.id}.${typeSlug(def.typeName)}` : typeSlug(def.typeName), definition: def }];
-  const seen = new Map<string, string>();
+  const clash = sizeNameCollision(model.types);
+  if (clash) throw new Error(clash);
   return model.types.map((row) => {
-    const slug = typeSlug(row.name);
-    const clash = seen.get(slug);
-    if (clash !== undefined) throw new Error(`Types ${clash} and ${row.name} would get the same id; rename one`);
-    seen.set(slug, row.name);
     const typeValues: Record<string, ParamValue> = { ...def.typeValues, ...row.values };
-    return { typeId: `${model.id}.${slug}`, definition: { ...def, typeName: row.name, typeValues } };
+    return { typeId: `${model.id}.${typeSlug(row.name)}`, definition: { ...def, typeName: row.name, typeValues } };
   });
 }
 

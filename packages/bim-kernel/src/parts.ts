@@ -5,6 +5,7 @@ import type { Discipline, ParamValue, PartInstance, PartTypeElement, Vec2 } from
 import { dimSchema, PARAM_NAME, type Dim } from "./part-dim";
 import { evaluateFormula, FormulaError, formulaNames, parseFormula } from "./part-model/formula";
 import { modelDims, resolvePartModel } from "./part-model/resolve";
+import { sizeNameCollision } from "./part-model/types-table";
 import { anyPartModelSchema, isPartModel2 } from "./part-model/schema-2";
 import { clearanceZoneIssues, clearanceZonesSchema, partPositionIssues, partPositionsSchema } from "./part-model/clearance";
 import { INTAKE_KINDS, type IntakeKind } from "./part-model/intake-hood";
@@ -663,6 +664,8 @@ function modelIssues(def: PartTypeDefinition): PartIssue[] {
   const model = def.model;
   if (!model) return [];
   const issues: PartIssue[] = [];
+  const clash = def.source.kind === "script" ? null : sizeNameCollision(model.types);
+  if (clash) issues.push({ field: "types", message: clash });
   const typeParams = new Map(def.typeParams.map((p) => [p.name, p]));
   const rows = model.types.length > 0 ? model.types : [{ name: def.typeName, values: def.typeValues }];
   for (const row of rows) {
