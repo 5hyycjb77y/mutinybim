@@ -1,12 +1,14 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import * as kernel from '@permitzip/bim-kernel'
 import { asRevision, DEFAULT_SETTINGS, exampleRooftopUnit, executeCommand, type Command, type ModelState, type PartTypeDefinition } from '@permitzip/bim-kernel'
 import type { EditorDataAnswer, EditorPartPublishRequest } from '@permitzip/bim-editor-host'
-import { drawnPartItemId, newerLibraryVersions, partItemSizes, partUpdateDiff, sizeHashes, type LibraryPartTypeEntry } from '../src/contracts/bim/firm-part-versions'
+import { drawnPartItemId, newerLibraryVersions, partItemSizes, partUpdateCommand, partUpdateDiff, projectFamilyTable, projectPartTypesToSave, sizeHashes, type LibraryPartTypeEntry } from '../src/contracts/bim/firm-part-versions'
 import { EditorHostProvider } from '../src/host'
 import { createLocalEditorHost, jsonAnswer } from '../src/host/local'
 import { PublishPartDialog } from '../src/editor/part-editor/PublishPartDialog'
 import PartEditorWindow from '../src/editor/part-editor/PartEditorWindow'
-import { blankDraft, draftDefinition, draftFromDefinition } from '../src/editor/part-editor/draft'
+import { blankDraft, draftDefinition, draftFromDefinition, setTypeValue } from '../src/editor/part-editor/draft'
+import { ModelSession } from '../src/editor/model-session'
 import { PartUpdateReview, type PartUpdateCommand } from '../src/editor/part-editor/PartUpdateReview'
 import { publishPartTypeFrom } from '../src/editor/part-editor/part-type-library'
 import { useFirmPartLibraryFrom } from '../src/editor/part-editor/use-firm-part-library'
@@ -248,6 +250,54 @@ it('offers only RTU-10 for an airflow edit and applies the full family definitio
     typeId: 'rtu.rtu-10',
     definition: expect.objectContaining({ typeName: 'RTU-10', typeValues: expect.objectContaining({ airflow: 4500 }), model: latest.definition.model }),
   }])
+})
+
+it('preserves the accepted RTU-10 airflow when a designer saves an RTU-5 edit from an older family table', () => {
+  const sizes = partItemSizes(entry(original, 1))
+  const latest = entry(reviseRtu10({ airflow: 4500 }), 2)
+  const empty: ModelState = { modelId: 'project-b', revision: asRevision(0), elements: {}, connections: [], settings: DEFAULT_SETTINGS }
+  let project = run(empty, { type: 'create_level', levelId: 'roof', name: 'Roof', elevationMm: 0 })
+  for (const size of sizes.slice(0, 2)) {
+    project = run(project, { type: 'place_part', partId: `placed-${size.name}`, typeId: size.typeId, partType: size.definition, levelId: 'roof', position: { x: 0, y: 0 } })
+  }
+  const projectType = (id: string) => {
+    const el = project.elements[id]
+    if (el?.kind !== 'part_type') throw new Error(`Missing project type ${id}`)
+    return el.definition
+  }
+  const before = projectType('rtu.rtu-5')
+  const updates = newerLibraryVersions([sizes[1]!], [latest])
+  project = run(project, partUpdateCommand(updates, 1))
+  const accepted = projectType('rtu.rtu-10')
+  expect(accepted.typeValues.airflow).toBe(4500)
+  const session: ModelSession = Object.assign(Object.create(ModelSession.prototype), {
+    kernel, view: project, submitCommand(command: Command) { project = run(project, command); return null },
+  })
+  expect(session.partFamilyForEditing(before).model!.types.find(row => row.name === 'RTU-10')?.values.airflow).toBe(4500)
+  const edited = draftDefinition(setTypeValue(draftFromDefinition(before), 'RTU-5', 'airflow', 2200))
+  expect(session.savePartDefinition(edited, before)).toBeNull()
+  expect(projectType('rtu.rtu-5').typeValues.airflow).toBe(2200)
+  expect(projectType('rtu.rtu-10')).toEqual(accepted)
+  expect(projectType('rtu.rtu-5').model!.types.find(row => row.name === 'RTU-10')?.values.airflow).toBe(4500)
+  expect(project.elements['placed-RTU-10']).toMatchObject({ typeId: 'rtu.rtu-10' })
+})
+
+it('opens a partially accepted family with the kept project value and detects competing edits to the same size', () => {
+  const oldSizes = partItemSizes(entry(original, 1))
+  const changeBoth = setTypeValue(draftFromDefinition(reviseRtu10({ airflow: 4500 })), 'RTU-5', 'airflow', 2500)
+  const latest = entry(draftDefinition(changeBoth), 2)
+  const empty: ModelState = { modelId: 'project-b', revision: asRevision(0), elements: {}, connections: [], settings: DEFAULT_SETTINGS }
+  const placed = run(empty, { type: 'save_part_types', label: 'Save rooftop units', types: oldSizes })
+  const selected = newerLibraryVersions([oldSizes[1]!], [latest])
+  const project = run(placed, partUpdateCommand(selected, 1))
+  const accepted = selected[0]!.after
+  const initial = projectFamilyTable(accepted, project.elements)
+  expect(initial.model!.types[0]?.values.airflow).toBe(2000)
+  const edit = (base: PartTypeDefinition, name: string, airflow: number) =>
+    draftDefinition(setTypeValue(draftFromDefinition(base), name, 'airflow', airflow))
+  const pending = projectPartTypesToSave(edit(initial, 'RTU-5', 2200), initial, project.elements)
+  expect(pending.map(size => size.typeId)).toEqual(['rtu.rtu-5'])
+  expect(() => projectPartTypesToSave(edit(original, 'RTU-10', 4800), original, project.elements)).toThrow(/RTU-10 changed in the project/)
 })
 
 it('reports a change to the RTU-10 cabinet length as a shape change for that size', () => {

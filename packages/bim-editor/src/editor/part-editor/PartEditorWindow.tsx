@@ -105,9 +105,11 @@ export interface FirmLibraryAccess {
 interface Props {
   /** The definition to edit, or null for a new part. */
   initial: PartTypeDefinition | null
+  /** Project row values at open; initial still identifies the library revision for publishing. */
+  projectDefinition?: PartTypeDefinition
   canEdit: boolean
   /** Save to the project library; returns the refusal in plain words, or null. */
-  onSave: (definition: PartTypeDefinition) => string | null
+  onSave: (definition: PartTypeDefinition, baseline: PartTypeDefinition | null) => string | null
   /** The firm library; absent where there is none (the standalone harness without it). */
   firmLibrary?: FirmLibraryAccess
   onClose: () => void
@@ -128,8 +130,8 @@ type EngineState = { status: 'loading' } | { status: 'ready' } | { status: 'fail
  * parameters and sizes, connectors, plan / front / side / 3D views, and a Test
  * tab that flexes every size. Save writes every size to the project library.
  */
-export default function PartEditorWindow({ initial, canEdit, onSave, firmLibrary, onClose, placesAt = null, newCategory }: Props) {
-  const [draft, setDraft] = useState<Draft>(() => (initial ? draftFromDefinition(initial) : blankDraft(undefined, newCategory)))
+export default function PartEditorWindow({ initial, projectDefinition, canEdit, onSave, firmLibrary, onClose, placesAt = null, newCategory }: Props) {
+  const [draft, setDraft] = useState<Draft>(() => (initial ? draftFromDefinition(projectDefinition ?? initial) : blankDraft(undefined, newCategory)))
   const modelId = draft.definition.model?.id
   const [baseRevision, setBaseRevision] = useState<number>()
   // Pin the original definition's revision once, even if the catalog arrives after editing starts.
@@ -271,7 +273,7 @@ export default function PartEditorWindow({ initial, canEdit, onSave, firmLibrary
       setSaveMessage({ ok: false, text: `Not saved: ${issue.message}` })
       return
     }
-    const refused = onSave(draftDefinition(draft))
+    const refused = onSave(draftDefinition(draft), saved ? draftDefinition(saved) : null)
     if (refused) setSaveMessage({ ok: false, text: refused })
     else {
       setSaved(draft)

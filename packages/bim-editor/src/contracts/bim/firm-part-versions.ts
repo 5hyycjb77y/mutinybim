@@ -1,4 +1,4 @@
-import { canonicalJson, definitionTypes, FormulaError, modelDims, partGroupName, resolveDim, type PartTypeDefinition } from "@permitzip/bim-kernel"
+import { canonicalJson, definitionTypes, FormulaError, modelDims, partGroupName, resolveDim, typeSlug, type ModelState, type PartTypeDefinition } from "@permitzip/bim-kernel"
 import { partDefinitionHash, type PartTypeItem } from "@permitzip/bim-library"
 import type { EditorPartPublishRequest } from "@permitzip/bim-editor-host"
 
@@ -102,6 +102,47 @@ export function draftBaseRevision(item: LibraryPartTypeEntry | undefined, initia
 function sizeForComparison(def: PartTypeDefinition): PartTypeDefinition {
   if (!def.model || def.source.kind === "script") return def
   return { ...def, model: { ...def.model, types: [] } }
+}
+
+/** A project can accept each size separately. Read its own saved row when opening another size's family table. */
+export function projectFamilyTable(def: PartTypeDefinition, elements: ModelState["elements"], baseline?: PartTypeDefinition): PartTypeDefinition {
+  const model = def.model
+  if (!model || def.source.kind === "script") return def
+  const before = new Map(baseline?.model?.types.map(row => [row.name, row.values]))
+  const types = model.types.map(row => {
+    // On save, retain rows the designer actually edited in this draft.
+    if (baseline && canonicalJson(before.get(row.name) ?? null) !== canonicalJson(row.values)) return row
+    const saved = elements[`${model.id}.${typeSlug(row.name)}`]
+    if (saved?.kind !== "part_type" || saved.definition.model?.id !== model.id) return row
+    const ownRow = saved.definition.model.types.find(r => r.name === saved.definition.typeName)
+    return ownRow ? { ...row, values: ownRow.values } : row
+  })
+  return { ...def, model: { ...model, types } }
+}
+
+/** Save a family edit as one command. Unedited project sizes keep their individual revision and local changes. */
+export function projectPartTypesToSave(def: PartTypeDefinition, baseline: PartTypeDefinition | null, elements: ModelState["elements"]) {
+  const proposed = definitionTypes(def)
+  if (!baseline?.model || !def.model || baseline.model.id !== def.model.id || def.source.kind === "script") return proposed
+  const previous = new Map(definitionTypes(baseline).map(size => [size.typeId, size.definition]))
+  const layoutChanged = canonicalJson(def.model.types.map(r => r.name)) !== canonicalJson(baseline.model.types.map(r => r.name))
+  const rows = def.model.types
+  const oldRows = baseline.model.types
+  const rebased = definitionTypes(projectFamilyTable(def, elements, baseline))
+  const effective = (size: PartTypeDefinition) => canonicalJson(sizeForComparison(size))
+  return rebased.filter(({ typeId, definition }, index) => {
+    const saved = elements[typeId]
+    const before = previous.get(typeId)
+    if (saved?.kind !== "part_type" || !before) return true
+    const old = effective(before)
+    if (!layoutChanged && effective(proposed[index]!.definition) === old
+      && canonicalJson(rows[index]?.values ?? null) === canonicalJson(oldRows[index]?.values ?? null)) return false
+    const current = effective(saved.definition)
+    if (current !== old && current !== effective(definition)) {
+      throw new Error(`${definition.typeName} changed in the project. Reopen the part editor to review its current definition before saving.`)
+    }
+    return true
+  })
 }
 
 /** A placed part type whose library item has a newer revision than the one it was placed from. */
