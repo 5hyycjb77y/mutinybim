@@ -329,13 +329,15 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
               <FieldDescription className="text-xs">
                 Locks: {boundTemplate.locks.map((k) => TEMPLATE_LOCK_LABELS[k]).join(', ') || 'none'}.{' '}
                 {canEdit && (
-                  <button
+                  <Button
                     type="button"
-                    className="underline hover:text-foreground"
+                    variant="link"
+                    size="xs"
+                    className="h-auto p-0 align-baseline text-xs"
                     onClick={() => set({ viewTemplateId: null }, 'detach view template')}
                   >
                     Detach
-                  </button>
+                  </Button>
                 )}
               </FieldDescription>
             ) : (
