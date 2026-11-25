@@ -328,4 +328,23 @@ describe("Nov 24 huddle electrical features", () => {
     expect(chamferPreview).not.toEqual(arcPreview);
     expect(chamferPreview.some((p, i) => i > 0 && Math.abs(p.y - chamferPreview[i - 1]!.y) < 0.01 && Math.abs(p.x - chamferPreview[i - 1]!.x) > 10)).toBe(true);
   });
+
+  it("omits expensive feeder kVA load tags by default and includes them when showFeederLoads is enabled", () => {
+    let model = emptyModel("m-feeder-loads");
+    model = run(model, { type: "create_level", levelId: "l1", name: "Level 1", elevationMm: 0 });
+    const types = electricalStarterTypes("1.0.0");
+    const panelDef = types.find((t) => t.id === "builtin:panelboard-225-mcb@1")!.definition;
+    const recDef = types.find((t) => t.id === "builtin:gfci-receptacle@1")!.definition;
+    model = run(model, { type: "place_part", partId: "mdp", typeId: "pt-mdp", partType: panelDef, levelId: "l1", position: { x: 0, y: 0 }, mark: "MDP" });
+    model = run(model, { type: "place_part", partId: "lp1", typeId: "pt-lp1", partType: panelDef, levelId: "l1", position: { x: 5000, y: 0 }, mark: "LP-1" });
+    model = run(model, { type: "place_part", partId: "r1", typeId: "pt-rec", partType: recDef, levelId: "l1", position: { x: 8000, y: 0 }, mark: "R1" });
+    model = run(model, { type: "create_service_link", linkId: "f-lp1", sourceId: "mdp", members: [{ elementId: "lp1" }], electrical: { ratingA: 225 } });
+    model = run(model, { type: "create_service_link", linkId: "c-r1", sourceId: "lp1", positions: [1], members: [{ elementId: "r1" }], electrical: { ratingA: 20 } });
+
+    const defaultGraph = electricalDiagramGraph(model.elements);
+    expect(defaultGraph.roots[0]?.children[0]?.feed?.load).toBeUndefined();
+
+    const withLoads = electricalDiagramGraph(model.elements, { showFeederLoads: true });
+    expect(withLoads.roots[0]?.children[0]?.feed?.load).toMatch(/kVA (DEM|CONN)/);
+  });
 });
