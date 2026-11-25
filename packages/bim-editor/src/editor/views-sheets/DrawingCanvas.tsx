@@ -2911,6 +2911,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       <ResizableSideRail
         side="right"
         surface={PROPERTIES_SURFACE}
+        testId="drawing-properties-rail"
         title="Properties"
         defaultWidthPx={PROPERTIES_DEFAULT_WIDTH_PX}
         shortcut={propertiesShortcut}

@@ -344,7 +344,14 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       if (e.key === 'Tab' && hover && !drag) {
         e.preventDefault()
         const ov = overlapRef.current
-        if (ov.stack.length > 1) {
+        const primaryKind = ov.stack[0] ? model.elements[ov.stack[0]]?.kind : undefined
+        const isRunStack =
+          (primaryKind === 'run_segment' || primaryKind === 'run_fitting') &&
+          ov.stack.every((cid) => {
+            const k = model.elements[cid]?.kind
+            return k === 'run_segment' || k === 'run_fitting'
+          })
+        if (ov.stack.length > 1 && !isRunStack) {
           const step = e.shiftKey ? -1 : 1
           const nextIdx = (ov.idx + step + ov.stack.length) % ov.stack.length
           ov.idx = nextIdx
