@@ -654,14 +654,17 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const at = el.position;
       const placement = geo.placement(frame, geo.axis(at));
       let body: StepRef | null = null;
+      let unresolved = false;
       try {
         const mesh = fittingMesh(fittingBody(els, el));
         body = geo.mesh(mesh.positions.map((v, i) => v - (i % 3 === 0 ? at.x : i % 3 === 1 ? at.y : at.z)), mesh.indices, false);
       } catch (err) {
         console.error("[bim-ifc] fitting geometry did not resolve; exported as a leg to each port", { fittingId: el.id, err });
+        unresolved = true;
       }
       body ??= geo.legs(el.ports.map((port) => ({ start: { x: 0, y: 0, z: 0 }, end: { x: port.position.x - at.x, y: port.position.y - at.y, z: port.position.z - at.z }, section: sectionOf(port.size) })));
-      if (!body) warn(`${el.id}: its fitting has no library body and no ports with length, so it has no body in the file`);
+      if (!body) warn(unresolved ? `${el.id}: its fitting shape did not resolve and it has no ports with length, so it has no body in the file` : `${el.id}: its fitting has no library body and no ports with length, so it has no body in the file`);
+      else if (unresolved) warn(`${el.id}: its fitting shape did not resolve, so it is written as a leg to each port`);
       product = writeElement(el, cls, stringField(el, "mark") ?? stringField(el, "label"), stringField(el, "mark"), placement, body);
     } else if (el.kind === "ceiling") {
       // The board the 3D view draws: its outline, less its holes, from its height up. In its room when it has one.
