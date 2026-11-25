@@ -29,12 +29,16 @@ contract only, with **no kernel edits**. It imports `@permitzip/bim-pack`,
   reactions down deck → beam → column → footing (`serviceNetworkTotals`), by
   load case (dead, live, equipment).
 - **A lint rule** (`struct.footing_unsupported`) and **a calc**
-  (`struct.simple_beam`: reactions, largest moment, utilisation).
+  (`struct.simple_beam`: reactions, largest moment, utilisation and, given
+  E and I, the largest elastic deflection and where it is).
 
 ## Limits
 
 - One service-level load case. No load factors or combinations (scenarios,
-  round 6), no live-load reduction, no deflection, no lateral loads.
+  round 6), no live-load reduction, no lateral loads.
+- Deflection only when both E and I are given (never a default): elastic
+  bending, constant EI, small deflections, no shear deformation, positive
+  down. No deflection limit is checked.
 - One-way rectangular decks; beams square to the span; simple spans only.
 - Footing and deck self-weight are not counted.
 - Beam ends are network nodes of their own (`<beamId>@start`), because one

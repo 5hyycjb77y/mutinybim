@@ -48,6 +48,60 @@ describe("c5x struct.simple_beam on the calc point", () => {
     expect(bad.ok).toBe(false);
   });
 
+  it("without E and I: the same five values, steps and issues as before, and no new inputs in the run (so its runKey holds)", () => {
+    const out = run(B2);
+    expect(out.values.map((v) => v.key)).toEqual(["start_reaction", "end_reaction", "max_moment", "max_moment_at", "utilisation"]);
+    expect(out.steps.map((s) => s.label)).toEqual(["Reactions", "Largest moment"]);
+    expect(out.issues).toHaveLength(1);
+    expect(Object.keys(out.inputs as object).sort()).toEqual(["allowable_moment_kip_ft", "point_loads", "span_ft", "uniform_plf"]);
+  });
+
+  it("with E (ksi) and I (in⁴): the largest deflection in inches and where it is in feet, citing the deflection method", () => {
+    // B2 with E = 29,000 ksi, I = 510 in⁴. Numerical double integration of EI·v″ = −M (independent of this code):
+    // Δ = 0.760294649 in at 14.799405 ft. Rounded: 0.76 in at 14.8 ft.
+    const out = run({ ...B2, elastic_modulus_ksi: 29000, moment_inertia_in4: 510 });
+    expect(out.values.map((v) => [v.key, v.value, v.unit])).toEqual([
+      ["start_reaction", 9223.3, "lbf"],
+      ["end_reaction", 8556.7, "lbf"],
+      ["max_moment", 69597, "lbf.ft"],
+      ["max_moment_at", 13.73, "ft"],
+      ["utilisation", 0.696, "ratio"],
+      ["max_deflection", 0.76, "in"],
+      ["max_deflection_at", 14.8, "ft"],
+    ]);
+    const d = out.values.filter((v) => v.key.startsWith("max_deflection"));
+    expect(d.every((v) => v.cite[0]?.clause === "Table 3-23, cases 1 and 8 (deflection)")).toBe(true);
+    expect(out.steps.map((s) => s.label)).toContain("Largest deflection");
+    expect(out.issues.some((i) => i.severity === "info" && i.message.includes("no shear deformation") && i.message.includes("No deflection limit is checked"))).toBe(true);
+    expect(out.issues.some((i) => i.severity === "error")).toBe(false);
+  });
+
+  it("the benchmark: 20 ft, 500 plf, E = 29,000 ksi, I = 100 in⁴ deflects 5wL⁴/384EI = 0.621 in at 10 ft; 2,000 lbf at midspan alone, PL³/48EI = 0.199 in", () => {
+    const u = run({ span_ft: 20, uniform_plf: 500, elastic_modulus_ksi: 29000, moment_inertia_in4: 100 });
+    expect(u.values.find((v) => v.key === "max_deflection")?.value).toBe(0.621);
+    expect(u.values.find((v) => v.key === "max_deflection_at")?.value).toBe(10);
+    const p = run({ span_ft: 20, uniform_plf: 0, point_loads: [{ p_lbf: 2000, a_ft: 10 }], elastic_modulus_ksi: 29000, moment_inertia_in4: 100 });
+    expect(p.values.find((v) => v.key === "max_deflection")?.value).toBe(0.199);
+    expect((p.detail as { maxDeflection: number } | null)?.maxDeflection).toBeCloseTo(((2000 * 240 ** 3) / (48 * 29e6 * 100)) * 0.0254, 12); // PL³/48EI in inches, as metres (canonical)
+  });
+
+  it("half a stiffness is an error issue in words; zero, negative or non-finite E or I is refused", () => {
+    const half = run({ ...B2, elastic_modulus_ksi: 29000 });
+    expect(half.values).toEqual([]);
+    expect(half.issues).toEqual([expect.objectContaining({ severity: "error", message: expect.stringContaining("Deflection needs the moment of inertia (I) as well as the modulus of elasticity (E)") })]);
+    expect(run({ ...B2, moment_inertia_in4: 100 }).issues[0]?.message).toContain("Deflection needs the modulus of elasticity (E)");
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(runPackCalc(SET, { calc: "struct.simple_beam", inputs: { ...B2, elastic_modulus_ksi: bad, moment_inertia_in4: 100 } }).ok).toBe(false);
+      expect(runPackCalc(SET, { calc: "struct.simple_beam", inputs: { ...B2, elastic_modulus_ksi: 29000, moment_inertia_in4: bad } }).ok).toBe(false);
+    }
+  });
+
+  it("publishes E and I in its JSON schema with the unit in the name", () => {
+    const props = (SIMPLE_BEAM_CALC.info.inputSchema as { properties: Record<string, unknown>; required?: string[] }).properties;
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(["elastic_modulus_ksi", "moment_inertia_in4"]));
+    expect((SIMPLE_BEAM_CALC.info.inputSchema as { required?: string[] }).required ?? []).not.toContain("elastic_modulus_ksi");
+  });
+
   it("is offered in a model that pins nothing, Structural being first-party (round 14)", () => {
     expect(FIRST_PARTY_PACKS).toContain(STRUCTURAL_PACK);
     expect(runPackCalc(OTHERS, { calc: "struct.simple_beam", inputs: B2 }).ok).toBe(true);
