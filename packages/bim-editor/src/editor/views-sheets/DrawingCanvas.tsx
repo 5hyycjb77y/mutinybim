@@ -1034,7 +1034,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, selectedViewportIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored])
+  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, selectedViewportIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored, annotatedView, model, toPaperPoint])
 
   /** Paper point under a pointer event on the overlay or anything in it. */
   const paperOf = (e: React.PointerEvent<SVGElement>): Vec2 | null => {
@@ -1362,11 +1362,17 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     }
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     const d = dragRef.current
     setDrag(null)
     setActiveSnap(null)
-    if (!d) return
+    if (!d) {
+      if (draftInput.active) {
+        const at = paperOf(e)
+        if (at) draftInput.up(at)
+      }
+      return
+    }
     if (d.kind === 'marquee') {
       if (Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < MIN_DRAG_MM) return
       const hits = marqueeHits(items, toPaperPoint, d.a, d.b)

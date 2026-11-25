@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { ArrowUpDown, Box, ChevronDown, ChevronRight, Compass, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
-import { canonicalViewLevel, documentIndex, resolveViewProps, type ModelState, type Sheet, type StoredDiagramKind, type ViewElement } from '@permitzip/bim-kernel'
+import { canonicalViewLevel, disciplineLabel, documentIndex, listDisciplines, resolveViewProps, type ModelState, type Sheet, type StoredDiagramKind, type ViewElement } from '@permitzip/bim-kernel'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible'
@@ -167,16 +167,13 @@ function disciplineDisplayLabel(raw: string | undefined): string {
   if (!d) return 'Coordination / All'
   if (d === 'architecture' || d === 'architectural') return 'Architectural'
   if (d === 'structure') return 'Structural'
-  return d.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return disciplineLabel(d)
 }
 
 const DISCIPLINE_ORDER: Readonly<Record<string, number>> = {
   Architectural: 10,
   Structural: 20,
-  Mechanical: 30,
-  Electrical: 40,
-  Plumbing: 50,
-  'Fire Protection': 60,
+  ...Object.fromEntries(listDisciplines().map((d, i) => [disciplineLabel(d.id), 30 + i * 10])),
   'Coordination / All': 90,
 }
 

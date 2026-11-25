@@ -24,6 +24,7 @@ import {
   partTypeItemsFromRun,
   readsWarnings,
   runFailureWords,
+  searchCommands,
   searchReference,
   sliceAsModel,
   sliceModel,
@@ -701,14 +702,39 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
       try {
         if (args.example) {
           const x = kitExample(args.example);
-          if (!x) return failure(`No example "${args.example}". Examples: ${KIT_EXAMPLES.map((e) => e.name).join(", ")}.`);
+          if (!x) {
+            const examples = KIT_EXAMPLES.map((e) => e.name);
+            return json({
+              found: false,
+              example: args.example,
+              message: `No example "${args.example}". Examples: ${examples.join(", ")}.`,
+              examples,
+            });
+          }
           return json({ example: x.name, title: x.title, builds: x.builds, run: "Send source as script.source to bim_run_script with the reads it declares; check, then apply.", source: x.source });
         }
         if (args.command) {
           const found = commandFields(args.command);
           if (!found) {
-            const near = searchReference(args.command.replace(/_/g, " "), 6).filter((h) => h.kind === "command").map((h) => h.name);
-            return failure(`ctx.edit has no command "${args.command}".${near.length ? ` Near: ${near.join(", ")}.` : ""} Search with bim_script_reference({ search }).`);
+            const query = args.command.replace(/_/g, " ");
+            const nearCommands = searchCommands(query, 6).map((c) => c.type);
+            const nearTopics = searchReference(query, 6)
+              .filter((h) => h.kind === "function" || h.kind === "recipe")
+              .slice(0, 4)
+              .map((h) => h.name);
+            const hints = [
+              nearCommands.length ? `Near commands: ${nearCommands.join(", ")}.` : "",
+              nearTopics.length ? `Related kit functions/recipes: ${nearTopics.join(", ")}.` : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return json({
+              found: false,
+              command: args.command,
+              message: `ctx.edit has no command "${args.command}".${hints ? ` ${hints}` : ""} Search with bim_script_reference({ search }).`,
+              ...(nearCommands.length ? { near_commands: nearCommands } : {}),
+              ...(nearTopics.length ? { near_topics: nearTopics } : {}),
+            });
           }
           // The one-line fields say everything for most commands; the full schema rides along only when a line had to cut a nested shape short.
           const cut = found.fields.some((f) => f.includes("{…}") || /: unknown\b/.test(f));
@@ -718,7 +744,12 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           const found = referenceTopic(args.topic);
           if (!found) {
             const near = searchReference(args.topic, 5).map((h) => h.name);
-            return failure(`No function or recipe named "${args.topic}".${near.length ? ` Near: ${near.join(", ")}.` : ""} Search with bim_script_reference({ search }).`);
+            return json({
+              found: false,
+              topic: args.topic,
+              message: `No function or recipe named "${args.topic}".${near.length ? ` Near: ${near.join(", ")}.` : ""} Search with bim_script_reference({ search }).`,
+              ...(near.length ? { near } : {}),
+            });
           }
           return json(found);
         }
@@ -1082,7 +1113,14 @@ async function libraryAnswer(helpers: ScriptToolHelpers, extra: unknown, action:
     return json({ scripts: rows, ...(rows.length === 0 ? { message: "No scripts yet. Write one (bim_script_reference) and preview it with bim_run_script." } : {}) });
   }
   const item = scripts.find((s) => s.item.key === key && (version === undefined || s.item.version === version))?.item;
-  if (!item) return failure(`No script ${key ?? "(key missing)"}${version ? ` ${version}` : ""}. List them first: bim_script_reference({ library: "list" }).`);
+  if (!item) {
+    return json({
+      found: false,
+      ...(key !== undefined ? { key } : {}),
+      ...(version !== undefined ? { version } : {}),
+      message: `No script ${key ?? "(key missing)"}${version ? ` ${version}` : ""}. List them first: bim_script_reference({ library: "list" }).`,
+    });
+  }
   return json({ key: item.key, version: item.version, name: item.name, manifest: item.manifest, source: item.source, run_with: { key: item.key, version: item.version } });
 }
 

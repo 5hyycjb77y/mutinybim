@@ -22,7 +22,7 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`drafting.repeat`](#draftingrepeat): Repeats a 2D detail component evenly along `from -> to` (studs, decking, hangers, masonry courses).
 - [`drafting.batt`](#draftingbatt): Draws a standard CAD batt insulation zig-zag strip of `thickness` between `from` and `to`.
 - [`drafting.breakLine`](#draftingbreakline): Places an architectural/mechanical zig-zag break line along `from -> to`, with an optional masking strip on the cut-off side.
-- [`drafting.note`](#draftingnote): Places a CAD rich-text note (`create_text_note`) with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.
+- [`drafting.note`](#draftingnote): Places a CAD rich-text note (`create_text_note`) on a view or sheet with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.
 - [`drafting.calloutStack`](#draftingcalloutstack): Places a vertically aligned left or right margin column of callout notes auto-spaced by exact wrapped line height (zero text overlaps) with horizontal-shoulder leaders to each target.
 - [`drafting.detailTitle`](#draftingdetailtitle): Draws an NCS-standard detail subtitle heading (bold title + heavy underline rule + optional scale/subtitle) inside a drafting view.
 - [`drafting.dimension`](#draftingdimension): Draws a CAD detail dimension (two-point `from`/`to` or continuous chain `points`) with typed paper offset, prefix, suffix, text override, and style.
@@ -466,13 +466,13 @@ export default defineScript({
 
 ## drafting.note
 
-Places a CAD rich-text note (`create_text_note`) with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.
+Places a CAD rich-text note (`create_text_note`) on a view or sheet with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.
 
 ```ts
 note(ctx: ScriptContext, spec: DraftNoteSpec): string
 ```
 
-Topics: note, callout, leader, text note, mask, arrow, annotation
+Topics: note, sheet note, general notes, callout, leader, text note, mask, arrow, annotation
 
 <details><summary>Example script</summary>
 

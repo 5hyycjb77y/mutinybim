@@ -111,7 +111,12 @@ export function ElectricalProperties({
       const localDisc = sourceEl?.kind === 'part' && isLocalDisconnectPart(model, sourceEl) ? sourceEl : null
       const upstreamLink = localDisc ? upstreamLinkOfPart(model, localDisc.id) : null
       const upstreamName = upstreamLink ? serviceLinkName(els, upstreamLink) : null
-      const disconnectExempt = part?.kind === 'part' && (part.values.disconnect_required === false || part.values.local_disconnect === 'not_required')
+      const disconnectExempt =
+        part?.kind === 'part' &&
+        (part.values['electrical.disconnect_required'] === false ||
+          part.values['electrical.local_disconnect'] === 'not_required' ||
+          part.values.disconnect_required === false ||
+          part.values.local_disconnect === 'not_required')
       const partType = part?.kind === 'part' ? els[part.typeId] : undefined
       const showDisconnectControls =
         Boolean(localDisc) ||
@@ -120,10 +125,21 @@ export function ElectricalProperties({
 
       type EditStep = Extract<Command, { type: 'batch_edits' }>['commands'][number]
 
+      const nextLinkId = (base: string) => {
+        let id = base
+        let k = 2
+        while (els[id]) id = `${base}-${k++}`
+        return id
+      }
+
       const handleToggleDisconnectExempt = (exempt: boolean) => {
         if (part?.kind !== 'part') return
         submit(
-          { type: 'set_parameters', id: part.id, scope: 'instance', values: { disconnect_required: !exempt, local_disconnect: exempt ? 'not_required' : 'required' } },
+          {
+            type: 'set_element_values',
+            elementIds: [part.id],
+            values: { 'electrical.disconnect_required': !exempt, 'electrical.local_disconnect': exempt ? 'not_required' : 'required' },
+          },
           exempt ? 'mark local disconnect not required' : 'require local disconnect',
         )
       }
@@ -151,14 +167,14 @@ export function ElectricalProperties({
             mark,
             values: { panel_name: mark, serves: part.mark.trim() || part.id },
           },
-          { type: 'set_parameters', id: part.id, scope: 'instance', values: { disconnect_required: true, local_disconnect: 'required' } },
+          { type: 'set_element_values', elementIds: [part.id], values: { 'electrical.disconnect_required': true, 'electrical.local_disconnect': 'required' } },
         ]
         if (currentLink?.kind === 'service_link') {
           if (currentLink.members.length === 1) {
             cmds.push({ type: 'delete_elements', ids: [currentLink.id], policy: 'cascade' })
             cmds.push({
               type: 'create_service_link',
-              linkId: currentLink.id,
+              linkId: nextLinkId(`ckt-${currentLink.source.elementId}-to-${discId}`),
               sourceId: currentLink.source.elementId,
               ...(currentLink.source.positions.length > 0 ? { positions: [...currentLink.source.positions] } : {}),
               members: [{ elementId: discId }],
@@ -169,7 +185,7 @@ export function ElectricalProperties({
             cmds.push({ type: 'remove_link_members', linkId: currentLink.id, elementIds: [part.id] })
             cmds.push({
               type: 'create_service_link',
-              linkId: `ckt-${currentLink.source.elementId}-to-${discId}`,
+              linkId: nextLinkId(`ckt-${currentLink.source.elementId}-to-${discId}`),
               sourceId: currentLink.source.elementId,
               members: [{ elementId: discId }],
               description: `${part.mark || part.id} (via ${mark})`,
@@ -179,7 +195,7 @@ export function ElectricalProperties({
         }
         cmds.push({
           type: 'create_service_link',
-          linkId: `ckt-${discId}-to-${slug}`,
+          linkId: nextLinkId(`ckt-${discId}-to-${slug}`),
           sourceId: discId,
           members: [{ elementId: part.id }],
           description: `${part.mark || part.id} local feed`,
@@ -190,11 +206,17 @@ export function ElectricalProperties({
 
       const handleRemoveDisconnect = () => {
         if (part?.kind !== 'part' || !localDisc || !circuit) return
-        const cmds: EditStep[] = [{ type: 'delete_elements', ids: [circuit.linkId, localDisc.id], policy: 'cascade' }]
+        const cmds: EditStep[] = [
+          {
+            type: 'delete_elements',
+            ids: [circuit.linkId, localDisc.id, ...(upstreamLink ? [upstreamLink.id] : [])],
+            policy: 'cascade',
+          },
+        ]
         if (upstreamLink) {
           cmds.push({
             type: 'create_service_link',
-            linkId: upstreamLink.id,
+            linkId: nextLinkId(`ckt-${upstreamLink.source.elementId}-to-${part.id}`),
             sourceId: upstreamLink.source.elementId,
             ...(upstreamLink.source.positions.length > 0 ? { positions: [...upstreamLink.source.positions] } : {}),
             members: [{ elementId: part.id }],

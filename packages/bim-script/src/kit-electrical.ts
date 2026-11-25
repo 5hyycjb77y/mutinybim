@@ -593,11 +593,17 @@ export const electrical = {
       return { part, disc, downstream, upstream };
     });
 
-    ctx.edit({ type: "delete_elements", ids: [found.downstream.id, found.disc.id], policy: "cascade" });
+    ctx.edit({
+      type: "delete_elements",
+      ids: [found.downstream.id, found.disc.id, ...(found.upstream ? [found.upstream.id] : [])],
+      policy: "cascade",
+    });
+    let restoredLinkId: string | null = null;
     if (found.upstream) {
+      restoredLinkId = ctx.id("ckt");
       ctx.edit({
         type: "create_service_link",
-        linkId: found.upstream.id,
+        linkId: restoredLinkId,
         sourceId: found.upstream.source.elementId,
         ...(found.upstream.source.positions.length > 0 ? { positions: [...found.upstream.source.positions] } : {}),
         members: [{ elementId: found.part.id }],
@@ -605,7 +611,7 @@ export const electrical = {
         ...(found.upstream.electrical ? { electrical: found.upstream.electrical } : {}),
       });
     }
-    return { removedDisconnectId: found.disc.id, restoredLinkId: found.upstream?.id ?? null };
+    return { removedDisconnectId: found.disc.id, restoredLinkId };
   },
 
   /**
@@ -628,13 +634,12 @@ export const electrical = {
       return part.id;
     });
     ctx.edit({
-      type: "set_parameters",
-      id: partId,
-      scope: "instance",
+      type: "set_element_values",
+      elementIds: [partId],
       values: {
-        disconnect_required: required,
-        local_disconnect: required ? "required" : "not_required",
-        ...(reason ? { disconnect_note: reason } : {}),
+        "electrical.disconnect_required": required,
+        "electrical.local_disconnect": required ? "required" : "not_required",
+        ...(reason ? { "electrical.disconnect_note": reason } : {}),
       },
     });
     return { equipmentId: partId, disconnectRequired: required };

@@ -1,4 +1,4 @@
-import { pushTo, linksFedFrom, organizationOf, phaseCreatedOf, type ServiceLink, formatFieldTemplate, resolveField, type OneLineTextLine, type BimElement, type ElementId, type PartInstance, type PartTypeElement, DEFAULT_DIAGRAM_LABELS, type DiagramHints, type DiagramLabelKind, type DiagramEdge, type DiagramGraph, type DiagramNode, type DiagramWarning } from "@permitzip/bim-kernel";
+import { elementsOfKind, pushTo, linksFedFrom, organizationOf, phaseCreatedOf, type ServiceLink, formatFieldTemplate, resolveField, type OneLineTextLine, type BimElement, type ElementId, type PartInstance, type PartTypeElement, DEFAULT_DIAGRAM_LABELS, type DiagramHints, type DiagramLabelKind, type DiagramEdge, type DiagramGraph, type DiagramNode, type DiagramWarning } from "@permitzip/bim-kernel";
 import { fedFromTextMismatch } from "../connections/fed-from";
 import { estimatedFeederLengthFt, faultCurrentAt, type FeederLengthMode } from "../calc/fault-current";
 import type { OneLineEquipmentKind as OneLineKind, OneLineProtectiveDevice as OneLineDevice } from "./one-line-layout";
@@ -83,7 +83,15 @@ function plannedOf(part: PartInstance): { readonly levelId: string | null; reado
   return { levelId: part.planned.levelHint ?? null, extra: [{ text: NOT_PLACED_MARK }], flag: { planned: true } };
 }
 
-function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKind: OneLineKind, schematic: boolean, lengthMode: FeederLengthMode = "explicit"): DiagramEdge {
+function feedEdge(
+  elements: Elements,
+  link: ServiceLink,
+  fedId: string,
+  parentKind: OneLineKind,
+  schematic: boolean,
+  lengthMode: FeederLengthMode = "explicit",
+  showFeederLoads = false,
+): DiagramEdge {
   const rating = link.electrical?.ratingA;
   // A disconnect or fused disconnect already IS its own disconnecting / overcurrent device;
   // never draw a redundant second breaker arc on its outgoing feeder.
@@ -96,19 +104,22 @@ function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKi
   const explicitLen = link.electrical?.lengthFt;
   const derivedLen = explicitLen === undefined && lengthMode !== "explicit" ? estimatedFeederLengthFt(elements, link.source.elementId, fedId, lengthMode) : null;
   const lengthFt = explicitLen ?? (derivedLen !== null ? Math.round(derivedLen * 10) / 10 : undefined);
-  const demandRes = resolveField(elements, fedId, "demand_kva");
-  const connectedRes = resolveField(elements, fedId, "connected_kva");
-  const demandNum = typeof demandRes.value === "number" && demandRes.value > 0 ? demandRes.value : null;
-  const connectedNum = typeof connectedRes.value === "number" && connectedRes.value > 0 ? connectedRes.value : null;
-  const fmtKva = (v: number) => `${Math.round(v * 10) / 10} kVA`;
-  const load =
-    demandNum !== null
-      ? connectedNum !== null && Math.abs(connectedNum - demandNum) > 0.05
-        ? `${fmtKva(demandNum)} DEM (${fmtKva(connectedNum)} CONN)`
-        : `${fmtKva(demandNum)} DEM`
-      : connectedNum !== null
-        ? `${fmtKva(connectedNum)} CONN`
-        : undefined;
+  let load: string | undefined;
+  if (!schematic && showFeederLoads) {
+    const demandRes = resolveField(elements, fedId, "demand_kva");
+    const connectedRes = resolveField(elements, fedId, "connected_kva");
+    const demandNum = typeof demandRes.value === "number" && demandRes.value > 0 ? demandRes.value : null;
+    const connectedNum = typeof connectedRes.value === "number" && connectedRes.value > 0 ? connectedRes.value : null;
+    const fmtKva = (v: number) => `${Math.round(v * 10) / 10} kVA`;
+    load =
+      demandNum !== null
+        ? connectedNum !== null && Math.abs(connectedNum - demandNum) > 0.05
+          ? `${fmtKva(demandNum)} DEM (${fmtKva(connectedNum)} CONN)`
+          : `${fmtKva(demandNum)} DEM`
+        : connectedNum !== null
+          ? `${fmtKva(connectedNum)} CONN`
+          : undefined;
+  }
   return {
     linkId: link.id,
     device,
@@ -146,6 +157,8 @@ export interface ElectricalDiagramHints extends DiagramHints {
   readonly faultCurrent?: boolean;
   /** How feeder length is obtained when not explicitly entered on the feeder ("explicit" | "shortest" | "manhattan"). */
   readonly lengthMode?: FeederLengthMode;
+  /** Print demand/connected kVA tags on feeder edges (requires electrical load aggregation). Absent: off. */
+  readonly showFeederLoads?: boolean;
 }
 
 /** The fault-current line a bus prints: "AFC 22 kA", "AFC 14.3 kA"; never blank (says what is missing). */
@@ -163,6 +176,7 @@ export function afcLine(elements: Elements, partId: string, lengthMode?: FeederL
 export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiagramHints = {}): DiagramGraph {
   const detail = hints.detail ?? "full";
   const schematic = detail === "schematic";
+  const showFeederLoads = hints.showFeederLoads === true;
   const minLoadRatingA = hints.minLoadRatingA ?? 0;
   const phaseScope = hints.phaseScope ?? "all";
   const org = organizationOf({ elements, connections: [] });
@@ -183,8 +197,7 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
   const partPhaseMatches = partPhaseInfo;
   const reads = new Set<ElementId>();
   const candidates = new Map<string, Candidate>();
-  for (const el of Object.values(elements)) {
-    if (el.kind !== "part") continue;
+  for (const el of elementsOfKind(elements, "part")) {
     const type = typeOf(elements, el);
     if (type?.definition.category !== "electrical_equipment") continue;
     if (!partPhaseMatches(el).keep) continue;
@@ -375,7 +388,7 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
       service,
       ...where.flag,
       ...phaseStyle,
-      ...(c.supply && parent ? { feed: feedEdge(elements, c.supply, c.part.id, parent.kind, schematic, lengthMode) } : {}),
+      ...(c.supply && parent ? { feed: feedEdge(elements, c.supply, c.part.id, parent.kind, schematic, lengthMode, showFeederLoads) } : {}),
       children: [...kids, ...loads, ...future],
       ...(emergency ? { emergency } : {}),
       ...(BUS.has(c.kind) && c.info?.mainA !== null && c.info?.mainA !== undefined ? { mainBreaker: true } : {}),

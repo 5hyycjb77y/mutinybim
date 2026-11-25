@@ -41,7 +41,7 @@ Panels, circuits, feeders and their loads; dedicated equipment space; electrical
 | Measure rules | 1 |
 | Network adapters | 1 |
 | Pack reads | 10 |
-| Parameter sets | 1 |
+| Parameter sets | 2 |
 | Position policies | 1 |
 | Preview calculations | 1 |
 | Proposers | 1 |

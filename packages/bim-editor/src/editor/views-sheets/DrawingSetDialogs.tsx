@@ -333,23 +333,27 @@ function PrePrintQualityGate({
         </div>
         {total > 0 && (
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
-              className="text-[11px] underline-offset-2 hover:underline"
+              variant="link"
+              size="xs"
+              className="h-auto p-0 text-[11px] text-current"
               onClick={copyReport}
               data-testid="preprint-copy-report"
             >
               {copied ? 'Copied' : 'Copy report'}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="inline-flex items-center gap-0.5 text-[11px] underline-offset-2 hover:underline"
+              variant="link"
+              size="xs"
+              className="h-auto p-0 text-[11px] text-current"
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={expanded}
             >
               {expanded ? 'Hide details' : 'Review'}
-              <ChevronDown className={`size-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-            </button>
+              <ChevronDown data-icon="inline-end" className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            </Button>
           </div>
         )}
       </div>

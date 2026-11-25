@@ -1,22 +1,17 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { VIEW_CATEGORY_LABELS, type ViewCategory } from '@permitzip/bim-kernel'
 import { Button } from '@permitzip/bim-ui'
 import type { SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import { BatteryCharging, ChevronDown, Eye, Lock, Moon, Sparkles, Sun, Sunrise, Sunset, Unlock } from 'lucide-react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu'
 import { toggleSelectionLock, useSelectionLocks } from './selection-locks'
 
-const LOCKABLE_CATEGORIES: ReadonlyArray<{ readonly id: string; readonly label: string }> = [
-  { id: 'lighting_fixtures', label: 'Lighting fixtures' },
-  { id: 'electrical_devices', label: 'Electrical devices (receptacles/switches)' },
-  { id: 'electrical_equipment', label: 'Electrical equipment (panels/gear)' },
-  { id: 'equipment', label: 'Mechanical & plumbing equipment' },
-  { id: 'duct', label: 'Ductwork' },
-  { id: 'pipe', label: 'Piping' },
-  { id: 'walls', label: 'Walls' },
-  { id: 'doors_windows', label: 'Doors & windows' },
-]
+const NON_LOCKABLE_VIEW_CATEGORIES: ReadonlySet<ViewCategory> = new Set(['tags', 'dimensions', 'rooms', 'grids', 'opening_tags', 'insulation'])
+const LOCKABLE_CATEGORIES: ReadonlyArray<{ readonly id: string; readonly label: string }> = (Object.entries(VIEW_CATEGORY_LABELS) as [ViewCategory, string][])
+  .filter(([id]) => !NON_LOCKABLE_VIEW_CATEGORIES.has(id))
+  .map(([id, label]) => ({ id, label }))
 
 interface ViewerLightingControls {
   setSun(azimuthDeg: number, elevationDeg: number): void

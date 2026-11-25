@@ -624,7 +624,7 @@ function arcThrough(a: Vec2, m: Vec2, b: Vec2): Vec2[] {
 /**
  * Paper-space preview polyline for an interactive wire or home-run drag (matches committed geometry):
  * - `"orthogonal"`: crisp 90° orthogonal path through the dragged waypoint(s).
- * - `"chamfered"` (Binoy): orthogonal path with rounded Binoy corner fillets (paper mm).
+ * - `"chamfered"`: orthogonal path with rounded corner fillets (paper mm).
  * - `"arcs"` (default): smooth arc / Catmull-Rom spline.
  */
 export function previewWireCurve(
@@ -776,7 +776,7 @@ function squareCandidates(a: Node, b: Node, step: number, chamfer = false): Vec2
     }
     out.push([]);
   } else {
-    // In Binoy mode (`chamfer`), wall-hosted endpoints on perpendicular or opposite walls first
+    // In chamfered mode (`chamfer`), wall-hosted endpoints on perpendicular or opposite walls first
     // step cleanly out perpendicular into the room before turning, so wires never cut diagonally
     // across a wall or behind a partition.
     if (chamfer && (na || nb)) {
@@ -879,7 +879,7 @@ export function collinearOverlap(p: Vec2, q: Vec2, r: Vec2, s: Vec2, tolerance: 
 
 const pathLength = (path: readonly Vec2[]) => path.reduce((s, p, i) => (i === 0 ? 0 : s + dist(path[i - 1]!, p)), 0);
 
-/** Round 90° corners of an orthogonal polyline with smooth circular arc fillets (Binoy drafting standard). */
+/** Round 90° corners of an orthogonal polyline with smooth circular arc fillets. */
 function chamferOrthogonalPath(pts: readonly Vec2[], radiusMm: number, minRadiusMm = 20): Vec2[] {
   if (pts.length < 3 || radiusMm < minRadiusMm) return [...pts];
   const ARC_STEPS = 6;
@@ -927,9 +927,9 @@ function chamferOrthogonalPath(pts: readonly Vec2[], radiusMm: number, minRadius
   return out;
 }
 
-/** The orthogonal (or Binoy-filleted) line a..b that stacks on the fewest drawn runs (then the shortest, then the first L). */
+/** The orthogonal (or filleted) line a..b that stacks on the fewest drawn runs (then the shortest, then the first L). */
 function squareJoin(a: Node, b: Node, waypoints: readonly Vec2[] | undefined, drawn: DrawnRuns, step: number, chamfer: boolean): Vec2[] {
-  // Binoy corner radius (~3.4 mm on paper, scaled cleanly with view scale so bends read unmistakably as rounded 90° corners).
+  // Filleted corner radius (~3.4 mm on paper, scaled cleanly with view scale so bends read unmistakably as rounded 90° corners).
   const chamferMm = Math.max(220, step * 1.35);
   const finish = (pts: Vec2[]) => (chamfer ? chamferOrthogonalPath(pts, chamferMm) : pts);
   if (waypoints && waypoints.length === 1) {
@@ -1650,7 +1650,7 @@ export interface CircuitJoinOnPaper {
   /** Key in `ViewProps.circuitGraphics.hints` (the link id for a circuit, or `"switch:<leg>"` for a switch leg). */
   readonly linkId: string;
   readonly kind: "circuit" | "switch_leg";
-  /** Active drawing style for this wire span (`"arcs"`, `"orthogonal"`, or `"chamfered"` / Binoy) so interactive drag previews match committed geometry. */
+  /** Active drawing style for this wire span (`"arcs"`, `"orthogonal"`, or `"chamfered"`) so interactive drag previews match committed geometry. */
   readonly style: CircuitGraphicStyle;
   /** The circuit or switch leg as drawings name it ("L1-1", "Switch leg a"). */
   readonly name: string;

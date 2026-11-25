@@ -62,7 +62,7 @@ export function registerBimSummaryReadTools(server: McpServer, host: ReadToolHos
           const model = s.model();
           const questions = questionsList(model, args.questions?.toLowerCase() === "all" ? "all" : undefined);
           let branchBlock: Record<string, unknown> = {};
-          if (s.branchesAvailable()) {
+          if (typeof s.branchesAvailable === "function" && s.branchesAvailable()) {
             const cur = s.branch();
             const current_branch = cur
               ? { id: cur.branchId, name: cur.name, state: cur.state, base_revision: cur.baseRevision }

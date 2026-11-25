@@ -176,21 +176,21 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
           </Field>
           {hints.showLoads && (
             <Field>
-              <FieldLabel htmlFor="diagram-min-breaker">Load breaker</FieldLabel>
+              <FieldLabel htmlFor="diagram-min-rating">Minimum load rating</FieldLabel>
               <Select
                 value={String(hints.minLoadRatingA ?? 0)}
                 onValueChange={(v) => {
-                  const amps = Number(v)
-                  set({ minLoadRatingA: amps > 0 ? amps : undefined }, amps > 0 ? `show loads ≥ ${amps} A on ${view.name}` : `show all load breakers on ${view.name}`)
+                  const minRatingA = Number(v)
+                  set({ minLoadRatingA: minRatingA > 0 ? minRatingA : undefined }, minRatingA > 0 ? `show loads ≥ ${minRatingA} A on ${view.name}` : `show all load ratings on ${view.name}`)
                 }}
                 disabled={!canEdit}
               >
-                <SelectTrigger id="diagram-min-breaker" size="sm" data-testid="diagram-min-breaker">
+                <SelectTrigger id="diagram-min-rating" size="sm" data-testid="diagram-min-rating">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="0">All breakers</SelectItem>
+                    <SelectItem value="0">All ratings</SelectItem>
                     <SelectItem value="30">≥ 30 A</SelectItem>
                     <SelectItem value="60">≥ 60 A</SelectItem>
                     <SelectItem value="100">≥ 100 A</SelectItem>
@@ -209,7 +209,7 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
         const loadChoices = elementsOfKind(model.elements, 'part')
           .filter((el) => {
             const t = model.elements[el.typeId]
-            return t?.kind === 'part_type' && t.definition.category === 'mechanical_equipment'
+            return t?.kind === 'part_type' && t.definition.category.endsWith('_equipment') && !t.definition.category.startsWith('elec')
           })
           .map((el) => ({ id: el.id, name: el.mark || resolveField(model.elements, el.id, 'name').text || el.id }))
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -282,7 +282,7 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
                 </div>
               )}
             </div>
-            <FieldDescription>Pin specific motors or equipment onto this one-line even if below the breaker threshold.</FieldDescription>
+            <FieldDescription>Pin specific loads or equipment onto this one-line even if below the rating threshold.</FieldDescription>
           </Field>
         )
       })()}
