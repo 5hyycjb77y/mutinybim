@@ -13,7 +13,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import postcss from "postcss";
-import tailwind from "@tailwindcss/postcss";
 import { WebSocketServer, type WebSocket } from "ws";
 import { parseBranchModelId } from "@permitzip/bim-kernel";
 import { TOOL_FAMILIES } from "@permitzip/bim-mcp";
@@ -245,8 +244,8 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   let appCss: Promise<string> | null = null;
   const bundleCss = (): Promise<string> => {
     const from = path.join(APP_DIR, "styles/app.css");
-    appCss ??= readFile(from, "utf8")
-      .then((source) => postcss([tailwind({ base: APP_DIR })]).process(source, { from }))
+    appCss ??= Promise.all([readFile(from, "utf8"), import("@tailwindcss/postcss")])
+      .then(([source, { default: tailwind }]) => postcss([tailwind({ base: APP_DIR })]).process(source, { from }))
       .then((r) => r.css)
       .catch((err: unknown) => {
         appCss = null;

@@ -12,4 +12,4 @@
 export const IFC_CUT_VERSION = 2;
 
 /** The IFC reader the cut runs on; part of the cache key too. Checked against the installed package by the same test. */
-export const IFC_READER = "web-ifc@0.0.78";
+export const IFC_READER = "web-ifc@0.0.81";

@@ -16,7 +16,6 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build, type Plugin } from 'esbuild'
 import postcss from 'postcss'
-import tailwind from '@tailwindcss/postcss'
 
 export const DEMO_DIR = path.dirname(fileURLToPath(import.meta.url))
 /** The folder holding every bim-* package (`packages/`). */
@@ -84,6 +83,7 @@ function demoResolve(): Plugin {
 async function buildCss(entry?: string): Promise<string> {
   const base = await readFile(STYLES, 'utf8')
   const source = entry ? `${base}\n@source "${path.relative(DEMO_DIR, entry).split(path.sep).join('/')}";\n` : base
+  const { default: tailwind } = await import('@tailwindcss/postcss')
   const result = await postcss([tailwind({ base: DEMO_DIR })]).process(source, { from: STYLES })
   return result.css
 }
