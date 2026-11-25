@@ -85,7 +85,7 @@
     "eslint": "9.39.5",
     "jest": "30.4.2",
     "jest-environment-jsdom": "30.4.1",
-    "lucide-react": "0.577.0",
+    "lucide-react": "1.77.0",
     "manifold-3d": "3.5.4",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.5.438",
