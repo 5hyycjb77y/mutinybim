@@ -232,14 +232,17 @@ export function planCommit(
   // The command built a fresh copy of head for this call: stamp versions into it instead of
   // copying every element again (that copy dominates commit time on large models).
   const elements: Record<string, BimElement> = takeOwnedElements(exec) ?? draftElements(exec.model.elements);
-  for (const id of exec.removedIds) {
+  // Keep changeset.elements and changeset.removedIds strictly disjoint: an id still present in
+  // exec.model.elements (e.g. deleted and recreated in one batch) is an upsert, never a removal.
+  const removedIds = exec.removedIds.filter((id) => !exec.model.elements[id] && Boolean(head.elements[id]));
+  for (const id of removedIds) {
     const prior = head.elements[id];
     if (prior) before[id] = prior;
   }
   for (const id of exec.changedIds) {
-    before[id] = head.elements[id] ?? null;
     const after = exec.model.elements[id];
     if (!after) continue;
+    before[id] = head.elements[id] ?? null;
     const fields = authoredByElement.get(id) ?? [];
     const authoredRev: Record<string, number> = { ...after.authoredRev };
     for (const f of fields) authoredRev[f] = revision;
@@ -265,14 +268,14 @@ export function planCommit(
     ...(request.clientSessionId ? { clientSessionId: request.clientSessionId } : {}),
     ...(request.cites && request.cites.length > 0 ? { cites: request.cites } : {}),
     before,
-    ...(exec.removedIds.length > 0 ? { removedIds: exec.removedIds } : {}),
+    ...(removedIds.length > 0 ? { removedIds } : {}),
     ...(exec.removedConnections.length > 0 ? { removedConnections: exec.removedConnections } : {}),
     ...(exec.addedConnections.length > 0 ? { addedConnections: exec.addedConnections } : {}),
   };
   const committed = freezeElements(elements);
   const model: ModelState = { ...head, revision, elements: committed, connections: exec.model.connections };
   // Same content as the validated, fully derived command result apart from versions.
-  const touched = [...exec.changedIds, ...exec.removedIds];
+  const touched = [...changed.map((el) => el.id), ...removedIds];
   if (model.connections === head.connections) shareNetwork(head.elements, committed, touched);
   carryClassIndexes(head.elements, committed, touched);
   carryRevision(head.elements, committed, touched);

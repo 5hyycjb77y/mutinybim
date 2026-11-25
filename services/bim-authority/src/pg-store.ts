@@ -679,7 +679,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
         returning 1
       ), dels as (
         delete from bim.elements
-        where model_id = ${id} and element_id in (select jsonb_array_elements_text(${this.sql.json(toJson(cs.removedIds ?? []))}::jsonb))
+        where model_id = ${id} and element_id in (select jsonb_array_elements_text(${this.sql.json(toJson(removedElementIds(cs)))}::jsonb))
           and exists (select 1 from guard)
         returning 1
       ), cuts as (
@@ -884,7 +884,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
           returning 1
         ), dels as (
           delete from bim.elements
-          where model_id = ${id} and element_id in (select jsonb_array_elements_text(${tx.json(toJson(cs.removedIds ?? []))}::jsonb))
+          where model_id = ${id} and element_id in (select jsonb_array_elements_text(${tx.json(toJson(removedElementIds(cs)))}::jsonb))
             and exists (select 1 from fence)
           returning 1
         ), cuts as (
@@ -1098,7 +1098,7 @@ interface BatchRun {
  * would be deleted and inserted by sibling statements on the same row, so the
  * run ends before it. Runs are written in order: durability stays a prefix.
  */
-function planRuns(commits: readonly DecidedCommit[]): BatchRun[] {
+export function planRuns(commits: readonly DecidedCommit[]): BatchRun[] {
   const fresh = (): BatchRun => ({ commits: [], upserts: new Map(), removed: new Set(), added: new Map(), cut: new Set() });
   const runs: BatchRun[] = [];
   let run = fresh();
@@ -1111,13 +1111,15 @@ function planRuns(commits: readonly DecidedCommit[]): BatchRun[] {
     }
     run.commits.push(c);
     if (!cs) continue;
-    for (const el of cs.elements) {
-      run.upserts.set(el.id, el);
-      run.removed.delete(el.id);
-    }
+    // Match applyChangeset order: removedIds before elements, so an overlapping
+    // or legacy changeset that both removes and recreates an id keeps the upsert.
     for (const removedId of cs.removedIds ?? []) {
       run.upserts.delete(removedId);
       run.removed.add(removedId);
+    }
+    for (const el of cs.elements) {
+      run.upserts.set(el.id, el);
+      run.removed.delete(el.id);
     }
     for (const gone of cs.removedConnections ?? []) {
       if (run.added.has(gone.id)) run.added.delete(gone.id);
@@ -1153,6 +1155,13 @@ function priorAnswer(sql: Sql | Tx, modelId: string, idempotencyKey: string) {
 
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && err.code === "23505";
+}
+
+/** Element ids removed by `cs` and not re-written by it (`applyChangeset` applies `removedIds` before `elements`). */
+export function removedElementIds(cs: Changeset): string[] {
+  if (!cs.removedIds?.length) return [];
+  const written = new Set(cs.elements.map((el) => el.id));
+  return cs.removedIds.filter((id) => !written.has(id));
 }
 
 function cutIds(cs: Changeset): string[] {

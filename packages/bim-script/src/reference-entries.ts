@@ -1229,7 +1229,7 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "drafting.repeat",
     summary: "Repeats a 2D detail component evenly along `from -> to` (studs, decking, hangers, masonry courses).",
     signature: "repeat(ctx: ScriptContext, spec: DraftStyleSpec & { view: string; symbol: string; from: PlanPoint; to: PlanPoint; spacing?: Measure; width?: Measure; height?: Measure; id?: string }): string",
-    example: layout(`    const detail = drafting.view(ctx, { name: "Bolts", scale: 8 });\n    drafting.repeat(ctx, { view: detail, symbol: "anchor_bolt", from: { x: units.in(0), y: units.in(0) }, to: { x: units.in(36), y: units.in(0) }, spacing: units.in(12) });`),
+    example: layout(`    const detail = drafting.view(ctx, { name: "Bolts", scale: 8 });\n    drafting.repeat(ctx, { view: detail, symbol: "concrete_anchor", from: { x: units.in(0), y: units.in(0) }, to: { x: units.in(36), y: units.in(0) }, spacing: units.in(12) });`),
     topics: ["repeating detail", "repeat", "array symbol", "anchor bolts", "decking"],
   },
   {

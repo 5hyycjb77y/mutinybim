@@ -70,8 +70,10 @@ export class GeometryWriter {
   }
 
   /**
-   * A triangle mesh (a modeled part's solid, local millimetres) as a closed
+   * A triangle mesh (a modeled part's solid, local millimetres) as an
    * `IfcTriangulatedFaceSet` in a Tessellation body. Corners round to 0.01 mm.
+   * The schema's order is Coordinates, Normals, Closed, CoordIndex, PnIndex:
+   * no normals are written, so `closed` is the third attribute.
    */
   mesh(positions: ArrayLike<number>, indices: ArrayLike<number>, closed: boolean): StepRef | null {
     if (indices.length < 3 || positions.length < 9) return null;
@@ -81,7 +83,7 @@ export class GeometryWriter {
     const tris: StepValue[] = [];
     for (let t = 0; t + 2 < indices.length; t += 3) tris.push(list([int((indices[t] ?? 0) + 1), int((indices[t + 1] ?? 0) + 1), int((indices[t + 2] ?? 0) + 1)]));
     const pts = this.g.add("IFCCARTESIANPOINTLIST3D", [list(coords), $]);
-    const faces = this.g.add("IFCTRIANGULATEDFACESET", [pts, bool(closed), $, list(tris), $]);
+    const faces = this.g.add("IFCTRIANGULATEDFACESET", [pts, $, bool(closed), list(tris), $]);
     const rep = this.g.add("IFCSHAPEREPRESENTATION", [this.body, str("Body"), str("Tessellation"), list([faces])]);
     return this.g.add("IFCPRODUCTDEFINITIONSHAPE", [$, $, list([rep])]);
   }

@@ -2106,7 +2106,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
               )}
               {[...items]
                 .sort((a, b) => {
-                  const rank = (x: DrawingItem) => (x.shape === 'region' ? 0 : x.shape === 'component' || x.shape === 'repeat' || x.shape === 'batt' ? 1 : x.shape === 'dimension' || x.shape === 'tag' || x.shape === 'text' ? 3 : 2)
+                  const rank = (x: DrawingItem) => (x.shape === 'region' ? 0 : x.shape === 'component' || x.shape === 'repeat' || x.shape === 'batt' ? 2 : x.shape === 'dimension' || x.shape === 'tag' || x.shape === 'text' ? 3 : 1)
                   return rank(a) - rank(b)
                 })
                 .map((item) => {

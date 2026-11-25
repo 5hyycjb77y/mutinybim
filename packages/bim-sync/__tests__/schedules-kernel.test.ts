@@ -5,9 +5,9 @@
  * schedule view is evaluated over the whole building, edits arrive as
  * patches, a changed definition re-sends the rows, a deleted view closes.
  */
-import { DOCUMENT_ZONE, PROJECT_DOCUMENT_LEVEL, type Actor, type Command, type ModelState } from "@permitzip/bim-kernel";
+import { DOCUMENT_ZONE, PROJECT_DOCUMENT_LEVEL, asElementId, asRevision, type Actor, type Changeset, type Command, type ModelState } from "@permitzip/bim-kernel";
 import { FULL_BIM_TIERS, createFullBimModel } from "@permitzip/bim-first-party/seed";
-import { InMemoryCommitStore, Sequencer, SyncClient, SyncHub, SyncScheduleConnection, actorColor, kernelScheduleEvaluator, type ScheduleEvent } from "../src";
+import { InMemoryCommitStore, Sequencer, SyncClient, SyncHub, SyncScheduleConnection, actorColor, kernelScheduleEvaluator, mergedScheduleChange, type ScheduleEvent } from "../src";
 
 class Net {
   private inflight = new Set<Promise<void>>();
@@ -84,5 +84,28 @@ describe("kernel row engine behind the hub", () => {
     await submit({ type: "delete_view", viewId: VIEW });
     expect(events.at(-1)).toEqual({ type: "closed", reason: "deleted", message: "This schedule was deleted." });
     schedules.dispose();
+  });
+
+  it("mergedScheduleChange keeps an element present in both removedIds and elements (matching applyChangeset)", () => {
+    const model = createFullBimModel(FULL_BIM_TIERS.XS);
+    const target = terminals(model)[0];
+    if (!target) throw new Error("expected a terminal in XS model");
+    const cs: Changeset = {
+      revision: asRevision(model.revision + 1),
+      baseRevision: model.revision,
+      idempotencyKey: "k-overlap",
+      actor: { id: "avery", name: "Avery", kind: "human" },
+      command: { type: "set_terminal_cfm", terminalId: target.id, cfm: 250 },
+      elements: [target],
+      removedIds: [asElementId(target.id)],
+      readSet: {},
+      authored: [],
+      intents: [],
+      rebased: false,
+      committedAt: "2026-11-24T13:00:00.000Z",
+    };
+    const merged = mergedScheduleChange(model, [cs]);
+    expect(merged.changedIds).toContain(target.id);
+    expect(merged.removedIds ?? []).not.toContain(target.id);
   });
 });

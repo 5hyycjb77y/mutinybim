@@ -1,5 +1,5 @@
 import type { Vec2 } from "../types";
-import type { ImportGeometry, ImportPoint } from "./types";
+import { OUTLINE_WITH_HOLES, type ImportExtrusion, type ImportGeometry, type ImportPoint } from "./types";
 
 /**
  * The few readings of a solid every import rule shares, trade-free: a
@@ -20,10 +20,7 @@ export interface VerticalPrism {
   readonly top: number;
 }
 
-/** The solid as one footprint pushed straight up (or down), or null. */
-export function verticalPrism(geometry: ImportGeometry): VerticalPrism | null {
-  const [only, ...rest] = geometry.extrusions;
-  if (!only || rest.length > 0 || geometry.unread) return null;
+function prismOf(only: ImportExtrusion): VerticalPrism | null {
   const l = len(only.along);
   if (l <= 0 || Math.hypot(only.along.x, only.along.y) / l > VERTICAL_TOLERANCE) return null;
   const zs = only.base.map((p) => p.z);
@@ -34,6 +31,37 @@ export function verticalPrism(geometry: ImportGeometry): VerticalPrism | null {
   const outline = dedupe(only.base.map((p) => ({ x: p.x, y: p.y })));
   if (outline.length < 3) return null;
   return { outline, bottom: Math.min(z0, z1), top: Math.max(z0, z1) };
+}
+
+/** The solid as one footprint pushed straight up (or down), or null. */
+export function verticalPrism(geometry: ImportGeometry): VerticalPrism | null {
+  const [only, ...rest] = geometry.extrusions;
+  if (!only || rest.length > 0 || geometry.unread) return null;
+  return prismOf(only);
+}
+
+export interface HoledPrism extends VerticalPrism {
+  /** Holes cut through the footprint, each an outline. Empty: none. */
+  readonly holes: readonly (readonly Vec2[])[];
+}
+
+/**
+ * The solid as one footprint pushed straight up, with any holes cut through
+ * it, or null. For kinds that can have holes: a shape whose holes are the
+ * one thing a plain vertical prism can't say comes back with them.
+ */
+export function holedPrism(geometry: ImportGeometry): HoledPrism | null {
+  const [only, ...rest] = geometry.extrusions;
+  if (!only || rest.length > 0) return null;
+  if (!geometry.unread) {
+    const prism = prismOf(only);
+    return prism ? { ...prism, holes: [] } : null;
+  }
+  if (geometry.unread !== OUTLINE_WITH_HOLES || !only.holes) return null;
+  const prism = prismOf(only);
+  if (!prism) return null;
+  const holes = only.holes.map((hole) => dedupe(hole.map((p) => ({ x: p.x, y: p.y }))));
+  return holes.every((hole) => hole.length >= 3) ? { ...prism, holes } : null;
 }
 
 export type SweepSection = { readonly shape: "rect"; readonly width: number; readonly height: number } | { readonly shape: "round"; readonly diameter: number };
@@ -127,7 +155,7 @@ function dedupe(points: readonly Vec2[]): Vec2[] {
   return out;
 }
 
-/** Round a plan point to 0.1 mm, as kernel commands do. */
+/** Round a plan point to 0.1 mm, as kernel commands do (never `-0`). */
 export function roundPlan(p: Vec2): Vec2 {
-  return { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 };
+  return { x: Math.round(p.x * 10) / 10 + 0, y: Math.round(p.y * 10) / 10 + 0 };
 }

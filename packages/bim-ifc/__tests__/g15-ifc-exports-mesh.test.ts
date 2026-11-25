@@ -38,8 +38,11 @@ describe("g15-ifc-exports-mesh", () => {
     expect(refs(set, 3)).toEqual([]);
     const tris = set.args[3];
     expect(tris?.kind === "list" ? tris.items.length : 0).toBe(partMesh(type.definition).triangleCount);
-    const closed = set.args[1];
-    expect(closed).toMatchObject({ kind: "enum", value: "T" });
+    // The schema's order: Coordinates, Normals, Closed, CoordIndex, PnIndex. No normals are written.
+    expect(set.args).toHaveLength(5);
+    expect(set.args[1]).toEqual({ kind: "null" });
+    expect(set.args[2]).toEqual({ kind: "enum", value: "T" });
+    expect(set.args[4]).toEqual({ kind: "null" });
     const points = file.entities.get(ref(set, 0));
     expect(points?.type).toBe("IFCCARTESIANPOINTLIST3D");
     const rep = ofType(file, "IFCSHAPEREPRESENTATION").find((r) => refs(r, 3).includes(set.id));
