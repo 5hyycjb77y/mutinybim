@@ -1,4 +1,4 @@
-import type { ImportGroup, ImportPort, ImportProduct, ImportSource, ImportStorey, ParamValue } from "@permitzip/bim-kernel";
+import { OUTLINE_WITH_HOLES, type ImportGroup, type ImportPort, type ImportProduct, type ImportSource, type ImportStorey, type ParamValue } from "@permitzip/bim-kernel";
 import { readStep, type ReadEntity, type StepFile, type StepToken } from "../read";
 import { ifcEntityName, ownAttributes } from "../schema-ifc4x3";
 import { GeometryReader, apply, boundsOf, compose, hostFrame, type Frame } from "./geometry";
@@ -108,6 +108,20 @@ function siScale(u: ReadEntity): number {
   return prefix ? (per[prefix] ?? 1000) : 1000;
 }
 
+/** A predefined type that says nothing: left out, or NOTDEFINED. */
+const unset = (predefined: string | null): boolean => predefined === null || predefined === "NOTDEFINED";
+
+/** Where a type object's own attributes start: after the shared prefix and its ElementType. */
+const TYPE_OWN_START = 9;
+
+/** The PredefinedType of a product's type object, or null when the type has none (an IFC2X3 style, a property-only type). */
+function typePredefined(type: ReadEntity | undefined): string | null {
+  if (!type || !type.type.endsWith("TYPE")) return null;
+  const name = ifcEntityName(type.type);
+  const i = name ? ownAttributes(name).indexOf("PredefinedType") : -1;
+  return i >= 0 ? enumOf(type.args[TYPE_OWN_START + i]) : null;
+}
+
 /** The attribute index of a named own attribute after the 8-attribute element prefix (null when the entity doesn't have it). */
 function ownIndex(entity: string, name: string): number | null {
   // Only element entities share the 8-attribute prefix; a space or a grid doesn't.
@@ -163,7 +177,12 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
   const psetsOf = new Map<number, number[]>();
   for (const r of all("IFCRELDEFINESBYPROPERTIES")) for (const o of refs(r.args[4])) psetsOf.set(o, [...(psetsOf.get(o) ?? []), ...refs(r.args[5])]);
   const voidHost = new Map<number, number>();
-  for (const r of all("IFCRELVOIDSELEMENT")) voidHost.set(refs(r.args[5])[0] ?? -1, refs(r.args[4])[0] ?? -1);
+  const openingsIn = new Map<number, number>();
+  for (const r of all("IFCRELVOIDSELEMENT")) {
+    const host = refs(r.args[4])[0] ?? -1;
+    voidHost.set(refs(r.args[5])[0] ?? -1, host);
+    openingsIn.set(host, (openingsIn.get(host) ?? 0) + 1);
+  }
   const filledHost = new Map<number, number>();
   for (const r of all("IFCRELFILLSELEMENT")) {
     const opening = refs(r.args[4])[0] ?? -1;
@@ -278,11 +297,16 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
       return [{ id, name: str(port.args[2]), position: at, flow: enumOf(port.args[7]), connectedTo: (joined.get(pid) ?? []).flatMap((j) => gid(j) ?? []) }];
     });
     const hostId = filledHost.get(e.id);
+    const openings = openingsIn.get(e.id) ?? 0;
+    // What a product is may be said once, on its type: its own PredefinedType wins, and the type's fills in when it is unset.
+    const own = predefinedIndex !== null ? enumOf(e.args[predefinedIndex]) : null;
+    const typed = unset(own) ? typePredefined(type) : null;
     products.push({
       sourceId,
       entity,
-      predefinedType: predefinedIndex !== null ? enumOf(e.args[predefinedIndex]) : null,
-      objectType: str(e.args[4]),
+      predefinedType: unset(typed) ? own : typed,
+      // A user-defined kind named on the type is named in the type's ElementType.
+      objectType: str(e.args[4]) ?? (typed === "USERDEFINED" ? str(type?.args[TYPE_OWN_START - 1]) : null),
       name: str(e.args[2]),
       longName: spatial ? str(e.args[7]) : null,
       tag: spatial ? null : str(e.args[7]),
@@ -290,8 +314,9 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
       typeId: type ? globalIdOf(type) : null,
       typeName: type ? str(type.args[2]) : null,
       hostId: hostId !== undefined ? gid(hostId) : null,
+      ...(openings > 0 ? { openings } : {}),
       groupIds: groupsOf.get(e.id) ?? [],
-      geometry: { extrusions: shape.extrusions, bounds: boundsOf(shape.points), unread: shape.unread },
+      geometry: { extrusions: shape.extrusions, bounds: boundsOf(shape.points), unread: shape.unread ?? (shape.holed ? OUTLINE_WITH_HOLES : null) },
       properties: properties(e.id, type),
       overall: {
         width: widthIndex !== null ? numberOf(e.args[widthIndex], scale) : null,

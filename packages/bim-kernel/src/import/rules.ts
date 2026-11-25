@@ -1,13 +1,15 @@
 import { asElementId } from "../types";
 import { GLOBAL_PARTITION } from "../partition";
-import type { Beam, Column, Component, ElementId, Level, MepSystem, Opening, PartInstance, PartTypeElement, Room, RunDomain, RunSegment, RunSize, Slab, Wall } from "../types";
+import type { Beam, Column, Component, ElementId, Level, MepSystem, Opening, PartInstance, PartTypeElement, Room, RunDomain, RunSegment, RunSize, Slab, Vec2, Wall } from "../types";
+import { checkCeilingHole, checkCeilingOutline, type HoleFault } from "../ceilings/outline";
+import { CEILING_HEIGHT_MAX_MM, CEILING_HOLES_MAX, CEILING_OUTLINE_MAX_POINTS, type Ceiling } from "../ceilings/types";
 import { RUN_DOMAINS } from "../routing/types";
 import { connectorDomainOf, sizeFitsDomain } from "../routing/rules";
 import { activeServiceRegistry } from "../services/registry";
 import { PART_CATEGORIES, type PartCategory, type PartTypeDefinition } from "../parts";
 import type { ImportRuleContext, ImportRuleDef } from "./rule-point";
-import { axisAligned, outlineArea, outlineCentre, rectangleAxis, roundPlan, straightSweep, verticalPrism } from "./shape";
-import type { ImportProduct, ImportRuleResult } from "./types";
+import { axisAligned, holedPrism, outlineArea, outlineCentre, rectangleAxis, roundPlan, straightSweep, verticalPrism } from "./shape";
+import { OUTLINE_WITH_HOLES, type ImportProduct, type ImportRuleResult } from "./types";
 
 /**
  * The kernel's import rules: one per generic kind, reading only geometry and
@@ -74,6 +76,64 @@ const slab: ImportRuleDef = {
     const prism = verticalPrism(p.geometry);
     if (!prism) return fail(p.geometry.unread ? `its shape is ${p.geometry.unread}` : "it isn't flat (sloped or shaped)");
     const record: Slab = { ...base(ctx, p, level), kind: "slab", outline: prism.outline.map(roundPlan), thickness: round(prism.top - prism.bottom) };
+    return { ok: true, records: [record] };
+  },
+};
+
+/** What is wrong with an outline or a hole the commands refuse, to follow "its outline" or "one of its holes". */
+const OUTLINE_FAULTS: Readonly<Record<HoleFault, string>> = {
+  too_few_corners: "has fewer than 3 corners",
+  not_a_number: "has a corner that isn't a number",
+  crosses_itself: "crosses itself",
+  too_small: "covers almost nothing (under 1 sq ft)",
+  outside: "isn't inside its outline",
+};
+
+const NOT_FLAT = "it isn't flat (sloped or shaped)";
+
+/**
+ * A flat ceiling from one footprint pushed straight up, less the holes cut through it: its underside is the ceiling,
+ * at its height above the level. The footprint has to be the ceiling's true outline, in straight edges, and the
+ * ceiling one the ceiling commands would make; anything else stays on the linked model with the reason.
+ */
+const ceiling: ImportRuleDef = {
+  id: "kernel.ceiling",
+  label: "Flat ceilings",
+  forKinds: ["ceiling"],
+  convert(p, ctx) {
+    const level = needLevel(ctx, p);
+    if (typeof level === "string") return fail(level);
+    const prism = holedPrism(p.geometry);
+    if (!prism) {
+      const { unread } = p.geometry;
+      if (unread !== OUTLINE_WITH_HOLES) return fail(unread ? `its shape is ${unread}` : NOT_FLAT);
+      // Holes are read for a ceiling, so having them is no reason: say what is wrong with the shape, or with a hole.
+      return fail(verticalPrism({ ...p.geometry, unread: null }) ? "one of its holes couldn't be read (curved, or not a closed line)" : NOT_FLAT);
+    }
+    const [shape] = p.geometry.extrusions;
+    // A ceiling is its plan outline, so a footprint read only as a size or as a sampled circle isn't one to take.
+    if (shape?.circle) return fail("its outline is a circle, and a ceiling here has straight edges");
+    if (shape?.outerBound) return fail("its shape is a hollow or rolled section, and only the outside edge of those is read from the file");
+    // An opening cut as its own element leaves the outline whole, so the outline alone would bring the ceiling in filled.
+    if ((p.openings ?? 0) > 0) return fail("it has openings cut through it, and those aren't read from the file yet");
+    const drawn = prism.outline.map(roundPlan);
+    if (drawn.length > CEILING_OUTLINE_MAX_POINTS) return fail(`its outline has ${drawn.length} corners, and a ceiling here takes ${CEILING_OUTLINE_MAX_POINTS} at most`);
+    // The same checks the ceiling commands run, so what comes in is a ceiling they would make.
+    const { outline, fault } = checkCeilingOutline(drawn);
+    if (fault) return fail(`its outline ${OUTLINE_FAULTS[fault]}`);
+    if (prism.holes.length > CEILING_HOLES_MAX) return fail(`it has ${prism.holes.length} holes, and a ceiling here takes ${CEILING_HOLES_MAX} at most`);
+    const most = prism.holes.reduce((n, hole) => Math.max(n, hole.length), 0);
+    if (most > CEILING_OUTLINE_MAX_POINTS) return fail(`one of its holes has ${most} corners, and a hole here takes ${CEILING_OUTLINE_MAX_POINTS} at most`);
+    const holes: Vec2[][] = [];
+    for (const cut of prism.holes) {
+      const hole = checkCeilingHole(cut.map(roundPlan), outline);
+      if (hole.fault) return fail(`one of its holes ${OUTLINE_FAULTS[hole.fault]}`);
+      holes.push(hole.outline);
+    }
+    const heightMm = round(prism.bottom - level.elevationMm);
+    if (!(heightMm > 0)) return fail("it sits at or below the floor of its level, and a ceiling here is above it");
+    if (heightMm > CEILING_HEIGHT_MAX_MM) return fail(`it is more than ${CEILING_HEIGHT_MAX_MM / 1000} m above its level, higher than a ceiling here can be`);
+    const record: Ceiling = { ...base(ctx, p, level), kind: "ceiling", levelId: level.id, outline, ...(holes.length > 0 ? { holes } : {}), form: "flat", heightMm };
     return { ok: true, records: [record] };
   },
 };
@@ -342,7 +402,7 @@ const component: ImportRuleDef = {
   },
 };
 
-export const KERNEL_IMPORT_RULES: readonly ImportRuleDef[] = [wall, slab, room, column, beam, opening, runSegment, part, component];
+export const KERNEL_IMPORT_RULES: readonly ImportRuleDef[] = [wall, slab, ceiling, room, column, beam, opening, runSegment, part, component];
 
 /** An element id for imported records: `imp.<source>.<GlobalId>[.<suffix>]`, GlobalId's `$` as `-` (outside its alphabet, so ids stay distinct). */
 export function importElementId(sourceKey: string, sourceId: string, suffix?: string): ElementId {

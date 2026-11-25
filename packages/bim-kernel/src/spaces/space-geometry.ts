@@ -78,13 +78,32 @@ export function selfIntersects(outline: readonly Vec2[]): boolean {
   return false;
 }
 
+/** What is wrong with an outline, as a word the caller puts its own sentence to. */
+export type OutlineFault = "too_few_corners" | "not_a_number" | "crosses_itself" | "too_small";
+
+/** The first thing that stops an outline from enclosing an area, or null when nothing does. */
+export function outlineFault(outline: readonly Vec2[]): OutlineFault | null {
+  if (outline.length < 3) return "too_few_corners";
+  if (outline.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return "not_a_number";
+  if (selfIntersects(outline)) return "crosses_itself";
+  if (outlineAreaMm2(outline) < MIN_SPACE_AREA_MM2) return "too_small";
+  return null;
+}
+
 /** Why an outline can't be a space, in words, or null when it can. */
 export function outlineProblem(outline: readonly Vec2[]): string | null {
-  if (outline.length < 3) return `A space needs at least 3 corners; this outline has ${outline.length}`;
-  if (outline.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return "An outline corner is not a number";
-  if (selfIntersects(outline)) return "The outline crosses itself. Click the corners in order around the space";
-  if (outlineAreaMm2(outline) < MIN_SPACE_AREA_MM2) return "That outline encloses almost no floor (under 1 sq ft). Click at least three corners around the space";
-  return null;
+  switch (outlineFault(outline)) {
+    case "too_few_corners":
+      return `A space needs at least 3 corners; this outline has ${outline.length}`;
+    case "not_a_number":
+      return "An outline corner is not a number";
+    case "crosses_itself":
+      return "The outline crosses itself. Click the corners in order around the space";
+    case "too_small":
+      return "That outline encloses almost no floor (under 1 sq ft). Click at least three corners around the space";
+    default:
+      return null;
+  }
 }
 
 export function containsPoint(outline: readonly Vec2[], p: Vec2): boolean {
