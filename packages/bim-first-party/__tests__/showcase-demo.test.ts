@@ -412,7 +412,7 @@ describe("createShowcaseDemoModel", () => {
       expect(totalBusAfter).toBeLessThan(totalBusBefore - 10);
     }
 
-    // Verify Lighting Plan & Lighting Controls Plan both use Binoy (chamfered) wire routing
+    // Verify Lighting Plan & Lighting Controls Plan both use chamfered orthogonal wire routing
     const ltg = model.elements["view-elec-ltg"];
     expect(ltg?.kind).toBe("view");
     if (ltg?.kind === "view") {

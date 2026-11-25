@@ -9,7 +9,7 @@ import { ToggleGroup, ToggleGroupItem } from '../../ui/toggle-group'
 
 const STYLES: ReadonlyArray<{ readonly value: CircuitGraphicStyle; readonly label: string; readonly hint: string }> = [
   { value: 'arcs', label: 'Arcs', hint: 'Curved lines join each circuit’s devices, with a home run on the one nearest the panel.' },
-  { value: 'chamfered', label: 'Binoy', hint: 'Orthogonal runs with crisp Binoy rounded corners, room-side wall stubs, and matching switch legs.' },
+  { value: 'chamfered', label: 'Chamfered', hint: 'Orthogonal runs with crisp rounded corners, room-side wall stubs, and matching switch legs.' },
   { value: 'orthogonal', label: 'Square', hint: 'Lines with 90° corners. Drag a line on the drawing to move its corner; it stays where you put it.' },
   { value: 'numbers', label: 'Numbers', hint: 'The circuit number beside each device and one home run per circuit (multifamily style).' },
   { value: 'off', label: 'Off', hint: 'No circuiting on this plan.' },

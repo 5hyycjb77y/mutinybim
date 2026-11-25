@@ -1681,8 +1681,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-power",
-      name: "Elec — Power Plan (Binoy)",
-      description: "Electrical power plan locking Binoy chamfered circuit graphics and clean device marks.",
+      name: "Elec — Power Plan (Chamfered)",
+      description: "Electrical power plan locking chamfered orthogonal circuit graphics and clean device marks.",
       viewTypes: ["floor_plan"],
       locks: ["discipline", "annotations", "pack_props"],
       props: {
@@ -1694,8 +1694,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-lighting",
-      name: "Elec — Lighting Plan (Binoy)",
-      description: "Electrical lighting RCP locking Binoy chamfered wiring and lighting visibility filters.",
+      name: "Elec — Lighting Plan (Chamfered)",
+      description: "Electrical lighting RCP locking chamfered orthogonal wiring and lighting visibility filters.",
       viewTypes: ["ceiling_plan"],
       locks: ["discipline", "category_overrides", "pack_props"],
       props: {

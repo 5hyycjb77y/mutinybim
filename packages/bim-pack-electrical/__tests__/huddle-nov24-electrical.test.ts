@@ -283,8 +283,8 @@ describe("Nov 24 huddle electrical features", () => {
     expect(branch!.length).toBeGreaterThan(4);
   });
 
-  it("renders Binoy (chamfered) style on lighting switch legs and matches Binoy preview geometry during interactive drag", () => {
-    let model = emptyModel("m-binoy-ctrl");
+  it("renders chamfered style on lighting switch legs and matches chamfered preview geometry during interactive drag", () => {
+    let model = emptyModel("m-chamfer-ctrl");
     model = run(model, { type: "create_level", levelId: "l1", name: "Level 1", elevationMm: 0 });
     const types = electricalStarterTypes("1.0.0");
     const sw = types.find((t) => t.id === "builtin:switch-dimmer@1")!;
@@ -313,7 +313,7 @@ describe("Nov 24 huddle electrical features", () => {
     expect(swGraphic).toBeDefined();
     expect(swGraphic!.dashed).toBe(true);
     const swPath = swGraphic!.paths[0]!;
-    // Binoy orthogonal + rounded corner path has a straight horizontal or vertical run segment (unlike a continuous arc).
+    // Chamfered orthogonal + rounded corner path has a straight horizontal or vertical run segment (unlike a continuous arc).
     let hasOrthoSeg = false;
     for (let i = 1; i < swPath.length; i++) {
       const dx = Math.abs(swPath[i]!.x - swPath[i - 1]!.x);
@@ -322,10 +322,10 @@ describe("Nov 24 huddle electrical features", () => {
     }
     expect(hasOrthoSeg).toBe(true);
 
-    // Interactive drag preview in Binoy (`chamfered`) mode produces orthogonal segments + rounded corners, not a spline.
-    const binoyPreview = previewWireCurve({ x: 0, y: 0 }, [{ x: 30, y: 20 }], { x: 60, y: 0 }, "chamfered");
+    // Interactive drag preview in `chamfered` mode produces orthogonal segments + rounded corners, not a spline.
+    const chamferPreview = previewWireCurve({ x: 0, y: 0 }, [{ x: 30, y: 20 }], { x: 60, y: 0 }, "chamfered");
     const arcPreview = previewWireCurve({ x: 0, y: 0 }, [{ x: 30, y: 20 }], { x: 60, y: 0 }, "arcs");
-    expect(binoyPreview).not.toEqual(arcPreview);
-    expect(binoyPreview.some((p, i) => i > 0 && Math.abs(p.y - binoyPreview[i - 1]!.y) < 0.01 && Math.abs(p.x - binoyPreview[i - 1]!.x) > 10)).toBe(true);
+    expect(chamferPreview).not.toEqual(arcPreview);
+    expect(chamferPreview.some((p, i) => i > 0 && Math.abs(p.y - chamferPreview[i - 1]!.y) < 0.01 && Math.abs(p.x - chamferPreview[i - 1]!.x) > 10)).toBe(true);
   });
 });
