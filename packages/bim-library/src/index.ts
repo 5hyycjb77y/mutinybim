@@ -22,3 +22,4 @@ export * from "./items/checks";
 export * from "./package";
 export * from "./registry";
 export * from "./registry/publish";
+export * from "./standard-notes";

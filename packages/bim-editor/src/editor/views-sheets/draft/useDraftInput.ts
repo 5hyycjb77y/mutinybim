@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { asElementId, drawDetailItem, modifyCommand, resolveNote, type DrawingItem, type Primitive, type Vec2 } from '@permitzip/bim-kernel'
 import { newId, type SubmitCommand } from '../types'
-import type { SnapPoint } from '../annotation-tools'
+import type { GraphicsSnapIndex, SnapPoint } from '../annotation-tools'
 import {
   PICK_ELEMENT_OPS,
   clickDimension,
@@ -42,8 +42,10 @@ export interface DraftInputContext {
   readonly reachMm: number
   /** The working angle on paper, degrees counter-clockwise: ortho and polar steps start from it. Absent: 0. */
   readonly trackBaseDeg?: number
-  /** Points a dimension follows (model ends and edges, or detail linework corners). */
+  /** Points a dimension and detail lines follow (model ends and edges, or detail linework corners). */
   readonly anchors: readonly SnapPoint[]
+  /** Real rendered model graphics index (wall corners/faces, grid lines/intersections). */
+  readonly graphicsIndex?: GraphicsSnapIndex | null
   readonly send: (command: Parameters<SubmitCommand>[0], label: string) => boolean
   readonly onSaved: (selectId: string | null) => void
   readonly onRefused: (reason: string) => void
@@ -54,6 +56,7 @@ export interface DraftInput {
   readonly active: boolean
   readonly prompt: string | null
   readonly preview: {
+    readonly tool: string | null
     readonly prims: Primitive[]
     readonly rubber: readonly Vec2[]
     readonly marker: Constrained | null
@@ -83,9 +86,26 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
   const active = pending !== null || shapeTool !== null
 
   const constrain = useCallback(
-    (at: Vec2, from: Vec2 | null, opts: { nearest?: boolean; anchors?: boolean; pickElement?: boolean } = {}) =>
-      constrainPoint({ at, from, items: ctx.items, toPaper: ctx.toPaper, settings: ctx.settings, reachMm: ctx.reachMm, trackBaseDeg: ctx.trackBaseDeg ?? 0, ...(opts.anchors ? { anchors: ctx.anchors } : {}), ...(opts.nearest ? { nearest: true } : {}), ...(opts.pickElement ? { pickElement: true } : {}) }),
-    [ctx.items, ctx.toPaper, ctx.settings, ctx.reachMm, ctx.anchors, ctx.trackBaseDeg],
+    (
+      at: Vec2,
+      from: Vec2 | null,
+      opts: { nearest?: boolean; anchors?: boolean; pickElement?: boolean; chainPoints?: readonly Vec2[]; allowCloseLoop?: boolean } = {},
+    ) =>
+      constrainPoint({
+        at,
+        from,
+        items: ctx.items,
+        toPaper: ctx.toPaper,
+        settings: ctx.settings,
+        reachMm: ctx.reachMm,
+        trackBaseDeg: ctx.trackBaseDeg ?? 0,
+        ...(opts.anchors !== false ? { anchors: ctx.anchors, graphicsIndex: ctx.graphicsIndex ?? null } : {}),
+        ...(opts.chainPoints && opts.chainPoints.length > 0 ? { chainPoints: opts.chainPoints } : {}),
+        ...(opts.allowCloseLoop ? { allowCloseLoop: true } : {}),
+        ...(opts.nearest ? { nearest: true } : {}),
+        ...(opts.pickElement ? { pickElement: true } : {}),
+      }),
+    [ctx.items, ctx.toPaper, ctx.settings, ctx.reachMm, ctx.anchors, ctx.graphicsIndex, ctx.trackBaseDeg],
   )
 
   const reset = useCallback(() => {
@@ -211,11 +231,23 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         return
       }
       if (!shapeTool) return
-      const c = constrain(raw, last, { anchors: shapeTool === 'dimension', nearest: shapeTool === 'dimension' && clicks.length === 0 && (settings.dimKind === 'radial' || settings.dimKind === 'diameter') })
+      const chainPoints = clicks.map((pt) => pt.at)
+      const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && clicks.length >= 3
+      const c = constrain(raw, last, {
+        anchors: true,
+        chainPoints,
+        allowCloseLoop,
+        nearest: shapeTool === 'dimension' && clicks.length === 0 && (settings.dimKind === 'radial' || settings.dimKind === 'diameter'),
+      })
       const next = [...clicks, c]
       const need = clicksFor(shapeTool, settings)
-      if ('fixed' in need && next.length >= need.fixed) commitShape(next)
-      else setClicks(next)
+      if ('fixed' in need && next.length >= need.fixed) {
+        commitShape(next)
+      } else if (allowCloseLoop && (c.closeLoop || (clicks[0] && Math.hypot(c.at.x - clicks[0].at.x, c.at.y - clicks[0].at.y) < 0.35))) {
+        commitShape(shapeTool === 'region' ? clicks : next)
+      } else {
+        setClicks(next)
+      }
     },
     [clicks, pending, ctx, constrain, picksNeeded, runModify, addLeader, shapeTool, settings, commitShape],
   )
@@ -228,7 +260,9 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       }
       const last = clicks[clicks.length - 1]?.at ?? null
       const needsItem = pending?.kind === 'modify' && pickNeedsItem(pending.op, clicks.length)
-      setHover(constrain(raw, last, { anchors: shapeTool === 'dimension', pickElement: needsItem }))
+      const chainPoints = clicks.map((pt) => pt.at)
+      const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && clicks.length >= 3
+      setHover(constrain(raw, last, { anchors: !needsItem, chainPoints, allowCloseLoop, pickElement: needsItem }))
     },
     [active, hover, clicks, pending, constrain, shapeTool],
   )
@@ -324,7 +358,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         drawDetailItem({ toPaper: ctx.toPaper, scale: ctx.storedPerPaperMm, prims }, item)
       }
     }
-    return { prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking) ? hover : null, typedLength, storedPerPaperMm: ctx.storedPerPaperMm }
+    return { tool: shapeTool, prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking || hover.guideLine || hover.closeLoop) ? hover : null, typedLength, storedPerPaperMm: ctx.storedPerPaperMm }
   }, [clicks, hover, shapeTool, settings, ctx.toStored, ctx.toPaper, ctx.storedPerPaperMm, ctx.ownerId, active, typedLength])
 
   const constrainDrag = useCallback((at: Vec2, from: Vec2 | null) => constrain(at, from), [constrain])

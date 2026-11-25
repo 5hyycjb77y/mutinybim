@@ -4,7 +4,7 @@ import type { SheetFigureSpec } from "./annotation/figures";
 import type { RichTextNote } from "./annotation/rich-text";
 import type { DiagramDefinition } from "./diagrams/definition";
 import type { FieldBlockSpec } from "./blocks/types";
-import type { Discipline, ElementId, Partition, Vec2 } from "./types";
+import type { Discipline, ElementId, ModelElementBase, Partition, Vec2, ViewElement, BimElement } from "./types";
 import type { CropBox3d, View3dCamera } from "./view3d";
 import type { FormScheduleDefinition } from "./schedules/forms/types";
 import type { ScheduleDefinition, ScheduleDefinitionV2 } from "./schedules/definition";
@@ -100,8 +100,192 @@ export interface SectionCut {
   readonly showInDisciplines?: readonly string[];
 }
 
+/** How a plan's upper view-range plane (`viewTopMm`) is anchored: relative to this level, relative to the next level above (Revit default for MEP plans), or unlimited. */
+export const VIEW_TOP_REFS = ["associated_level", "level_above", "unlimited"] as const;
+export type ViewTopRef = (typeof VIEW_TOP_REFS)[number];
+
+/** Peers that store and evaluate level-relative view range (`viewTopRef`) and Project Browser view grouping/sorting (`browserGroup`, `sortOrder`). */
+export const VIEW_RANGE_AND_BROWSER_FEATURE = "views:range_and_browser";
+
+/** Peers that store and resolve reusable first-class view templates (`view_template` elements & `ViewProps.viewTemplateId`). */
+export const VIEW_TEMPLATES_FEATURE = "views:templates";
+
+/**
+ * Property groups a `view_template` can control and lock across all bound views.
+ * - `view_range`: `cutHeightMm`, `viewTopMm`, `viewTopRef`, `viewBottomMm`, `viewDepthMm`
+ * - `category_overrides`: `categoryOverrides`, `hiddenCategories`, `hiddenDraftingCategories`, `lineWeights`
+ * - `detail_level`: `detailLevel`, `scale`, `symbolScale`, `showLineCodes`, `offsetStackedRuns`, `cutPattern`
+ * - `visual_style`: `visualStyle`, `showHiddenLines`, `hiddenLineCategories`
+ * - `discipline`: `discipline`, `browserGroup`, `showReferenceDisciplines`
+ * - `annotations`: `hideDeviceMarks`, `showClearanceLabels`
+ * - `pack_props`: any add-on `ViewGraphicsHints` records stored on the template
+ */
+export const VIEW_TEMPLATE_LOCK_KEYS = [
+  "view_range",
+  "category_overrides",
+  "detail_level",
+  "visual_style",
+  "discipline",
+  "annotations",
+  "pack_props",
+] as const;
+export type ViewTemplateLockKey = (typeof VIEW_TEMPLATE_LOCK_KEYS)[number];
+
+/** Reusable view settings stored on a `view_template` (including any pack-registered `ViewGraphicsHints`). */
+export type ViewTemplateProps = Omit<
+  ViewProps,
+  "level" | "levelElevationMm" | "section" | "cropView" | "cropPolygon" | "showCropBox" | "camera3d" | "cropBox3d" | "workingFor" | "schedule" | "formSchedule" | "scheduleV2" | "diagram" | "viewTemplateId"
+>;
+
+/** A saved, reusable view template bound live to any number of views via `ViewProps.viewTemplateId`. */
+export interface ViewTemplateElement extends ModelElementBase {
+  readonly kind: "view_template";
+  readonly name: string;
+  readonly description?: string;
+  /** View types this template applies to (absent or empty: any view type). */
+  readonly viewTypes?: readonly ViewType[];
+  /** Property groups controlled and locked by this template. */
+  readonly locks: readonly ViewTemplateLockKey[];
+  /** View settings applied to bound views for each locked group. */
+  readonly props: ViewTemplateProps;
+  /** Optional library item id this template came from (firm or add-on library). */
+  readonly sourceLibraryId?: string;
+  readonly deleted?: boolean;
+}
+
+/** Resolved effective view properties after overlaying any bound `view_template`. */
+export interface ResolvedViewProps {
+  readonly props: ViewProps;
+  readonly template: ViewTemplateElement | null;
+  readonly lockedGroups: ReadonlySet<ViewTemplateLockKey>;
+}
+
+const KNOWN_TEMPLATE_KERNEL_KEYS: ReadonlySet<string> = new Set([
+  "scale",
+  "cutHeightMm",
+  "viewDepthMm",
+  "viewBottomMm",
+  "viewTopMm",
+  "viewTopRef",
+  "browserGroup",
+  "sortOrder",
+  "discipline",
+  "hiddenCategories",
+  "hiddenElementIds",
+  "showClearanceLabels",
+  "hideDeviceMarks",
+  "hiddenDraftingCategories",
+  "references",
+  "linkedHiddenLines",
+  "linkedMinObjectMm",
+  "levelLeftExtMm",
+  "levelRightExtMm",
+  "detailLevel",
+  "showLineCodes",
+  "offsetStackedRuns",
+  "showReferenceDisciplines",
+  "symbolScale",
+  "visualStyle",
+  "showHiddenLines",
+  "hiddenLineCategories",
+  "lineWeights",
+  "categoryOverrides",
+  "cutPattern",
+  "annotationCrop",
+  "annotationCropOffsetMm",
+  "phaseId",
+  "phaseFilterId",
+  "groupDisplay",
+  "orientation",
+  "workingAngleDeg",
+  "projection",
+  "viewTemplateId",
+]);
+
+/**
+ * Resolve a view's effective `ViewProps` by applying its bound `view_template` (if any).
+ * Single canonical kernel resolver used by 2D/3D renderers, Inspector UI, and scripts.
+ */
+export function resolveViewProps(
+  elements: Readonly<Record<string, BimElement>>,
+  view: Pick<ViewElement, "props">,
+): ResolvedViewProps {
+  const base: ViewProps = view.props ?? {};
+  const tid = base.viewTemplateId;
+  const tpl = tid ? elements[tid] : undefined;
+  if (!tpl || tpl.kind !== "view_template" || tpl.deleted) {
+    return { props: base, template: null, lockedGroups: new Set<ViewTemplateLockKey>() };
+  }
+  const locked = new Set<ViewTemplateLockKey>(tpl.locks);
+  const next: Record<string, unknown> = { ...base };
+  const tp = tpl.props as Readonly<Record<string, unknown>>;
+  const copyIfDefined = (keys: readonly string[]) => {
+    for (const k of keys) {
+      if (tp[k] !== undefined) next[k] = tp[k];
+    }
+  };
+  if (locked.has("view_range")) {
+    // Replace the entire view-range tuple cleanly so stale view-level overrides don't leak past a template.
+    delete next.cutHeightMm;
+    delete next.viewTopMm;
+    delete next.viewTopRef;
+    delete next.viewBottomMm;
+    delete next.viewDepthMm;
+    copyIfDefined(["cutHeightMm", "viewTopMm", "viewTopRef", "viewBottomMm", "viewDepthMm"]);
+  }
+  if (locked.has("category_overrides")) {
+    copyIfDefined(["categoryOverrides", "hiddenCategories", "hiddenDraftingCategories", "lineWeights"]);
+  }
+  if (locked.has("detail_level")) {
+    copyIfDefined(["detailLevel", "scale", "symbolScale", "showLineCodes", "offsetStackedRuns", "cutPattern"]);
+  }
+  if (locked.has("visual_style")) {
+    copyIfDefined(["visualStyle", "showHiddenLines", "hiddenLineCategories"]);
+  }
+  if (locked.has("discipline")) {
+    copyIfDefined(["discipline", "browserGroup", "showReferenceDisciplines"]);
+  }
+  if (locked.has("annotations")) {
+    copyIfDefined(["hideDeviceMarks", "showClearanceLabels"]);
+  }
+  if (locked.has("pack_props")) {
+    for (const [k, v] of Object.entries(tp)) {
+      if (!KNOWN_TEMPLATE_KERNEL_KEYS.has(k) && v !== undefined) {
+        const cur = next[k];
+        if (
+          typeof cur === "object" &&
+          cur !== null &&
+          !Array.isArray(cur) &&
+          typeof v === "object" &&
+          v !== null &&
+          !Array.isArray(v)
+        ) {
+          // Template keys override the view's style settings while preserving view-local drafting state (e.g. per-wire hints).
+          next[k] = { ...(cur as Record<string, unknown>), ...(v as Record<string, unknown>) };
+        } else {
+          next[k] = v;
+        }
+      }
+    }
+  }
+  return { props: next as ViewProps, template: tpl, lockedGroups: locked };
+}
+
+/** Return a copy of `view` with its `props` resolved through any bound `view_template` (returns `view` untouched when unbound). */
+export function resolveViewElement(
+  elements: Readonly<Record<string, BimElement>>,
+  view: ViewElement,
+): ViewElement {
+  if (!view.props?.viewTemplateId) return view;
+  const resolved = resolveViewProps(elements, view);
+  if (!resolved.template) return view;
+  return { ...view, props: resolved.props };
+}
+
 /** Everything about a view a person can set; absent fields take the view type's default. */
 export interface ViewProps extends ViewGraphicsHints {
+  /** Optional bound `view_template` element id; locked template groups override this view's local values live. */
+  readonly viewTemplateId?: ElementId;
   /** Level the plan belongs to (matches element partitions). */
   readonly level?: string;
   /** Level elevation above project zero, mm. */
@@ -114,11 +298,23 @@ export interface ViewProps extends ViewGraphicsHints {
   readonly viewDepthMm?: number;
   /** Plans: the bottom of what the view shows, mm above the level (negative is below it). Absent: no lower limit. */
   readonly viewBottomMm?: number;
-  /** Plans: the top of what the view shows, mm above the level. Absent: no upper limit (ductwork above the cut still shows). */
+  /** Plans: the top of what the view shows, mm above its reference plane (`viewTopRef`: associated level or level above). Absent: automatic to next level. */
   readonly viewTopMm?: number;
+  /** Plans: reference datum for `viewTopMm` (`"associated_level"`, `"level_above"`, or `"unlimited"`). Absent: associated level when `viewTopMm` is set, else automatic to next level. */
+  readonly viewTopRef?: ViewTopRef;
+  /** Optional Project Browser folder/group label for organizing views alongside sheets. */
+  readonly browserGroup?: string;
+  /** Optional numeric sort key for ordering views in the Project Browser. */
+  readonly sortOrder?: number;
   /** Elements of this discipline print in ink; underlay disciplines (the building) halftone; plans leave other disciplines' runs out (`leftOutOfDisciplineView`). Absent: all in ink. */
   readonly discipline?: Discipline;
   readonly hiddenCategories?: readonly ViewCategory[];
+  /** Individual element ids hidden in this view only; cleared by removing them from the list. Stored only when peers advertise `views:hidden_elements`. */
+  readonly hiddenElementIds?: readonly string[];
+  /** Plans: draw text labels inside clearance zones (dashed outlines always draw). Absent: on. */
+  readonly showClearanceLabels?: boolean;
+  /** Plans: hide automatic per-instance marks on repetitive devices (outlets, switches, luminaires) while keeping equipment & manual tags visible. Absent: off. */
+  readonly hideDeviceMarks?: boolean;
   /** Drafting categories this view hides (detail lines, hatching, components, insulation…); the model's categories are `hiddenCategories`. */
   readonly hiddenDraftingCategories?: readonly DraftingCategory[];
   /** Per linked model id. Absent: visible, halftone. */
@@ -207,6 +403,8 @@ export const VIEW_TYP_LABELS_FEATURE = "views:typ_labels";
 export const VIEW_ANALYSIS_OVERLAY_FEATURE = "views:analysis_overlay";
 /** Peers that store per-viewport north-arrow sheet offsets and accept offset-only `set_viewport_north_arrow` commands. */
 export const VIEWPORT_NORTH_ARROW_OFFSET_FEATURE = "documents:viewport_north_arrow_offset";
+/** Peers that store per-view hidden element lists (`ViewProps.hiddenElementIds`). */
+export const VIEW_HIDDEN_ELEMENTS_FEATURE = "views:hidden_elements";
 
 /** A callout: a box or custom closed polygon around part of a plan, bound to the view that shows it enlarged; its head reads that view's number and sheet, live. */
 export interface CalloutSpec {

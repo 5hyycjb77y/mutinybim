@@ -62,7 +62,11 @@ async function branchAction(caller: ResolveBimCaller, branches: BranchActions, e
               ...(action.fromVersion !== undefined ? { fromVersion: action.fromVersion } : {}),
             }),
           )
-        : await withSession(who, modelId, undefined, (session) => actions.proposeMerge({ session, userId: who.userId }));
+        : action.kind === "checkout"
+          ? await withSession({ ...who, branchId: null }, modelId, undefined, (session) =>
+              actions.checkout({ session, target: action.target }),
+            )
+          : await withSession(who, modelId, undefined, (session) => actions.proposeMerge({ session, userId: who.userId }));
     if (result.status === "refused") return failure(result.message);
     return text({ ...result, model_id: modelId });
   } catch (err) {
@@ -287,7 +291,7 @@ export function registerBimOrganizationTools(server: McpServer, caller: ResolveB
     "bim_set_active_group_and_phase",
     {
       title: "Set where new work goes",
-      description: "Set the model's active group (new ducts, pipes and parts go in it) or active phase (new elements are built in it; demolish uses it), typical_cap, switch an add-on on or off for this model (addon), or branch: start one (Main is untouched) or propose this thread's branch to Main; people approve merges. Give one of them per call. A locked group can't be made active.",
+      description: "Set the model's active group (new ducts, pipes and parts go in it) or active phase (new elements are built in it; demolish uses it), typical_cap, switch an add-on on or off for this model (addon), or branch: start a new branch from Main (branch.start), switch this thread onto an existing open branch or \"main\" (branch.checkout), or propose this thread's branch to Main (branch.propose_merge); people approve merges. Give one of them per call. A locked group can't be made active.",
       inputSchema: { ...target, ...baseRevision, group: groupRef.optional(), phase: phaseRef.optional(), typical_cap: z.number().int().min(1).max(500).optional().describe("How many typical types the contract covers; more is a coordination warning."), addon: z.object({ id: z.string().min(1).max(100), on: z.boolean() }).optional().describe("Add-on id (e.g. struct); off hides its rows, deletes nothing."), branch: agentBranchSchema.optional() },
     },
     async (args, extra) => {

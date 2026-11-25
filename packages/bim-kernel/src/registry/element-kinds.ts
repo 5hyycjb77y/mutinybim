@@ -15,6 +15,7 @@ export const KERNEL_ELEMENT_KINDS = [
   "riser_segment",
   "component",
   "view",
+  "view_template",
   "sheet",
   "tag",
   "dimension",

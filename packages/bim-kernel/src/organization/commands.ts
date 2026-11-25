@@ -48,7 +48,7 @@ import {
 } from "./model";
 import { MAX_TYPICAL_COPIES, arrayCopies } from "./typicals";
 import { ORG_FIELDS, organizationFieldValue } from "./fields";
-import { DOCUMENTS_PRINT_BLACK_ONLY_FEATURE, TAGS_MASK_LEADER_FEATURE, TAGS_SLOPE_ARROW_FEATURE, TAG_STYLE_ARROWS, TAG_STYLE_CATEGORIES_B16, TYPICALS_MIRROR_FEATURE, type TypicalCopy, type TypicalSpec } from "./model";
+import { DOCUMENTS_PRINT_BLACK_ONLY_FEATURE, ORGANIZATION_ELEMENT_LOCKS_FEATURE, TAGS_MASK_LEADER_FEATURE, TAGS_SLOPE_ARROW_FEATURE, TAG_STYLE_ARROWS, TAG_STYLE_CATEGORIES_B16, TYPICALS_MIRROR_FEATURE, type TypicalCopy, type TypicalSpec } from "./model";
 import { ORGANIZATION_SETUP_FEATURE, addonSetupId, disciplineSetupId, modelSetupHostPacks, setupProblems, setupWithFirm, setupWithSwitch } from "./setup";
 import { peerReads } from "../elements/feature";
 import { partitionMembers } from "../partition";
@@ -260,6 +260,10 @@ export const organizationCommandSchemas = [
   z.object({ type: z.literal("set_typical_cap"), cap: z.number().int().min(1).max(MAX_TYPICAL_COPIES) }),
   /** The project's sheets print black only (true) or in colour (false). */
   z.object({ type: z.literal("set_print_black_only"), blackOnly: z.boolean() }),
+  /** Lock or unlock individual model elements against edits (move, parameter edit, delete). */
+  z.object({ type: z.literal("set_element_locks"), ids, locked: z.boolean() }),
+  /** Lock or unlock an entire view category across the model. */
+  z.object({ type: z.literal("lock_category"), category: z.string().trim().min(1).max(64), locked: z.boolean() }),
   /** Switch an installed add-on on or off for this model (round 8). Off hides its rows; nothing is deleted. */
   z.object({
     type: z.literal("set_model_addon"),
@@ -364,10 +368,17 @@ class Edit {
     // Every stored setting is kept; only the ones named change.
     const cap = kept?.typicalCap !== undefined ? { typicalCap: kept.typicalCap } : {};
     const black = kept?.printBlackOnly === true ? { printBlackOnly: true as const } : {};
-    const merged: OrganizationSettingsEntry = { type: "settings", activeGroupId: this.org.activeGroupId, activePhaseId: this.org.activePhaseId, ...cap, ...black, ...change };
-    // Colour is the default: say nothing rather than store false.
-    const { printBlackOnly: blackNow, ...rest } = merged;
-    const next: OrganizationSettingsEntry = blackNow ? merged : rest;
+    const lockedEls = kept?.lockedElementIds && kept.lockedElementIds.length > 0 ? { lockedElementIds: kept.lockedElementIds } : {};
+    const lockedCats = kept?.lockedCategories && kept.lockedCategories.length > 0 ? { lockedCategories: kept.lockedCategories } : {};
+    const merged: OrganizationSettingsEntry = { type: "settings", activeGroupId: this.org.activeGroupId, activePhaseId: this.org.activePhaseId, ...cap, ...black, ...lockedEls, ...lockedCats, ...change };
+    // Defaults are omitted rather than stored as false/empty.
+    const { printBlackOnly: blackNow, lockedElementIds: idsNow, lockedCategories: catsNow, ...rest } = merged;
+    const next: OrganizationSettingsEntry = {
+      ...rest,
+      ...(blackNow ? { printBlackOnly: true as const } : {}),
+      ...(idsNow && idsNow.length > 0 ? { lockedElementIds: idsNow } : {}),
+      ...(catsNow && catsNow.length > 0 ? { lockedCategories: catsNow } : {}),
+    };
     this.putEntry(ORGANIZATION_SETTINGS_ID, next);
   }
 
@@ -587,6 +598,36 @@ export function executeOrganizationCommand(model: ModelState, command: Organizat
         if (org.printBlackOnly === command.blackOnly) return edit.done([command.blackOnly ? "Sheets already print black only" : "Sheets already print in colour"]);
         edit.setSettings({ printBlackOnly: command.blackOnly });
         return edit.done([command.blackOnly ? "Sheets now print black only: colours print black, halftone stays grey" : "Sheets now print in colour"]);
+      }
+      case "set_element_locks": {
+        if (!peerReads(ORGANIZATION_ELEMENT_LOCKS_FEATURE)) refuse("invalid_value", "Element locking can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        const next = new Set(org.lockedElementIds);
+        let changed = 0;
+        for (const eid of command.ids) {
+          if (command.locked) {
+            if (!next.has(eid)) {
+              next.add(eid);
+              changed++;
+            }
+          } else if (next.delete(eid)) {
+            changed++;
+          }
+        }
+        if (changed === 0) return edit.done([`${plural(command.ids.length, "element")} already ${command.locked ? "locked" : "unlocked"}`]);
+        const list = [...next].sort();
+        edit.setSettings({ lockedElementIds: list.length > 0 ? list : undefined });
+        return edit.done([command.locked ? `${plural(changed, "element")} locked against changes` : `${plural(changed, "element")} unlocked`]);
+      }
+      case "lock_category": {
+        if (!peerReads(ORGANIZATION_ELEMENT_LOCKS_FEATURE)) refuse("invalid_value", "Category locking can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated", []);
+        const next = new Set(org.lockedCategories);
+        const had = next.has(command.category);
+        if (command.locked === had) return edit.done([`Category "${command.category}" is already ${command.locked ? "locked" : "unlocked"}`]);
+        if (command.locked) next.add(command.category);
+        else next.delete(command.category);
+        const list = [...next].sort();
+        edit.setSettings({ lockedCategories: list.length > 0 ? list : undefined });
+        return edit.done([command.locked ? `Category "${command.category}" is locked against changes` : `Category "${command.category}" is unlocked`]);
       }
       case "set_typical_cap": {
         if (org.typicalCap === command.cap) return edit.done([`The contract already covers ${plural(command.cap, "typical")}`]);

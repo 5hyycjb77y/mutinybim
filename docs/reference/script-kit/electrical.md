@@ -12,6 +12,9 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`electrical.exportRadiance`](#electricalexportradiance): Exports the live working model into standard LBNL Radiance scene text files (`materialsRad`, `geometryRad`, `luminairesRad`, `skyRad`, `sensorGridPts`, `iesFiles`, and `oconv`/`rtrace`/`rpict`/`evalglare` commands) using exact kernel.material LRV/T_vis and luminaire IES webs — zero runtime Radiance dependency.
 - [`electrical.runEgressLightingCheck`](#electricalrunegresslightingcheck): Runs NFPA 101 §7.9.2.1 / IBC §1008.3.5 emergency egress lighting compliance (initial ≥1.0 avg / ≥0.1 min fc and 90-minute ≥0.6 avg / ≥0.06 min fc, max:min ≤40:1) using strictly emergency-backed fixtures along corridors, 3D multi-flight stair treads/landings, exit discharge pads, or explicit egress paths (supports calculationMode: "simplified" | "detailed").
 - [`electrical.enablePhotometricOverlay`](#electricalenablephotometricoverlay): Toggles the 2D photometric footcandle grid, marching-squares iso-contour lines, and sub-threshold fail highlights on a floor or ceiling plan view (mode: "off" | "normal" | "egress").
+- [`electrical.insertDisconnect`](#electricalinsertdisconnect): Places a local NEMA 3R/1 disconnect switch beside an equipment load (NEC 440.14 / 430.102) and re-routes its circuit inline (panel -> disconnect -> equipment) while preserving upstream breaker positions and One-Line topology.
+- [`electrical.removeDisconnect`](#electricalremovedisconnect): Removes an inline local disconnect switch feeding a piece of equipment and restores direct feed from its upstream panel circuit (preserving breaker positions and ratings).
+- [`electrical.setDisconnectRequirement`](#electricalsetdisconnectrequirement): Marks whether a piece of equipment requires a local disconnect switch (set required: false for integral factory disconnects or lockable breakers per NEC 430.102(B) Exception to silence equipment-missing-disconnect warnings).
 
 ## electrical.setLuminaireIes
 
@@ -183,6 +186,88 @@ export default defineScript({
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
     const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plan", scale: 48 });
     electrical.enablePhotometricOverlay(ctx, plan, { mode: "egress", showContours: true, showGridValues: true });
+  },
+});
+```
+
+</details>
+
+## electrical.insertDisconnect
+
+Places a local NEMA 3R/1 disconnect switch beside an equipment load (NEC 440.14 / 430.102) and re-routes its circuit inline (panel -> disconnect -> equipment) while preserving upstream breaker positions and One-Line topology.
+
+```ts
+insertDisconnect(ctx: ScriptContext, equipmentRef: PlacedPart | string, spec?: InsertDisconnectSpec): InsertDisconnectResult
+```
+
+Topics: disconnect, safety switch, nec 440.14, nec 430.102, equipment connection, one-line, inline disconnect, starter
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const hp = equipment.place(ctx, { level: "L1", type: "builtin:panelboard-225-480@1", at: { x: units.ft(2), y: units.ft(2) }, mark: "HP-1" });
+    const rtu = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5-ton@1", at: { x: units.ft(20), y: units.ft(10) }, mark: "RTU-1" });
+    ctx.edit({ type: "create_service_link", linkId: "ckt-rtu", sourceId: hp.id, positions: [1, 3, 5], members: [{ elementId: rtu.id }], electrical: { ratingA: 40 } });
+    electrical.insertDisconnect(ctx, rtu, { ratingA: 60 });
+  },
+});
+```
+
+</details>
+
+## electrical.removeDisconnect
+
+Removes an inline local disconnect switch feeding a piece of equipment and restores direct feed from its upstream panel circuit (preserving breaker positions and ratings).
+
+```ts
+removeDisconnect(ctx: ScriptContext, equipmentRef: PlacedPart | string): { removedDisconnectId: string; restoredLinkId: string | null }
+```
+
+Topics: disconnect, remove disconnect, direct feed, equipment connection, bypass disconnect
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    electrical.removeDisconnect(ctx, "RTU-1");
+  },
+});
+```
+
+</details>
+
+## electrical.setDisconnectRequirement
+
+Marks whether a piece of equipment requires a local disconnect switch (set required: false for integral factory disconnects or lockable breakers per NEC 430.102(B) Exception to silence equipment-missing-disconnect warnings).
+
+```ts
+setDisconnectRequirement(ctx: ScriptContext, equipmentRef: PlacedPart | string, required: boolean, reason?: string): { equipmentId: string; disconnectRequired: boolean }
+```
+
+Topics: disconnect, disconnect not required, exempt, integral disconnect, lockable breaker, nec 440.14, nec 430.102
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    electrical.setDisconnectRequirement(ctx, "EF-1", false, "Factory integral disconnect");
   },
 });
 ```

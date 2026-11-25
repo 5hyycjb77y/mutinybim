@@ -27,6 +27,7 @@ import { PrintedPdfLayer } from './PrintedPdfLayer'
 import { FigureProperties } from './FigureProperties'
 import type { SheetImages } from './use-sheet-images'
 import { EditingViewIndicator } from './EditingViewIndicator'
+import { PROPERTIES_DEFAULT_WIDTH_PX, PROPERTIES_SURFACE, ResizableSideRail } from '../layout/ResizableSideRail'
 import { KeynotePicker } from './KeynotePicker'
 import { cleanKey, keynoteCommand } from './keynotes'
 import { useDrawnScene, type DrawingTarget } from './use-drawn-scene'
@@ -52,7 +53,7 @@ import { useLinkedReferenceState } from '../linked-reference/use-linked-referenc
 import { DetailSelectionProperties } from './draft/DetailSelectionProperties'
 import { DraftOptionsBar } from './draft/DraftOptionsBar'
 import { DraftOverlay } from './draft/DraftOverlay'
-import { marqueeHits } from './draft/draft-input'
+import { isDraftShape, marqueeHits } from './draft/draft-input'
 import { useDraftController, type DraftController } from './draft/useDraftController'
 import { useDraftInput } from './draft/useDraftInput'
 import { ToolHintBar } from '../ToolHintBar'
@@ -79,7 +80,7 @@ type Target = DrawingTarget
 type Selection = { readonly kind: 'viewport'; readonly id: string } | { readonly kind: 'item'; readonly id: string } | null
 
 type Drag =
-  | { readonly kind: 'move'; readonly id: string; readonly from: Vec2; readonly origin: Vec2; readonly to: Vec2 }
+  | { readonly kind: 'move'; readonly id: string; readonly from: Vec2; readonly origin: Vec2; readonly to: Vec2; readonly extras?: readonly { readonly id: string; readonly origin: Vec2 }[] }
   /** A viewport frame's edge or corner on a sheet: the view's crop follows. */
   | { readonly kind: 'frame'; readonly id: string; readonly handle: CropHandle; readonly from: Vec2; readonly start: Rect; readonly rect: Rect }
   /** The crop box of the open view's drawing. */
@@ -152,6 +153,8 @@ interface Props {
   readonly onEditSheet?: () => void
   /** Right-hand properties for a detail view (scale etc.), rendered under the selection panel. */
   readonly viewProperties?: React.ReactNode
+  /** Optional override for the right Properties rail collapse shortcut (default `]`; pass `null` to disable). */
+  readonly propertiesShortcut?: string | null
   /** The drawing tool, when the ribbon owns it (its Annotate tab); the canvas then draws no tool buttons of its own. */
   readonly tool?: DrawingTool
   readonly onToolChange?: (tool: DrawingTool) => void
@@ -242,6 +245,7 @@ const ANNOTATE_EXTRA: ReadonlyArray<{ tool: Tool; label: string; icon: React.Rea
   { tool: 'keynote', label: 'Keynote', icon: <KeyRound /> },
   { tool: 'callout', label: 'Callout', icon: <SquareDashed /> },
   { tool: 'line', label: 'Line', icon: <Minus /> },
+  { tool: 'rect', label: 'Rectangle', icon: <Square /> },
   { tool: 'cloud', label: 'Revision cloud', icon: <Cloud /> },
   ...DRAFT_EXTRA,
 ]
@@ -272,7 +276,7 @@ interface PlacedFrame {
 }
 
 /** Sheet editor and detail-view drafting canvas: the printed drawing underneath, interaction on top. */
-export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReason, submit, onOpenView, onOpenSheet, onEditSheet, viewProperties, tool: controlledTool, onToolChange, onToolsAvailable, backgrounds, printedPreview = false, people, selfActorId, onActivity, draft: sharedDraft, modelEdit, onActiveViewChange, onOpenTagStyles, viewportProperties, sheetImages = null, focusItem = null, placing = null, onPlaced, onPlacingCancel, spaces = null, ceilings = null, questions = null, blockFreshness, onCreateSimilar, onAddView, onPlanPointer }: Props) {
+export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReason, submit, onOpenView, onOpenSheet, onEditSheet, viewProperties, propertiesShortcut, tool: controlledTool, onToolChange, onToolsAvailable, backgrounds, printedPreview = false, people, selfActorId, onActivity, draft: sharedDraft, modelEdit, onActiveViewChange, onOpenTagStyles, viewportProperties, sheetImages = null, focusItem = null, placing = null, onPlaced, onPlacingCancel, spaces = null, ceilings = null, questions = null, blockFreshness, onCreateSimilar, onAddView, onPlanPointer }: Props) {
   const overlayRef = useRef<SVGSVGElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const paperRef = useRef<HTMLDivElement | null>(null)
@@ -431,18 +435,25 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
   /** Points a dimension snaps to (and then follows): element ends, middles, edges and insertion points, or a detail's linework. */
   const dimSelected = selection?.kind === 'item' && Boolean(items.find((i) => i.id === selection.id)?.dim)
   const linkedReference = useLinkedReferenceState()
-  const snaps = useMemo<SnapPoint[]>(() => {
-    if (!annotatedView || (tool !== 'dimension' && !dimSelected)) return []
-    const own = snapPoints(model, annotatedView, items, toPaperPoint)
-    // A linked model's walls too: the dimension follows the wall by its GlobalId when the link updates.
-    return linkedReference.status === 'ready' ? [...own, ...linkedDimensionAnchors(linkedReference.index, model, annotatedView, toPaperPoint)] : own
-  }, [model, annotatedView, items, toPaperPoint, tool, dimSelected, linkedReference])
-  const [hoverSnap, setHoverSnap] = useState<SnapPoint | null>(null)
-  const snapReach = SNAP_REACH_MM / Math.max(zoom, 0.25)
   const ownDraft = useDraftController()
   const draft = sharedDraft ?? ownDraft
+  const draftingSnapActive = isDraftShape(tool) || draft.pending !== null
+  const snaps = useMemo<SnapPoint[]>(() => {
+    if (!annotatedView || (tool !== 'dimension' && !dimSelected && !draftingSnapActive)) return []
+    const own = snapPoints(model, annotatedView, items, toPaperPoint)
+    // A linked model's walls too: dimensions and detail lines snap to linked walls cleanly.
+    return linkedReference.status === 'ready' ? [...own, ...linkedDimensionAnchors(linkedReference.index, model, annotatedView, toPaperPoint)] : own
+  }, [model, annotatedView, items, toPaperPoint, tool, dimSelected, draftingSnapActive, linkedReference])
+  const [hoverSnap, setHoverSnap] = useState<SnapPoint | null>(null)
+  const snapReach = SNAP_REACH_MM / Math.max(zoom, 0.25)
   /** Drawn items picked besides the selection (Shift+click), for modify operations on several. */
   const [alsoPicked, setAlsoPicked] = useState<readonly string[]>([])
+  /** Sheet viewports picked besides the selection (Shift+click), for moving or removing several together. */
+  const [alsoViewports, setAlsoViewports] = useState<readonly string[]>([])
+  const selectedViewportIds = useMemo(
+    () => (selection?.kind === 'viewport' ? [selection.id, ...alsoViewports.filter((id) => id !== selection.id)] : []),
+    [selection, alsoViewports],
+  )
   // A chart or picture just placed becomes the selection (adjusting state while rendering, React's pattern for a prop that asks once).
   const [seenFocus, setSeenFocus] = useState(focusItem)
   if (focusItem !== seenFocus) {
@@ -454,10 +465,11 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
   }
   /** Edit Boundary on a filled/masking region OR enlarged callout: its corners (paper mm) until Finish or Cancel. */
   const [boundary, setBoundary] = useState<{ readonly itemId: string; readonly kind: 'region' | 'callout'; readonly points: readonly Vec2[]; readonly picked: number | null } | null>(null)
-  /** Paper-space snap index for wall faces/corners, grids & intersections — computed lazily while editing callouts or sketching P-lines. */
+  /** Paper-space snap index for wall faces/corners, grids & intersections — active for all drafting tools, callouts, and P-lines. */
   const needGraphicsSnap =
     annotatedView !== null &&
-    (tool === 'callout' ||
+    (draftingSnapActive ||
+      tool === 'callout' ||
       boundary?.kind === 'callout' ||
       plineSketch !== null ||
       (selection?.kind === 'item' && items.some((i) => i.id === selection.id && i.shape === 'callout')))
@@ -562,6 +574,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     reachMm: snapReach,
     trackBaseDeg,
     anchors: snaps,
+    graphicsIndex,
     send,
     onSaved: (id) => {
       setAlsoPicked([])
@@ -920,6 +933,28 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
           toast(`Selected joined chain of ${chain.length} items.`)
           return
         }
+        // Otherwise cycle through overlapping drawn items under the currently selected item's footprint.
+        const current = items.find((it) => it.id === selection.id)
+        const curBox = current ? (current.dim || current.tag ? annotationBox(model, annotatedView, current, toPaperPoint) : detailBox(current, toPaperPoint)) : null
+        if (curBox) {
+          const cx = curBox.x + curBox.w / 2
+          const cy = curBox.y + curBox.h / 2
+          const overlapping = items.filter((it) => {
+            if (it.deleted) return false
+            const b = it.dim || it.tag ? annotationBox(model, annotatedView, it, toPaperPoint) : detailBox(it, toPaperPoint)
+            if (!b) return false
+            return cx >= b.x - 1.5 && cx <= b.x + b.w + 1.5 && cy >= b.y - 1.5 && cy <= b.y + b.h + 1.5
+          })
+          if (overlapping.length > 1) {
+            e.preventDefault()
+            const idx = overlapping.findIndex((it) => it.id === selection.id)
+            const next = overlapping[(idx + (e.shiftKey ? overlapping.length - 1 : 1)) % overlapping.length]!
+            setAlsoPicked([])
+            setSelection({ kind: 'item', id: next.id })
+            toast(`Selected ${next.shape} (${((idx + 1) % overlapping.length) + 1} of ${overlapping.length} overlapping).`)
+            return
+          }
+        }
       }
       const plainKey = !e.metaKey && !e.ctrlKey && !e.altKey
       if (plainKey && !e.repeat && similarChord.current.press(e.key, e.timeStamp) && tool === 'select' && selection?.kind === 'item') {
@@ -970,7 +1005,10 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
           setAlsoPicked([])
         }
         else if (active) finishEditing()
-        else setSelection(null)
+        else {
+          setSelection(null)
+          setAlsoViewports([])
+        }
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selection && canEdit) {
         e.preventDefault()
@@ -981,12 +1019,22 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
             setSelection(null)
             setAlsoPicked([])
           }
-        } else if (send({ type: 'remove_viewport', viewportId: selection.id }, 'take the view off the sheet')) setSelection(null)
+        } else {
+          const vpIds = selectedViewportIds
+          const command =
+            vpIds.length > 1
+              ? { type: 'batch_documents' as const, label: `Remove ${vpIds.length} views from sheet`, commands: vpIds.map((viewportId) => ({ type: 'remove_viewport' as const, viewportId })) }
+              : { type: 'remove_viewport' as const, viewportId: selection.id }
+          if (send(command, 'take the view off the sheet')) {
+            setSelection(null)
+            setAlsoViewports([])
+          }
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored])
+  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, selectedViewportIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored])
 
   /** Paper point under a pointer event on the overlay or anything in it. */
   const paperOf = (e: React.PointerEvent<SVGElement>): Vec2 | null => {
@@ -1097,15 +1145,21 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       return
     }
     if (tool === 'select') {
-      if (e.shiftKey && e.target === e.currentTarget) {
+      if (e.shiftKey) {
         e.preventDefault()
         e.currentTarget.setPointerCapture(e.pointerId)
         setDrag({ kind: 'marquee', a: at, b: at })
         return
       }
       const deselect = () => {
-        if (!active) setSelection(null)
-        else if (selection?.kind !== 'viewport') setSelection(null)
+        if (!active) {
+          setSelection(null)
+          setAlsoPicked([])
+          setAlsoViewports([])
+        } else if (selection?.kind !== 'viewport') {
+          setSelection(null)
+          setAlsoPicked([])
+        }
       }
       // Empty paper: a drag pans (as in the plan view); a click deselects.
       if (e.target !== e.currentTarget || !viewNav?.pressEmpty(e.nativeEvent, deselect)) deselect()
@@ -1274,15 +1328,25 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       case 'note-new':
         setDrag({ ...drag, b: at })
         break
-      case 'items-move':
+      case 'items-move': {
         if (!drag.started && !dragStarted(drag.from, at, pxPerMm)) break
         if (!canEdit) {
           toast.error(blockedReason)
           setDrag(null)
           break
         }
-        setDrag({ ...drag, started: true, to: dragTo(drag.from, at, draft.settings.ortho, trackBaseDeg) })
+        const orthoOn = draft.settings.ortho || e.shiftKey
+        let snappedTo = dragTo(drag.from, at, orthoOn, trackBaseDeg)
+        // Soft orthogonal alignment guide when dragging freely (snaps cleanly to pure H/V within 1.5 mm paper).
+        if (!orthoOn) {
+          const dx = snappedTo.x - drag.from.x
+          const dy = snappedTo.y - drag.from.y
+          if (Math.abs(dy) < 1.5 && Math.abs(dx) > 3) snappedTo = { x: snappedTo.x, y: drag.from.y }
+          else if (Math.abs(dx) < 1.5 && Math.abs(dy) > 3) snappedTo = { x: drag.from.x, y: snappedTo.y }
+        }
+        setDrag({ ...drag, started: true, to: snappedTo })
         break
+      }
       case 'note-size':
         setDrag({ ...drag, frame: resizeFrame(drag.start, drag.edge, { x: at.x - drag.from.x, y: at.y - drag.from.y }) })
         break
@@ -1515,6 +1579,14 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     const dx = d.to.x - d.from.x
     const dy = d.to.y - d.from.y
     if (Math.hypot(dx, dy) < 0.3) return
+    if (d.extras && d.extras.length > 0) {
+      const commands = [
+        { type: 'move_viewport' as const, viewportId: d.id, center: { x: d.origin.x + dx, y: d.origin.y + dy } },
+        ...d.extras.map((ex) => ({ type: 'move_viewport' as const, viewportId: ex.id, center: { x: ex.origin.x + dx, y: ex.origin.y + dy } })),
+      ]
+      send({ type: 'batch_documents', label: `Move ${commands.length} viewports`, commands }, 'move the viewports')
+      return
+    }
     send({ type: 'move_viewport', viewportId: d.id, center: { x: d.origin.x + dx, y: d.origin.y + dy } }, 'move the viewport')
   }
 
@@ -1591,9 +1663,18 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       } else if (drag?.kind === 'grip' && drag.id === item.id && drag.grip.index === i) {
         if (drag.grip.kind === 'leader-tip') toP = drag.to
         else if (drag.grip.kind === 'leader-elbow') {
-          const firstMid = liveBlock.layout.lines[0] ? liveBlock.layout.lines[0].top + liveBlock.layout.lines[0].height / 2 : liveBlock.layout.height / 2
           const local = paperToBox(liveBlock, drag.to)
-          elbowP = Math.abs(local.y - firstMid) <= 2.5 ? boxToPaper(liveBlock, { x: local.x, y: firstMid }) : drag.to
+          const mids = liveBlock.layout.lines.length > 0 ? liveBlock.layout.lines.map((ln) => ln.top + ln.height / 2) : [liveBlock.layout.height / 2]
+          let bestMid: number | null = null
+          let bestDist = 2.5
+          for (const m of mids) {
+            const d = Math.abs(local.y - m)
+            if (d <= bestDist) {
+              bestDist = d
+              bestMid = m
+            }
+          }
+          elbowP = bestMid !== null ? boxToPaper(liveBlock, { x: local.x, y: bestMid }) : drag.to
         }
       }
       const start = leaderStart(liveBlock, elbowP ?? toP)
@@ -1737,7 +1818,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       entry={entry}
       drag={drag}
       tool={tool}
-      selected={selection?.kind === 'viewport' && selection.id === entry.viewport.id}
+      selected={selectedViewportIds.includes(entry.viewport.id)}
       isActive={active?.viewport.id === entry.viewport.id}
       dimmed={active !== null && active.viewport.id !== entry.viewport.id}
       canEdit={canEdit}
@@ -1745,10 +1826,33 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       onSelect={(e) => {
         if (tool !== 'select' || e.button !== 0) return
         e.stopPropagation()
-        setSelection({ kind: 'viewport', id: entry.viewport.id })
+        if (e.shiftKey && selection?.kind === 'viewport') {
+          if (entry.viewport.id === selection.id) {
+            if (alsoViewports.length > 0) {
+              setSelection({ kind: 'viewport', id: alsoViewports[0]! })
+              setAlsoViewports(alsoViewports.slice(1))
+            }
+          } else {
+            setAlsoViewports((cur) => (cur.includes(entry.viewport.id) ? cur.filter((id) => id !== entry.viewport.id) : [...cur, entry.viewport.id]))
+          }
+          return
+        }
+        const keepMulti = selectedViewportIds.length > 1 && selectedViewportIds.includes(entry.viewport.id)
+        if (!keepMulti) {
+          setAlsoViewports([])
+          setSelection({ kind: 'viewport', id: entry.viewport.id })
+        }
         if (!canEdit) return
         const at = paperOf(e)
-        if (at) startDrag(e, { kind: 'move', id: entry.viewport.id, from: at, origin: entry.viewport.center, to: at })
+        if (!at) return
+        const extras = keepMulti
+          ? selectedViewportIds
+              .filter((id) => id !== entry.viewport.id)
+              .map((id) => placed.find((p) => p.viewport.id === id))
+              .filter((p): p is PlacedFrame => p !== undefined)
+              .map((p) => ({ id: p.viewport.id, origin: p.viewport.center }))
+          : undefined
+        startDrag(e, { kind: 'move', id: entry.viewport.id, from: at, origin: entry.viewport.center, to: at, ...(extras && extras.length > 0 ? { extras } : {}) })
       }}
       onActivate={() => openPlaced(entry.viewport.id)}
       onGrab={(handle, e) => {
@@ -2117,7 +2221,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                       <NoteHandles
                         key={item.id}
                         block={noteBlock}
-                        selected={selection?.kind === 'item' && selection.id === item.id}
+                        selected={selectedIds.includes(item.id)}
                         editing={noteEdit?.itemId === item.id}
                         lockedBy={lock ? lockMessage(lock, selfActorId) : null}
                         canEdit={canEdit}
@@ -2125,11 +2229,24 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                         blockedReason={blockedReason}
                         onBodyDown={(e) => {
                           if (tool !== 'select' || e.button !== 0 || noteEdit || draftInput.active) return
+                          if (e.shiftKey && selection?.kind === 'item') {
+                            e.stopPropagation()
+                            if (item.id === selection.id) {
+                              if (alsoPicked.length > 0) {
+                                setSelection({ kind: 'item', id: alsoPicked[0]! })
+                                setAlsoPicked(alsoPicked.slice(1))
+                              }
+                            } else {
+                              setAlsoPicked((cur) => (cur.includes(item.id) ? cur.filter((id) => id !== item.id) : [...cur, item.id]))
+                            }
+                            return
+                          }
                           if (selectedIds.length > 1 && selectedIds.includes(item.id) && !e.shiftKey) {
                             pressItem(e, item.id)
                             return
                           }
                           e.stopPropagation()
+                          setAlsoPicked([])
                           const wasSelected = selection?.kind === 'item' && selection.id === item.id
                           setSelection({ kind: 'item', id: item.id })
                           const at = paperOf(e)
@@ -2221,6 +2338,11 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   const selected = selectedIds.includes(item.id)
                   const isMoving = Boolean(moveDelta && movingIds.has(item.id))
                   const liveTagLines = isMoving && item.tag ? (tagLines(model, item.tag) ?? []) : null
+                  const zoomScale = 1 / Math.max(zoom, 0.35)
+                  const selPad = Math.min(0.75, 0.55 * zoomScale)
+                  const selStroke = Math.min(0.45, 0.35 * zoomScale)
+                  const selDash = `${(1.4 * Math.min(1, zoomScale)).toFixed(2)} ${(1.0 * Math.min(1, zoomScale)).toFixed(2)}`
+                  const hitPad = Math.max(1.2, 1.5 * zoomScale)
                   return (
                     <g key={item.id}>
                       {isMoving && (
@@ -2263,15 +2385,28 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                             ))}
                           </g>
                         )}
+                        {selected && (
+                          <rect
+                            x={box.x - selPad}
+                            y={box.y - selPad}
+                            width={box.w + selPad * 2}
+                            height={box.h + selPad * 2}
+                            fill={PRIMARY}
+                            fillOpacity={0.05}
+                            stroke={PRIMARY}
+                            strokeOpacity={0.85}
+                            strokeDasharray={selDash}
+                            strokeWidth={selStroke}
+                            pointerEvents="none"
+                          />
+                        )}
                         <rect
-                          x={box.x - 1.5}
-                          y={box.y - 1.5}
-                          width={box.w + 3}
-                          height={box.h + 3}
+                          x={box.x - hitPad}
+                          y={box.y - hitPad}
+                          width={box.w + hitPad * 2}
+                          height={box.h + hitPad * 2}
                           fill="transparent"
-                          stroke={selected ? PRIMARY : 'transparent'}
-                          strokeDasharray="2 1.5"
-                          strokeWidth={0.5}
+                          stroke="transparent"
                           className={tool === 'select' && !draftInput.active ? 'cursor-pointer' : 'pointer-events-none'}
                           data-testid={`drawn-${item.shape}`}
                           data-selected={selected || undefined}
@@ -2656,6 +2791,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
               )}
               {draftInput.active && (
                 <DraftOverlay
+                  tool={draftInput.preview.tool}
                   prims={draftInput.preview.prims}
                   rubber={draftInput.preview.rubber}
                   marker={draftInput.preview.marker}
@@ -2765,7 +2901,15 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         )}
       </div>
 
-      <aside className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l p-3" aria-label="Properties">
+      <ResizableSideRail
+        side="right"
+        surface={PROPERTIES_SURFACE}
+        title="Properties"
+        defaultWidthPx={PROPERTIES_DEFAULT_WIDTH_PX}
+        shortcut={propertiesShortcut}
+        className="border-l bg-background"
+        bodyClassName="gap-3 p-3"
+      >
         {selectedViewport ? (
           <>
           <ViewportProperties
@@ -2917,11 +3061,11 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         ) : null}
         {viewProperties && (
           <>
-            {(selectedItem || selectedViewport) && <Separator />}
+            {(selectedItem || selectedViewport || active) && <Separator />}
             {viewProperties}
           </>
         )}
-      </aside>
+      </ResizableSideRail>
     </div>
   )
 }
@@ -2953,7 +3097,7 @@ function ViewportFrame({
   onGrab: (handle: CropHandle, e: React.PointerEvent<SVGRectElement>) => void
 }) {
   const { viewport, view } = entry
-  const moving = drag?.kind === 'move' && drag.id === viewport.id ? drag : null
+  const moving = drag?.kind === 'move' && (drag.id === viewport.id || drag.extras?.some((ex) => ex.id === viewport.id)) ? drag : null
   const framing = drag?.kind === 'frame' && drag.id === viewport.id ? drag : null
   const base = framing ? framing.rect : entry.rect
   const dx = moving ? moving.to.x - moving.from.x : 0

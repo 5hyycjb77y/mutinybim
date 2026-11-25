@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, EyeOff, RotateCcw, TriangleAlert } from 'lucide-react'
-import { DIAGRAM_KIND_LABELS, evaluateDiagram, resolveField, type DiagramHints, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
+import { DIAGRAM_KIND_LABELS, elementsOfKind, evaluateDiagram, resolveField, type DiagramHints, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
 import { Alert, AlertDescription, AlertTitle } from '../../ui/alert'
 import { Button } from '../../ui/button'
 import { Field, FieldDescription, FieldLabel } from '../../ui/field'
@@ -148,6 +148,144 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
           <FieldLabel htmlFor={`diagram-${key}`}>{label}</FieldLabel>
         </Field>
       ))}
+
+      {isOneLine && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field>
+            <FieldLabel htmlFor="diagram-phase-scope">Scope</FieldLabel>
+            <Select
+              value={hints.phaseScope ?? 'all'}
+              onValueChange={(v) => {
+                const scope = v === 'new' || v === 'existing' || v === 'demolition' ? v : undefined
+                set({ phaseScope: scope }, scope ? `show ${scope} equipment on ${view.name}` : `show all phases on ${view.name}`)
+              }}
+              disabled={!canEdit}
+            >
+              <SelectTrigger id="diagram-phase-scope" size="sm" data-testid="diagram-phase-scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All phases</SelectItem>
+                  <SelectItem value="new">New work</SelectItem>
+                  <SelectItem value="existing">Existing</SelectItem>
+                  <SelectItem value="demolition">Demolition</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          {hints.showLoads && (
+            <Field>
+              <FieldLabel htmlFor="diagram-min-breaker">Load breaker</FieldLabel>
+              <Select
+                value={String(hints.minLoadRatingA ?? 0)}
+                onValueChange={(v) => {
+                  const amps = Number(v)
+                  set({ minLoadRatingA: amps > 0 ? amps : undefined }, amps > 0 ? `show loads ≥ ${amps} A on ${view.name}` : `show all load breakers on ${view.name}`)
+                }}
+                disabled={!canEdit}
+              >
+                <SelectTrigger id="diagram-min-breaker" size="sm" data-testid="diagram-min-breaker">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="0">All breakers</SelectItem>
+                    <SelectItem value="30">≥ 30 A</SelectItem>
+                    <SelectItem value="60">≥ 60 A</SelectItem>
+                    <SelectItem value="100">≥ 100 A</SelectItem>
+                    <SelectItem value="200">≥ 200 A</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+        </div>
+      )}
+
+      {isOneLine && (() => {
+        const included = hints.includeEquipmentIds ?? []
+        const excluded = hints.excludeEquipmentIds ?? []
+        const loadChoices = elementsOfKind(model.elements, 'part')
+          .filter((el) => {
+            const t = model.elements[el.typeId]
+            return t?.kind === 'part_type' && t.definition.category === 'mechanical_equipment'
+          })
+          .map((el) => ({ id: el.id, name: el.mark || resolveField(model.elements, el.id, 'name').text || el.id }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        if (loadChoices.length === 0 && included.length === 0 && excluded.length === 0) return null
+        return (
+          <Field data-testid="diagram-equipment-overrides">
+            <FieldLabel htmlFor="diagram-pin-equipment">Equipment load overrides</FieldLabel>
+            <div className="flex flex-col gap-1.5">
+              <Select
+                value=""
+                disabled={!canEdit}
+                onValueChange={(id) => {
+                  if (!id) return
+                  const nextInc = [...new Set([...included, id])]
+                  const nextExc = excluded.filter((x) => x !== id)
+                  set({ includeEquipmentIds: nextInc, excludeEquipmentIds: nextExc.length > 0 ? nextExc : undefined }, `always show ${id} on ${view.name}`)
+                }}
+              >
+                <SelectTrigger id="diagram-pin-equipment" size="sm">
+                  <SelectValue placeholder="Always include equipment…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {loadChoices
+                      .filter((c) => !included.includes(c.id))
+                      .map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {included.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {included.map((id) => (
+                    <Button
+                      key={id}
+                      variant="secondary"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        const next = included.filter((x) => x !== id)
+                        set({ includeEquipmentIds: next.length > 0 ? next : undefined }, `remove ${id} override on ${view.name}`)
+                      }}
+                    >
+                      + {resolveField(model.elements, id, 'mark').text || resolveField(model.elements, id, 'name').text || id} ×
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {excluded.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {excluded.map((id) => (
+                    <Button
+                      key={id}
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      disabled={!canEdit}
+                      onClick={() => {
+                        const next = excluded.filter((x) => x !== id)
+                        set({ excludeEquipmentIds: next.length > 0 ? next : undefined }, `re-allow ${id} on ${view.name}`)
+                      }}
+                    >
+                      − {resolveField(model.elements, id, 'mark').text || resolveField(model.elements, id, 'name').text || id} ×
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <FieldDescription>Pin specific motors or equipment onto this one-line even if below the breaker threshold.</FieldDescription>
+          </Field>
+        )
+      })()}
 
       {selectedBox && selectedId && (
         <div className="flex flex-col gap-2 rounded-md border p-2" data-testid="diagram-selected">

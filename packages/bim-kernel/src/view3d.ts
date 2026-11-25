@@ -279,7 +279,7 @@ export function boxPlanRect(box: CropBox3d): Rect {
 
 // ── Extents ──────────────────────────────────────────────────────────────────
 
-const NOT_MODEL = new Set<BimElement["kind"]>(["view", "sheet", "viewport", "drawing_item", "level", "tag", "dimension"]);
+const NOT_MODEL = new Set<BimElement["kind"]>(["view", "view_template", "sheet", "viewport", "drawing_item", "level", "tag", "dimension"]);
 
 function floorOf(model: ModelState, el: BimElement): number {
   return levelOf(model.elements, el)?.elevationMm ?? viewFloorMm(model, el.partition?.level) ?? 0;

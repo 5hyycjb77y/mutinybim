@@ -1,3 +1,4 @@
+import { detailItemBounds } from "./annotation/detailing";
 import { noteCornersInModel } from "./annotation/text-note";
 import { DEFAULT_DETAIL_SCALE, type DrawingItem, type ViewProps } from "./documents";
 import { boxOverRect, cameraWindow } from "./view3d";
@@ -71,6 +72,14 @@ export function drawnContentExtent(items: readonly DrawingItem[], scale: number,
       minY = Math.min(minY, c.y);
       maxX = Math.max(maxX, c.x);
       maxY = Math.max(maxY, c.y);
+    }
+    // Detail shapes (circles, arcs, filled regions, components) beyond raw control points.
+    const detail = detailItemBounds(item, (q) => q);
+    if (detail) {
+      minX = Math.min(minX, detail.min.x);
+      minY = Math.min(minY, detail.min.y);
+      maxX = Math.max(maxX, detail.max.x);
+      maxY = Math.max(maxY, detail.max.y);
     }
   }
   if (!Number.isFinite(minX)) return null;

@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '../ui/alert'
 import { Button } from '../ui/button'
 import { useLayoutPrefs } from './layout/LayoutPrefsProvider'
 import { LayoutSection } from './layout/LayoutSection'
-import { RailResizeHandle } from './layout/RailResizeHandle'
+import { ResizableSideRail } from './layout/ResizableSideRail'
 import { useEditorHost } from '@permitzip/bim-editor/host'
 import { canLinkFrom, linkSourcesOf } from './linked-api'
 import { openModelPackSet } from './linked-display/open-model-disciplines'
@@ -97,6 +97,8 @@ export interface SurfaceRailProps {
   readonly fixtureReferences: LinkedModelsProps['fixtureReferences']
   /** Rail › Checklist (what the code studies say still needs attention). */
   readonly onOpenChecklist?: () => void
+  /** Optional override for the left rail collapse shortcut (default `[`; pass `null` to disable). */
+  readonly collapseShortcut?: string | null
 }
 
 /**
@@ -117,18 +119,18 @@ export const SurfaceRail = memo<(props: SurfaceRailProps) => ReactNode>(function
   const prefs = useLayoutPrefs()
   const linkSources = linkSourcesOf(useEditorHost().data.linkedModels)
   const canLink = canLinkFrom(linkSources) || linkSources.autodeskDocs
-  const savedWidth = prefs.width(RAIL_SURFACE)
-  const [dragWidth, setDragWidth] = useState<number | null>(null)
-  const width = dragWidth ?? savedWidth ?? RAIL_DEFAULT_WIDTH_PX
   return (
-    <aside
-      className="relative flex shrink-0 flex-col border-r"
-      style={{ width }}
-      aria-label="Views, sheets and model filters"
-      data-testid="building-model-rail"
-      data-layout={prefs.status}
+    <ResizableSideRail
+      side="left"
+      surface={RAIL_SURFACE}
+      title="Browser"
+      defaultWidthPx={RAIL_DEFAULT_WIDTH_PX}
+      shortcut={props.collapseShortcut}
+      testId="building-model-rail"
+      className="min-h-0 border-r"
+      bodyClassName="gap-3 p-3 pb-6"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div className="contents" data-layout={prefs.status}>
         {prefs.status === 'error' && (
           <Alert data-testid="rail-layout-load-error">
             <AlertDescription className="text-xs">
@@ -262,8 +264,7 @@ export const SurfaceRail = memo<(props: SurfaceRailProps) => ReactNode>(function
           />
         </LayoutSection>
       </div>
-      <RailResizeHandle edge="right" ariaLabel="Resize the left sidebar" width={width} defaultWidth={RAIL_DEFAULT_WIDTH_PX} onPreview={setDragWidth} onCommit={(px) => prefs.setWidth(RAIL_SURFACE, px)} />
-    </aside>
+    </ResizableSideRail>
   )
 }, stablePropsEqual)
 

@@ -54,15 +54,36 @@ export function levelsByHeight(model: Pick<ModelState, "elements" | "connections
 
 const FLOOR_TOL_MM = 1;
 
+const NON_STORY_LEVEL_RE = /(\b(ceiling|clg|soffit|plenum|parapet|roof|datum|ridge|eave|curb)\b|^\s*(t\.?o\.?|b\.?o\.?)\s)/i;
+const ROOF_LEVEL_RE = /\broof\b/i;
+
+/**
+ * True when a level represents an occupied building story rather than a
+ * ceiling, soffit, plenum, parapet, roof, or structural datum reference.
+ * An explicit `level.buildingStory` always wins over the name heuristic.
+ */
+export function isBuildingStoryLevel(level: Pick<Level, "name" | "buildingStory">): boolean {
+  if (level.buildingStory !== undefined) return level.buildingStory;
+  return !NON_STORY_LEVEL_RE.test(level.name);
+}
+
+/** True when a non-story level is a roof datum (e.g. "Roof", "Low Roof", "High Roof"). */
+export function isRoofDatumLevel(level: Pick<Level, "name" | "buildingStory">): boolean {
+  return level.buildingStory !== true && ROOF_LEVEL_RE.test(level.name);
+}
+
 /**
  * The floor a run piece is filed under: its own level while it stays between
- * that floor and the next one up, else the floor it is actually on (a drop
- * through the roof to the floor below, a rise to the floor above).
+ * that floor and the next building story up, else the building-story level it
+ * is actually on (a drop through the roof to the floor below, a rise to the
+ * floor above). Non-story ceiling/roof/parapet datums never steal high-bay
+ * runs away from the building story they serve.
  */
 export function floorForPiece(levels: readonly Level[], own: Level, absoluteMm: number): Level {
-  if (absoluteMm < own.elevationMm - FLOOR_TOL_MM) return floorAt(levels, absoluteMm) ?? own;
-  const next = levels.find((l) => l.elevationMm > own.elevationMm + FLOOR_TOL_MM);
-  if (next && absoluteMm >= next.elevationMm - FLOOR_TOL_MM) return floorAt(levels, absoluteMm) ?? own;
+  const stories = levels.filter((l) => l.id === own.id || isBuildingStoryLevel(l));
+  if (absoluteMm < own.elevationMm - FLOOR_TOL_MM) return floorAt(stories, absoluteMm) ?? own;
+  const next = stories.find((l) => l.elevationMm > own.elevationMm + FLOOR_TOL_MM);
+  if (next && absoluteMm >= next.elevationMm - FLOOR_TOL_MM) return floorAt(stories, absoluteMm) ?? own;
   return own;
 }
 

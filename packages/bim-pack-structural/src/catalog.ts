@@ -36,6 +36,7 @@ export const STRUCT_PARAMETER_SET: PackParameterSet = {
   parameters: [
     { key: "struct.section", label: "Section", classes: MEMBERS, valueType: "choice", choices: WIDE_FLANGE_SECTIONS.map((s) => s.id), group: "Structural", description: "A wide-flange section from the Structural pack's catalogue.", ifc: { pset: "MutinyBIM_Structural", property: "Section" } },
     { key: "struct.grade", label: "Steel grade", classes: MEMBERS, valueType: "choice", choices: ["A992", "A36", "A572 Gr. 50"], group: "Structural", ifc: { pset: "MutinyBIM_Structural", property: "Grade" } },
+    { key: "struct.elastic_modulus", label: "Elastic modulus (E)", classes: MEMBERS, valueType: "quantity", kind: "stress", unit: "ksi", group: "Structural", description: "Modulus of elasticity E for elastic bending deflection (e.g. 29,000 ksi for ASTM A992 steel per AISC 360).", ifc: { pset: "MutinyBIM_Structural", property: "ElasticModulus" } },
     { key: "struct.occupancy", label: "Live load use", classes: DECKS, valueType: "text", group: "Structural", description: "The use the deck's live load comes from (struct.roof_ordinary, office_space).", ifc: { pset: "MutinyBIM_Structural", property: "LiveLoadUse" } },
     { key: "struct.footing_thickness_mm", label: "Footing thickness", classes: ["struct.footing_pad"], valueType: "quantity", kind: "length", unit: "mm", group: "Structural", description: "Thickness of a concrete pad footing below its top of footing elevation.", ifc: { pset: "MutinyBIM_Structural", property: "FootingThickness" } },
   ],

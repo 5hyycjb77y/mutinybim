@@ -44,6 +44,8 @@ export function createElectricalDemoModel(modelId = "electrical-plan-demo"): Mod
   const duplex = must("builtin:duplex-receptacle@1");
   const gfci = must("builtin:gfci-receptacle@1");
   const quad = must("builtin:quad-receptacle@1");
+  const floorRec = must("builtin:floor-receptacle@1");
+  const floorQuad = must("builtin:floor-receptacle-quad@1");
   const sw1 = must("builtin:switch-single-pole@1");
   const sw3 = must("builtin:switch-three-way@1");
   const swD = must("builtin:switch-dimmer@1");
@@ -457,7 +459,7 @@ export function createElectricalDemoModel(modelId = "electrical-plan-demo"): Mod
       },
     },
 
-    // 6) Live Electrical Diagrams (One-Line Distribution Diagram & Lighting Controls Schematic Diagram).
+      // 6) Live Electrical Diagrams (One-Line Distribution Diagram, Filtered >=60A Distribution Diagram, & Lighting Controls Diagram).
     {
       type: "create_view",
       viewId: "v-diag-sld",
@@ -470,6 +472,24 @@ export function createElectricalDemoModel(modelId = "electrical-plan-demo"): Mod
             title: "ELECTRICAL ONE-LINE DIAGRAM",
             showLoads: true,
             showWarnings: true,
+          },
+        },
+      },
+    },
+    {
+      type: "create_view",
+      viewId: "v-diag-sld-dist",
+      name: "Electrical Distribution One-Line (≥ 60A)",
+      viewType: "detail",
+      props: {
+        diagram: {
+          kind: "one_line",
+          hints: {
+            title: "DISTRIBUTION ONE-LINE DIAGRAM (≥ 60A FEEDERS)",
+            showLoads: true,
+            showWarnings: true,
+            minLoadRatingA: 60,
+            phaseScope: "new",
           },
         },
       },
@@ -548,6 +568,28 @@ export function createElectricalDemoModel(modelId = "electrical-plan-demo"): Mod
         run({ type: "move_viewport", viewportId: move.viewportId, center: { x: move.center.x, y: move.center.y + 14 } });
       }
     }
+
+    // Floor-hosted floor boxes + multi-line leader note + locked service switchboard MDP showcase
+    run(place("fb-1", floorRec, 24, 14, "FB-1", 0));
+    run(place("fb-2", floorQuad, 32, 14, "FB-2", 0));
+    run({
+      type: "create_text_note",
+      itemId: "note-demo-fb",
+      ownerId: "v-e101",
+      at: { x: 28 * FT, y: 18 * FT },
+      width: 65,
+      paragraphs: [
+        { runs: [{ text: "FLOOR-HOSTED DUPLEX & QUAD BOXES", bold: true }] },
+        { runs: [{ text: "FLUSH COVER IN SLAB — NO WALL HOST" }] },
+        { runs: [{ text: "DRAG LEADER ELBOW TO REPOSITION" }] },
+      ],
+      leaders: [{ to: { x: 24 * FT, y: 14 * FT } }],
+    });
+    run({
+      type: "set_element_locks",
+      ids: ["pnl-mdp"],
+      locked: true,
+    });
 
     return m;
   });

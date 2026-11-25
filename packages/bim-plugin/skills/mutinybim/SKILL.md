@@ -208,6 +208,11 @@ These hold here and in every family.
 - **Look at what you drew.** After anything that changes a drawing, look at
   it (the `model` family's `bim_render_view_image` and
   `bim_render_sheet_image`) before saying it is done.
+- **Branches.** `bim_model_summary` reports `current_branch` (or `null` on Main)
+  and `branches` (existing branches on the model). When the person asks to work
+  on an existing branch they created, check `branches` first and switch onto it
+  with `bim_set_active_group_and_phase` (`branch: { checkout: "<name or id>" }`,
+  or `"main"` to return to Main) instead of creating a duplicate branch.
 - **Locked groups.** Nothing in a locked group can be created, changed,
   moved or deleted, by anyone, agents included. Report the refusal word for
   word and ask whether to unlock it; never unlock a group unless the person

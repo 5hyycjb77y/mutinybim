@@ -8,6 +8,7 @@ import {
   detailSnap,
   draftingVersionOf,
   polygonLines,
+  rectangleLines,
   tangentEndArc,
   trackAngle,
   type BatchCommand,
@@ -24,7 +25,7 @@ import {
   type Vec2,
   type ViewCommand,
 } from '@permitzip/bim-kernel'
-import type { SnapPoint } from '../annotation-tools'
+import { snapToGraphics, type GraphicsSnapIndex, type SnapPoint } from '../annotation-tools'
 
 /**
  * The Draft tools' state machine, pure: what each click means for the tool or
@@ -69,7 +70,7 @@ export const DEFAULT_DRAFT_SETTINGS: DraftSettings = {
   battThickness: '2"',
   snaps: ['endpoint', 'midpoint', 'center', 'quadrant', 'intersection', 'perpendicular'],
   ortho: false,
-  polarDeg: null,
+  polarDeg: 90,
   dimKind: 'linear',
   dimChain: 'single',
   polygonSides: '6',
@@ -225,7 +226,7 @@ const ITEM_PICKS: Partial<Record<ModifyOpName, readonly number[]>> = {
 
 /** UI-only drawing tools: polygon, start-end-radius arc and tangent-end arc compile to stored lines/arcs. */
 export type DraftToolShape = DrawingShape | 'polygon' | 'arc_radius' | 'arc_tangent'
-export const DRAFT_SHAPES = ['arc', 'arc_radius', 'arc_tangent', 'circle', 'polyline', 'polygon', 'spline', 'region', 'component', 'repeat', 'batt'] as const satisfies readonly DraftToolShape[]
+export const DRAFT_SHAPES = ['line', 'rect', 'arc', 'arc_radius', 'arc_tangent', 'circle', 'polyline', 'polygon', 'spline', 'region', 'component', 'repeat', 'batt'] as const satisfies readonly DraftToolShape[]
 export type DraftShape = (typeof DRAFT_SHAPES)[number]
 export function isDraftShape(tool: string): tool is DraftShape {
   return (DRAFT_SHAPES as readonly string[]).includes(tool)
@@ -233,14 +234,16 @@ export function isDraftShape(tool: string): tool is DraftShape {
 
 /** Dimension kinds the click flow draws (linear and aligned single dimensions are a drag). */
 export function clickDimension(s: Pick<DraftSettings, 'dimKind' | 'dimChain'>): boolean {
-  return !((s.dimKind === 'linear' || s.dimKind === 'aligned') && s.dimChain === 'single')
+  return s.dimKind !== 'linear' && s.dimKind !== 'aligned' ? true : s.dimChain !== 'single'
 }
 
-/** Clicks a tool takes: a number, or 'open' (Enter or double-click finishes; min clicks). */
-export function clicksFor(tool: DraftShape | 'dimension', s: Pick<DraftSettings, 'dimKind' | 'dimChain'>): { readonly fixed: number } | { readonly min: number } {
+/** How many clicks a tool takes, or the minimum before Enter / double-click finishes. */
+export function clicksFor(tool: DraftShape | 'dimension', s: Pick<DraftSettings, 'dimKind' | 'dimChain'>): { fixed: number } | { min: number } {
   switch (tool) {
     case 'component':
       return { fixed: 1 }
+    case 'line':
+    case 'rect':
     case 'circle':
     case 'polygon':
     case 'repeat':
@@ -263,14 +266,16 @@ export function clicksFor(tool: DraftShape | 'dimension', s: Pick<DraftSettings,
 }
 
 const SHAPE_PROMPTS: Record<DraftShape, readonly string[]> = {
+  line: ['Click the start point', 'Click the end point (or type length + Enter)'],
+  rect: ['Click the first corner', 'Click the opposite corner'],
   arc: ['Click the centre of the arc', 'Click where the arc starts', 'Click where it ends (counter-clockwise)'],
   arc_radius: ['Click where the arc starts', 'Click where the arc ends', 'Click a point on the bulge of the arc'],
   arc_tangent: ['Click the start point', 'Click a point along the tangent direction', 'Click where the arc ends'],
   circle: ['Click the centre', 'Click a point on the circle (or type radius + Enter)'],
-  polyline: ['Click the first point', 'Click the next point (or type length + Enter). Click the first point again to close, or Enter to finish'],
+  polyline: ['Click the first point', 'Click the next point (or type length + Enter). Click the first point to close, or Enter / double-click to finish'],
   polygon: ['Click the centre', 'Click a corner (or type radius + Enter)'],
   spline: ['Click the first point', 'Click the next point. Enter or double-click finishes'],
-  region: ['Click the first corner', 'Click the next corner', 'Click the next corner. Enter or double-click closes it'],
+  region: ['Click the first corner', 'Click the next corner', 'Click the next corner. Click the first corner, Enter, or double-click to close'],
   component: ['Click where the component goes (its bottom-left corner)'],
   repeat: ['Click where the repeat starts', 'Click where it ends'],
   batt: ['Click where the insulation starts', 'Click where it ends'],
@@ -344,6 +349,10 @@ export interface Constrained {
   readonly snapRef: SnapPoint['ref'] | null
   /** The tracking line drawn from the last point, when tracking. */
   readonly tracking: { readonly from: Vec2; readonly angleDeg: number } | null
+  /** Optional Revit-style dashed alignment guide connecting an aligned corner/edge to `at`. */
+  readonly guideLine?: readonly [Vec2, Vec2] | null
+  /** True when hovering/snapping back onto the start point of an open polyline or region to close the loop. */
+  readonly closeLoop?: boolean
   /** The drawn item under the snap, if any (trim / extend boundaries, radial dimensions). */
   readonly itemId: string | null
 }
@@ -360,9 +369,10 @@ const SNAP_WORDS: Record<SnapKind, string> = {
 }
 
 /**
- * Where a click lands: a model / dimension snap point first (it is followed),
- * then a detail-linework snap, then ortho or polar tracking from the last
- * point, else the pointer.
+ * Where a click lands: active chain start/vertices (close loop), then model /
+ * dimension anchors, then detail-linework snaps, then real model graphics
+ * (walls, wall corners, grid lines & intersections, orthogonal alignment guides),
+ * then ortho or polar tracking from the last point, else the pointer.
  */
 export function constrainPoint(input: {
   readonly at: Vec2
@@ -371,8 +381,14 @@ export function constrainPoint(input: {
   readonly toPaper: (p: Vec2) => Vec2
   readonly settings: Pick<DraftSettings, 'snaps' | 'ortho' | 'polarDeg'>
   readonly reachMm: number
-  /** Points dimensions follow (model ends and edges), when a dimension is being drawn. */
+  /** Points dimensions and detail lines follow (model ends and edges). */
   readonly anchors?: readonly SnapPoint[]
+  /** Real rendered model graphics index (wall corners/faces, grid lines/intersections). */
+  readonly graphicsIndex?: GraphicsSnapIndex | null
+  /** Vertices already clicked in the current polyline / region / line chain. */
+  readonly chainPoints?: readonly Vec2[]
+  /** Allow snapping to the start point to close a loop (polyline / region with >= 3 points). */
+  readonly allowCloseLoop?: boolean
   /** Also snap to the nearest point on a line (picking a trim / extend boundary). */
   readonly nearest?: boolean
   /** Picking an element: only the nearest point on a line counts (an endpoint snap at a corner would name either line). */
@@ -381,6 +397,27 @@ export function constrainPoint(input: {
   readonly trackBaseDeg?: number
 }): Constrained {
   const { at, from, settings, reachMm } = input
+  if (input.pickElement) {
+    const snap = detailSnap(input.items, input.toPaper, at, { kinds: new Set<SnapKind>(['nearest']), reachMm })
+    return snap ? { at: snap.at, snapLabel: SNAP_WORDS.nearest, snapKind: 'nearest', snapRef: null, tracking: null, itemId: snap.itemId } : { at, snapLabel: null, snapKind: null, snapRef: null, tracking: null, itemId: null }
+  }
+
+  // 1. Active chain vertices (start point closes loop when >= 3 vertices clicked).
+  const chain = input.chainPoints ?? []
+  if (chain.length >= 3 && input.allowCloseLoop) {
+    const first = chain[0]!
+    if (Math.hypot(first.x - at.x, first.y - at.y) < reachMm * 1.25) {
+      return { at: first, snapLabel: 'close loop', snapKind: 'endpoint', snapRef: null, tracking: null, closeLoop: true, itemId: null }
+    }
+  }
+  for (let i = 0; i < chain.length - 1; i++) {
+    const pt = chain[i]!
+    if (Math.hypot(pt.x - at.x, pt.y - at.y) < reachMm) {
+      return { at: pt, snapLabel: 'chain corner', snapKind: 'endpoint', snapRef: null, tracking: null, itemId: null }
+    }
+  }
+
+  // 2. Model / dimension anchor points.
   let bestAnchor: SnapPoint | null = null
   let bestD = reachMm
   for (const a of input.anchors ?? []) {
@@ -390,17 +427,37 @@ export function constrainPoint(input: {
       bestD = d
     }
   }
-  if (input.pickElement) {
-    const snap = detailSnap(input.items, input.toPaper, at, { kinds: new Set<SnapKind>(['nearest']), reachMm })
-    return snap ? { at: snap.at, snapLabel: SNAP_WORDS.nearest, snapKind: 'nearest', snapRef: null, tracking: null, itemId: snap.itemId } : { at, snapLabel: null, snapKind: null, snapRef: null, tracking: null, itemId: null }
-  }
   if (bestAnchor) return { at: bestAnchor.at, snapLabel: bestAnchor.label, snapKind: 'endpoint', snapRef: bestAnchor.ref, tracking: null, itemId: input.items.some((i) => i.id === bestAnchor.ref.elementId) ? bestAnchor.ref.elementId : null }
+
+  // 3. Existing detail linework snaps (endpoint, midpoint, intersection, perpendicular, etc.).
   const kinds = new Set<SnapKind>(settings.snaps)
   if (input.nearest) kinds.add('nearest')
   if (kinds.size > 0) {
     const snap = detailSnap(input.items, input.toPaper, at, { kinds, reachMm, ...(from ? { from } : {}) })
     if (snap) return { at: snap.at, snapLabel: SNAP_WORDS[snap.kind], snapKind: snap.kind, snapRef: null, tracking: null, itemId: snap.itemId }
   }
+
+  // 4. Real model graphics snaps (wall corners, wall faces, grids, intersections, and chain corner alignment guides).
+  if (input.graphicsIndex || chain.length > 0) {
+    const gHit = snapToGraphics(input.graphicsIndex ?? null, at, reachMm, {
+      alignRefs: chain,
+      orthoFrom: settings.ortho ? from : null,
+    })
+    if (gHit) {
+      const snapKind: SnapKind = gHit.kind === 'intersection' ? 'intersection' : gHit.kind === 'corner' ? 'endpoint' : gHit.kind === 'ortho' ? 'perpendicular' : 'nearest'
+      return {
+        at: gHit.at,
+        snapLabel: gHit.label,
+        snapKind,
+        snapRef: null,
+        tracking: null,
+        guideLine: gHit.guideLine ?? null,
+        itemId: null,
+      }
+    }
+  }
+
+  // 5. Ortho / polar tracking (90° soft magnetic snap by default, Revit style).
   if (from && (settings.ortho || settings.polarDeg)) {
     const t = trackFrom(from, at, settings.ortho ? 90 : (settings.polarDeg ?? 90), input.trackBaseDeg ?? 0)
     if (t) return { at: t.at, snapLabel: null, snapKind: null, snapRef: null, tracking: { from, angleDeg: t.angleDeg }, itemId: null }
@@ -446,6 +503,16 @@ export function shapeCommand(input: {
     commands: sides.map(([p, q], k) => ({ ...base, itemId: `${itemId}-${k}`, shape: 'line' as const, points: [p, q] })),
   })
   switch (tool) {
+    case 'line': {
+      const [a, b] = pts
+      if (!a || !b || Math.hypot(b.x - a.x, b.y - a.y) < 1e-6) return 'Click two different points for the line.'
+      return { ...base, shape: 'line', points: [a, b] }
+    }
+    case 'rect': {
+      const [a, b] = pts
+      if (!a || !b || (Math.abs(b.x - a.x) < 1e-6 && Math.abs(b.y - a.y) < 1e-6)) return 'Click two opposite corners for the rectangle.'
+      return joined(rectangleLines(a, b), 'Draw a rectangle')
+    }
     case 'arc':
       return { ...base, shape: 'arc', points: pts.slice(0, 3), ccw: true }
     case 'arc_radius': {

@@ -15,8 +15,8 @@ import {
   nearestWallFace,
   paperToDrawing,
   planAutoPartMarks,
-  viewLevelElements,
   viewModelLevel,
+  visiblePlanParts,
   type AutoPartMarkHit,
   type ModelState,
   type PartInstance,
@@ -28,7 +28,7 @@ import {
 } from '@permitzip/bim-kernel'
 import { DRAFTING_GRID_MM, snapPoint, type Snap } from '../architecture/tools/snap'
 import { endDragHint, endDropCommand } from '../architecture/WallEndGrips'
-import { isSelectableUnderLocks, useSelectionLocks } from '../selection-locks'
+import { isElementLockedInModel, isSelectableUnderLocks, useSelectionLocks } from '../selection-locks'
 import {
   WireContextMenu,
   previewWireCurve,
@@ -186,7 +186,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const [drag, setDrag] = useState<Drag | null>(null)
   const [wallEndDrag, setWallEndDrag] = useState<{ readonly wallId: string; readonly end: 'start' | 'end'; readonly at: Vec2; readonly snap: Snap | null; readonly disjoin: boolean } | null>(null)
   const overlapRef = useRef<{ stack: string[]; idx: number }>({ stack: [], idx: 0 })
-  const pickIdsAt = (p: Vec2): string[] => idsAt(index, view, p, paperMmPerPx).filter((id) => isSelectableUnderLocks(model.elements[id], locks))
+  const pickIdsAt = (p: Vec2): string[] => idsAt(index, view, p, paperMmPerPx).filter((id) => isSelectableUnderLocks(model.elements[id], locks, model))
   /** Split or Route: where the tool would act under the pointer (a tick on the duct, or the next route point). */
   const [toolMark, setToolMark] = useState<{ readonly paper: Vec2; readonly label: string } | null>(null)
   const r = view.paperRect
@@ -197,10 +197,8 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   const snapTolerance = toleranceMm(view, paperMmPerPx, SNAP_PX)
   const isPlanView = view.view.viewType === 'floor_plan' || view.view.viewType === 'ceiling_plan'
   const shownPlanParts = useMemo(() => {
-    const shown = new Map<string, PartInstance>()
-    if (!isPlanView) return shown
-    for (const el of viewLevelElements(model, view.view)) if (el.kind === 'part') shown.set(el.id, el)
-    return shown
+    if (!isPlanView) return new Map<string, PartInstance>()
+    return visiblePlanParts(model, view.view)
   }, [isPlanView, model, view.view])
   // Circuit & switch-leg spans on paper (plans only): drag to bend/reshape, right-click to add/remove spline vertices.
   const wireJoins = useMemo(() => {
@@ -959,6 +957,19 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
   })
   const overSelected = hover !== null && hover.some((id) => bridge.selectedIds.includes(id))
 
+  const lockedOutlines = useMemo(() => {
+    if (!locks.showLocked) return []
+    const out: Array<{ readonly id: string; readonly poly: readonly Vec2[] }> = []
+    for (const id of index.footprints.keys()) {
+      if (out.length >= MAX_OUTLINES) break
+      const el = model.elements[id]
+      if (!el || !isElementLockedInModel(model, el)) continue
+      const poly = outlineOnPaper(index, view, id)
+      if (poly) out.push({ id, poly })
+    }
+    return out
+  }, [locks.showLocked, index, model, view])
+
   // "+" grip: on the one selected (else hovered) element when nothing serves it and a network says what could.
   const gripId = bridge.canEdit && !drag ? (bridge.selectedIds.length === 1 ? bridge.selectedIds[0] : hover?.length === 1 ? hover[0] : undefined) : undefined
   const gripAnswer = useMemo(() => (gripId ? gripFor(model, asElementId(gripId)) : null), [model, gripId])
@@ -974,6 +985,19 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
         </clipPath>
       </defs>
       <g clipPath={`url(#${clipId})`} pointerEvents="none">
+        {lockedOutlines.map(({ id, poly }) => (
+          <polygon
+            key={`lk-${id}`}
+            points={points(poly)}
+            fill="#f59e0b"
+            fillOpacity={0.14}
+            stroke="#d97706"
+            strokeWidth={0.45}
+            strokeDasharray="1.4 0.9"
+            data-testid="model-locked-outline"
+            data-element-id={id}
+          />
+        ))}
         {selectedOutlines.map(({ id, poly }) => (
           <polygon key={`s-${id}`} points={points(poly)} fill={PRIMARY} fillOpacity={0.14} stroke={PRIMARY} strokeWidth={0.5} data-testid="model-selected-outline" data-element-id={id} />
         ))}
@@ -1134,7 +1158,7 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
                     })
             return (
               <>
-                <polyline points={points(previewWireCurve(start, wps, end))} fill="none" stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+                <polyline points={points(previewWireCurve(start, wps, end, drag.join.style))} fill="none" stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
                 {wps.map((wp, i) => (
                   <circle key={`dwp-${i}`} cx={wp.x} cy={wp.y} r={1.15} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.45} />
                 ))}
@@ -1145,15 +1169,25 @@ export function ModelDrawingLayer({ model, view, bridge, paperOf, paperMmPerPx, 
       )}
       {drag?.kind === 'homerun' && (
         <g pointerEvents="none" data-testid="model-homerun-preview" data-link-id={drag.homeRun.linkId}>
+          {/* Softly mask the old static home-run position while dragging so it doesn't look like a frozen duplicate */}
+          <line
+            x1={drag.homeRun.fromPaper.x}
+            y1={drag.homeRun.fromPaper.y}
+            x2={drag.homeRun.tipPaper.x}
+            y2={drag.homeRun.tipPaper.y}
+            stroke="#ffffff"
+            strokeOpacity={0.85}
+            strokeWidth={2.2}
+          />
           {drag.part === 'tip' && (
             <>
-              <line x1={drag.homeRun.fromPaper.x} y1={drag.homeRun.fromPaper.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+              <line x1={drag.homeRun.fromPaper.x} y1={drag.homeRun.fromPaper.y} x2={drag.to.x} y2={drag.to.y} stroke={PRIMARY} strokeWidth={0.55} />
               <circle cx={drag.to.x} cy={drag.to.y} r={1.3} fill={PRIMARY} />
             </>
           )}
           {drag.part === 'shaft' && (
             <>
-              <polyline points={points(previewWireCurve(drag.homeRun.fromPaper, [drag.to], drag.homeRun.tipPaper))} fill="none" stroke={PRIMARY} strokeWidth={0.5} strokeDasharray="1.5 1" />
+              <polyline points={points(previewWireCurve(drag.homeRun.fromPaper, [drag.to], drag.homeRun.tipPaper))} fill="none" stroke={PRIMARY} strokeWidth={0.55} />
               <circle cx={drag.to.x} cy={drag.to.y} r={1.15} fill="#ffffff" stroke={PRIMARY} strokeWidth={0.45} />
             </>
           )}

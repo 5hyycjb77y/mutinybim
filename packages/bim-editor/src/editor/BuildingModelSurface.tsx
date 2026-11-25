@@ -159,6 +159,7 @@ import { addOns, loadAddOns } from '../contracts/building-model/add-ons'
 
 import { MemoRibbon, useStableCommands, useStableRibbonTabs } from './ribbon/stable-ribbon'
 import { useModelPacks } from './state/use-model-packs'
+import { getStandardNoteSet, standardNoteParagraphs } from '@permitzip/bim-library'
 import { buildingModelQuickCommands, buildingModelRibbon, PROJECTION_SHORTCUT, type BoxCategory, type BuildingModelTool, type RibbonSelection } from './building-model-ribbon'
 import { OrientationControls } from './orientation/OrientationControls'
 import { OrbitPointMarker } from './orientation/OrbitPointMarker'
@@ -235,6 +236,8 @@ interface Props {
   initialView: BuildingModelView
   /** Open this view (a schedule from the project tree) as soon as the model shows it; a new id opens that one. */
   openViewId?: string
+  /** Optional single-key shortcuts for collapsing the left/right sidebars (defaults: `[` and `]`, avoiding host Cmd+B / Cmd+Shift+K / Cmd+J). Pass `null` to disable either side. */
+  sidebarShortcuts?: { readonly left?: string | null; readonly right?: string | null }
 }
 
 interface SurfaceConfig {
@@ -294,7 +297,7 @@ function RibbonTrailing({ targetId, children }: { targetId: string; children: Re
 /** The project's black-only printing choice (Sheets › Black only), re-read only when the model changes. */
 const printBlackOnlySelector: ModelSelector<boolean> = (snapshot) => (snapshot.model ? organizationOf(snapshot.model).printBlackOnly : false)
 
-export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId }: Props) {
+export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId, sidebarShortcuts }: Props) {
   const host = useEditorHost()
   const { openConfig: openModelConfig, getAccessToken } = host.session
   const referencesPort = host.data.references
@@ -305,7 +308,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const sheetTitle = useMemo<SheetTitle>(() => ({ projectName, projectNumber: projectNumber ?? '', firmName: SHEET_FIRM_NAME }), [projectName, projectNumber])
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const sessionRef = useRef<ModelSession | null>(null)
-  const autoSize = useAutoSize(projectId, (command, label) => sessionRef.current?.submitCommand(command, label) ?? "Live editing isn't connected, so changes can't be saved.")
+  const autoSize = useAutoSize(projectId, (command, label) => (sessionRef.current ? sessionRef.current.submitCommand(command, label) : "Live editing isn't connected, so changes can't be saved."))
   const dragRef = useRef<{ drag: SlideDrag; s: number | null } | null>(null)
   const [requested, setOpen] = useState<OpenItem>({ kind: 'model', mode: initialView === 'plan' ? 'plan' : '3d' })
   const [viewDisplay, setViewDisplay] = useState<ViewDisplay>('model')
@@ -341,6 +344,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const [levelElevations, setLevelElevations] = useState<Record<string, number>>({})
   const [config, setConfig] = useState<SurfaceConfig | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [viewerError, setViewerError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>('Opening the model…')
   // The trade add-ons are their own download, fetched beside the model's config; the session opens once they are installed.
   const [addOnsReady, setAddOnsReady] = useState(() => addOns() !== null)
@@ -588,6 +592,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         setRouteChecks(checks)
         setRouteTickMarks(checks.length > 0 ? { ticks: session.routeTicks(), pieces: session.routeTickPieces() } : null)
       },
+      onViewerError: setViewerError,
     }, getAccessToken, referencesPort, hostCapabilities)
     session.setViewerColors(viewerColorsRef.current)
     sessionRef.current = session
@@ -655,11 +660,15 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const [figureDialog, setFigureDialog] = useState<'chart' | 'picture' | null>(null)
   const [calcDialog, setCalcDialog] = useState(false)
   const [placedFigure, setPlacedFigure] = useState<{ readonly id: string } | null>(null)
-  // Detail views are only a drawing; plans, sections and 3D views show the live model or their drawing (sections open as the drawing).
-  const showDrawing = open.kind === 'sheet' || (openView !== null && (openView.viewType === 'detail' || viewDisplay === 'drawing'))
+  // Detail views are only a drawing; form schedules (panel/controls schedules without a v2 grid) render directly as live drawings so they never hit a dead-end placeholder; plans, sections and 3D views show the live model or their drawing.
+  const isFormOnlySchedule = openView !== null && openView.viewType === 'schedule' && Boolean(openView.props?.formSchedule) && !openView.props?.scheduleV2
+  const showDrawing = open.kind === 'sheet' || (openView !== null && (openView.viewType === 'detail' || isFormOnlySchedule || viewDisplay === 'drawing'))
   const propertiesOpen = selection !== null || (!showDrawing && openView !== null)
   /** A schedule view on its live side opens as the editable grid. */
   const scheduleGridOpen = openView !== null && openView.viewType === 'schedule' && !showDrawing
+  useEffect(() => {
+    viewer?.setPaused(showDrawing || scheduleGridOpen)
+  }, [viewer, showDrawing, scheduleGridOpen])
   /** A saved view with a live model is showing its drawing: the model tools switch it to the live model. */
   const liveViewOnDrawing = openView !== null && openView.viewType !== 'detail' && showDrawing
   const planOpen = openView !== null && (openView.viewType === 'floor_plan' || openView.viewType === 'ceiling_plan') && viewDisplay === 'model'
@@ -2451,21 +2460,21 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 .catch((err: unknown) => console.error('[BuildingModelSurface] box select in the drawing failed', err))
               return `${ids.length} in the box.`
             },
-            moveBy: (ids, delta) => sessionRef.current?.moveGroupBy(ids, { x: delta.x, y: delta.y }, delta.z) ?? "Live editing isn't connected, so nothing can be moved.",
+            moveBy: (ids, delta) => (sessionRef.current ? sessionRef.current.moveGroupBy(ids, { x: delta.x, y: delta.y }, delta.z) : "Live editing isn't connected, so nothing can be moved."),
             submit: submitWithUndo,
             runDrag: {
               begin: (id, at) => sessionRef.current?.beginRunDragOn(id, at) ?? null,
-              preview: (delta, strict) => sessionRef.current?.previewRunDragBy(delta, strict) ?? "Live editing isn't connected, so the duct can't be changed.",
+              preview: (delta, strict) => (sessionRef.current ? sessionRef.current.previewRunDragBy(delta, strict) : "Live editing isn't connected, so the duct can't be changed."),
               previewModel: () => sessionRef.current?.runDragPreview() ?? null,
               end: (commit) => sessionRef.current?.endRunDrag(commit) ?? null,
               toLength: (mm) => sessionRef.current?.runDragToLength(mm) ?? null,
             },
             tools: {
-              previewSplit: (id, at) => sessionRef.current?.previewSplitOn(id, at) ?? "Live editing isn't connected.",
-              split: (id, at) => sessionRef.current?.splitOn(id, at) ?? "Live editing isn't connected, so nothing can be split.",
+              previewSplit: (id, at) => (sessionRef.current ? sessionRef.current.previewSplitOn(id, at) : "Live editing isn't connected."),
+              split: (id, at) => (sessionRef.current ? sessionRef.current.splitOn(id, at) : "Live editing isn't connected, so nothing can be split."),
               previewRoute: (p, vertical, end, side) => sessionRef.current?.previewRouteOnDrawing(p, vertical, end, side) ?? null,
               clickRoute: (p, vertical, end, side) => {
-                const hint = sessionRef.current?.clickRouteOnDrawing(p, vertical, end, side) ?? "Live editing isn't connected, so nothing can be routed."
+                const hint = sessionRef.current ? sessionRef.current.clickRouteOnDrawing(p, vertical, end, side) : "Live editing isn't connected, so nothing can be routed."
                 setRoutePoints(sessionRef.current?.routePointCount() ?? 0)
                 return hint
               },
@@ -2742,6 +2751,32 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       }
     : null
 
+  const standardNotesOwnerId = drawingOpen === 'sheet' && openSheet ? openSheet.id : drawingOpen === 'detail' && openView ? openView.id : null
+  const placeStandardNotes = standardNotesOwnerId
+    ? {
+        disabledReason: editBlocked,
+        run: (setId: string) => {
+          const set = getStandardNoteSet(setId)
+          if (!set) return
+          const isSheet = drawingOpen === 'sheet'
+          const at = isSheet ? { x: 45, y: 55 } : { x: 0, y: 0 }
+          const refusal = submitWithUndo(
+            {
+              type: 'create_text_note',
+              itemId: newId('note'),
+              ownerId: standardNotesOwnerId,
+              at,
+              width: isSheet ? 170 : 120,
+              paragraphs: standardNoteParagraphs(setId),
+            },
+            `place ${set.title.toLowerCase()}`,
+          )
+          if (refusal) toast.error(refusal)
+          else toast(`Placed ${set.title} (${set.notes.length} notes) — drag it into position.`)
+        },
+      }
+    : null
+
   /** Views › Schedules › Load schedules: each opens the model's own, or says why it can't be made yet. */
   // Checking a definition opens it (every row), so that runs on the click, not on every edit.
   const loadScheduleLists = LOAD_SCHEDULE_IDS.map((id) => ({
@@ -2906,6 +2941,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     lastDetailShape,
     draft,
     tagAll,
+    placeStandardNotes,
     request: onPanelRequest,
     sectionDrawing: drawingSection,
     toggleSection: () => (drawingSection ? setVerticalViewTool(null) : startSection()),
@@ -3275,7 +3311,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               placeHeightTyped.current = { forCategory: placeType?.definition.category ?? null }
               setPlaceHeightFt(value)
             },
-            onAddLevel: (name, elevationMm) => sessionRef.current?.createLevel(name, elevationMm) ?? "Live editing isn't connected.",
+            onAddLevel: (name, elevationMm) => (sessionRef.current ? sessionRef.current.createLevel(name, elevationMm) : "Live editing isn't connected."),
             onStop: () => chooseTool('select'),
             firmLibrary: { status: firmLibrary.status, retry: () => void firmLibrary.retry() },
             onNewPart: canEdit ? () => setPartEditor({ definition: null }) : undefined,
@@ -3300,7 +3336,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             checks: routeChecks,
             pipeTypes,
             inheritArmed,
-            onAddLevel: (name, elevationMm) => sessionRef.current?.createLevel(name, elevationMm) ?? "Live editing isn't connected.",
+            onAddLevel: (name, elevationMm) => (sessionRef.current ? sessionRef.current.createLevel(name, elevationMm) : "Live editing isn't connected."),
             onUseArchitectLevels: canEdit ? () => setLevelRequest('architect') : undefined,
             onInherit: () => {
               setInheritArmed((on) => !on)
@@ -3326,6 +3362,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     onViewChange: refreshReferences,
     onCanEditChange: setCanLink,
     fixtureReferences,
+    collapseShortcut: sidebarShortcuts?.left,
   })
 
   return (
@@ -3635,31 +3672,36 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                   const view = index?.views.find((v) => v.id === viewId)
                   return view ? workflows.viewProperties(view) : null
                 }}
-                viewProperties={
-                  openView ? (
+                propertiesShortcut={sidebarShortcuts?.right}
+                viewProperties={(() => {
+                  const activeSheetView = openSheet && sheetModelView ? (index?.views.find((v) => v.id === sheetModelView) ?? null) : null
+                  const inspectedView = openView ?? activeSheetView
+                  if (!inspectedView) return undefined
+                  return (
                     <ViewProperties
-                      view={openView}
+                      view={inspectedView}
                       canEdit={canEdit}
                       blockedReason={blockedReason}
                       submit={submitWithUndo}
                       references={references.map((r) => ({ id: r.id, label: r.label }))}
                       display={viewDisplay}
                       onDisplay={chooseDisplay}
-                      onRename={() => setRequest({ kind: 'rename_view', view: openView })}
-                      background={backgroundStates[openView.id]}
+                      onRename={() => setRequest({ kind: 'rename_view', view: inspectedView })}
+                      background={backgroundStates[inspectedView.id]}
                       hostLevelId={viewLevelId}
-                      levelName={model ? (canonicalViewLevel(model, openView.props?.level) ?? null) : null}
-                      phaseFields={viewPhaseFields(openView)}
+                      levelName={model ? (canonicalViewLevel(model, inspectedView.props?.level) ?? null) : null}
+                      phaseFields={viewPhaseFields(inspectedView)}
                       onOpenTextStyles={() => setTextStylesOpen(true)}
-                      schedule={workflows.viewProperties(openView)}
+                      elements={model?.elements}
+                      schedule={workflows.viewProperties(inspectedView)}
                       diagram={
-                        openView.props?.diagram ? (
+                        inspectedView.props?.diagram ? (
                           <ModelFromStore store={modelStore}>
                             {(shown) =>
                               shown && (
                                 <DiagramProperties
                                   model={shown}
-                                  view={openView}
+                                  view={inspectedView}
                                   selectedIds={selectedIds}
                                   canEdit={canEdit}
                                   blockedReason={blockedReason}
@@ -3672,8 +3714,8 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                         ) : undefined
                       }
                     />
-                  ) : undefined
-                }
+                  )
+                })()}
               />
             </div>
                 )
@@ -3712,6 +3754,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                 editBlocked={canEdit ? null : blockedReason}
                 onOpenSheet={(sheetId) => openItem({ kind: 'sheet', id: sheetId })}
                 onOpenFormEditor={sharedValue<(kind: string, elementId: string) => boolean>(workflows.shared, 'openFormView') ?? undefined}
+                backSheet={backSheet ? { number: backSheet.number, onBack: () => openItem({ kind: 'sheet', id: backSheet.id }) } : null}
               />
                 )}
               </ModelFromStore>
@@ -3733,6 +3776,28 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               <Alert variant="destructive">
                 <AlertTitle>The model didn&apos;t open</AlertTitle>
                 <AlertDescription>{loadError} Reload the page to try again; if it keeps happening, tell the software team.</AlertDescription>
+              </Alert>
+            </div>
+          )}
+          {!loadError && viewerError && !showDrawing && !scheduleGridOpen && (
+            <div className="absolute inset-x-4 top-4 z-10 max-w-lg" data-testid="viewer-webgl-unavailable">
+              <Alert>
+                <AlertTitle>3D view temporarily unavailable (WebGL)</AlertTitle>
+                <AlertDescription>
+                  <p>{viewerError} 2D floor plans, sheets, one-line diagrams and schedules remain live in the left browser.</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => {
+                      const next = sessionRef.current?.retry3d() ?? null
+                      if (next) setViewer(next)
+                    }}
+                  >
+                    <RefreshCw data-icon="inline-start" />
+                    Retry 3D view
+                  </Button>
+                </AlertDescription>
               </Alert>
             </div>
           )}
@@ -3765,19 +3830,19 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           {blocker && (
             <ToolReadinessNotice
               blocker={blocker}
-              onCreateLevel={(name, elevationMm) => sessionRef.current?.createLevel(name, elevationMm) ?? "Live editing isn't connected, so the level can't be saved."}
+              onCreateLevel={(name, elevationMm) => (sessionRef.current ? sessionRef.current.createLevel(name, elevationMm) : "Live editing isn't connected, so the level can't be saved.")}
               onOpenAddLevel={() => setLevelRequest('add')}
               onRetry={() => live?.retry()}
               onUseArchitectLevels={() => setLevelRequest('architect')}
             />
           )}
-          {toolHint && !dragHint && !blocker && (
+          {toolHint && !dragHint && !blocker && !showDrawing && (
             <ToolHintBar text={toolHint} tone={toolHint === refusal ? 'warning' : 'info'} style={propertiesOpen ? { right: propertiesWidth + 24 } : undefined} />
           )}
           {showDrawing && <TrackpadHint />}
           {viewer && !showDrawing && !scheduleGridOpen && <OrbitPointMarker viewer={viewer} enabled={!planOpen} />}
           {viewer && !showDrawing && !scheduleGridOpen && <ZoomThroughNotice viewer={viewer} />}
-          {backSheet && !showDrawing && !drawingSection && (
+          {backSheet && !showDrawing && !drawingSection && !scheduleGridOpen && (
             <Button size="sm" variant="secondary" className="absolute left-3 top-3 shadow-sm" onClick={() => openItem({ kind: 'sheet', id: backSheet.id })} data-testid="back-to-sheet">
               <ArrowLeft data-icon="inline-start" />
               Back to {backSheet.number}
@@ -3822,6 +3887,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               surface={PROPERTIES_SURFACE}
               title="Properties"
               defaultWidthPx={PROPERTIES_DEFAULT_WIDTH_PX}
+              shortcut={sidebarShortcuts?.right}
               onWidthChange={setPropertiesWidth}
               className={`absolute inset-y-0 right-0 border-l shadow-sm ${propertiesSurfaceClass(showDrawing, scheduleGridOpen)}`}
               bodyClassName="gap-3 p-3"
@@ -3935,6 +4001,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                   onRename={() => setRequest({ kind: 'rename_view', view: openView })}
                   phaseFields={viewPhaseFields(openView)}
                   crop3d={openView.viewType === 'three_d' ? crop3dControls : undefined}
+                  elements={model?.elements}
                   schedule={workflows.viewProperties(openView)}
                 />
               ) : null}
@@ -4001,15 +4068,34 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             hasSelection={selectedIds.length > 0}
             selectionLocked={selectedIds.length > 0 && selectedIds.every((id) => lockOf(model?.elements[id]) !== null)}
             canEdit={canEdit}
+            onLockCategory={(category, locked) => {
+              const refusal = submitWithUndo({ type: 'lock_category', category, locked }, `${locked ? 'lock' : 'unlock'} ${category.replace(/_/g, ' ')}`)
+              if (refusal) toast.error(refusal)
+              else toast.success(`${locked ? 'Locked' : 'Unlocked'} ${category.replace(/_/g, ' ')}.`)
+            }}
             onTogglePin={() => {
               if (!model || selectedIds.length === 0) return
               const allLocked = selectedIds.every((id) => lockOf(model.elements[id]) !== null)
-              submitWithUndo(
-                allLocked
-                  ? { type: 'unlock_elements', elementIds: [...selectedIds] }
-                  : { type: 'lock_elements', elementIds: [...selectedIds], state: 'existing', reason: 'Pinned by user' },
-                allLocked ? 'Unpin selection' : 'Pin selection',
-              )
+              const coreKinds = new Set(['wall', 'slab', 'room', 'column', 'beam', 'grid', 'opening'])
+              const coreIds = selectedIds.filter((id) => {
+                const el = model.elements[id]
+                return el && coreKinds.has(el.kind)
+              })
+              const otherIds = selectedIds.filter((id) => !coreIds.includes(id))
+              if (coreIds.length > 0) {
+                submitWithUndo(
+                  allLocked
+                    ? { type: 'unlock_elements', elementIds: coreIds }
+                    : { type: 'lock_elements', elementIds: coreIds, state: 'existing', reason: 'Pinned by user' },
+                  allLocked ? 'Unpin selection' : 'Pin selection',
+                )
+              }
+              if (otherIds.length > 0) {
+                submitWithUndo(
+                  { type: 'set_element_locks', ids: otherIds, locked: !allLocked, ...(!allLocked ? { reason: 'Pinned by user' } : {}) },
+                  allLocked ? 'Unpin selection' : 'Pin selection',
+                )
+              }
             }}
           />
         )}

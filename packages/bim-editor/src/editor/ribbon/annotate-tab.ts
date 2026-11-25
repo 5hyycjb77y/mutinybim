@@ -1,5 +1,6 @@
-import { Check, Circle, Cloud, Eraser, Hexagon, KeyRound, Minus, MoveHorizontal, PaintBucket, Palette, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, SquareRoundCorner, Tag, Tags, Type, Waves, Waypoints } from 'lucide-react'
+import { Check, Circle, Cloud, Eraser, FileText, Hexagon, KeyRound, Minus, MoveHorizontal, PaintBucket, Palette, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, SquareRoundCorner, Tag, Tags, Type, Waves, Waypoints } from 'lucide-react'
 import { DIMENSION_KINDS, detailComponents, type DimensionKind } from '@permitzip/bim-kernel'
+import { STANDARD_NOTE_SETS } from '@permitzip/bim-library'
 import type { RibbonCommand, RibbonGroup, RibbonTab } from './types'
 import type { DrawingTool } from '../views-sheets/DrawingCanvas'
 import type { DraftController } from '../views-sheets/draft/useDraftController'
@@ -29,7 +30,6 @@ export function drawingReason(ctx: BuildingModelRibbonContext, tool: DrawingTool
   if (tool === 'dimension') return 'Dimensions measure a view. Open a plan, section or detail view, or double-click one on the sheet.'
   if (tool === 'tag') return 'Tags label the model. Open a plan or a section, or double-click one on the sheet.'
   if (tool === 'keynote') return 'Keynotes go on elements in a view. Open a plan or a section, or double-click one on the sheet.'
-  if (tool === 'rect') return 'Rectangles are drawn on sheets and in detail views.'
   return 'A 3D view or schedule takes no annotation. Draw on the sheet, or in a plan, section or detail view.'
 }
 
@@ -172,7 +172,31 @@ export function annotateTab(ctx: BuildingModelRibbonContext, leading: RibbonGrou
     },
     { id: 'detail', label: 'Detail', commands: [detailLine(ctx), ...(draft ? [filletArc(ctx, draft)] : []), drawingCommand(ctx, 'cloud', 'Revision cloud', Cloud, 'Cloud a change on the sheet', ['revision'])] },
     ...(draft ? [{ id: 'region', label: 'Region', commands: [region(ctx, draft, false), region(ctx, draft, true)] }] : []),
-    { id: 'text', label: 'Text', commands: [drawingCommand(ctx, 'text', 'Text', Type, 'Add a note; drag its grips to re-wrap', ['note', 'label', 'leader'])] },
+    {
+      id: 'text',
+      label: 'Text',
+      commands: [
+        drawingCommand(ctx, 'text', 'Text', Type, 'Add a note; drag its grips to re-wrap', ['note', 'label', 'leader']),
+        {
+          id: 'standard-notes',
+          label: 'Standard notes',
+          icon: FileText,
+          description: 'Drop a reusable discipline general-notes block onto this sheet or view (same library scripts use)',
+          keywords: ['general notes', 'notes library', 'specifications', 'nec', 'imc', 'ipc', 'boilerplate'],
+          disabledReason: ctx.placeStandardNotes ? ctx.placeStandardNotes.disabledReason : OPEN_A_DRAWING,
+          children: STANDARD_NOTE_SETS.map((set) => ({
+            id: `standard-notes-${set.id}`,
+            label: set.title,
+            icon: FileText,
+            description: `${set.codeBasis} — ${set.notes.length} notes`,
+            disabledReason: ctx.placeStandardNotes ? ctx.placeStandardNotes.disabledReason : OPEN_A_DRAWING,
+            run: () => ctx.placeStandardNotes?.run(set.id),
+            testId: `ribbon-standard-notes-${set.id}`,
+          })),
+          testId: 'ribbon-standard-notes',
+        },
+      ],
+    },
     {
       id: 'tag',
       label: 'Tag',

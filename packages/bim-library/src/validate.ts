@@ -77,6 +77,7 @@ export function bundleItems(bundle: LibraryBundle): LibraryItem[] {
     ...bundle.elementTypes.map((body) => makeItem("element_type", body)),
     ...bundle.titleBlocks.map((body) => makeItem("title_block", body)),
     ...bundle.keynoteTables.map((body) => makeItem("keynote_table", body)),
+    ...bundle.viewTemplates.map((body) => makeItem("view_template", body)),
   ];
 }
 
@@ -99,6 +100,7 @@ export function bundleWithItems(header: LibraryBundle, items: readonly LibraryIt
     elementTypes: items.flatMap((i) => (i.type === "element_type" ? [i.body] : [])),
     titleBlocks: items.flatMap((i) => (i.type === "title_block" ? [i.body] : [])),
     keynoteTables: items.flatMap((i) => (i.type === "keynote_table" ? [i.body] : [])),
+    viewTemplates: items.flatMap((i) => (i.type === "view_template" ? [i.body] : [])),
   };
 }
 

@@ -4,8 +4,8 @@ import { kindRowOf } from "../kinds/rows";
 import { recognizes } from "../registry/recognition";
 import type { ClassId, ObjectClass } from "../registry/types";
 import type { BimElement, ElementKind, ModelState, ViewElement } from "../types";
-import { activeCategoryRegistry, serviceCategoryId, viewCategoryOfPartCategory, type CategoryRegistry } from "./registry";
-import { hasCategoryOverrides, resolveChain, type CategoryLook } from "./resolve";
+import { activeCategoryRegistry, isViewCategory, serviceCategoryId, viewCategoryOfPartCategory, type CategoryRegistry } from "./registry";
+import { DEFAULT_LOOK, hasCategoryOverrides, resolveChain, type CategoryLook } from "./resolve";
 import type { CategoryId } from "./types";
 
 /**
@@ -47,9 +47,33 @@ export function partCategoryViewCategory(elements: Elements, el: BimElement): Vi
   return viewCategoryOfPartCategory(type.definition.category);
 }
 
-/** The view category an element has always drawn under (runs by domain, then its kind or its add-on row, then a part's type), or null. */
+function viewCategoryFromClassId(classId: string): ViewCategory | null {
+  const reg = activeCategoryRegistry();
+  for (const id of reg.lineage(classId)) {
+    if (isViewCategory(id)) return id;
+  }
+  const cls = reg.classes.getClass(classId);
+  if (cls?.discipline === "structure") return "structure";
+  if (classId.startsWith("struct.") || classId.startsWith("structural")) return "structure";
+  return null;
+}
+
+/** The view category an element has always drawn under (runs by domain, then its kind or its add-on row, then an explicit class's view category, then a part's type), or null. */
 export function elementViewCategory(elements: Elements, el: BimElement): ViewCategory | null {
-  return runViewCategory(el) ?? KIND_VIEW_CATEGORY[el.kind] ?? kindRowOf(el.kind)?.viewCategory ?? partCategoryViewCategory(elements, el);
+  const direct = runViewCategory(el) ?? KIND_VIEW_CATEGORY[el.kind] ?? kindRowOf(el.kind)?.viewCategory;
+  if (direct) return direct;
+  if ("classId" in el && typeof el.classId === "string") {
+    const byClass = viewCategoryFromClassId(el.classId);
+    if (byClass) return byClass;
+  }
+  if (el.kind === "part") {
+    const type = elements[el.typeId];
+    if (type?.kind === "part_type") {
+      const byStored = viewCategoryFromClassId(type.definition.category);
+      if (byStored) return byStored;
+    }
+  }
+  return partCategoryViewCategory(elements, el);
 }
 
 interface Recognizer {
@@ -149,8 +173,19 @@ function serviceOf(elements: Elements, el: BimElement): string | null {
 export function elementCategoryChain(elements: Elements, el: BimElement, categories: CategoryRegistry = activeCategoryRegistry()): readonly CategoryId[] {
   const specific: CategoryId[] = [];
   const general: CategoryId[] = [];
+  const explicitView =
+    ("classId" in el && typeof el.classId === "string" ? viewCategoryFromClassId(el.classId) : null) ??
+    (el.kind === "part" && elements[el.typeId]?.kind === "part_type"
+      ? viewCategoryFromClassId((elements[el.typeId] as Extract<BimElement, { kind: "part_type" }>).definition.category)
+      : null);
   const cls = elementClass(elements, el, categories);
-  if (cls !== null) for (const id of categories.lineage(cls)) (categories.get(id)?.source === "view" ? general : specific).push(id);
+  if (cls !== null) {
+    for (const id of categories.lineage(cls)) {
+      const isView = categories.get(id)?.source === "view";
+      if (isView && explicitView !== null && id !== explicitView) continue;
+      (isView ? general : specific).push(id);
+    }
+  }
   const service = serviceOf(elements, el);
   if (service !== null) {
     const id = serviceCategoryId(service);
@@ -179,6 +214,19 @@ export function elementSymbolId(elements: Elements, el: BimElement, categories: 
 
 const NO_CHAIN: readonly CategoryId[] = [];
 const NO_PROPS: ViewProps = Object.freeze({});
+const HIDDEN_ELEMENT_LOOK: CategoryLook = Object.freeze({ ...DEFAULT_LOOK, visible: false });
+const hiddenElementSets = new WeakMap<ViewProps, ReadonlySet<string>>();
+
+function hiddenElementSet(props: ViewProps): ReadonlySet<string> | null {
+  const list = props.hiddenElementIds;
+  if (!list || list.length === 0) return null;
+  let set = hiddenElementSets.get(props);
+  if (!set) {
+    set = new Set(list);
+    hiddenElementSets.set(props, set);
+  }
+  return set;
+}
 
 type Nested<T> = Map<string, Map<string, Map<string, T>>>;
 /** Per view props, per registry: looks by (class, service, view category). No strings are built per element on a hit. */
@@ -195,6 +243,7 @@ const viewLooks = new WeakMap<ViewProps, Map<string, CategoryLook>>();
  */
 export function elementLook(model: Pick<ModelState, "elements">, view: Pick<ViewElement, "props">, el: BimElement, categories: CategoryRegistry = activeCategoryRegistry()): CategoryLook {
   const props = view.props ?? NO_PROPS;
+  if (hiddenElementSet(props)?.has(el.id)) return HIDDEN_ELEMENT_LOOK;
   const view0 = elementViewCategory(model.elements, el);
   if (!hasCategoryOverrides(view) && !categories.classesPlaceElements) {
     let byView = viewLooks.get(props);

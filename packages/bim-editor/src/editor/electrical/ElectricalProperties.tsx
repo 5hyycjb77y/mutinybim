@@ -1,10 +1,12 @@
 'use client'
 
-import { Cable, CircleDot, ToggleLeft, Unplug, Waypoints } from 'lucide-react'
-import { faultCurrentAt, faultCurrentSummary, electricalConnections, hasPositions, panelSchedule } from '@permitzip/bim-pack-electrical'
-import { type ModelState } from '@permitzip/bim-kernel'
+import { Cable, CircleDot, Power, ToggleLeft, Unplug, Waypoints } from 'lucide-react'
+import { faultCurrentAt, faultCurrentSummary, electricalConnections, hasPositions, isLocalDisconnectPart, panelSchedule, upstreamLinkOfPart } from '@permitzip/bim-pack-electrical'
+import { builtinPartType, serviceLinkName, type Command, type ModelState } from '@permitzip/bim-kernel'
 import { Button } from '../../ui/button'
+import { Checkbox } from '../../ui/checkbox'
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '../../ui/item'
+import { Label } from '../../ui/label'
 import { Separator } from '../../ui/separator'
 import type { SubmitCommand } from '../views-sheets/types'
 import { ConnectionTypePicker } from './ConnectionTypePicker'
@@ -102,8 +104,107 @@ export function ElectricalProperties({
     }
     if (target.loads.length === 1 && target.panels.length === 0) {
       const id = target.loads[0] ?? ''
+      const part = els[id]
       const conn = electricalConnections(els, id)[0]
       const circuit = conn?.circuit ?? null
+      const sourceEl = circuit ? els[circuit.sourceId] : undefined
+      const localDisc = sourceEl?.kind === 'part' && isLocalDisconnectPart(model, sourceEl) ? sourceEl : null
+      const upstreamLink = localDisc ? upstreamLinkOfPart(model, localDisc.id) : null
+      const upstreamName = upstreamLink ? serviceLinkName(els, upstreamLink) : null
+      const disconnectExempt = part?.kind === 'part' && (part.values.disconnect_required === false || part.values.local_disconnect === 'not_required')
+      const partType = part?.kind === 'part' ? els[part.typeId] : undefined
+      const showDisconnectControls =
+        Boolean(localDisc) ||
+        (partType?.kind === 'part_type' &&
+          (partType.definition.category === 'mechanical_equipment' || partType.definition.category === 'plumbing_fixture' || partType.definition.category === 'electrical_equipment'))
+
+      type EditStep = Extract<Command, { type: 'batch_edits' }>['commands'][number]
+
+      const handleToggleDisconnectExempt = (exempt: boolean) => {
+        if (part?.kind !== 'part') return
+        submit(
+          { type: 'set_parameters', id: part.id, scope: 'instance', values: { disconnect_required: !exempt, local_disconnect: exempt ? 'not_required' : 'required' } },
+          exempt ? 'mark local disconnect not required' : 'require local disconnect',
+        )
+      }
+
+      const handleAddDisconnect = () => {
+        if (part?.kind !== 'part') return
+        const currentLink = circuit ? els[circuit.linkId] : undefined
+        const ratingA = (currentLink?.kind === 'service_link' ? currentLink.electrical?.ratingA : undefined) ?? 30
+        const typeId = ratingA > 30 ? 'builtin:disconnect-nf-60-480@1' : 'builtin:disconnect-nf-30-480@1'
+        const def = els[typeId]?.kind === 'part_type' ? undefined : builtinPartType(typeId)?.definition
+        const slug = (part.mark.trim() || part.id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'eq'
+        let discId = `disc-${slug}`
+        let n = 2
+        while (els[discId]) discId = `disc-${slug}-${n++}`
+        const mark = `SD-${part.mark.trim() || part.id}`
+        const cmds: EditStep[] = [
+          {
+            type: 'place_part',
+            partId: discId,
+            typeId,
+            ...(def ? { partType: def } : {}),
+            levelId: part.levelId,
+            position: { x: Math.round(part.position.x - 900), y: Math.round(part.position.y) },
+            offsetMm: Math.round(part.offsetMm || 1200),
+            mark,
+            values: { panel_name: mark, serves: part.mark.trim() || part.id },
+          },
+          { type: 'set_parameters', id: part.id, scope: 'instance', values: { disconnect_required: true, local_disconnect: 'required' } },
+        ]
+        if (currentLink?.kind === 'service_link') {
+          if (currentLink.members.length === 1) {
+            cmds.push({ type: 'delete_elements', ids: [currentLink.id], policy: 'cascade' })
+            cmds.push({
+              type: 'create_service_link',
+              linkId: currentLink.id,
+              sourceId: currentLink.source.elementId,
+              ...(currentLink.source.positions.length > 0 ? { positions: [...currentLink.source.positions] } : {}),
+              members: [{ elementId: discId }],
+              ...(currentLink.description ? { description: currentLink.description } : {}),
+              ...(currentLink.electrical ? { electrical: currentLink.electrical } : { electrical: { ratingA } }),
+            })
+          } else {
+            cmds.push({ type: 'remove_link_members', linkId: currentLink.id, elementIds: [part.id] })
+            cmds.push({
+              type: 'create_service_link',
+              linkId: `ckt-${currentLink.source.elementId}-to-${discId}`,
+              sourceId: currentLink.source.elementId,
+              members: [{ elementId: discId }],
+              description: `${part.mark || part.id} (via ${mark})`,
+              electrical: { ratingA },
+            })
+          }
+        }
+        cmds.push({
+          type: 'create_service_link',
+          linkId: `ckt-${discId}-to-${slug}`,
+          sourceId: discId,
+          members: [{ elementId: part.id }],
+          description: `${part.mark || part.id} local feed`,
+          electrical: { ratingA },
+        })
+        submit({ type: 'batch_edits', label: `Add local disconnect ${mark}`, commands: cmds }, `add local disconnect ${mark}`)
+      }
+
+      const handleRemoveDisconnect = () => {
+        if (part?.kind !== 'part' || !localDisc || !circuit) return
+        const cmds: EditStep[] = [{ type: 'delete_elements', ids: [circuit.linkId, localDisc.id], policy: 'cascade' }]
+        if (upstreamLink) {
+          cmds.push({
+            type: 'create_service_link',
+            linkId: upstreamLink.id,
+            sourceId: upstreamLink.source.elementId,
+            ...(upstreamLink.source.positions.length > 0 ? { positions: [...upstreamLink.source.positions] } : {}),
+            members: [{ elementId: part.id }],
+            ...(upstreamLink.description ? { description: upstreamLink.description } : {}),
+            ...(upstreamLink.electrical ? { electrical: upstreamLink.electrical } : {}),
+          })
+        }
+        submit({ type: 'batch_edits', label: `Remove local disconnect ${localDisc.mark || localDisc.id}`, commands: cmds }, 'remove local disconnect')
+      }
+
       return (
         <>
           <ItemGroup className="gap-1">
@@ -111,7 +212,13 @@ export function ElectricalProperties({
               <ItemContent>
                 <ItemDescription className="text-xs">Circuit</ItemDescription>
                 <ItemTitle className="text-xs font-normal" data-testid="electrical-props-circuit">
-                  {circuit ? `${circuit.name} (panel ${circuit.sourceName})` : 'Not on a circuit'}
+                  {localDisc
+                    ? upstreamName
+                      ? `${upstreamName} (via ${localDisc.mark || localDisc.id})`
+                      : `Via ${localDisc.mark || localDisc.id}`
+                    : circuit
+                      ? `${circuit.name} (panel ${circuit.sourceName})`
+                      : 'Not on a circuit'}
                 </ItemTitle>
               </ItemContent>
             </Item>
@@ -124,7 +231,49 @@ export function ElectricalProperties({
                 </ItemTitle>
               </ItemContent>
             </Item>
+            {showDisconnectControls && (
+              <Item size="sm">
+                <ItemContent>
+                  <ItemDescription className="text-xs">Local disconnect</ItemDescription>
+                  <ItemTitle className="text-xs font-normal" data-testid="electrical-props-disconnect">
+                    {localDisc
+                      ? `${localDisc.mark || localDisc.id}${upstreamName ? ` → ${upstreamName}` : ''}`
+                      : disconnectExempt
+                        ? 'Not required (exempt)'
+                        : 'None (direct feed)'}
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            )}
           </ItemGroup>
+          {showDisconnectControls && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap gap-2">
+                {localDisc ? (
+                  <Button variant="outline" size="sm" onClick={handleRemoveDisconnect} disabled={editBlocked !== null} title={editBlocked ?? undefined} data-testid="electrical-props-remove-disconnect">
+                    <Power data-icon="inline-start" />
+                    Remove disconnect
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={handleAddDisconnect} disabled={editBlocked !== null} title={editBlocked ?? undefined} data-testid="electrical-props-add-disconnect">
+                    <Power data-icon="inline-start" />
+                    Add local disconnect
+                  </Button>
+                )}
+              </div>
+              {!localDisc && (
+                <Label className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                  <Checkbox
+                    checked={disconnectExempt}
+                    disabled={editBlocked !== null}
+                    onCheckedChange={(v) => handleToggleDisconnectExempt(v === true)}
+                    data-testid="electrical-props-disconnect-exempt"
+                  />
+                  Disconnect not required (integral / lockable breaker)
+                </Label>
+              )}
+            </div>
+          )}
           <ConnectionTypePicker model={model} ids={[id]} submit={submit} editBlocked={editBlocked} onManage={onManageTypes} />
           <div className="flex flex-wrap gap-2">
             <Button variant={circuit ? 'outline' : 'default'} size="sm" onClick={onAdd} disabled={addBlocked !== null} title={addBlocked ?? undefined} data-testid="electrical-props-add">

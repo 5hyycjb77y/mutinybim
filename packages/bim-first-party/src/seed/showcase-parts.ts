@@ -448,6 +448,7 @@ export const SHOWCASE_DIFFUSER: { readonly id: string; readonly definition: Part
   definition: {
     familyName: "Supply diffuser, 3-cone louvered",
     typeName: 'Titus TMS-3-8 (24"×24" Face, 8" Neck)',
+    typeMark: "SD-1",
     category: "air_terminal",
     description: "Square ceiling supply diffuser with 3 stamped louvers and 8\" round top inlet neck.",
     typeParams: [

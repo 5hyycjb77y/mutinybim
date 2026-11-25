@@ -8,8 +8,12 @@ Every example below is a complete script that passes the kit's checks; the kit's
 
 - [`documents.sheet`](#documentssheet): A new sheet (number, name, title block, optional `discipline`, `group`, and `sortOrder` for Views & Sheets discipline grouping/ordering); returns its id.
 - [`documents.setSheet`](#documentssetsheet): Changes a sheet's number, name, title block, fields, or sidebar `discipline` / `group` / `sortOrder` metadata.
-- [`documents.planView`](#documentsplanview): A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
-- [`documents.setView`](#documentssetview): Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
+- [`documents.planView`](#documentsplanview): A floor plan of one level (for a discipline, scale, Revit-standard `viewTopRef`: "level_above" | "associated_level" | "unlimited", `viewTop`/`cutHeight`/`viewBottom`, `browserGroup`, `sortOrder`, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
+- [`documents.setView`](#documentssetview): Changes a view's `viewTopRef` ("level_above" | "associated_level" | "unlimited"), `viewTop`/`cutHeight`/`viewBottom`, `browserGroup`, `sortOrder`, detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
+- [`documents.viewTemplate`](#documentsviewtemplate): Creates or updates a reusable first-class view template (`kind: "view_template"`) locking any combination of `view_range`, `category_overrides`, `detail_level`, `visual_style`, `discipline`, `annotations`, and pack-owned `pack_props` (such as `circuitGraphics`).
+- [`documents.applyViewTemplate`](#documentsapplyviewtemplate): Binds a view template (by id or name) live to one or many views, or passes `null` to detach the template while keeping the view editable.
+- [`documents.viewTemplates`](#documentsviewtemplates): Lists all active view templates in the model with their locks, applicable view types, library source id, and bound view ids.
+- [`documents.viewSettings`](#documentsviewsettings): Inspects a view's effective settings (resolved through any bound `view_template`, returning `viewTemplateId`, `viewTemplateName`, `lockedGroups`, effective view range low/high mm & auto top description, browserGroup, sortOrder, and categoryOverrides).
 - [`documents.ceilingView`](#documentsceilingview): A reflected ceiling plan of one level; returns the view's id.
 - [`documents.sectionView`](#documentssectionview): A vertical building section cut from `from` to `to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines` (e.g. `["architecture"]` to filter which discipline plans print the section marker), `categoryOverrides` (e.g. `{ pipe: { detailLevel: "fine" } }`), `headExt`/`tailExt`, `splitGap`, explicit `crop`, and `levelLeftExtMm`/`levelRightExtMm`.
 - [`documents.elevationView`](#documentselevationview): An interior or exterior elevation looking from `from..to` (direction +1 left / -1 right, depth default 20 ft); supports `referencingView`, `showInDisciplines`, and `categoryOverrides`.
@@ -41,6 +45,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`documents.setWirePath`](#documentssetwirepath): Pins one or more spline/orthogonal control vertices on a circuit or switch-leg wire span (`hintKey` is the link id or `"switch:<leg>"`). 1 point draws a smooth arc, 2+ points draw a Catmull-Rom spline, and `null` resets to automatic routing.
 - [`documents.setHomeRun`](#documentssethomerun): Aims, resizes, curves, re-attaches, or moves the label of a circuit's home run arrow using offsets relative to its host device so the home run still follows when the device moves.
 - [`documents.keynote`](#documentskeynote): Gives elements a keynote by its key ("P1", "M3"); a keynote tag on a view prints the key and the sheet's keynote list (Sheets › Live table › Keynote list) gives its words from the keynote tables in force.
+- [`documents.listStandardNoteSets`](#documentsliststandardnotesets): Lists reusable discipline general-notes and specification sets (electrical-general, electrical-demolition, mechanical-general, plumbing-general, fire-protection-general, architectural-general, structural-steel-concrete) so scripts pull standard notes instead of regenerating boilerplate.
+- [`documents.placeStandardNotes`](#documentsplacestandardnotes): Places a formatted, numbered standard general-notes block from the reusable library onto a sheet or view, with optional custom title, extra project-specific notes, or excluded starter note numbers.
 - [`documents.scheduleRows`](#documentsschedulerows): A schedule's rows as numbers and words, on the model as the script has it so far: cells by column id (quantities in SI), grand totals, the row count.
 - [`documents.scheduleFields`](#documentsschedulefields): What a schedule can list and show: every class (no argument), or each named class's fields (path, label, type, unit, how it totals) and relationships for aggregate columns.
 - [`documents.autoTag`](#documentsautotag): Tag every untagged element of `categories` (`duct`, `pipe`, `air_terminal`, `equipment`, `fixture`, `part`, `room`, `space`, `opening`) in a view as movable `DrawingItem` tags placed clear of linework and other tags.
@@ -109,13 +115,13 @@ export default defineScript({
 
 ## documents.planView
 
-A floor plan of one level (for a discipline, scale, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
+A floor plan of one level (for a discipline, scale, Revit-standard `viewTopRef`: "level_above" | "associated_level" | "unlimited", `viewTop`/`cutHeight`/`viewBottom`, `browserGroup`, `sortOrder`, detailLevel, symbolScale, showLineCodes, `offsetStackedRuns`, `showReferenceDisciplines`, and per-category/service overrides including singleLineBelow); returns the view's id.
 
 ```ts
 planView(ctx: ScriptContext, spec: PlanViewSpec): string
 ```
 
-Topics: view, plan, floor plan, detail level, symbolScale, annotative, single line, double line, line code, stacked runs, section references
+Topics: view, plan, floor plan, view range, level above, browser group, sort order, detail level, symbolScale, annotative, single line, double line, line code, stacked runs, section references
 
 <details><summary>Example script</summary>
 
@@ -126,7 +132,7 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, detailLevel: "medium", offsetStackedRuns: true });
+    documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing", scale: 48, viewTopRef: "level_above", browserGroup: "Plumbing", sortOrder: 300, detailLevel: "medium", offsetStackedRuns: true });
   },
 });
 ```
@@ -135,13 +141,13 @@ export default defineScript({
 
 ## documents.setView
 
-Changes a view's detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
+Changes a view's `viewTopRef` ("level_above" | "associated_level" | "unlimited"), `viewTop`/`cutHeight`/`viewBottom`, `browserGroup`, `sortOrder`, detail level (coarse/medium/fine), visual style, annotative `symbolScale` (0.5–3.0), inline service codes, `offsetStackedRuns`, `showReferenceDisciplines`, scale, discipline, or per-category/service graphics overrides (including singleLineBelow).
 
 ```ts
 setView(ctx: ScriptContext, viewId: string, changes: ViewChanges): void
 ```
 
-Topics: view, detail level, symbolScale, annotative, category overrides, single line, double line, schematic, line code, stacked runs, section references
+Topics: view, view range, level above, browser group, sort order, detail level, symbolScale, annotative, category overrides, single line, double line, schematic, line code, stacked runs, section references
 
 <details><summary>Example script</summary>
 
@@ -153,7 +159,117 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plumbing", discipline: "plumbing" });
-    documents.setView(ctx, plan, { detailLevel: "medium", showLineCodes: true, offsetStackedRuns: true, scale: 48 });
+    documents.setView(ctx, plan, { viewTopRef: "level_above", browserGroup: "Plumbing", sortOrder: 300, detailLevel: "medium", showLineCodes: true, offsetStackedRuns: true, scale: 48 });
+  },
+});
+```
+
+</details>
+
+## documents.viewTemplate
+
+Creates or updates a reusable first-class view template (`kind: "view_template"`) locking any combination of `view_range`, `category_overrides`, `detail_level`, `visual_style`, `discipline`, `annotations`, and pack-owned `pack_props` (such as `circuitGraphics`).
+
+```ts
+viewTemplate(ctx: ScriptContext, spec: ViewTemplateSpec): string
+```
+
+Topics: view template, template, view range, level above, category overrides, standard, firm library, pack props
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const tpl = documents.viewTemplate(ctx, { name: "Mech — HVAC Plan", viewTypes: ["floor_plan"], locks: ["view_range", "discipline"], discipline: "mechanical", viewTopRef: "level_above", cutHeight: units.ft(4) });
+    const plan = documents.planView(ctx, { level: "L1", name: "L1 Mechanical", viewTemplate: tpl });
+  },
+});
+```
+
+</details>
+
+## documents.applyViewTemplate
+
+Binds a view template (by id or name) live to one or many views, or passes `null` to detach the template while keeping the view editable.
+
+```ts
+applyViewTemplate(ctx: ScriptContext, viewRef: string | readonly string[], templateRef: string | null): void
+```
+
+Topics: view template, apply template, detach template, view
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const tpl = documents.viewTemplate(ctx, { name: "Elec Power", locks: ["discipline", "annotations"], discipline: "electrical", hideDeviceMarks: true });
+    const p1 = documents.planView(ctx, { level: "L1", name: "L1 Power" });
+    documents.applyViewTemplate(ctx, p1, tpl);
+  },
+});
+```
+
+</details>
+
+## documents.viewTemplates
+
+Lists all active view templates in the model with their locks, applicable view types, library source id, and bound view ids.
+
+```ts
+viewTemplates(ctx: ScriptContext): readonly ViewTemplateSummary[]
+```
+
+Topics: view template, list templates, audit view
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const templates = documents.viewTemplates(ctx);
+    ctx.label(`${templates.length} view templates`);
+  },
+});
+```
+
+</details>
+
+## documents.viewSettings
+
+Inspects a view's effective settings (resolved through any bound `view_template`, returning `viewTemplateId`, `viewTemplateName`, `lockedGroups`, effective view range low/high mm & auto top description, browserGroup, sortOrder, and categoryOverrides).
+
+```ts
+viewSettings(ctx: ScriptContext, viewRef: string): ViewSettingsReport
+```
+
+Topics: view settings, view template, view range, audit view, rcp, ceiling plan, browser group, inspect view
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plan", scale: 48 });
+    const info = documents.viewSettings(ctx, plan);
+    ctx.label(`${info.name}: top ${info.viewRange.effectiveHighMm} mm`);
   },
 });
 ```
@@ -1053,6 +1169,59 @@ export default defineScript({
 
 </details>
 
+## documents.listStandardNoteSets
+
+Lists reusable discipline general-notes and specification sets (electrical-general, electrical-demolition, mechanical-general, plumbing-general, fire-protection-general, architectural-general, structural-steel-concrete) so scripts pull standard notes instead of regenerating boilerplate.
+
+```ts
+listStandardNoteSets(discipline?: string): readonly StandardNoteSetSummary[]
+```
+
+Topics: general notes, standard notes, spec library, boilerplate, sheet notes
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { ids: [] },
+  parameters: {},
+  run(ctx) {
+    const sets = documents.listStandardNoteSets("electrical");
+    ctx.label(`Sets: ${sets.map((s) => s.id).join(", ")}`);
+  },
+});
+```
+
+</details>
+
+## documents.placeStandardNotes
+
+Places a formatted, numbered standard general-notes block from the reusable library onto a sheet or view, with optional custom title, extra project-specific notes, or excluded starter note numbers.
+
+```ts
+placeStandardNotes(ctx: ScriptContext, ownerRef: string, setId: string, at: { x: Measure; y: Measure }, opts?: FormatStandardNoteOptions & { id?: string; width?: Measure }): string
+```
+
+Topics: general notes, standard notes, spec library, sheet notes, place notes
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { ids: [] },
+  parameters: {},
+  run(ctx) {
+    documents.placeStandardNotes(ctx, "sh-e101", "electrical-general", { x: units.mm(650), y: units.mm(500) }, { extraNotes: ["COORDINATE FLOOR BOXES WITH FURNITURE LAYOUT."] });
+  },
+});
+```
+
+</details>
+
 ## documents.scheduleRows
 
 A schedule's rows as numbers and words, on the model as the script has it so far: cells by column id (quantities in SI), grand totals, the row count. Form schedules (panels, feeders) are add-on reads (electrical.loads).
@@ -1232,7 +1401,7 @@ export default defineScript({
 
 ## documents.diagram
 
-Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"air_schematic"`, `"plumbing_riser"`, `"plumbing_isometric"`, …; `documents.diagramKinds(ctx)` lists all available kinds). For `one_line`, pass `hints: { faultCurrent: true, lengthMode: "shortest" | "manhattan" | "explicit", showLoads: true }` to annotate live 3D-estimated feeder lengths and available fault current (AFC vs kAIC). Returns the view's id.
+Creates a live diagram view derived from the model by any active pack (`"one_line"`, `"electrical_riser"`, `"controls_diagram"`, `"air_schematic"`, `"plumbing_riser"`, `"plumbing_isometric"`, …; `documents.diagramKinds(ctx)` lists all available kinds). For `one_line`, pass `hints: { faultCurrent: true, lengthMode: "shortest" | "manhattan" | "explicit", showLoads: true, minLoadRatingA: 60, phaseScope: "all" | "new" | "existing" | "demolition" }` to annotate live 3D-estimated feeder lengths, available fault current (AFC vs kAIC), filter branch loads by breaker size, or generate new-work vs demolition single-lines. Returns the view id.
 
 ```ts
 diagram(ctx: ScriptContext, spec: { name: string; kind: string; hints?: DiagramHints; id?: string }): string

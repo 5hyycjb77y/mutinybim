@@ -305,26 +305,59 @@ export interface CropBoxSpec {
 }
 export interface PlanViewSpec {
   level: string; name: string; discipline?: string; scale?: number; cutHeight?: Measure;
+  viewTop?: Measure; viewTopRef?: "associated_level" | "level_above" | "unlimited"; viewBottom?: Measure; viewDepth?: Measure;
+  browserGroup?: string; sortOrder?: number; viewTemplate?: string;
   detailLevel?: "coarse" | "medium" | "fine";
   visualStyle?: "wireframe" | "hidden_line" | "shaded" | "shaded_edges";
   showLineCodes?: boolean;
   offsetStackedRuns?: boolean;
   showReferenceDisciplines?: readonly string[];
+  symbolScale?: number;
   hide?: string[];
+  hideElements?: readonly string[];
+  showClearanceLabels?: boolean;
+  hideDeviceMarks?: boolean;
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
   crop?: { from: PlanPoint; to: PlanPoint };
+  cropPolygon?: readonly PlanPoint[];
   id?: string;
 }
 export interface ViewChanges {
+  viewTemplate?: string | null;
   discipline?: string | null; scale?: number; cutHeight?: Measure;
+  viewTop?: Measure | null; viewTopRef?: "associated_level" | "level_above" | "unlimited" | null;
+  browserGroup?: string | null; sortOrder?: number | null;
+  viewBottom?: Measure | null; viewDepth?: Measure;
   detailLevel?: "coarse" | "medium" | "fine";
   visualStyle?: "wireframe" | "hidden_line" | "shaded" | "shaded_edges";
   showLineCodes?: boolean;
   offsetStackedRuns?: boolean;
   showReferenceDisciplines?: readonly string[];
+  symbolScale?: number;
   hide?: string[];
+  hideElements?: readonly string[];
+  showClearanceLabels?: boolean;
+  hideDeviceMarks?: boolean;
   /** Replaces the view's category override map; pass {} to clear all overrides. */
   categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
+  cropPolygon?: readonly PlanPoint[] | null;
+}
+export type ViewTemplateLockKey = "view_range" | "category_overrides" | "detail_level" | "visual_style" | "discipline" | "annotations" | "pack_props";
+export interface ViewTemplateSpec {
+  id?: string; name: string; description?: string;
+  viewTypes?: readonly ("floor_plan" | "ceiling_plan" | "section" | "elevation" | "three_d" | "detail" | "schedule")[];
+  locks: readonly ViewTemplateLockKey[];
+  discipline?: string; browserGroup?: string; scale?: number; cutHeight?: Measure;
+  viewTop?: Measure; viewTopRef?: "associated_level" | "level_above" | "unlimited";
+  viewBottom?: Measure; viewDepth?: Measure;
+  detailLevel?: "coarse" | "medium" | "fine";
+  visualStyle?: "wireframe" | "hidden_line" | "shaded" | "shaded_edges";
+  showLineCodes?: boolean; offsetStackedRuns?: boolean;
+  showReferenceDisciplines?: readonly string[]; symbolScale?: number;
+  hide?: string[]; showClearanceLabels?: boolean; hideDeviceMarks?: boolean;
+  categoryOverrides?: Readonly<Record<string, CategoryOverrideSpec>>;
+  packProps?: Readonly<Record<string, unknown>>;
+  sourceLibraryId?: string;
 }
 export interface VerticalViewSpec {
   name: string; from: PlanPoint; to: PlanPoint; direction?: 1 | -1; depth?: Measure;

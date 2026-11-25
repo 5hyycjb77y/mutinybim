@@ -50,6 +50,11 @@ export function documentFieldValue(el: BimElement, field: string): AuthoredValue
       if (key === "crop") return canonicalJson({ min: el.cropMin, max: el.cropMax });
       if (key.startsWith("props.")) return canonicalJson(propValue(el.props, key.slice(6)));
       return undefined;
+    case "view_template":
+      if (key === "name") return el.name;
+      if (key === "locks") return canonicalJson(el.locks);
+      if (key.startsWith("props.")) return canonicalJson(propValue(el.props, key.slice(6)));
+      return undefined;
     case "sheet":
       if (key === "number") return el.number;
       if (key === "title") return el.title;

@@ -93,7 +93,7 @@ function missingGraphMessage(kind: string): string {
 /** A drawn piece of pipe is easy to hit: its box is at least this far from the line on every side (drawing mm). */
 const PIPE_HIT_MM = 1.2;
 
-function toSpecNode(n: DiagramNode): OneLineNode {
+function toSpecNode(n: DiagramNode, showLoads = false): OneLineNode {
   const [first, ...rest] = n.lines;
   return {
     id: n.id,
@@ -109,11 +109,12 @@ function toSpecNode(n: DiagramNode): OneLineNode {
             ...(n.feed.conductors ? { conductors: n.feed.conductors } : {}),
             ...(n.feed.lengthFt !== undefined ? { length_ft: n.feed.lengthFt } : {}),
             ...(n.feed.typeMark ? { type_mark: n.feed.typeMark } : {}),
+            ...(showLoads && n.feed.load ? { load: n.feed.load } : {}),
           },
         }
       : {}),
-    ...(n.emergency ? { emergency: toSpecNode(n.emergency) } : {}),
-    ...(n.children.length > 0 ? { children: n.children.map(toSpecNode) } : {}),
+    ...(n.emergency ? { emergency: toSpecNode(n.emergency, showLoads) } : {}),
+    ...(n.children.length > 0 ? { children: n.children.map((c) => toSpecNode(c, showLoads)) } : {}),
     ...(n.placeholder || n.planned ? { placeholder: true } : {}),
   };
 }
@@ -141,7 +142,71 @@ function applyPins(layout: DiagramLayoutResult, roots: readonly DiagramNode[], p
   const items = [...layout.items];
   if (!pins || !layout.ranges) return items;
   const entries = new Map(Object.entries(layout.entries ?? {}));
-  for (const n of diagramNodes({ roots })) {
+  const allNodes = diagramNodes({ roots });
+  // Index every horizontal bus bar and all child nodes tapping it BEFORE applying pins,
+  // so moving children inward shrinks the bus intelligently while moving outward expands it.
+  interface BusInfo {
+    readonly busIndex: number;
+    readonly ownerId: string;
+    readonly busY: number;
+    readonly leftIs0: boolean;
+    readonly origMinX: number;
+    readonly origMaxX: number;
+    readonly parentDropX: number;
+    readonly accessoryPadLeft: number;
+    readonly tapNodeIds: string[];
+  }
+  const busByIndex = new Map<number, BusInfo>();
+  const busIndexByNode = new Map<string, number>();
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!it || it.shape !== "line" || it.weight !== "heavy") continue;
+    const [p0, p1] = it.points;
+    if (Math.abs(p0.y - p1.y) >= 0.2) continue;
+    const origMinX = Math.min(p0.x, p1.x);
+    const origMaxX = Math.max(p0.x, p1.x);
+    if (origMaxX - origMinX < 10) continue;
+    // Find the parent's incoming vertical stem drop onto this horizontal header (same ownerId, ends at busY).
+    let parentDropX = (origMinX + origMaxX) / 2;
+    for (let j = 0; j < items.length; j++) {
+      const seg = items[j];
+      if (!seg || seg.shape !== "line" || seg.nodeId !== it.nodeId || j === i) continue;
+      const [s0, s1] = seg.points;
+      if (Math.abs(s0.x - s1.x) < 0.2 && (Math.abs(s0.y - p0.y) < 0.35 || Math.abs(s1.y - p0.y) < 0.35)) {
+        parentDropX = s0.x;
+        break;
+      }
+    }
+    const tapNodeIds: string[] = [];
+    for (const child of allNodes) {
+      if (child.id === it.nodeId) continue;
+      const e = entries.get(child.id);
+      if (!e) continue;
+      if (Math.abs(e.y - p0.y) < 0.35 && e.x >= origMinX - 1.5 && e.x <= origMaxX + 1.5) {
+        tapNodeIds.push(child.id);
+        busIndexByNode.set(child.id, i);
+      }
+    }
+    if (tapNodeIds.length === 0) continue;
+    const naturalLeft = Math.min(parentDropX - 18, ...tapNodeIds.map((id) => (entries.get(id)?.x ?? parentDropX) - 8));
+    const accessoryPadLeft = Math.max(0, naturalLeft - origMinX);
+    busByIndex.set(i, {
+      busIndex: i,
+      ownerId: it.nodeId,
+      busY: p0.y,
+      leftIs0: p0.x <= p1.x,
+      origMinX,
+      origMaxX,
+      parentDropX,
+      accessoryPadLeft,
+      tapNodeIds,
+    });
+  }
+
+  const touchedBuses = new Set<number>();
+  const ownerDeltaX = new Map<string, number>();
+
+  for (const n of allNodes) {
     const pin = pins[n.id] ?? (n.elementId ? pins[n.elementId] : undefined);
     const range = layout.ranges[n.id];
     if (!pin || !range || (pin.dx === 0 && pin.dy === 0)) continue;
@@ -155,45 +220,17 @@ function applyPins(layout: DiagramLayoutResult, roots: readonly DiagramNode[], p
     for (const id of below) {
       const e = entries.get(id);
       if (e) entries.set(id, shift(e, d));
+      ownerDeltaX.set(id, (ownerDeltaX.get(id) ?? 0) + d.x);
     }
     if (entry) {
-      // Check if `entry` sits directly on a horizontal bus bar: slide the tap along the bus cleanly (no ugly Z-dogleg) and auto-expand the bus if dragged past its ends!
       const movedEntry = shift(entry, d);
-      let busIndex = -1;
-      for (let i = 0; i < items.length; i++) {
-        if (i >= range[0] && i < range[1]) continue;
-        const it = items[i];
-        if (!it || it.shape !== "line") continue;
-        const [p0, p1] = it.points;
-        if (Math.abs(p0.y - p1.y) < 0.2 && Math.abs(p0.y - entry.y) < 0.35) {
-          const minX = Math.min(p0.x, p1.x);
-          const maxX = Math.max(p0.x, p1.x);
-          if (entry.x >= minX - 1.5 && entry.x <= maxX + 1.5) {
-            busIndex = i;
-            break;
-          }
-        }
-      }
+      const busIndex = busIndexByNode.get(n.id) ?? -1;
       if (busIndex >= 0) {
-        const bus = items[busIndex] as Extract<OneLineItem, { shape: "line" }>;
-        const b0 = bus.points[0];
-        const b1 = bus.points[1];
-        const leftIs0 = b0.x <= b1.x;
-        const curMinX = Math.min(b0.x, b1.x);
-        const curMaxX = Math.max(b0.x, b1.x);
-        const nextMinX = Math.min(curMinX, movedEntry.x - 4);
-        const nextMaxX = Math.max(curMaxX, movedEntry.x + 4);
-        if (nextMinX < curMinX - 0.05 || nextMaxX > curMaxX + 0.05) {
-          items[busIndex] = {
-            ...bus,
-            points: leftIs0
-              ? [round({ x: nextMinX, y: b0.y }), round({ x: nextMaxX, y: b1.y })]
-              : [round({ x: nextMaxX, y: b0.y }), round({ x: nextMinX, y: b1.y })],
-          };
-        }
+        touchedBuses.add(busIndex);
         // Only draw a clean vertical drop if moved vertically off the bus (zero horizontal Z-jog!).
         if (Math.abs(d.y) > 0.25) {
-          items.push({ shape: "line", points: [round({ x: movedEntry.x, y: entry.y }), movedEntry], weight: "medium", nodeId: n.id });
+          const bus = items[busIndex] as Extract<OneLineItem, { shape: "line" }>;
+          items.push({ shape: "line", points: [round({ x: movedEntry.x, y: bus.points[0].y }), movedEntry], weight: "medium", nodeId: n.id });
         }
       } else {
         const horiz = Math.abs(d.x) >= Math.abs(d.y);
@@ -205,6 +242,25 @@ function applyPins(layout: DiagramLayoutResult, roots: readonly DiagramNode[], p
         items.push({ shape: "polyline", points: pts, weight: "medium", nodeId: n.id });
       }
     }
+  }
+
+  // Recompute every touched bus bar's left/right extent from its live child taps and parent drop:
+  // shrinks cleanly when children are squished inward and expands when dragged outward.
+  for (const busIndex of touchedBuses) {
+    const info = busByIndex.get(busIndex);
+    const bus = items[busIndex];
+    if (!info || !bus || bus.shape !== "line") continue;
+    const busY = bus.points[0].y;
+    const dropX = info.parentDropX + (ownerDeltaX.get(info.ownerId) ?? 0);
+    const tapXs = info.tapNodeIds.map((id) => entries.get(id)?.x ?? dropX);
+    const nextMinX = Math.min(dropX - 18, ...tapXs.map((cx) => cx - 8)) - info.accessoryPadLeft;
+    const nextMaxX = Math.max(dropX + 18, ...tapXs.map((cx) => cx + 8));
+    items[busIndex] = {
+      ...bus,
+      points: info.leftIs0
+        ? [round({ x: nextMinX, y: busY }), round({ x: nextMaxX, y: busY })]
+        : [round({ x: nextMaxX, y: busY }), round({ x: nextMinX, y: busY })],
+    };
   }
   return items;
 }
@@ -401,7 +457,10 @@ function itemId(viewId: string, i: number): ElementId {
   return asElementId(`${viewId}~dg~${i}`);
 }
 
-function toDrawingItems(viewId: string, items: readonly OneLineItem[]): DrawingItem[] {
+type NodeVisual = { readonly tone?: "ink" | "halftone"; readonly dashed?: boolean };
+const HALFTONE_TEXT_COLOR = "#7f7f7f";
+
+function toDrawingItems(viewId: string, items: readonly OneLineItem[], nodeVisuals?: ReadonlyMap<string, NodeVisual>): DrawingItem[] {
   const base = (i: number) => ({ id: itemId(viewId, i), version: 0, authoredRev: {}, kind: "drawing_item" as const, ownerId: asElementId(viewId) });
   const note = (i: number, at: Vec2, width: number, size: number, paragraphs: readonly NoteParagraph[]): DrawingItem => ({
     ...base(i),
@@ -413,21 +472,41 @@ function toDrawingItems(viewId: string, items: readonly OneLineItem[]): DrawingI
   const out: DrawingItem[] = [];
   let n = 0;
   for (const item of items) {
+    const vis = nodeVisuals?.get(item.nodeId);
+    const tone = vis?.tone === "halftone" ? ("halftone" as const) : undefined;
+    const isDashed = (item.shape === "line" || item.shape === "polyline" ? item.dashed : false) || vis?.dashed === true;
     switch (item.shape) {
       case "component":
-        out.push({ ...base(n++), shape: "component", points: [item.at], component: { symbolId: item.symbolId, widthMm: item.widthMm, heightMm: item.heightMm, ...(item.rotationDeg ? { rotationDeg: item.rotationDeg } : {}) } });
+        out.push({
+          ...base(n++),
+          shape: "component",
+          points: [item.at],
+          component: { symbolId: item.symbolId, widthMm: item.widthMm, heightMm: item.heightMm, ...(item.rotationDeg ? { rotationDeg: item.rotationDeg } : {}) },
+          ...(tone || isDashed ? { lineStyle: { ...(tone ? { tone } : {}), ...(isDashed ? { pattern: "dashed" as const } : {}) } } : {}),
+        });
         break;
       case "line":
-        out.push({ ...base(n++), shape: "line", points: [...item.points], lineStyle: { weight: item.weight, ...(item.dashed ? { pattern: "dashed" as const } : {}) } });
+        out.push({
+          ...base(n++),
+          shape: "line",
+          points: [...item.points],
+          lineStyle: { weight: item.weight, ...(isDashed ? { pattern: "dashed" as const } : {}), ...(tone ? { tone } : {}) },
+        });
         break;
       case "polyline":
-        out.push({ ...base(n++), shape: "polyline", points: [...item.points], lineStyle: { weight: item.weight, ...(item.dashed ? { pattern: "dashed" as const } : {}) }, ...(item.closed ? { closed: true } : {}) });
+        out.push({
+          ...base(n++),
+          shape: "polyline",
+          points: [...item.points],
+          lineStyle: { weight: item.weight, ...(isDashed ? { pattern: "dashed" as const } : {}), ...(tone ? { tone } : {}) },
+          ...(item.closed ? { closed: true } : {}),
+        });
         break;
       case "oval": {
         const pts = ovalOutline(item.center, item.widthMm, item.heightMm);
         if (item.mask) out.push({ ...base(n++), shape: "region", points: pts, fill: { pattern: "solid", masking: true } });
-        out.push({ ...base(n++), shape: "polyline", points: pts, closed: true, lineStyle: { weight: "thin" } });
-        out.push(note(n++, round({ x: item.center.x - item.widthMm / 2, y: item.center.y + ONE_LINE_TEXT_MM * 0.75 }), item.widthMm, ONE_LINE_TEXT_MM * 0.85, [{ runs: [{ text: item.text }], align: "center" }]));
+        out.push({ ...base(n++), shape: "polyline", points: pts, closed: true, lineStyle: { weight: "thin", ...(isDashed ? { pattern: "dashed" as const } : {}), ...(tone ? { tone } : {}) } });
+        out.push(note(n++, round({ x: item.center.x - item.widthMm / 2, y: item.center.y + ONE_LINE_TEXT_MM * 0.75 }), item.widthMm, ONE_LINE_TEXT_MM * 0.85, [{ runs: [{ text: item.text, ...(tone ? { color: HALFTONE_TEXT_COLOR } : {}) }], align: "center" }]));
         break;
       }
       case "text": {
@@ -447,7 +526,7 @@ function toDrawingItems(viewId: string, items: readonly OneLineItem[]): DrawingI
             fill: { pattern: "solid", masking: true },
           });
         }
-        out.push(note(n++, item.at, item.widthMm, ONE_LINE_TEXT_MM, item.lines.map((l) => ({ runs: [{ text: l.text, ...(l.bold ? { bold: true } : {}) }], ...(item.align === "center" ? { align: "center" as const } : {}) }))));
+        out.push(note(n++, item.at, item.widthMm, ONE_LINE_TEXT_MM, item.lines.map((l) => ({ runs: [{ text: l.text, ...(l.bold ? { bold: true } : {}), ...(tone ? { color: HALFTONE_TEXT_COLOR } : {}) }], ...(item.align === "center" ? { align: "center" as const } : {}) }))));
         break;
       }
     }
@@ -491,7 +570,8 @@ function layoutFor(elements: Elements, def: DiagramDefinition, graph: DiagramGra
     return laidFrom(result, row);
   }
   if (def.kind === "one_line") {
-    const spec: OneLineSpec = { roots: roots.map(toSpecNode), ...(hints.title ? { title: hints.title } : {}), ...(hints.notes?.length ? { notes: [...hints.notes] } : {}) };
+    const showLoads = hints.showLoads === true;
+    const spec: OneLineSpec = { roots: roots.map((r) => toSpecNode(r, showLoads)), ...(hints.title ? { title: hints.title } : {}), ...(hints.notes?.length ? { notes: [...hints.notes] } : {}) };
     return { layout: layoutOneLine(spec, { orientation: hints.orientation ?? "vertical" }), pieces: {}, serviceSections: true };
   }
   return { layout: layoutRiser(roots, riserLevels(elements)), pieces: {}, serviceSections: true };
@@ -559,7 +639,13 @@ function evaluateUncached(elements: Elements, viewId: string, def: DiagramDefini
   if (hints.style === "box3d") drawBoxes(items);
   if (hints.showWarnings !== false) drawWarnings(items, graph.warnings);
   const boxes: DiagramNodeBox[] = [];
+  const nodeVisuals = new Map<string, NodeVisual>();
   for (const n of all) {
+    if (n.tone || n.dashed) {
+      const vis: NodeVisual = { ...(n.tone ? { tone: n.tone } : {}), ...(n.dashed ? { dashed: true } : {}) };
+      nodeVisuals.set(n.id, vis);
+      if (n.feed?.linkId) nodeVisuals.set(n.feed.linkId, vis);
+    }
     if (!n.elementId) continue;
     const b = boundsOf(items, 0, items.length, new Set([n.id]), moved);
     if (b) boxes.push({ elementId: n.elementId, name: n.name, min: b.min, max: b.max });
@@ -567,7 +653,7 @@ function evaluateUncached(elements: Elements, viewId: string, def: DiagramDefini
   boxes.push(...pipeBoxes(items, pipeRefs));
   return {
     kind: def.kind,
-    items: toDrawingItems(viewId, items),
+    items: toDrawingItems(viewId, items, nodeVisuals),
     boxes,
     texts: texts.map((t) => {
       const it = items[t.index];

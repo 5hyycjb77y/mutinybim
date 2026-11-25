@@ -8,6 +8,7 @@ import {
   pushTo,
   resolveConnectors,
   resolveTextStyle,
+  resolveViewElement,
   serviceLinkName,
   type DetailLevel,
   type GroupEntry,
@@ -116,8 +117,11 @@ export function resolveCircuitGraphics(view: ViewElement): ResolvedCircuitGraphi
 /** The conductors a circuit's home run marks, in order: one per hot, the neutral on a single-pole or a circuit that states one, then the ground. */
 export function circuitConductorMarks(model: Pick<ModelState, "elements">, linkId: string | null, style: CircuitHashMarkStyle): ReadonlyArray<"hot" | "neutral" | "ground"> {
   if (style === "off" || !linkId) return [];
-  const link = model.elements[linkId];
-  if (link?.kind !== "service_link") return [];
+  const raw = model.elements[linkId];
+  if (raw?.kind !== "service_link") return [];
+  const rawSrc = model.elements[raw.source.elementId];
+  const upstream = rawSrc?.kind === "part" && isLocalDisconnectPart(model, rawSrc) ? upstreamLinkOfPart(model, rawSrc.id) : null;
+  const link = upstream ?? raw;
   const hots = Math.max(1, link.source.positions.length);
   const neutral = hots === 1 || link.electrical?.conductors?.neutralSize !== undefined;
   return [...Array.from({ length: hots }, () => "hot" as const), ...(neutral ? ["neutral" as const] : []), ...(style === "hots_neutral_ground" ? ["ground" as const] : [])];
@@ -617,9 +621,46 @@ function arcThrough(a: Vec2, m: Vec2, b: Vec2): Vec2[] {
   return out;
 }
 
-/** Smooth paper-space preview polyline for an interactive wire or curved home-run drag (matches committed geometry). */
-export function previewWireCurve(start: Vec2, waypoints: readonly Vec2[], end: Vec2): Vec2[] {
+/**
+ * Paper-space preview polyline for an interactive wire or home-run drag (matches committed geometry):
+ * - `"orthogonal"`: crisp 90° orthogonal path through the dragged waypoint(s).
+ * - `"chamfered"` (Binoy): orthogonal path with rounded Binoy corner fillets (paper mm).
+ * - `"arcs"` (default): smooth arc / Catmull-Rom spline.
+ */
+export function previewWireCurve(
+  start: Vec2,
+  waypoints: readonly Vec2[],
+  end: Vec2,
+  style: CircuitGraphicStyle = "arcs",
+): Vec2[] {
   if (waypoints.length === 0) return [start, end];
+  if (style === "orthogonal" || style === "chamfered") {
+    const corners: Vec2[] = [];
+    if (waypoints.length === 1) {
+      const bend = waypoints[0]!;
+      // Choose the axis aligned with how the drag displaced the midpoint (vertical bar at bend.x vs horizontal bar at bend.y).
+      const dxSpan = Math.abs(end.x - start.x);
+      const dySpan = Math.abs(end.y - start.y);
+      const midY = (start.y + end.y) / 2;
+      const midX = (start.x + end.x) / 2;
+      const preferHorizontalBar = dySpan > dxSpan ? Math.abs(bend.y - midY) > Math.abs(bend.x - midX) : Math.abs(bend.y - midY) >= Math.abs(bend.x - midX) * 0.45;
+      if (preferHorizontalBar) {
+        corners.push({ x: start.x, y: bend.y }, { x: end.x, y: bend.y });
+      } else {
+        corners.push({ x: bend.x, y: start.y }, { x: bend.x, y: end.y });
+      }
+    } else {
+      let prev = start;
+      for (const wp of waypoints) {
+        if (Math.abs(wp.x - prev.x) > 0.2 && Math.abs(wp.y - prev.y) > 0.2) corners.push({ x: wp.x, y: prev.y });
+        corners.push(wp);
+        prev = wp;
+      }
+      if (Math.abs(end.x - prev.x) > 0.2 && Math.abs(end.y - prev.y) > 0.2) corners.push({ x: prev.x, y: end.y });
+    }
+    const raw = [start, ...corners, end].filter((q, i, arr) => i === 0 || dist(q, arr[i - 1] ?? q) > 0.15);
+    return style === "chamfered" ? chamferOrthogonalPath(raw, 3.2, 0.5) : raw;
+  }
   if (waypoints.length === 1) return arcThrough(start, waypoints[0]!, end);
   return splineThrough([start, ...waypoints, end]);
 }
@@ -678,26 +719,96 @@ function squarePath(a: Node, b: Node, corners: readonly Vec2[]): Vec2[] {
   return pts.filter((q, i) => i === 0 || dist(q, pts[i - 1] ?? q) > 0.5);
 }
 
+/** Outward room unit normal for a wall-hosted part (`+Y` in part local space), or null for free-standing parts. */
+function wallRoomNormal(node: Node): Vec2 | null {
+  if (node.part.host?.kind !== "wall_face") return null;
+  const rad = (node.part.rotationDeg * Math.PI) / 180;
+  return { x: -Math.sin(rad), y: Math.cos(rad) };
+}
+
+/** Furthest extent (model mm) of `node`'s rendered symbol outline along unit vector `dir` from `node.point`. */
+function symbolExtentAlong(node: Node, dir: Vec2): number {
+  let max = 0;
+  for (const o of node.outline) {
+    if (o.kind === "circle") {
+      const proj = (o.c.x - node.point.x) * dir.x + (o.c.y - node.point.y) * dir.y + o.r;
+      if (proj > max) max = proj;
+    } else {
+      const p1 = (o.a.x - node.point.x) * dir.x + (o.a.y - node.point.y) * dir.y;
+      const p2 = (o.b.x - node.point.x) * dir.x + (o.b.y - node.point.y) * dir.y;
+      if (p1 > max) max = p1;
+      if (p2 > max) max = p2;
+    }
+  }
+  return max;
+}
+
 /**
  * Square routes from a to b, shortest first: the two L corners (or the
  * straight run when they line up), then the same shapes with one run pushed
  * sideways by 1, 2, 3 offsets either way, so a run that would sit on top of
  * another can step beside it instead.
+ * When both endpoints are wall-mounted facing the same room along an aligned
+ * wall, stepping outward into the room comes first so wires don't slice through
+ * adjacent receptacles along the wall face.
  */
-function squareCandidates(a: Vec2, b: Vec2, step: number): Vec2[][] {
-  const aligned = Math.abs(a.x - b.x) < 1 || Math.abs(a.y - b.y) < 1;
-  const out: Vec2[][] = aligned ? [[]] : [[{ x: b.x, y: a.y }], [{ x: a.x, y: b.y }]];
-  const horizontal = Math.abs(a.y - b.y) < 1;
+function squareCandidates(a: Node, b: Node, step: number, chamfer = false): Vec2[][] {
+  const ap = a.point;
+  const bp = b.point;
+  const aligned = Math.abs(ap.x - bp.x) < 1 || Math.abs(ap.y - bp.y) < 1;
+  const horizontal = Math.abs(ap.y - bp.y) < 1;
+  const out: Vec2[][] = [];
+  const na = wallRoomNormal(a);
+  const nb = wallRoomNormal(b);
+  if (aligned) {
+    const sameWallFace = na && nb && na.x * nb.x + na.y * nb.y > 0.7;
+    const perpWall = sameWallFace && (horizontal ? Math.abs(na.y) > 0.7 : Math.abs(na.x) > 0.7);
+    if (perpWall && na && nb) {
+      const sign = horizontal ? (na.y >= 0 ? 1 : -1) : (na.x >= 0 ? 1 : -1);
+      // Clear both symbol graphics plus enough leg length for a clean rounded fillet off the wall.
+      // Stay strictly on the room side so wires never slice along the wall face or loop behind the wall.
+      const clearOut = Math.max(symbolExtentAlong(a, na), symbolExtentAlong(b, nb)) + Math.max(step * 2.5, 220);
+      for (let k = 0; k <= SQUARE_OFFSETS; k++) {
+        const o = sign * (clearOut + k * step);
+        out.push(horizontal ? [{ x: ap.x, y: ap.y + o }, { x: bp.x, y: ap.y + o }] : [{ x: ap.x + o, y: ap.y }, { x: ap.x + o, y: bp.y }]);
+      }
+      return out;
+    }
+    out.push([]);
+  } else {
+    // In Binoy mode (`chamfer`), wall-hosted endpoints on perpendicular or opposite walls first
+    // step cleanly out perpendicular into the room before turning, so wires never cut diagonally
+    // across a wall or behind a partition.
+    if (chamfer && (na || nb)) {
+      const stubOf = (n: Node, norm: Vec2 | null): Vec2 => {
+        if (!norm) return n.point;
+        const clear = symbolExtentAlong(n, norm) + Math.max(step * 1.5, 180);
+        return { x: n.point.x + norm.x * clear, y: n.point.y + norm.y * clear };
+      };
+      const as = stubOf(a, na);
+      const bs = stubOf(b, nb);
+      const c1: Vec2[] = [];
+      if (na) c1.push(as);
+      c1.push({ x: bs.x, y: as.y });
+      if (nb) c1.push(bs);
+      const c2: Vec2[] = [];
+      if (na) c2.push(as);
+      c2.push({ x: as.x, y: bs.y });
+      if (nb) c2.push(bs);
+      out.push(c1, c2);
+    }
+    out.push([{ x: bp.x, y: ap.y }], [{ x: ap.x, y: bp.y }]);
+  }
   for (let k = 1; k <= SQUARE_OFFSETS; k++) {
     for (const o of [k * step, -k * step]) {
       if (aligned) {
-        out.push(horizontal ? [{ x: a.x, y: a.y + o }, { x: b.x, y: a.y + o }] : [{ x: a.x + o, y: a.y }, { x: a.x + o, y: b.y }]);
+        out.push(horizontal ? [{ x: ap.x, y: ap.y + o }, { x: bp.x, y: ap.y + o }] : [{ x: ap.x + o, y: ap.y }, { x: ap.x + o, y: bp.y }]);
         continue;
       }
-      out.push([{ x: a.x, y: a.y + o }, { x: b.x, y: a.y + o }]);
-      out.push([{ x: a.x + o, y: a.y }, { x: a.x + o, y: b.y }]);
-      out.push([{ x: b.x + o, y: a.y }, { x: b.x + o, y: b.y }]);
-      out.push([{ x: a.x, y: b.y + o }, { x: b.x, y: b.y + o }]);
+      out.push([{ x: ap.x, y: ap.y + o }, { x: bp.x, y: ap.y + o }]);
+      out.push([{ x: ap.x + o, y: ap.y }, { x: ap.x + o, y: bp.y }]);
+      out.push([{ x: bp.x + o, y: ap.y }, { x: bp.x + o, y: bp.y }]);
+      out.push([{ x: ap.x, y: bp.y + o }, { x: bp.x, y: bp.y + o }]);
     }
   }
   return out;
@@ -768,11 +879,70 @@ export function collinearOverlap(p: Vec2, q: Vec2, r: Vec2, s: Vec2, tolerance: 
 
 const pathLength = (path: readonly Vec2[]) => path.reduce((s, p, i) => (i === 0 ? 0 : s + dist(path[i - 1]!, p)), 0);
 
-/** The square line a..b that stacks on the fewest drawn runs (then the shortest, then the first L): the corner is chosen per line. */
-function squareJoin(a: Node, b: Node, waypoints: readonly Vec2[] | undefined, drawn: DrawnRuns, step: number): Vec2[] {
+/** Round 90° corners of an orthogonal polyline with smooth circular arc fillets (Binoy drafting standard). */
+function chamferOrthogonalPath(pts: readonly Vec2[], radiusMm: number, minRadiusMm = 20): Vec2[] {
+  if (pts.length < 3 || radiusMm < minRadiusMm) return [...pts];
+  const ARC_STEPS = 6;
+  const out: Vec2[] = [pts[0]!];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1]!;
+    const curr = pts[i]!;
+    const next = pts[i + 1]!;
+    const d1 = dist(prev, curr);
+    const d2 = dist(curr, next);
+    if (d1 < 0.2 || d2 < 0.2) {
+      out.push(curr);
+      continue;
+    }
+    const u1x = (curr.x - prev.x) / d1;
+    const u1y = (curr.y - prev.y) / d1;
+    const u2x = (next.x - curr.x) / d2;
+    const u2y = (next.y - curr.y) / d2;
+    const dot = u1x * u2x + u1y * u2y;
+    // Only fillet near-orthogonal bends (skip collinear or sharp reverse points).
+    if (Math.abs(dot) > 0.25) {
+      out.push(curr);
+      continue;
+    }
+    const r = Math.min(radiusMm, d1 * 0.45, d2 * 0.45);
+    if (r < minRadiusMm) {
+      out.push(curr);
+      continue;
+    }
+    // Tangent start & end points; quadratic Bezier with control point at `curr` closely matches a quarter-circle fillet.
+    const p0x = curr.x - u1x * r;
+    const p0y = curr.y - u1y * r;
+    const p2x = curr.x + u2x * r;
+    const p2y = curr.y + u2y * r;
+    for (let s = 0; s <= ARC_STEPS; s++) {
+      const t = s / ARC_STEPS;
+      const omt = 1 - t;
+      out.push({
+        x: omt * omt * p0x + 2 * omt * t * curr.x + t * t * p2x,
+        y: omt * omt * p0y + 2 * omt * t * curr.y + t * t * p2y,
+      });
+    }
+  }
+  out.push(pts[pts.length - 1]!);
+  return out;
+}
+
+/** The orthogonal (or Binoy-filleted) line a..b that stacks on the fewest drawn runs (then the shortest, then the first L). */
+function squareJoin(a: Node, b: Node, waypoints: readonly Vec2[] | undefined, drawn: DrawnRuns, step: number, chamfer: boolean): Vec2[] {
+  // Binoy corner radius (~3.4 mm on paper, scaled cleanly with view scale so bends read unmistakably as rounded 90° corners).
+  const chamferMm = Math.max(220, step * 1.35);
+  const finish = (pts: Vec2[]) => (chamfer ? chamferOrthogonalPath(pts, chamferMm) : pts);
   if (waypoints && waypoints.length === 1) {
     const bend = waypoints[0]!;
-    return squarePath(a, b, [{ x: bend.x, y: a.point.y }, { x: bend.x, y: b.point.y }]);
+    const dxSpan = Math.abs(b.point.x - a.point.x);
+    const dySpan = Math.abs(b.point.y - a.point.y);
+    const midY = (a.point.y + b.point.y) / 2;
+    const midX = (a.point.x + b.point.x) / 2;
+    const preferHorizontalBar = dySpan > dxSpan ? Math.abs(bend.y - midY) > Math.abs(bend.x - midX) : Math.abs(bend.y - midY) >= Math.abs(bend.x - midX) * 0.45;
+    const corners = preferHorizontalBar
+      ? [{ x: a.point.x, y: bend.y }, { x: b.point.x, y: bend.y }]
+      : [{ x: bend.x, y: a.point.y }, { x: bend.x, y: b.point.y }];
+    return finish(squarePath(a, b, corners));
   }
   if (waypoints && waypoints.length > 1) {
     const corners: Vec2[] = [];
@@ -783,12 +953,12 @@ function squareJoin(a: Node, b: Node, waypoints: readonly Vec2[] | undefined, dr
       prev = wp;
     }
     if (Math.abs(b.point.x - prev.x) > 1 && Math.abs(b.point.y - prev.y) > 1) corners.push({ x: prev.x, y: b.point.y });
-    return squarePath(a, b, corners);
+    return finish(squarePath(a, b, corners));
   }
   let best: Vec2[] | null = null;
   let bestOverlap = Infinity;
   let bestLength = Infinity;
-  for (const corners of squareCandidates(a.point, b.point, step)) {
+  for (const corners of squareCandidates(a, b, step, chamfer)) {
     const path = squarePath(a, b, corners);
     const over = drawn.overlap(path);
     const length = pathLength(path);
@@ -800,12 +970,12 @@ function squareJoin(a: Node, b: Node, waypoints: readonly Vec2[] | undefined, dr
     // Candidates come shortest first, so the first clear one is the answer.
     if (over === 0) break;
   }
-  return best ?? squarePath(a, b, []);
+  return finish(best ?? squarePath(a, b, []));
 }
 
 /** The joining line between two members in the view's style, trimmed cleanly at each symbol's rendered boundary. */
 function joinPath(style: CircuitGraphicStyle, a: Node, b: Node, waypoints: readonly Vec2[] | undefined, flip: boolean, drawn: DrawnRuns, step: number): Vec2[] {
-  if (style === "orthogonal") return squareJoin(a, b, waypoints, drawn, step);
+  if (style === "orthogonal" || style === "chamfered") return squareJoin(a, b, waypoints, drawn, step, style === "chamfered");
   if (waypoints && waypoints.length === 1) return trimPolylineEnds(arcThrough(a.point, waypoints[0]!, b.point), a.outline, b.outline);
   if (waypoints && waypoints.length > 1) return trimPolylineEnds(splineThrough([a.point, ...waypoints, b.point]), a.outline, b.outline);
   const pa = exitPoint(a.outline, a.point, b.point);
@@ -959,6 +1129,24 @@ function nodeOf(model: ModelState, part: PartInstance, connector: string, scale:
   return { id: part.id, part, point: wireAnchorPoint(base, part, outline, bounds), outline };
 }
 
+export function isLocalDisconnectPart(model: Pick<ModelState, "elements">, part: PartInstance): boolean {
+  const type = model.elements[part.typeId];
+  return (
+    type?.kind === "part_type" &&
+    type.definition.category === "electrical_equipment" &&
+    /disconnect/i.test(type.definition.familyName)
+  );
+}
+
+/** Find the upstream feeder/branch link feeding a local disconnect switch so plan wiring runs `equipment -> disconnect -> home run (upstream panel circuit)`. */
+export function upstreamLinkOfPart(model: Pick<ModelState, "elements">, partId: string): ServiceLink | null {
+  for (const el of Object.values(model.elements)) {
+    if (el.kind !== "service_link") continue;
+    if (el.members.some((m) => m.elementId === partId)) return el;
+  }
+  return null;
+}
+
 /** The circuit drawing for one link in model mm, or null when none of its members is shown. */
 function linkGraphic(model: ModelState, link: ServiceLink, shown: ReadonlyMap<string, PartInstance>, settings: ResolvedCircuitGraphics, scale: number, typ: boolean, drawn: DrawnRuns, detail: DetailLevel = "medium", symbolScale = 1): CircuitGraphic | null {
   const nodes: Node[] = [];
@@ -969,15 +1157,33 @@ function linkGraphic(model: ModelState, link: ServiceLink, shown: ReadonlyMap<st
   if (nodes.length === 0) return null;
   const hint = settings.hints[link.id];
   const hrHint = hint?.homeRun;
-  const source = model.elements[link.source.elementId];
+  const rawSource = model.elements[link.source.elementId];
+  // When a branch link is fed from a local disconnect switch (e.g. HP-1-1,3,5 -> SD-RTU-1 -> RTU-1),
+  // connect equipment -> disconnect with a real branch wire and draw the home-run arrow OUT OF the
+  // disconnect pointing toward the upstream panel with the panel circuit designation (never "SD-RTU-1 to RTU-1").
+  const localDisconnect = rawSource?.kind === "part" && isLocalDisconnectPart(model, rawSource) ? rawSource : null;
+  const upstreamLink = localDisconnect ? upstreamLinkOfPart(model, localDisconnect.id) : null;
+  const effectiveLink = upstreamLink ?? link;
+  const source = model.elements[effectiveLink.source.elementId] ?? rawSource;
   const sourceAt = source?.kind === "part" ? source.position : null;
-  let home = (hrHint?.memberId ? nodes.find((n) => n.id === hrHint.memberId) : undefined) ?? nodes[0]!;
-  if (!hrHint?.memberId && sourceAt) {
+  let discNode: Node | null = null;
+  if (localDisconnect) {
+    const shownDisc = shown.get(localDisconnect.id);
+    if (shownDisc && !nodes.some((n) => n.id === shownDisc.id)) {
+      const discConn = model.elements[shownDisc.typeId]?.kind === "part_type"
+        ? (model.elements[shownDisc.typeId] as { definition: { connectors: readonly { id: string }[] } }).definition.connectors[0]?.id ?? "line"
+        : "line";
+      discNode = nodeOf(model, shownDisc, discConn, scale, detail, symbolScale);
+      nodes.push(discNode);
+    }
+  }
+  let home = (hrHint?.memberId ? nodes.find((n) => n.id === hrHint.memberId) : undefined) ?? discNode ?? nodes[0]!;
+  if (!hrHint?.memberId && !discNode && sourceAt) {
     for (const n of nodes) if (dist(n.part.position, sourceAt) < dist(home.part.position, sourceAt)) home = n;
   }
   const paths: Vec2[][] = [];
   const joins: Array<[string, string]> = [];
-  const name = serviceLinkName(model.elements, link);
+  const name = serviceLinkName(model.elements, effectiveLink);
   let homeRun: CircuitGraphic["homeRun"] = null;
   if (settings.homeRuns) {
     let tip: Vec2;
@@ -1006,22 +1212,55 @@ function linkGraphic(model: ModelState, link: ServiceLink, shown: ReadonlyMap<st
         hrPath = [from, tip];
       }
     }
+    const buildHomeRunLabel = (l: ServiceLink, baseName: string, isTyp: boolean, explicitNote?: string): string => {
+      const parts: string[] = [isTyp ? `${baseName} TYP.` : baseName];
+      const note = explicitNote?.trim();
+      if (note) {
+        parts.push(note.toUpperCase());
+      } else {
+        const desc = (l.description ?? "").toUpperCase();
+        const designRec = (l.design?.electrical ?? l.electrical) as Record<string, unknown> | undefined;
+        const tags: string[] = [];
+        if (designRec?.breaker_lock === true || designRec?.breakerLock === true || /\bBREAKER\s+LOCK\b|\[BL\]/.test(desc)) {
+          tags.push("BL");
+        }
+        if (designRec?.shunt_trip === true || designRec?.shuntTrip === true || /\bSHUNT\s+TRIP\b/.test(desc)) {
+          tags.push("SHUNT TRIP");
+        }
+        const viaMatch = desc.match(/\bVIA\s+(?:TIME\s*CLOCK|CONTACTOR|RELAY|PHOTOCELL|EM\s*TRANSFER|UPS)\b/);
+        if (viaMatch) tags.push(viaMatch[0]);
+        const cond = l.electrical?.conductors;
+        const rating = l.electrical?.ratingA;
+        if (
+          settings.style === "chamfered" &&
+          cond &&
+          rating &&
+          ((rating <= 20 && cond.phaseSize !== "12" && cond.phaseSize !== "14") ||
+            (rating > 20 && rating <= 30 && cond.phaseSize !== "10" && cond.phaseSize !== "12"))
+        ) {
+          tags.push(`#${cond.phaseSize} ${cond.material.toUpperCase()}`);
+        }
+        if (tags.length > 0) parts.push(`(${tags.join(", ")})`);
+      }
+      return parts.join(" ");
+    };
+
     const labelAt = hrHint?.labelOffset ? { x: tip.x + hrHint.labelOffset.x, y: tip.y + hrHint.labelOffset.y } : undefined;
     homeRun = {
       memberId: home.id,
       from,
       tip,
       ...(hrPath.length > 2 ? { path: hrPath } : {}),
-      label: typ ? `${name} TYP.` : name,
+      label: buildHomeRunLabel(effectiveLink, name, typ, hrHint?.note),
       ...(labelAt ? { labelAt } : {}),
     };
     drawn.add(hrPath);
   }
-  if (settings.style === "arcs" || settings.style === "orthogonal") {
+  if (settings.style === "arcs" || settings.style === "orthogonal" || settings.style === "chamfered") {
     for (const [a, b] of joinPairs(settings.style, home, nodes.filter((n) => n !== home))) {
       const k = bendKey(a.id, b.id);
       const path = joinPath(settings.style, a, b, spanWaypoints(hint, a.id, b.id), hint?.flipArc?.[k] === true, drawn, SQUARE_RUN_OFFSET_MM * scale);
-      if (settings.style === "orthogonal") drawn.add(path);
+      if (settings.style === "orthogonal" || settings.style === "chamfered") drawn.add(path);
       paths.push(path);
       joins.push([a.id, b.id]);
     }
@@ -1117,7 +1356,8 @@ function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>,
     }
   }
   const out: CircuitGraphic[] = [];
-  const style = settings.style === "orthogonal" ? "orthogonal" : "arcs";
+  const style: CircuitGraphicStyle =
+    settings.style === "chamfered" ? "chamfered" : settings.style === "orthogonal" ? "orthogonal" : "arcs";
   for (const leg of [...controllersByLeg.keys()].sort()) {
     const ctrls = [...(controllersByLeg.get(leg) ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1));
     const loads = [...(loadsByLeg.get(leg) ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -1135,7 +1375,7 @@ function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>,
       const b = orderedCtrls[i + 1]!;
       const k = bendKey(a.id, b.id);
       const path = joinPath(style, a, b, spanWaypoints(hint, a.id, b.id), hint?.flipArc?.[k] === true, drawn, SQUARE_RUN_OFFSET_MM * scale);
-      if (style === "orthogonal") drawn.add(path);
+      if (style === "orthogonal" || style === "chamfered") drawn.add(path);
       paths.push(path);
       joins.push([a.id, b.id]);
     }
@@ -1143,7 +1383,7 @@ function switchLegs(model: ModelState, shown: ReadonlyMap<string, PartInstance>,
     for (const [a, b] of joinPairs(style, anchorCtrl, loadNodes)) {
       const k = bendKey(a.id, b.id);
       const path = joinPath(style, a, b, spanWaypoints(hint, a.id, b.id), hint?.flipArc?.[k] === true, drawn, SQUARE_RUN_OFFSET_MM * scale);
-      if (style === "orthogonal") drawn.add(path);
+      if (style === "orthogonal" || style === "chamfered") drawn.add(path);
       paths.push(path);
       joins.push([a.id, b.id]);
     }
@@ -1410,6 +1650,8 @@ export interface CircuitJoinOnPaper {
   /** Key in `ViewProps.circuitGraphics.hints` (the link id for a circuit, or `"switch:<leg>"` for a switch leg). */
   readonly linkId: string;
   readonly kind: "circuit" | "switch_leg";
+  /** Active drawing style for this wire span (`"arcs"`, `"orthogonal"`, or `"chamfered"` / Binoy) so interactive drag previews match committed geometry. */
+  readonly style: CircuitGraphicStyle;
   /** The circuit or switch leg as drawings name it ("L1-1", "Switch leg a"). */
   readonly name: string;
   readonly a: string;
@@ -1424,7 +1666,8 @@ export interface CircuitJoinOnPaper {
 }
 
 /** The plan's editable wire spans (original circuits and switch legs, not typical copies), on paper. */
-export function circuitJoinsOnPaper(model: ModelState, view: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number, toPaper: (p: Vec2) => Vec2): CircuitJoinOnPaper[] {
+export function circuitJoinsOnPaper(model: ModelState, rawView: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number, toPaper: (p: Vec2) => Vec2): CircuitJoinOnPaper[] {
+  const view = resolveViewElement(model.elements, rawView);
   const settings = resolveCircuitGraphics(view);
   const out: CircuitJoinOnPaper[] = [];
   for (const g of deriveCircuitGraphics(model, view, shown, scale)) {
@@ -1446,6 +1689,7 @@ export function circuitJoinsOnPaper(model: ModelState, view: ViewElement, shown:
       out.push({
         linkId: hintKey,
         kind: g.kind,
+        style: settings.style === "chamfered" ? "chamfered" : settings.style === "orthogonal" ? "orthogonal" : "arcs",
         name,
         a,
         b,
@@ -1479,7 +1723,8 @@ export interface CircuitHomeRunOnPaper {
 }
 
 /** Every original circuit's home run on paper so the editor can drag its tip, curve, or label. */
-export function circuitHomeRunsOnPaper(model: ModelState, view: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number, toPaper: (p: Vec2) => Vec2): CircuitHomeRunOnPaper[] {
+export function circuitHomeRunsOnPaper(model: ModelState, rawView: ViewElement, shown: ReadonlyMap<string, PartInstance>, scale: number, toPaper: (p: Vec2) => Vec2): CircuitHomeRunOnPaper[] {
+  const view = resolveViewElement(model.elements, rawView);
   const settings = resolveCircuitGraphics(view);
   const textLook = resolveTextStyle(model, "link_label");
   const labelSize = textLook?.textSizeMm ?? LABEL_MM;
@@ -1584,11 +1829,12 @@ export interface CircuitSwitchLegLabelOnPaper {
 /** Every editable switch-leg label on a plan (excludes typical copies), on paper. */
 export function circuitSwitchLegLabelsOnPaper(
   model: ModelState,
-  view: ViewElement,
+  rawView: ViewElement,
   shown: ReadonlyMap<string, PartInstance>,
   scale: number,
   toPaper: (p: Vec2) => Vec2,
 ): CircuitSwitchLegLabelOnPaper[] {
+  const view = resolveViewElement(model.elements, rawView);
   const settings = resolveCircuitGraphics(view);
   const symbolScale = view.props?.symbolScale ?? 1;
   const out: CircuitSwitchLegLabelOnPaper[] = [];

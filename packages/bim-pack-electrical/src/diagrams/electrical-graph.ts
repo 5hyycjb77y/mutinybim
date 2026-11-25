@@ -1,4 +1,4 @@
-import { pushTo, linksFedFrom, type ServiceLink, formatFieldTemplate, resolveField, type OneLineTextLine, type BimElement, type ElementId, type PartInstance, type PartTypeElement, DEFAULT_DIAGRAM_LABELS, type DiagramHints, type DiagramLabelKind, type DiagramEdge, type DiagramGraph, type DiagramNode, type DiagramWarning } from "@permitzip/bim-kernel";
+import { pushTo, linksFedFrom, organizationOf, phaseCreatedOf, type ServiceLink, formatFieldTemplate, resolveField, type OneLineTextLine, type BimElement, type ElementId, type PartInstance, type PartTypeElement, DEFAULT_DIAGRAM_LABELS, type DiagramHints, type DiagramLabelKind, type DiagramEdge, type DiagramGraph, type DiagramNode, type DiagramWarning } from "@permitzip/bim-kernel";
 import { fedFromTextMismatch } from "../connections/fed-from";
 import { estimatedFeederLengthFt, faultCurrentAt, type FeederLengthMode } from "../calc/fault-current";
 import type { OneLineEquipmentKind as OneLineKind, OneLineProtectiveDevice as OneLineDevice } from "./one-line-layout";
@@ -85,14 +85,30 @@ function plannedOf(part: PartInstance): { readonly levelId: string | null; reado
 
 function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKind: OneLineKind, schematic: boolean, lengthMode: FeederLengthMode = "explicit"): DiagramEdge {
   const rating = link.electrical?.ratingA;
-  const device: OneLineDevice = rating !== undefined ? "breaker" : BUS.has(parentKind) && parentKind !== "switchboard" ? "breaker" : "none";
-  const breaker = resolveField(elements, fedId, "supply.breaker").text;
+  // A disconnect or fused disconnect already IS its own disconnecting / overcurrent device;
+  // never draw a redundant second breaker arc on its outgoing feeder.
+  const parentIsDisconnect = parentKind === "disconnect" || parentKind === "fused_disconnect";
+  const device: OneLineDevice = parentIsDisconnect ? "none" : rating !== undefined ? "breaker" : BUS.has(parentKind) && parentKind !== "switchboard" ? "breaker" : "none";
+  const breaker = parentIsDisconnect ? "" : resolveField(elements, fedId, "supply.breaker").text;
   const conductors = resolveField(elements, fedId, "supply.conductors").text;
   const mark = link.electrical?.feederType;
   const catalog = mark ? feederTypeInfoOf(elements, mark) : null;
   const explicitLen = link.electrical?.lengthFt;
   const derivedLen = explicitLen === undefined && lengthMode !== "explicit" ? estimatedFeederLengthFt(elements, link.source.elementId, fedId, lengthMode) : null;
   const lengthFt = explicitLen ?? (derivedLen !== null ? Math.round(derivedLen * 10) / 10 : undefined);
+  const demandRes = resolveField(elements, fedId, "demand_kva");
+  const connectedRes = resolveField(elements, fedId, "connected_kva");
+  const demandNum = typeof demandRes.value === "number" && demandRes.value > 0 ? demandRes.value : null;
+  const connectedNum = typeof connectedRes.value === "number" && connectedRes.value > 0 ? connectedRes.value : null;
+  const fmtKva = (v: number) => `${Math.round(v * 10) / 10} kVA`;
+  const load =
+    demandNum !== null
+      ? connectedNum !== null && Math.abs(connectedNum - demandNum) > 0.05
+        ? `${fmtKva(demandNum)} DEM (${fmtKva(connectedNum)} CONN)`
+        : `${fmtKva(demandNum)} DEM`
+      : connectedNum !== null
+        ? `${fmtKva(connectedNum)} CONN`
+        : undefined;
   return {
     linkId: link.id,
     device,
@@ -100,6 +116,7 @@ function feedEdge(elements: Elements, link: ServiceLink, fedId: string, parentKi
     ...(!schematic && (conductors || catalog?.conductors) ? { conductors: conductors || (catalog?.conductors ?? "") } : {}),
     ...(!schematic && lengthFt !== undefined ? { lengthFt } : {}),
     ...(mark ? { typeMark: mark } : {}),
+    ...(load ? { load } : {}),
   };
 }
 
@@ -146,12 +163,31 @@ export function afcLine(elements: Elements, partId: string, lengthMode?: FeederL
 export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiagramHints = {}): DiagramGraph {
   const detail = hints.detail ?? "full";
   const schematic = detail === "schematic";
+  const minLoadRatingA = hints.minLoadRatingA ?? 0;
+  const phaseScope = hints.phaseScope ?? "all";
+  const org = organizationOf({ elements, connections: [] });
+  const existingPhaseIds = new Set<string>();
+  for (const p of org.phases) {
+    if (p.id === "phase-existing" || /exist/i.test(p.entry.name)) existingPhaseIds.add(p.id);
+  }
+  const partPhaseInfo = (part: PartInstance, name?: string): { readonly keep: boolean; readonly existing: boolean; readonly demo: boolean } => {
+    const isDemo = Boolean(part.phaseDemolished);
+    const created = phaseCreatedOf(org, part);
+    const isExisting = (created !== undefined && existingPhaseIds.has(created)) || (name !== undefined && /\(\s*e(?:xist(?:ing)?)?\s*\)/i.test(name));
+    if (phaseScope === "all") return { keep: true, existing: isExisting, demo: isDemo };
+    if (phaseScope === "new") return { keep: !isDemo, existing: isExisting, demo: false };
+    if (phaseScope === "existing") return { keep: isExisting && !isDemo, existing: isExisting, demo: false };
+    // "demolition": show existing & demolished equipment (hide brand-new construction).
+    return { keep: isExisting || isDemo, existing: isExisting, demo: isDemo };
+  };
+  const partPhaseMatches = partPhaseInfo;
   const reads = new Set<ElementId>();
   const candidates = new Map<string, Candidate>();
   for (const el of Object.values(elements)) {
     if (el.kind !== "part") continue;
     const type = typeOf(elements, el);
     if (type?.definition.category !== "electrical_equipment") continue;
+    if (!partPhaseMatches(el).keep) continue;
     const info = distributionOf(elements, el);
     const kind = oneLineKindOf(elements, el, info);
     const served = Object.entries(el.served ?? {}).sort(([a], [b]) => cmp(a, b));
@@ -194,14 +230,27 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
   const labels = (kind: DiagramLabelKind) => hints.labels?.[kind] ?? DEFAULT_DIAGRAM_LABELS[detail][kind];
   const visited = new Set<string>();
 
+  const includeEquipment = new Set(hints.includeEquipmentIds ?? []);
+  const excludeEquipment = new Set(hints.excludeEquipmentIds ?? []);
+
   const loadsOf = (c: Candidate, service: string): DiagramNode[] => {
-    if (!hints.showLoads || !BUS.has(c.kind)) return [];
+    const isDisconnect = c.kind === "disconnect" || c.kind === "fused_disconnect";
+    if (!BUS.has(c.kind) && !isDisconnect) return [];
+    if (!hints.showLoads && includeEquipment.size === 0) return [];
     const out: DiagramNode[] = [];
     for (const link of linksFedFrom(elements, c.part.id)) {
-      if (link.role !== "branch") continue;
+      if (link.role !== "branch" && !isDisconnect) continue;
       for (const m of link.members) {
         const member = elements[m.elementId];
-        if (member?.kind !== "part" || candidates.has(member.id) || hidden.has(member.id) || visited.has(member.id) || !drawnLoad(elements, member, m.connector)) continue;
+        if (member?.kind !== "part" || candidates.has(member.id) || hidden.has(member.id) || excludeEquipment.has(member.id) || visited.has(member.id) || !drawnLoad(elements, member, m.connector)) continue;
+        const pinnedIn = includeEquipment.has(member.id);
+        if (!pinnedIn) {
+          if (!hints.showLoads) continue;
+          if (minLoadRatingA > 0 && (link.electrical?.ratingA ?? 0) < minLoadRatingA) continue;
+        }
+        const memberName = electricalName(elements, member);
+        const phaseCheck = partPhaseMatches(member, memberName);
+        if (!phaseCheck.keep) continue;
         visited.add(member.id);
         reads.add(link.id);
         reads.add(member.id);
@@ -210,17 +259,28 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
         const rating = link.electrical?.ratingA;
         const poles = link.source.positions.length;
         const circuit = poles > 0 ? `${c.name}-${[...link.source.positions].sort((a, b) => a - b).join(",")}` : "";
+        const loadPhaseStyle = phaseCheck.demo
+          ? ({ tone: "halftone", dashed: true } as const)
+          : phaseCheck.existing
+            ? ({ tone: "halftone" } as const)
+            : {};
         out.push({
           id: member.id,
           elementId: member.id,
           kind: type?.definition.category === "mechanical_equipment" ? "motor" : "equipment",
           labelKind: "equipment",
-          name: electricalName(elements, member),
-          lines: [{ text: (member.mark || electricalName(elements, member)).toUpperCase(), bold: true }, ...(circuit ? [{ text: circuit.toUpperCase() }] : []), ...where.extra],
+          name: memberName,
+          lines: [
+            { text: (member.mark || memberName).toUpperCase(), bold: true },
+            ...(circuit ? [{ text: circuit.toUpperCase() }] : []),
+            ...(phaseCheck.demo ? [{ text: "(TO BE DEMOLISHED)" }] : []),
+            ...where.extra,
+          ],
           levelId: where.levelId,
           ...where.flag,
+          ...loadPhaseStyle,
           service,
-          feed: { linkId: link.id, device: "breaker", ...(rating !== undefined ? { deviceLabel: `${rating}A${poles > 0 ? `/${poles}P` : ""}` } : {}) },
+          feed: { linkId: link.id, device: c.kind === "disconnect" || c.kind === "fused_disconnect" ? "none" : "breaker", ...(rating !== undefined && c.kind !== "disconnect" && c.kind !== "fused_disconnect" ? { deviceLabel: `${rating}A${poles > 0 ? `/${poles}P` : ""}` } : {}) },
           children: [],
         });
       }
@@ -240,7 +300,14 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
     const where = plannedOf(c.part);
     const lengthMode: FeederLengthMode = hints.lengthMode ?? "explicit";
     const afc = hints.faultCurrent === true && c.info && c.info.kind !== "transformer" ? afcLine(elements, c.part.id, lengthMode) : null;
-    const lines = [...textLines(elements, c.part.id, labels(labelKind)), ...(afc ? [{ text: afc }] : []), ...where.extra];
+    const phaseInfo = partPhaseInfo(c.part, c.name);
+    const isDemo = phaseInfo.demo;
+    const phaseStyle = isDemo
+      ? ({ tone: "halftone", dashed: true } as const)
+      : phaseInfo.existing
+        ? ({ tone: "halftone" } as const)
+        : {};
+    const lines = [...textLines(elements, c.part.id, labels(labelKind)), ...(afc ? [{ text: afc }] : []), ...(isDemo ? [{ text: "(TO BE DEMOLISHED)" }] : []), ...where.extra];
     // Bus against the breaker that feeds it (V3: change one, forget the other).
     if (c.supply && parent && c.info && c.info.kind !== "transformer" && c.info.busA !== null) {
       const rating = c.supply.electrical?.ratingA;
@@ -307,6 +374,7 @@ export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiag
       levelId: where.levelId,
       service,
       ...where.flag,
+      ...phaseStyle,
       ...(c.supply && parent ? { feed: feedEdge(elements, c.supply, c.part.id, parent.kind, schematic, lengthMode) } : {}),
       children: [...kids, ...loads, ...future],
       ...(emergency ? { emergency } : {}),

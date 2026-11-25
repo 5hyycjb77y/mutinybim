@@ -2,10 +2,10 @@
 
 import { useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import type { Command, ModelState, ViewElement } from '@permitzip/bim-kernel'
+import { elementViewCategory, organizationOf, VIEW_CATEGORY_LABELS, type Command, type ModelState, type ViewElement } from '@permitzip/bim-kernel'
 import type { ModelEditBridge } from '../../view-input/bridge'
 import { DrawingContextMenu } from './DrawingContextMenu'
-import { drawingMenuItems, hideInViewPatch, likeThisIds, menuElementOf, type DrawingMenu, type DrawingMenuAction, type DrawingMenuTarget } from './drawing-menu-items'
+import { drawingMenuItems, elementTitle, hideElementInViewPatch, hideInViewPatch, likeThisIds, menuElementOf, type DrawingMenu, type DrawingMenuAction, type DrawingMenuTarget } from './drawing-menu-items'
 
 export interface DrawingContextMenuOptions {
   readonly model: ModelState
@@ -103,6 +103,41 @@ export function useDrawingContextMenu(opts: DrawingContextMenuOptions): { open: 
     if (action === 'create_similar') {
       modelEdit?.select(el.id)
       return opts.onCreateSimilar?.(el.id)
+    }
+    if (action === 'lock_element') {
+      const locked = !organizationOf(model).lockedElementIds.has(el.id)
+      const command: Command = { type: 'set_element_locks', ids: [el.id], locked }
+      const label = `${locked ? 'lock' : 'unlock'} ${elementTitle(model, el)}`
+      if (modelEdit) {
+        const refusal = modelEdit.submit(command, label)
+        if (refusal) toast.error(refusal)
+      } else opts.send(command, label)
+      return
+    }
+    if (action === 'lock_category') {
+      const cat = elementViewCategory(model.elements, el)
+      if (!cat) return
+      const locked = !organizationOf(model).lockedCategories.has(cat)
+      const command: Command = { type: 'lock_category', category: cat, locked }
+      const label = `${locked ? 'lock' : 'unlock'} category ${VIEW_CATEGORY_LABELS[cat] ?? cat}`
+      if (modelEdit) {
+        const refusal = modelEdit.submit(command, label)
+        if (refusal) toast.error(refusal)
+      } else opts.send(command, label)
+      return
+    }
+    if (action === 'hide_element_in_view' && view) {
+      const patch = hideElementInViewPatch(view, el)
+      const command: Command = { type: 'set_view_properties', viewId: view.id, props: { hiddenElementIds: [...patch.hiddenElementIds] } }
+      const label = `hide ${elementTitle(model, el)} in ${view.name}`
+      if (modelEdit) {
+        const refusal = modelEdit.submit(command, label)
+        if (refusal) {
+          console.error('[DrawingContextMenu] Hide element in view was refused', { viewId: view.id, refusal })
+          toast.error(refusal)
+        }
+      } else opts.send(command, label)
+      return
     }
     if (action === 'hide_in_view' && view) {
       const patch = hideInViewPatch(model, view, el)

@@ -14,8 +14,8 @@ const ADDED_AFTER_5C = ["connector-touching-not-joined", "connector-shape-size-m
 /** Add-on rules added in round 14: Mechanical's two route checks (run in its systems group, after its makeup air check) and Structural's footing check (Structural became first-party, so it runs in every model, last). */
 const ADDED_ROUND_14 = ["duct-rated-crossing", "duct-ceiling-clearance", "struct.footing_unsupported"];
 
-/** Electrical photometrics & emergency egress rules (IES LM-63 / NFPA 101 / IBC §1008.3.5). */
-const ADDED_PHOTOMETRICS = ["photometrics-normal-illuminance", "photometrics-egress-compliance"];
+/** Electrical photometrics, emergency egress & equipment disconnect rules (IES LM-63 / NFPA 101 / IBC §1008.3.5 / NEC 440.14). */
+const ADDED_PHOTOMETRICS = ["photometrics-normal-illuminance", "photometrics-egress-compliance", "equipment-missing-disconnect"];
 
 describe("c6x-lint-order", () => {
   it("runs every rule in the batch 5c order, each unchanged", () => {

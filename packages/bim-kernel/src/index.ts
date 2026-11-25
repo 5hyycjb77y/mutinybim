@@ -181,7 +181,7 @@ export type { Perimeter } from "./propose/perimeter";
 export * from "./catalog/entry-point";
 export * from "./layout/diagram-layout-point";
 export * from "./layout/view-graphics-point";
-export { PartLabelIndex, drawPartSymbol, partPlanOutline, type DrawPartSymbolOptions, type FillFn, type PartLabelBox, type PartLabelStore, type PlanOutline } from "./drawing/runs";
+export { PartLabelIndex, drawPartClearancesBatch, drawPartSymbol, partPlanOutline, type BatchedClearanceZone, type DrawPartSymbolOptions, type FillFn, type PartLabelBox, type PartLabelStore, type PlanOutline } from "./drawing/runs";
 export type * from "./connections/faces";
 export type * from "./registry/kind-row-faces";
 export { kindRowFaceProblems } from "./registry/kind-row-faces";

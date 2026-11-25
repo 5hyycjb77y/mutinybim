@@ -3,8 +3,20 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@permitzip/bim-ui'
 import type { SceneLightingPreset } from '@permitzip/bim-viewer-3d'
-import { BatteryCharging, Lock, Moon, Sparkles, Sun, Sunrise, Sunset, Unlock } from 'lucide-react'
+import { BatteryCharging, ChevronDown, Eye, Lock, Moon, Sparkles, Sun, Sunrise, Sunset, Unlock } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '../ui/dropdown-menu'
 import { toggleSelectionLock, useSelectionLocks } from './selection-locks'
+
+const LOCKABLE_CATEGORIES: ReadonlyArray<{ readonly id: string; readonly label: string }> = [
+  { id: 'lighting_fixtures', label: 'Lighting fixtures' },
+  { id: 'electrical_devices', label: 'Electrical devices (receptacles/switches)' },
+  { id: 'electrical_equipment', label: 'Electrical equipment (panels/gear)' },
+  { id: 'equipment', label: 'Mechanical & plumbing equipment' },
+  { id: 'duct', label: 'Ductwork' },
+  { id: 'pipe', label: 'Piping' },
+  { id: 'walls', label: 'Walls' },
+  { id: 'doors_windows', label: 'Doors & windows' },
+]
 
 interface ViewerLightingControls {
   setSun(azimuthDeg: number, elevationDeg: number): void
@@ -38,6 +50,7 @@ interface Props {
   readonly selectionLocked: boolean
   readonly canEdit: boolean
   readonly onTogglePin?: () => void
+  readonly onLockCategory?: (category: string, locked: boolean) => void
   readonly viewer?: ViewerLightingControls | null
   readonly lightingPreset?: SceneLightingPreset
   readonly onLightingPresetChange?: (preset: SceneLightingPreset) => void
@@ -60,6 +73,7 @@ export function SelectionLocksBar({
   selectionLocked,
   canEdit,
   onTogglePin,
+  onLockCategory,
   viewer,
   lightingPreset,
   onLightingPresetChange,
@@ -157,6 +171,53 @@ export function SelectionLocksBar({
         {locks.links ? <Unlock className="size-3" /> : <Lock className="size-3" />}
         Links
       </Button>
+      <Button
+        size="sm"
+        variant={locks.showLocked ? 'default' : 'ghost'}
+        onClick={() => toggleSelectionLock('showLocked')}
+        aria-pressed={locks.showLocked}
+        title={locks.showLocked ? 'Hide locked/pinned element highlight overlay' : 'Highlight every locked or pinned element on the drawing'}
+        data-testid="lock-toggle-show-locked"
+      >
+        <Eye className="size-3" />
+        Show locked
+      </Button>
+      {canEdit && onLockCategory && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" title="Lock or unlock an entire category across the model" data-testid="lock-category-menu">
+              <Lock className="size-3" />
+              Categories
+              <ChevronDown className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuLabel className="text-xs">Lock / unlock by category</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {LOCKABLE_CATEGORIES.map((cat) => (
+              <div key={cat.id} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
+                <span className="truncate">{cat.label}</span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <DropdownMenuItem
+                    className="h-6 cursor-pointer px-1.5 py-0 text-xs"
+                    onSelect={() => onLockCategory(cat.id, true)}
+                    data-testid={`lock-cat-${cat.id}`}
+                  >
+                    Lock
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="h-6 cursor-pointer px-1.5 py-0 text-xs text-muted-foreground"
+                    onSelect={() => onLockCategory(cat.id, false)}
+                    data-testid={`unlock-cat-${cat.id}`}
+                  >
+                    Unlock
+                  </DropdownMenuItem>
+                </div>
+              </div>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       {hasSelection && canEdit && onTogglePin && (
         <Button
           size="sm"

@@ -30,7 +30,7 @@ export function levelContentExtent(model: Pick<ModelState, "elements"> & Partial
     maxY = Math.max(maxY, p.y);
   };
   for (const el of elementValues(model.elements)) {
-    if (el.kind === "view" || el.kind === "sheet" || el.kind === "viewport" || el.kind === "drawing_item" || el.kind === "level") continue;
+    if (el.kind === "view" || el.kind === "view_template" || el.kind === "sheet" || el.kind === "viewport" || el.kind === "drawing_item" || el.kind === "level") continue;
     if (names && !names.has(el.partition?.level ?? DEFAULT_PARTITION.level)) continue;
     if ("start" in el && "end" in el) {
       take(el.start);

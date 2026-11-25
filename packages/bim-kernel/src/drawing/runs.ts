@@ -121,6 +121,8 @@ export interface DrawPartSymbolOptions {
   readonly takenBoxes?: PartLabelStore;
   /** Optional sink notified whenever an automatic part mark is placed (used for interactive mark picking/dragging). */
   readonly onMarkPlaced?: (mark: { readonly partId: string; readonly text: string; readonly at: Vec2; readonly sizeMm: number }) => void;
+  /** Skip per-part clearance rendering when the caller batches and merges clearances across all visible parts. */
+  readonly skipClearances?: boolean;
 }
 
 export interface RunDrawOptions {
@@ -1144,9 +1146,11 @@ export function drawPartSymbol(
   }
   const symbolBox: PartLabelBox | null = Number.isFinite(bb.minX) ? { min: { x: bb.minX, y: bb.minY }, max: { x: bb.maxX, y: bb.maxY } } : null;
   if (symbolBox) addLabelBox(opts.takenBoxes, symbolBox);
-  if (part.mark && opts.showMark !== false) {
+  const partType = model.elements[part.typeId];
+  const rawMark = part.mark || (partType?.kind === "part_type" ? (partType.definition.typeMark ?? "") : "");
+  if (rawMark && opts.showMark !== false) {
     const markStyle = resolveTextStyle(model, "part_mark");
-    const markText = markStyle?.uppercase ? part.mark.toUpperCase() : part.mark;
+    const markText = markStyle?.uppercase ? rawMark.toUpperCase() : rawMark;
     const markSize = markStyle?.textSizeMm ?? MARK_SIZE_MM;
     const markAt = placePartMark(part, markText, symbolBox, viewScale, opts.takenBoxes, hasCenterText, markSize);
     // Center the mark vertically on markAt (SVG/PDF text y is baseline).
@@ -1167,16 +1171,29 @@ export function drawPartSymbol(
     );
     opts.onMarkPlaced?.({ partId: part.id, text: markText, at: markAt, sizeMm: markSize });
   }
-  drawPartClearances(model, part, line, text, viewScale, opts.takenBoxes);
+  if (!opts.skipClearances) drawPartClearances(model, part, line, text, viewScale, opts.takenBoxes);
 }
 
-/** Clearance zones draw dashed (paper mm), never as part of the part's body. */
-export const CLEARANCE_DASH: readonly number[] = [3, 1.5];
+/** Clearance zones draw dashed (paper mm) in halftone, never as part of the part's body. */
+export const CLEARANCE_DASH: readonly number[] = [2.2, 1.2];
+
+const CLEARANCE_LABEL_MAX_MM = CLEARANCE_TEXT_MM * 0.65;
+const CLEARANCE_LABEL_MIN_MM = 0.9;
+
+/** Compact CAD label for tight clearance boxes when the full zone name would clutter equipment or marks. */
+function compactClearanceLabel(label: string): string {
+  const code = label.match(/\b\d{3}\.\d+\b/)?.[0];
+  if (code) return `${code} CLR`;
+  if (/WORKING\s+SPACE/i.test(label)) return "WORK CLR";
+  if (/SERVICE/i.test(label)) return "SVC CLR";
+  if (/COMBUSTIBLE/i.test(label)) return "COMB CLR";
+  return label.length > 12 ? "CLR" : label;
+}
 
 /** Wrap a clearance zone label onto lines that stay strictly inside its dashed outline. */
 function wrapClearanceText(label: string, maxWorldW: number, fontMm: number, viewScale: number): readonly string[] {
   const charW = fontMm * 0.58 * viewScale;
-  const maxChars = Math.max(8, Math.floor((maxWorldW * 0.88) / Math.max(1, charW)));
+  const maxChars = Math.max(6, Math.floor((maxWorldW * 0.86) / Math.max(1, charW)));
   if (label.length <= maxChars) return [label];
   const words = label.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -1195,44 +1212,227 @@ function wrapClearanceText(label: string, maxWorldW: number, fontMm: number, vie
   return lines;
 }
 
-/** A placed part's clearance zones in plan: a dashed outline each, with wrapped text kept strictly inside the zone. */
-export function drawPartClearances(model: ModelState, part: PartInstance, line: LineFn, text: TextFn, viewScale = DEFAULT_SYMBOL_SCALE, takenBoxes?: PartLabelStore): void {
-  for (const z of partClearances(model, part)) {
-    const c = z.corners;
-    for (let i = 0; i < 4; i++) line(c[i] ?? c[0], c[(i + 1) % 4] ?? c[0], "thin", [...CLEARANCE_DASH]);
-    const label = z.name.toUpperCase();
-    const xs = c.map((p) => p.x);
-    const ys = c.map((p) => p.y);
-    const zoneW = Math.max(1, Math.max(...xs) - Math.min(...xs));
-    const zoneH = Math.max(1, Math.max(...ys) - Math.min(...ys));
-    const mid: Vec2 = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+function drawClearanceLabel(
+  label: string,
+  candidates: ReadonlyArray<{ readonly mid: Vec2; readonly w: number; readonly h: number }>,
+  text: TextFn,
+  viewScale: number,
+  takenBoxes?: PartLabelStore,
+): void {
+  const short = compactClearanceLabel(label);
+  const textsToTry = short !== label ? [label, short] : [label];
+  for (const cand of candidates) {
+    for (const candidateText of textsToTry) {
+      let fontMm = CLEARANCE_LABEL_MAX_MM;
+      let lines = wrapClearanceText(candidateText, cand.w, fontMm, viewScale);
+      const fitsBox = () =>
+        lines.length <= 2 &&
+        lines.length * fontMm * 1.25 * viewScale <= cand.h * 0.82 &&
+        lines.every((l) => l.length * fontMm * 0.58 * viewScale <= cand.w * 0.88);
+      while (fontMm > CLEARANCE_LABEL_MIN_MM && !fitsBox()) {
+        fontMm = Math.max(CLEARANCE_LABEL_MIN_MM, fontMm - 0.1);
+        lines = wrapClearanceText(candidateText, cand.w, fontMm, viewScale);
+      }
+      if (!fitsBox()) continue;
 
-    // Choose a legible clearance text height that fits cleanly inside the dashed zone without spilling onto equipment or walls.
-    let fontMm = CLEARANCE_TEXT_MM;
-    let lines = wrapClearanceText(label, zoneW, fontMm, viewScale);
-    const maxLineH = () => lines.length * fontMm * 1.28 * viewScale;
-    while (fontMm > 1.25 && (maxLineH() > zoneH * 0.88 || lines.some((l) => l.length * fontMm * 0.58 * viewScale > zoneW * 0.94))) {
-      fontMm = Math.max(1.25, fontMm - 0.2);
-      lines = wrapClearanceText(label, zoneW, fontMm, viewScale);
-    }
-
-    const stepWorld = fontMm * 1.28 * viewScale;
-    const totalH = (lines.length - 1) * stepWorld;
-    // Offset down by ~0.35em so alphabetic-baseline text sits dead-center vertically inside the dashed clearance rectangle.
-    const baselineShift = fontMm * 0.35 * viewScale;
-    for (let i = 0; i < lines.length; i++) {
-      const p: Vec2 = { x: mid.x, y: mid.y + totalH / 2 - i * stepWorld - baselineShift };
-      text(p, lines[i]!, fontMm, "middle", { mask: true });
-    }
-    if (takenBoxes) {
+      const stepWorld = fontMm * 1.25 * viewScale;
+      const totalH = (lines.length - 1) * stepWorld;
       const longest = lines.reduce((a, b) => (b.length > a.length ? b : a), "");
-      const box = worldTextBox(mid, longest, fontMm, viewScale);
-      addLabelBox(takenBoxes, {
-        min: { x: box.min.x, y: mid.y - (totalH + fontMm * viewScale) / 2 },
-        max: { x: box.max.x, y: mid.y + (totalH + fontMm * viewScale) / 2 },
-      });
+      const baseBox = worldTextBox(cand.mid, longest, fontMm, viewScale);
+      const fullBox: PartLabelBox = {
+        min: { x: baseBox.min.x, y: cand.mid.y - (totalH + fontMm * viewScale) / 2 },
+        max: { x: baseBox.max.x, y: cand.mid.y + (totalH + fontMm * viewScale) / 2 },
+      };
+      // Never draw clearance text over an existing equipment mark or symbol.
+      if (takenBoxes && overlapsLabelStore(takenBoxes, fullBox)) continue;
+
+      const baselineShift = fontMm * 0.35 * viewScale;
+      for (let i = 0; i < lines.length; i++) {
+        const p: Vec2 = { x: cand.mid.x, y: cand.mid.y + totalH / 2 - i * stepWorld - baselineShift };
+        text(p, lines[i]!, fontMm, "middle");
+      }
+      addLabelBox(takenBoxes, fullBox);
+      return;
     }
   }
+}
+
+export interface BatchedClearanceZone {
+  readonly name: string;
+  readonly corners: readonly [Vec2, Vec2, Vec2, Vec2];
+  readonly line: LineFn;
+  readonly text: TextFn;
+}
+
+/** Merge touching or overlapping clearance zones with the same label and alignment into one clean dashed boundary and one centered label. */
+export function drawPartClearancesBatch(
+  zones: readonly BatchedClearanceZone[],
+  viewScale = DEFAULT_SYMBOL_SCALE,
+  takenBoxes?: PartLabelStore,
+): void {
+  if (zones.length === 0) return;
+  const MERGE_TOL_MM = 50;
+  // Canonical orientation angle in [0, pi/2) so 0/90/180/270 boxes share one local orthogonal grid.
+  const angleOf = (c: readonly [Vec2, Vec2, Vec2, Vec2]): number => {
+    const a = Math.atan2(c[1].y - c[0].y, c[1].x - c[0].x);
+    let m = ((a % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
+    if (Math.abs(m - Math.PI / 2) < 0.03) m = 0;
+    return m;
+  };
+  interface LocalBox {
+    readonly zone: BatchedClearanceZone;
+    readonly label: string;
+    readonly angle: number;
+    readonly minU: number;
+    readonly maxU: number;
+    readonly minV: number;
+    readonly maxV: number;
+  }
+  const byBucket = new Map<string, LocalBox[]>();
+  for (const zone of zones) {
+    const label = zone.name.toUpperCase();
+    const angle = angleOf(zone.corners);
+    const bucketAngle = Math.round((angle * 180) / Math.PI / 2) * 2;
+    const key = `${label}\u0000${bucketAngle}`;
+    const cos = Math.cos(-angle);
+    const sin = Math.sin(-angle);
+    let minU = Infinity;
+    let maxU = -Infinity;
+    let minV = Infinity;
+    let maxV = -Infinity;
+    for (const q of zone.corners) {
+      const u = q.x * cos - q.y * sin;
+      const v = q.x * sin + q.y * cos;
+      if (u < minU) minU = u;
+      if (u > maxU) maxU = u;
+      if (v < minV) minV = v;
+      if (v > maxV) maxV = v;
+    }
+    const list = byBucket.get(key);
+    const entry: LocalBox = { zone, label, angle, minU, maxU, minV, maxV };
+    if (list) list.push(entry);
+    else byBucket.set(key, [entry]);
+  }
+
+  for (const list of byBucket.values()) {
+    // Connected components of overlapping or touching boxes (within MERGE_TOL_MM).
+    const visited = new Array<boolean>(list.length).fill(false);
+    for (let start = 0; start < list.length; start++) {
+      if (visited[start]) continue;
+      const cluster: LocalBox[] = [];
+      const stack = [start];
+      visited[start] = true;
+      while (stack.length > 0) {
+        const idx = stack.pop()!;
+        const cur = list[idx]!;
+        cluster.push(cur);
+        for (let j = 0; j < list.length; j++) {
+          if (visited[j]) continue;
+          const o = list[j]!;
+          if (cur.minU <= o.maxU + MERGE_TOL_MM && cur.maxU >= o.minU - MERGE_TOL_MM && cur.minV <= o.maxV + MERGE_TOL_MM && cur.maxV >= o.minV - MERGE_TOL_MM) {
+            visited[j] = true;
+            stack.push(j);
+          }
+        }
+      }
+      const rep = cluster[0]!;
+      if (cluster.length === 1) {
+        const c = rep.zone.corners;
+        for (let i = 0; i < 4; i++) rep.zone.line(c[i] ?? c[0], c[(i + 1) % 4] ?? c[0], "thin", [...CLEARANCE_DASH]);
+        const xs = c.map((p) => p.x);
+        const ys = c.map((p) => p.y);
+        const zoneW = Math.max(1, Math.max(...xs) - Math.min(...xs));
+        const zoneH = Math.max(1, Math.max(...ys) - Math.min(...ys));
+        const mid: Vec2 = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+        drawClearanceLabel(rep.label, [{ mid, w: zoneW, h: zoneH }], rep.zone.text, viewScale, takenBoxes);
+        continue;
+      }
+
+      // Snap near-identical coordinates (within MERGE_TOL_MM) so side-by-side boxes with tiny gaps fuse into one smooth outline.
+      const dedupeCoords = (raw: number[]): number[] => {
+        raw.sort((a, b) => a - b);
+        const out: number[] = [];
+        for (const v of raw) {
+          if (out.length === 0 || v - out[out.length - 1]! > 1e-3) out.push(v);
+        }
+        return out;
+      };
+      const us = dedupeCoords(cluster.flatMap((b) => [b.minU, b.maxU]));
+      const vs = dedupeCoords(cluster.flatMap((b) => [b.minV, b.maxV]));
+      const cols = us.length - 1;
+      const rows = vs.length - 1;
+      const filled = Array.from({ length: cols }, () => new Array<boolean>(rows).fill(false));
+      const pad = MERGE_TOL_MM / 2;
+      for (let ci = 0; ci < cols; ci++) {
+        const mu = ((us[ci]! + us[ci + 1]!) / 2);
+        for (let ri = 0; ri < rows; ri++) {
+          const mv = ((vs[ri]! + vs[ri + 1]!) / 2);
+          // Fill cell if covered by any rectangle, or if it bridges a tiny gap (<= MERGE_TOL_MM) between two touching boxes along one axis.
+          if (cluster.some((b) => mu >= b.minU - 1e-3 && mu <= b.maxU + 1e-3 && mv >= b.minV - 1e-3 && mv <= b.maxV + 1e-3)) {
+            filled[ci]![ri] = true;
+          } else if (us[ci + 1]! - us[ci]! <= MERGE_TOL_MM && cluster.some((b) => mu >= b.minU - pad && mu <= b.maxU + pad && mv >= b.minV - 1e-3 && mv <= b.maxV + 1e-3)) {
+            filled[ci]![ri] = true;
+          } else if (vs[ri + 1]! - vs[ri]! <= MERGE_TOL_MM && cluster.some((b) => mv >= b.minV - pad && mv <= b.maxV + pad && mu >= b.minU - 1e-3 && mu <= b.maxU + 1e-3)) {
+            filled[ci]![ri] = true;
+          }
+        }
+      }
+      const cos = Math.cos(rep.angle);
+      const sin = Math.sin(rep.angle);
+      const toWorld = (u: number, v: number): Vec2 => ({ x: u * cos - v * sin, y: u * sin + v * cos });
+      // Emit merged horizontal boundary segments.
+      for (let ri = 0; ri <= rows; ri++) {
+        let runStart: number | null = null;
+        for (let ci = 0; ci <= cols; ci++) {
+          const below = ci < cols && ri > 0 ? filled[ci]![ri - 1]! : false;
+          const above = ci < cols && ri < rows ? filled[ci]![ri]! : false;
+          const isEdge = ci < cols && below !== above;
+          if (isEdge && runStart === null) runStart = ci;
+          else if (!isEdge && runStart !== null) {
+            rep.zone.line(toWorld(us[runStart]!, vs[ri]!), toWorld(us[ci]!, vs[ri]!), "thin", [...CLEARANCE_DASH]);
+            runStart = null;
+          }
+        }
+      }
+      // Emit merged vertical boundary segments.
+      for (let ci = 0; ci <= cols; ci++) {
+        let runStart: number | null = null;
+        for (let ri = 0; ri <= rows; ri++) {
+          const left = ri < rows && ci > 0 ? filled[ci - 1]![ri]! : false;
+          const right = ri < rows && ci < cols ? filled[ci]![ri]! : false;
+          const isEdge = ri < rows && left !== right;
+          if (isEdge && runStart === null) runStart = ri;
+          else if (!isEdge && runStart !== null) {
+            rep.zone.line(toWorld(us[ci]!, vs[runStart]!), toWorld(us[ci]!, vs[ri]!), "thin", [...CLEARANCE_DASH]);
+            runStart = null;
+          }
+        }
+      }
+      // Pick candidate interior positions inside the merged polygon's largest filled sub-rectangles
+      // (never in the empty notch of an L-shaped merged clearance), largest first.
+      const labelCands: Array<{ readonly mid: Vec2; readonly w: number; readonly h: number; readonly area: number }> = [];
+      for (const b of cluster) {
+        const w = Math.max(1, b.maxU - b.minU);
+        const h = Math.max(1, b.maxV - b.minV);
+        const cx = (b.minU + b.maxU) / 2;
+        const cy = (b.minV + b.maxV) / 2;
+        labelCands.push({ mid: toWorld(cx, cy), w, h, area: w * h });
+      }
+      labelCands.sort((a, b) => b.area - a.area);
+      drawClearanceLabel(rep.label, labelCands, rep.zone.text, viewScale, takenBoxes);
+    }
+  }
+}
+
+/** A placed part's clearance zones in plan: a dashed outline each, with wrapped text kept strictly inside the zone. */
+export function drawPartClearances(model: ModelState, part: PartInstance, line: LineFn, text: TextFn, viewScale = DEFAULT_SYMBOL_SCALE, takenBoxes?: PartLabelStore): void {
+  const zones: BatchedClearanceZone[] = partClearances(model, part).map((z) => ({
+    name: z.name,
+    corners: z.corners,
+    line,
+    text,
+  }));
+  drawPartClearancesBatch(zones, viewScale, takenBoxes);
 }
 
 /** Drawing category of a routed element (views can hide duct and pipe separately). */

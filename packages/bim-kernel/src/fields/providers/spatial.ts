@@ -137,6 +137,12 @@ function typeNameOf(elements: Elements, el: BimElement): string | null {
   return null;
 }
 
+function typeMarkOf(elements: Elements, el: BimElement): string | null {
+  if (el.kind !== "part") return null;
+  const t = elements[el.typeId];
+  return t?.kind === "part_type" ? textOrNull(t.definition.typeMark) : null;
+}
+
 function familyOf(elements: Elements, el: BimElement): string | null {
   if (el.kind !== "part") return null;
   const t = elements[el.typeId];
@@ -161,6 +167,7 @@ function baseFields(registry: Registry, roots: readonly ClassId[]): ProviderFiel
     const read = (f: (elements: Elements, el: BimElement) => string | null): FieldReader => (el, ctx) => f(ctx.elements, el);
     out.push(
       { path: "mark", label: "Mark", classes, valueType: "text", writer: markWriter(registry, root), group: "Identity", read: (el) => markOf(el) },
+      { path: "type_mark", label: "Type Mark", classes, valueType: "text", writer: locked("Edit the part type to change its Type Mark."), deps: { elementKinds: ["part_type"] }, group: "Identity", read: read(typeMarkOf) },
       { path: "type_name", label: "Type", classes, valueType: "text", writer: locked("Change its type to change this."), deps: { elementKinds: ["part_type"] }, group: "Identity", read: read(typeNameOf) },
       { path: "family", label: "Family", classes, valueType: "text", writer: locked("Change its type to change this."), deps: { elementKinds: ["part_type"] }, group: "Identity", read: read(familyOf) },
       { path: "level", label: "Level", classes, valueType: "text", writer: locked(MOVE_LEVEL), deps: { elementKinds: ["level"] }, group: "Location", read: read((els, el) => textOrNull(levelOf(els, el)?.name)) },

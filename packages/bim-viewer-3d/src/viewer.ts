@@ -17,7 +17,7 @@ import { ifcPlacementToScene, kernelToScene, MM, sceneToKernel, toColumnMajor, t
 import { robustCore } from "./framing";
 import { DEFAULT_ELEVATIONS, modelSolids, routeJoinSolids, type ElevationRules, type RenderGroup, type Solid } from "./native-geometry";
 import { batchMeshSolids, batchOwnerAt, type MeshBatch } from "./mesh-batches";
-import { applyCeilingGridUVs, buildStudioEnvironment, cleanEdgesGeometry, ensureBoxUVs, inflateAlongNormals, proceduralMaterialMaps } from "./procedural-textures";
+import { applyCeilingGridUVs, buildStudioEnvironment, cleanEdgesGeometry, disposeEnvironmentTexture, ensureBoxUVs, inflateAlongNormals, proceduralMaterialMaps } from "./procedural-textures";
 import { materialOf, parseHexColor, type MaterialPattern } from "@permitzip/bim-kernel";
 import { readReferenceItem, type ReferenceItemProperties } from "./item-properties";
 import { nearestTurn, type Orientation, type PlanRectMm } from "./orientation";
@@ -273,6 +273,11 @@ export class ModelViewer3D {
   private shadowsEnabled = true;
   private renderQuality: "draft" | "standard" | "high" = "standard";
   private studioEnv: THREE.Texture | null = null;
+  private paused = false;
+  private contextLost = false;
+  private readonly onContextLostHandler: (e: Event) => void;
+  private readonly onContextRestoredHandler: () => void;
+  private readonly onVisibilityChangeHandler: () => void;
   private projection: Projection = "perspective";
   /** Where the 3D view was looking when plan took over (a projection switch in plan frames about it). */
   private readonly last3dTarget = new THREE.Vector3();
@@ -389,7 +394,64 @@ export class ModelViewer3D {
     this.cropOutline = new CropBoxOutline(this.palette.css("selectionOutline"));
     this.overlayScene.add(this.cropOutline.object);
     // Standard hardware 24-bit depth buffer (logarithmicDepthBuffer writes gl_FragDepth, which disables hardware gl.polygonOffset and early-Z culling).
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    // Capture Chrome's real webglcontextcreationerror message so a browser-level GPU lockout (GL_VENDOR = Disabled / BindToCurrentSequence)
+    // is reported clearly without hammering Chrome's GPU process with repeated doomed retries.
+    let creationErrorDetail = "";
+    const makeRenderer = (attrs: THREE.WebGLRendererParameters): THREE.WebGLRenderer => {
+      const canvas = document.createElement("canvas");
+      const onCreationErr = (e: Event) => {
+        const msg = (e as { statusMessage?: string }).statusMessage;
+        if (typeof msg === "string" && msg.trim()) creationErrorDetail = msg.trim();
+      };
+      canvas.addEventListener("webglcontextcreationerror", onCreationErr);
+      try {
+        return new THREE.WebGLRenderer({ canvas, ...attrs });
+      } finally {
+        canvas.removeEventListener("webglcontextcreationerror", onCreationErr);
+      }
+    };
+    const isBrowserGpuDisabled = (detail: string) =>
+      /GL_VENDOR\s*=\s*Disabled|GL_RENDERER\s*=\s*Disabled|BindToCurrentSequence failed|hardware acceleration/i.test(detail);
+    try {
+      this.renderer = makeRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    } catch (firstErr) {
+      if (isBrowserGpuDisabled(creationErrorDetail)) {
+        throw new Error(
+          `Your browser has disabled GPU/WebGL for this session (${creationErrorDetail}). Fully quit and reopen Chrome (Cmd+Q), and make sure "Use graphics acceleration when available" is enabled in Chrome Settings -> System.`,
+        );
+      }
+      try {
+        this.renderer = makeRenderer({ antialias: false, alpha: false, powerPreference: "default" });
+      } catch {
+        if (isBrowserGpuDisabled(creationErrorDetail)) {
+          throw new Error(
+            `Your browser has disabled GPU/WebGL for this session (${creationErrorDetail}). Fully quit and reopen Chrome (Cmd+Q), and make sure "Use graphics acceleration when available" is enabled in Chrome Settings -> System.`,
+          );
+        }
+        throw firstErr;
+      }
+    }
+    const canvasEl = this.renderer.domElement;
+    this.onContextLostHandler = (e: Event) => {
+      e.preventDefault();
+      this.contextLost = true;
+      this.syncAnimationLoop();
+    };
+    this.onContextRestoredHandler = () => {
+      this.contextLost = false;
+      if (!this.disposed) {
+        this.renderer.shadowMap.needsUpdate = true;
+        this.syncAnimationLoop();
+      }
+    };
+    this.onVisibilityChangeHandler = () => {
+      this.syncAnimationLoop();
+    };
+    canvasEl.addEventListener("webglcontextlost", this.onContextLostHandler);
+    canvasEl.addEventListener("webglcontextrestored", this.onContextRestoredHandler);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", this.onVisibilityChangeHandler);
+    }
     const softwareGpu = isSoftwareWebGL(this.renderer);
     if (softwareGpu) {
       this.renderQuality = "draft";
@@ -486,7 +548,7 @@ export class ModelViewer3D {
 
     this.resizeObserver = new ResizeObserver(() => this.onContainerResize());
     this.resizeObserver.observe(container);
-    this.renderer.setAnimationLoop(() => this.tick());
+    this.syncAnimationLoop();
   }
 
   private size(): { width: number; height: number } {
@@ -549,8 +611,28 @@ export class ModelViewer3D {
     void this.fragments.update(true);
   }
 
+  /**
+   * Pause or resume the 3D WebGL render loop (e.g. while 2D plans, sheets, or schedules cover the canvas)
+   * so background surfaces consume 0% GPU without sacrificing any 3D render quality when visible.
+   */
+  setPaused(paused: boolean): void {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    this.syncAnimationLoop();
+  }
+
+  private syncAnimationLoop(): void {
+    const hidden = typeof document !== "undefined" && document.hidden;
+    if (this.disposed || this.paused || this.contextLost || hidden) {
+      this.renderer.setAnimationLoop(null);
+    } else {
+      this.clock.getDelta();
+      this.renderer.setAnimationLoop(() => this.tick());
+    }
+  }
+
   private tick() {
-    if (this.disposed) return;
+    if (this.disposed || this.paused || this.contextLost) return;
     const delta = this.clock.getDelta();
     this.controls.update(delta);
     this.renderer.info.reset();
@@ -2681,12 +2763,23 @@ export class ModelViewer3D {
     }
     for (const entry of this.toneMaterials.values()) entry.material.dispose();
     this.dashedEdge?.dispose();
-    this.studioEnv?.dispose();
+    disposeEnvironmentTexture(this.studioEnv);
     this.studioEnv = null;
+    this.sunLight?.shadow.map?.dispose();
     this.palette.dispose();
     void this.fragments.dispose();
+    const canvasEl = this.renderer.domElement;
+    canvasEl.removeEventListener("webglcontextlost", this.onContextLostHandler);
+    canvasEl.removeEventListener("webglcontextrestored", this.onContextRestoredHandler);
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", this.onVisibilityChangeHandler);
+    }
     this.renderer.dispose();
-    this.renderer.domElement.remove();
+    // Avoid calling forceContextLoss() on routine unmount/HMR — synchronous WEBGL_lose_context trips
+    // macOS Chrome ANGLE/Metal GPU process crashes. Shrink the detached backing store cleanly instead.
+    canvasEl.width = 0;
+    canvasEl.height = 0;
+    canvasEl.remove();
   }
 }
 

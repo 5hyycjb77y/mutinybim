@@ -145,11 +145,24 @@ export function noteLeadersAfterMove(
   });
 }
 
-/** Where a leader leaves the box: the middle of the first line, on the side nearer `toward`. */
+/** Where a leader leaves the box: the line midpoint nearest `toward` when `toward` sits alongside the box, else the first line, on the side nearer `toward`. */
 export function leaderStart(block: TextBlock, toward: Vec2): Vec2 {
-  const firstMid = block.layout.lines[0] ? block.layout.lines[0].top + block.layout.lines[0].height / 2 : block.layout.height / 2;
+  const lines = block.layout.lines;
+  const firstMid = lines[0] ? lines[0].top + lines[0].height / 2 : block.layout.height / 2;
   const local = paperToBox(block, toward);
-  return boxToPaper(block, { x: local.x < block.layout.width / 2 ? 0 : block.layout.width, y: firstMid });
+  let y = firstMid;
+  if (lines.length > 1 && local.y > firstMid && local.y <= block.layout.height + 2.5) {
+    let bestDist = Infinity;
+    for (const ln of lines) {
+      const mid = ln.top + ln.height / 2;
+      const d = Math.abs(local.y - mid);
+      if (d < bestDist) {
+        bestDist = d;
+        y = mid;
+      }
+    }
+  }
+  return boxToPaper(block, { x: local.x < block.layout.width / 2 ? 0 : block.layout.width, y });
 }
 
 /** Leader from the nearer side of the box (middle of its first line) to `to` on paper, with an open arrowhead. */

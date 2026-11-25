@@ -6,6 +6,7 @@ import {
   endsOf,
   figureFrame,
   modifyCommand,
+  noteAutoShoulderPaper,
   paperToBox,
   resolveNote,
   textBlockFor,
@@ -162,9 +163,12 @@ export function annotationGrips(model: ModelState, view: ViewElement | null, ite
   }
   if (item.tag && item.points[0]) out.push({ key: 'head', kind: 'tag-head', index: 0, at: toPaper(item.points[0]), follows: false, label: 'Drag to move the tag; its words stay with the element' })
   if (item.shape === 'text' && item.note) {
+    const block = textBlockFor(item, toPaper)
     noteLeaders(item).forEach((l, index) => {
-      out.push({ key: `tip${index}`, kind: 'leader-tip', index, at: toPaper(l.to), follows: false, label: 'Drag the arrow to what it points at' })
-      if (l.elbow) out.push({ key: `elbow${index}`, kind: 'leader-elbow', index, at: toPaper(l.elbow), follows: false, label: 'Drag the bend' })
+      const tipPaper = toPaper(l.to)
+      out.push({ key: `tip${index}`, kind: 'leader-tip', index, at: tipPaper, follows: false, label: 'Drag the arrow to what it points at' })
+      const elbowPaper = l.elbow ? toPaper(l.elbow) : block ? noteAutoShoulderPaper(block, tipPaper) : null
+      if (elbowPaper) out.push({ key: `elbow${index}`, kind: 'leader-elbow', index, at: elbowPaper, follows: false, label: 'Drag the leader landing / bend (snaps to note lines and flips side)' })
     })
   }
   return out
@@ -334,13 +338,22 @@ export function gripCommand(input: {
       const leaders = noteLeaders(item).map((l, i) => {
         if (i !== grip.index) return l
         if (grip.kind === 'leader-tip') return { ...l, to: toStored(to) }
-        // Snap elbow cleanly to horizontal shoulder with the note's first line when within 2.5 paper mm
+        // Snap elbow cleanly to a horizontal shoulder with any line of the note when within 2.5 paper mm
         const block = textBlockFor(item, toPaper)
         if (block) {
-          const firstMid = block.layout.lines[0] ? block.layout.lines[0].top + block.layout.lines[0].height / 2 : block.layout.height / 2
           const local = paperToBox(block, to)
-          if (Math.abs(local.y - firstMid) <= 2.5) {
-            return { ...l, elbow: toStored(boxToPaper(block, { x: local.x, y: firstMid })) }
+          const mids = block.layout.lines.length > 0 ? block.layout.lines.map((ln) => ln.top + ln.height / 2) : [block.layout.height / 2]
+          let bestMid: number | null = null
+          let bestDist = 2.5
+          for (const m of mids) {
+            const d = Math.abs(local.y - m)
+            if (d <= bestDist) {
+              bestDist = d
+              bestMid = m
+            }
+          }
+          if (bestMid !== null) {
+            return { ...l, elbow: toStored(boxToPaper(block, { x: local.x, y: bestMid })) }
           }
         }
         return { ...l, elbow: toStored(to) }
