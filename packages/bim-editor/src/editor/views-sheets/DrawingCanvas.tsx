@@ -1362,11 +1362,17 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     }
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
     const d = dragRef.current
     setDrag(null)
     setActiveSnap(null)
-    if (!d) return
+    if (!d) {
+      if (draftInput.active) {
+        const at = paperOf(e)
+        if (at) draftInput.up(at)
+      }
+      return
+    }
     if (d.kind === 'marquee') {
       if (Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) < MIN_DRAG_MM) return
       const hits = marqueeHits(items, toPaperPoint, d.a, d.b)

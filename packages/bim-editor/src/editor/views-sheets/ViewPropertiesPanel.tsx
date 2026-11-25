@@ -248,7 +248,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
   )
   const disabledHint = canEdit ? undefined : blockedReason
 
-  const isElectricalView = !props.discipline || props.discipline === 'electrical' || props.discipline.startsWith('electrical')
+  const showWiringSection = !props.discipline || props.discipline.toLowerCase().startsWith('elec')
   return (
     <div className="flex flex-col gap-2" data-testid="view-properties">
       <div className="flex items-start justify-between gap-2">
@@ -479,7 +479,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
                   <FieldLabel htmlFor="vp-clearance-labels" className="font-normal">
                     Show clearance labels
                   </FieldLabel>
-                  <FieldDescription className="text-xs">Applies to all trades (NEC working space, HVAC service clearance, etc.). Uncheck to keep dashed outlines without text.</FieldDescription>
+                  <FieldDescription className="text-xs">Applies to all trades (working clearances, service access zones, etc.). Uncheck to keep dashed outlines without text.</FieldDescription>
                 </FieldContent>
               </Field>
               <Field orientation="horizontal">
@@ -494,7 +494,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
                   <FieldLabel htmlFor="vp-hide-device-marks" className="font-normal">
                     Hide repetitive device marks
                   </FieldLabel>
-                  <FieldDescription className="text-xs">Suppresses auto marks on receptacles and light fixtures while keeping equipment tags.</FieldDescription>
+                  <FieldDescription className="text-xs">Suppresses auto marks on repetitive wall/ceiling devices while keeping major equipment tags.</FieldDescription>
                 </FieldContent>
               </Field>
             </FieldGroup>
@@ -505,7 +505,7 @@ export function ViewPropertiesPanel({ view: saved, canEdit, blockedReason, submi
       {isPlan && (
         <>
           <Separator />
-          <LayoutSection surface={PROPERTIES_SURFACE} id="vp-electrical" title="Electrical graphics" meta={locked.has('pack_props') ? 'Template' : undefined} defaultCollapsed={!isElectricalView}>
+          <LayoutSection surface={PROPERTIES_SURFACE} id="vp-wiring" title="Wiring graphics" meta={locked.has('pack_props') ? 'Template' : undefined} defaultCollapsed={!showWiringSection}>
             <CircuitGraphicsFields view={view} canEdit={canEdit && !locked.has('pack_props')} disabledHint={lockHint('pack_props')} set={set} />
           </LayoutSection>
         </>

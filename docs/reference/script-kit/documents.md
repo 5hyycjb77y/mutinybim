@@ -241,7 +241,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const templates = documents.viewTemplates(ctx);
-    ctx.label(`${templates.length} view templates`);
+    ctx.report({ count: templates.length, names: templates.map((t) => t.name) });
   },
 });
 ```
@@ -1189,7 +1189,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const sets = documents.listStandardNoteSets("electrical");
-    ctx.label(`Sets: ${sets.map((s) => s.id).join(", ")}`);
+    ctx.report({ sets: sets.map((s) => s.id) });
   },
 });
 ```
@@ -1215,7 +1215,8 @@ export default defineScript({
   reads: { ids: [] },
   parameters: {},
   run(ctx) {
-    documents.placeStandardNotes(ctx, "sh-e101", "electrical-general", { x: units.mm(650), y: units.mm(500) }, { extraNotes: ["COORDINATE FLOOR BOXES WITH FURNITURE LAYOUT."] });
+    const sh = documents.sheet(ctx, { number: "E-001", name: "Electrical Notes" });
+    documents.placeStandardNotes(ctx, sh, "electrical-general", { x: units.mm(650), y: units.mm(500) }, { extraNotes: ["COORDINATE FLOOR BOXES WITH FURNITURE LAYOUT."] });
   },
 });
 ```

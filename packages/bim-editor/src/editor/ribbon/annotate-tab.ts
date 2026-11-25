@@ -182,7 +182,7 @@ export function annotateTab(ctx: BuildingModelRibbonContext, leading: RibbonGrou
           label: 'Standard notes',
           icon: FileText,
           description: 'Drop a reusable discipline general-notes block onto this sheet or view (same library scripts use)',
-          keywords: ['general notes', 'notes library', 'specifications', 'nec', 'imc', 'ipc', 'boilerplate'],
+          keywords: ['general notes', 'notes library', 'specifications', 'code notes', 'boilerplate'],
           disabledReason: ctx.placeStandardNotes ? ctx.placeStandardNotes.disabledReason : OPEN_A_DRAWING,
           children: STANDARD_NOTE_SETS.map((set) => ({
             id: `standard-notes-${set.id}`,

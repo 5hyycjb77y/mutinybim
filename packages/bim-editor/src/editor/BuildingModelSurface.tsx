@@ -660,7 +660,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const [figureDialog, setFigureDialog] = useState<'chart' | 'picture' | null>(null)
   const [calcDialog, setCalcDialog] = useState(false)
   const [placedFigure, setPlacedFigure] = useState<{ readonly id: string } | null>(null)
-  // Detail views are only a drawing; form schedules (panel/controls schedules without a v2 grid) render directly as live drawings so they never hit a dead-end placeholder; plans, sections and 3D views show the live model or their drawing.
+  // Detail views are only a drawing; form schedules (fixed-layout schedules without a v2 grid) render directly as live drawings so they never hit a dead-end placeholder; plans, sections and 3D views show the live model or their drawing.
   const isFormOnlySchedule = openView !== null && openView.viewType === 'schedule' && Boolean(openView.props?.formSchedule) && !openView.props?.scheduleV2
   const showDrawing = open.kind === 'sheet' || (openView !== null && (openView.viewType === 'detail' || isFormOnlySchedule || viewDisplay === 'drawing'))
   const propertiesOpen = selection !== null || (!showDrawing && openView !== null)

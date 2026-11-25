@@ -241,7 +241,12 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    electrical.removeDisconnect(ctx, "RTU-1");
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const hp = equipment.place(ctx, { level: "L1", type: "builtin:panelboard-225-480@1", at: { x: units.ft(2), y: units.ft(2) }, mark: "HP-1" });
+    const rtu = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5ton@1", at: { x: units.ft(20), y: units.ft(10) }, mark: "RTU-1" });
+    ctx.edit({ type: "create_service_link", linkId: "ckt-rtu", sourceId: hp.id, positions: [1, 3, 5], members: [{ elementId: rtu.id }], electrical: { ratingA: 40 } });
+    electrical.insertDisconnect(ctx, rtu, { ratingA: 60 });
+    electrical.removeDisconnect(ctx, rtu);
   },
 });
 ```
@@ -267,7 +272,9 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    electrical.setDisconnectRequirement(ctx, "EF-1", false, "Factory integral disconnect");
+    const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
+    const ef = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5ton@1", at: { x: units.ft(12), y: units.ft(8) }, mark: "EF-1" });
+    electrical.setDisconnectRequirement(ctx, ef, false, "Factory integral disconnect");
   },
 });
 ```
