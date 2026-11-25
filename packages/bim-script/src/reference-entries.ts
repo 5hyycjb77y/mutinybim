@@ -1318,10 +1318,10 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "drafting.note",
-    summary: "Places a CAD rich-text note (`create_text_note`) with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.",
+    summary: "Places a CAD rich-text note (`create_text_note`) on a view or sheet with word wrap, opaque paper-white background mask (on by default when supported), and auto-elbowed horizontal-shoulder leaders with filled NCS arrowheads.",
     signature: "note(ctx: ScriptContext, spec: DraftNoteSpec): string",
     example: layout(`    const detail = drafting.view(ctx, { name: "Note Example", scale: 16 });\n    drafting.rect(ctx, { view: detail, at: { x: units.in(0), y: units.in(0) }, width: units.in(36), height: units.in(20), lineStyle: "wide" });\n    drafting.note(ctx, { view: detail, at: { x: units.in(48), y: units.in(18) }, text: "14\\" INSULATED ROOF CURB\\nW/ CANT STRIP & FLASHING", leaders: [{ to: { x: units.in(36), y: units.in(14) } }] });`),
-    topics: ["note", "callout", "leader", "text note", "mask", "arrow", "annotation"],
+    topics: ["note", "sheet note", "general notes", "callout", "leader", "text note", "mask", "arrow", "annotation"],
   },
   {
     name: "drafting.calloutStack",

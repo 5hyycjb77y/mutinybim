@@ -262,7 +262,42 @@ describe("script-sent-once", () => {
     expect(whole).toMatchObject({ name: brief?.name, example: expect.stringContaining("defineScript") });
     const sending = await c.call("bim_script_reference", { topic: "sending scripts" });
     expect(sending).toMatchObject({ name: "Sending scripts", forms: expect.arrayContaining([expect.stringContaining("replace: [{ old, new }]")]) });
-    expect(await c.call("bim_script_reference", { topic: "no such thing at all" })).toMatchObject({ isError: true, message: expect.stringContaining("No function or recipe named") });
+    const missingTopic = await c.call("bim_script_reference", { topic: "no such thing at all" });
+    expect(missingTopic).toMatchObject({ found: false, topic: "no such thing at all", message: expect.stringContaining("No function or recipe named") });
+    expect(missingTopic.isError).toBeUndefined();
+
+    const missingExample = await c.call("bim_script_reference", { example: "no-such-example" });
+    expect(missingExample).toMatchObject({ found: false, example: "no-such-example", examples: expect.arrayContaining(["rooftop-unit"]) });
+    expect(missingExample.isError).toBeUndefined();
+
+    const missingLibrary = await c.call("bim_script_reference", { library: "read", key: "missing.script" });
+    expect(missingLibrary).toMatchObject({ found: false, key: "missing.script", message: expect.stringContaining("No script missing.script") });
+    expect(missingLibrary.isError).toBeUndefined();
+
+    const missingCommand = await c.call("bim_script_reference", { command: "add_sheet_note" });
+    expect(missingCommand).toMatchObject({
+      found: false,
+      command: "add_sheet_note",
+      near_commands: expect.arrayContaining(["create_text_note"]),
+      near_topics: expect.arrayContaining(["drafting.note"]),
+      message: expect.stringContaining("create_text_note"),
+    });
+    expect(missingCommand.isError).toBeUndefined();
+
+    const missingDeleteViewport = await c.call("bim_script_reference", { command: "delete_viewport" });
+    expect(missingDeleteViewport).toMatchObject({
+      found: false,
+      near_commands: expect.arrayContaining(["remove_viewport"]),
+    });
+    expect(missingDeleteViewport.near_commands).not.toContain("delete_catalog_entry");
+    expect(missingDeleteViewport.isError).toBeUndefined();
+
+    const missingScheduleCell = await c.call("bim_script_reference", { command: "set_schedule_cell" });
+    expect(missingScheduleCell).toMatchObject({
+      found: false,
+      near_commands: expect.arrayContaining(["edit_schedule"]),
+    });
+    expect(missingScheduleCell.isError).toBeUndefined();
 
     const command = await c.call("bim_script_reference", { command: "create_level" });
     const fields = command.fields as string[];

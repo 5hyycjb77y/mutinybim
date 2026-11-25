@@ -135,6 +135,7 @@ export type ReferenceHit =
   | { readonly kind: "example"; readonly name: string; readonly title: string; readonly builds: string; readonly read: string };
 
 const STOP = new Set(["a", "an", "the", "i", "do", "how", "to", "make", "with", "of", "for", "in", "on", "and", "or", "is", "can", "what", "my", "me", "it", "be", "use", "using", "script", "scripts"]);
+const GENERIC_COMMAND_VERBS = new Set(["add", "create", "define", "delete", "edit", "get", "list", "put", "register", "remove", "save", "set", "update"]);
 
 function words(text: string): string[] {
   return text
@@ -143,6 +144,45 @@ function words(text: string): string[] {
     .split(/[\s._-]+/)
     .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w))
     .filter((w) => w.length > 1 && !STOP.has(w));
+}
+
+/** Closest `ctx.edit` commands to a query or guessed command name (e.g. `"add_sheet_note"` → `create_text_note`). */
+export function searchCommands(query: string, limit = 6): readonly CommandEntry[] {
+  const normalized = query.replace(/_/g, " ");
+  const q = words(normalized);
+  const phrase = normalized.toLowerCase().trim();
+  if (q.length === 0) return [];
+  const nouns = q.filter((w) => !GENERIC_COMMAND_VERBS.has(w));
+  const headNoun = nouns[nouns.length - 1];
+  const hits: { entry: CommandEntry; score: number }[] = [];
+  for (const entry of scriptCommands()) {
+    const text = entry.type.replace(/_/g, " ");
+    const cmdWords = words(text);
+    const have = new Set(cmdWords);
+    let total = 0;
+    let nounMatches = 0;
+    for (const w of q) {
+      if (have.has(w)) {
+        if (GENERIC_COMMAND_VERBS.has(w)) {
+          total += 1;
+        } else {
+          total += 4;
+          nounMatches += 1;
+        }
+      } else if (!GENERIC_COMMAND_VERBS.has(w) && w.length >= 4 && cmdWords.some((cw) => cw.includes(w) || (cw.length >= 4 && w.includes(cw)))) {
+        total += 2;
+        nounMatches += 1;
+      }
+    }
+    if (nouns.length > 0 && nounMatches === 0) continue;
+    if (headNoun && have.has(headNoun)) total += 2;
+    if (phrase.length > 3 && text.includes(phrase)) total += 4;
+    if (total > 0) hits.push({ entry, score: total });
+  }
+  return hits
+    .sort((a, b) => b.score - a.score || a.entry.type.localeCompare(b.entry.type))
+    .slice(0, limit)
+    .map((h) => h.entry);
 }
 
 function score(query: readonly string[], phrase: string, fields: readonly { readonly text: string; readonly weight: number }[]): number {
