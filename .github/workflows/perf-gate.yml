@@ -51,7 +51,7 @@ jobs:
       CI_JOB_NAME: Perf gate
       MUTINYBIM_PERF_BUDGETS: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.PERF_RUNNER && 'absolute' || 'relative' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -94,7 +94,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.run == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload the perf results
         if: always() && steps.scope.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-gate-results
           path: .perf-results/mutinybim/ci/
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts

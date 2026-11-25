@@ -46,10 +46,10 @@ jobs:
       CI_JOB_KEY: lint
       CI_JOB_NAME: Lint and boundary checks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -66,7 +66,7 @@ jobs:
         run: $REPORT --kind lines --name "Dependency license check" -- npm run licenses
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts
@@ -81,10 +81,10 @@ jobs:
       CI_JOB_KEY: typecheck
       CI_JOB_NAME: Typecheck
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -94,7 +94,7 @@ jobs:
         run: $REPORT --kind tsc --name "Typecheck the packages" -- npm run typecheck
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts
@@ -113,10 +113,10 @@ jobs:
       CI_JOB_KEY: test-${{ matrix.shard }}
       CI_JOB_NAME: Unit tests (${{ matrix.shard }}/2)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -136,7 +136,7 @@ jobs:
               --json --testLocationInResults --outputFile="$RUNNER_TEMP/ci-artifacts/jest-results.json"
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts
@@ -151,10 +151,10 @@ jobs:
       CI_JOB_KEY: model-server
       CI_JOB_NAME: Model server (typecheck, Docker build)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -168,7 +168,7 @@ jobs:
         run: $REPORT --kind lines --name "Docker build" -- docker build --progress=plain -f services/bim-authority/Dockerfile -t mutinybim-authority:ci .
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts
@@ -183,7 +183,7 @@ jobs:
       CI_JOB_KEY: secret-scan
       CI_JOB_NAME: Secret scan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -197,7 +197,7 @@ jobs:
               git /repo --no-banner --redact --exit-code 1 --report-format json --report-path /out/report.json
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts
@@ -225,10 +225,10 @@ jobs:
     env:
       OUT: .perf-results/mutinybim/1m
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -268,7 +268,7 @@ jobs:
 
       - name: Upload 1M results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bim-perf-1m
           path: .perf-results/mutinybim/1m/
@@ -281,7 +281,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
@@ -289,7 +289,7 @@ jobs:
       - name: Collect the failure reports
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: ci-logs-*
           path: ${{ runner.temp }}/ci-reports
