@@ -1,7 +1,7 @@
 # MutinyBIM model authority. Build context = repo root (deploy.sh stages only
 # what is copied below, because Fly packs the context with the root .dockerignore).
 #   services/bim-authority/deploy.sh <fly config>
-FROM node:22.23.4-bookworm-slim
+FROM node:22.23.5-bookworm-slim
 
 WORKDIR /app
 ENV NODE_ENV=production
