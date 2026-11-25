@@ -1,6 +1,6 @@
 import { BASELINE_PARAMETER_SETS } from "@permitzip/bim-library";
 import type { ParameterIfc, Registry } from "@permitzip/bim-kernel";
-import { $, list, real, str, typed, type StepGraph, type StepRef, type StepValue } from "./step";
+import { $, int, list, real, str, typed, type StepGraph, type StepRef, type StepValue } from "./step";
 import { measureOf, type UnitSet } from "./units";
 
 /**
@@ -117,12 +117,30 @@ export class PropertyBag {
 
 const LABEL_MAX = 255;
 
+const COUNT_MEASURE = "IFCCOUNTMEASURE";
+
+/**
+ * A count as the whole number it is, or null when it isn't one. IfcCountMeasure is an INTEGER in IFC 4.3 (it was a
+ * number in IFC 4), so a count is written without a decimal point, and one that isn't whole can't be written as a
+ * count at all. Nor can one too large to be exact (past 2^53): it is written as the real it is.
+ */
+function wholeCount(value: number): number | null {
+  const whole = Math.round(value);
+  return Number.isSafeInteger(whole) && Math.abs(value - whole) < 1e-9 ? whole + 0 : null;
+}
+
 function nominal(units: UnitSet, input: PropertyInput): StepValue {
   switch (input.kind) {
     case "number": {
       const m = measureOf(input.value, input.unit);
       units.note(m.unitType);
-      return typed(input.measure ?? m.measure, real(m.value));
+      const measure = input.measure ?? m.measure;
+      if (measure === COUNT_MEASURE) {
+        // A whole count is an integer; one that isn't keeps its value as a plain real instead of being rounded.
+        const whole = wholeCount(m.value);
+        return whole === null ? typed("IFCREAL", real(m.value)) : typed(COUNT_MEASURE, int(whole));
+      }
+      return typed(measure, real(m.value));
     }
     case "bool":
       return typed("IFCBOOLEAN", { bool: input.value });
@@ -143,12 +161,13 @@ const QUANTITY_OF_MEASURE: Readonly<Record<string, { readonly entity: string }>>
 function quantityEntity(g: StepGraph, units: UnitSet, q: PropertyInput & { readonly kind: "number" }): StepRef {
   const m = measureOf(q.value, q.unit);
   const known = QUANTITY_OF_MEASURE[m.measure];
-  if (known) {
-    units.note(m.unitType);
-    return g.add(known.entity, [str(q.name), $, $, real(m.value), $]);
-  }
-  // IfcQuantityNumber (new in 4.3): a code's own units (fixture units) and any other number, in the project unit of its type.
   units.note(m.unitType);
+  if (known && m.measure !== COUNT_MEASURE) return g.add(known.entity, [str(q.name), $, $, real(m.value), $]);
+  // IfcQuantityCount's value is an integer, and not below zero; a count that isn't whole is written as a number below
+  // instead of being rounded, and so is a negative one.
+  const whole = known ? wholeCount(m.value) : null;
+  if (known && whole !== null && whole >= 0) return g.add(known.entity, [str(q.name), $, $, int(whole), $]);
+  // IfcQuantityNumber (new in 4.3): a code's own units (fixture units) and any other number, in the project unit of its type.
   return g.add("IFCQUANTITYNUMBER", [str(q.name), $, $, real(m.value), $]);
 }
 

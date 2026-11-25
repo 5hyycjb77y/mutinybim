@@ -1454,7 +1454,7 @@ export function modelSolids(model: ModelState, rules: ElevationRules = DEFAULT_E
     const prevElements = snap.elements;
     const dirtyIds = new Set<string>();
     const removedIds: string[] = [];
-    let matchedPrev = 0;
+    let existingInNow = 0;
     let totalNow = 0;
     let allLocal = true;
 
@@ -1463,10 +1463,8 @@ export function modelSolids(model: ModelState, rules: ElevationRules = DEFAULT_E
       totalNow++;
       const el = elements[id]!;
       const prev = prevElements[id];
-      if (prev === el) {
-        matchedPrev++;
-        continue;
-      }
+      if (prev !== undefined) existingInNow++;
+      if (prev === el) continue;
       if (!LOCAL_ONLY_KINDS.has(el.kind) || (prev !== undefined && !LOCAL_ONLY_KINDS.has(prev.kind))) {
         allLocal = false;
         break;
@@ -1474,7 +1472,7 @@ export function modelSolids(model: ModelState, rules: ElevationRules = DEFAULT_E
       dirtyIds.add(id);
     }
 
-    if (allLocal && matchedPrev + dirtyIds.size < snap.elementCount) {
+    if (allLocal && existingInNow < snap.elementCount) {
       for (const id in prevElements) {
         if (!Object.prototype.hasOwnProperty.call(prevElements, id)) continue;
         if (id in elements) continue;

@@ -1,4 +1,4 @@
-import type { ImportExtrusion, ImportPoint } from "@permitzip/bim-kernel";
+import { OUTLINE_WITH_HOLES, type ImportExtrusion, type ImportPoint } from "@permitzip/bim-kernel";
 import type { ReadEntity, StepFile, StepToken } from "../read";
 
 /**
@@ -52,6 +52,8 @@ export interface ShapeReading {
   readonly extrusions: ImportExtrusion[];
   readonly points: ImportPoint[];
   unread: string | null;
+  /** An outline with holes was read, holes and all. Only that: `unread` says anything else that wasn't read. */
+  holed?: boolean;
 }
 
 /** Reads entity graph geometry in file units times `scale` (mm per file unit). */
@@ -163,6 +165,7 @@ export class GeometryReader {
           return;
         }
         if (profile.unread) out.unread ??= profile.unread;
+        if (profile.holes) out.holed = true;
         const base = profile.points.map((p) => apply(local, { x: p.x, y: p.y, z: 0 }));
         const along = rotate(local, mul(dir, length));
         const extrusion: ImportExtrusion = {
@@ -170,6 +173,8 @@ export class GeometryReader {
           along,
           ...(profile.circle ? { circle: { centre: apply(local, { x: profile.circle.cx, y: profile.circle.cy, z: 0 }), radius: profile.circle.r } } : {}),
           ...(profile.rectangle ? { rectangle: profile.rectangle } : {}),
+          ...(profile.holes ? { holes: profile.holes.map((hole) => hole.map((p) => apply(local, { x: p.x, y: p.y, z: 0 }))) } : {}),
+          ...(profile.outerBound ? { outerBound: true as const } : {}),
         };
         out.extrusions.push(extrusion);
         for (const p of base) out.points.push(p, add(p, along));
@@ -251,8 +256,12 @@ export class GeometryReader {
     return { o, x: mul(x, k), y: mul(y, k), z: mul(z, k) };
   }
 
-  /** A profile in its own plane: points (closed, in order), and whether it is a rectangle or a circle. */
-  profile(t: StepToken | undefined): { points: { x: number; y: number }[]; rectangle?: { x: number; y: number }; circle?: { cx: number; cy: number; r: number }; unread?: string } | null {
+  /**
+   * A profile in its own plane: points (closed, in order), and whether it is a rectangle or a circle. `holes`: the
+   * outlines cut through it, when every one was read. `outerBound`: the points are only the profile's outer bound (a
+   * hollow section, a rounded rectangle, a rolled shape as its box).
+   */
+  profile(t: StepToken | undefined): { points: { x: number; y: number }[]; rectangle?: { x: number; y: number }; circle?: { cx: number; cy: number; r: number }; holes?: { x: number; y: number }[][]; outerBound?: true; unread?: string } | null {
     const e = this.entity(t);
     if (!e) return null;
     const pos = this.axis2(e.args[2]);
@@ -262,7 +271,12 @@ export class GeometryReader {
     };
     const rect = (xd: number, yd: number) => ({ points: [at(-xd / 2, -yd / 2), at(xd / 2, -yd / 2), at(xd / 2, yd / 2), at(-xd / 2, yd / 2)], rectangle: { x: xd, y: yd } });
     switch (e.type) {
-      case "IFCRECTANGLEPROFILEDEF":
+      case "IFCRECTANGLEPROFILEDEF": {
+        const a = (this.num(e.args[3]) ?? 0) * this.scale;
+        const b = (this.num(e.args[4]) ?? 0) * this.scale;
+        return a > 0 && b > 0 ? rect(a, b) : null;
+      }
+      // The box around the section: its size, not its outline.
       case "IFCRECTANGLEHOLLOWPROFILEDEF":
       case "IFCROUNDEDRECTANGLEPROFILEDEF":
       case "IFCISHAPEPROFILEDEF":
@@ -273,7 +287,7 @@ export class GeometryReader {
       case "IFCZSHAPEPROFILEDEF": {
         const a = (this.num(e.args[3]) ?? 0) * this.scale;
         const b = (this.num(e.args[4]) ?? 0) * this.scale;
-        return a > 0 && b > 0 ? rect(a, b) : null;
+        return a > 0 && b > 0 ? { ...rect(a, b), outerBound: true } : null;
       }
       case "IFCCIRCLEPROFILEDEF":
       case "IFCCIRCLEHOLLOWPROFILEDEF": {
@@ -281,21 +295,28 @@ export class GeometryReader {
         if (!(r > 0)) return null;
         const points = Array.from({ length: 16 }, (_, i) => at(r * Math.cos((i * Math.PI) / 8), r * Math.sin((i * Math.PI) / 8)));
         const c = at(0, 0);
-        return { points, circle: { cx: c.x, cy: c.y, r } };
+        return { points, circle: { cx: c.x, cy: c.y, r }, ...(e.type === "IFCCIRCLEHOLLOWPROFILEDEF" ? { outerBound: true as const } : {}) };
       }
       case "IFCARBITRARYCLOSEDPROFILEDEF":
       case "IFCARBITRARYPROFILEDEFWITHVOIDS": {
         const curve = this.entity(e.args[2]);
         const points = this.curvePoints(curve);
-        if (!points) return { points: [], unread: "a curved outline" };
-        return e.type === "IFCARBITRARYPROFILEDEFWITHVOIDS" ? { points, unread: "an outline with holes" } : { points };
+        if (!points) return { points: [], unread: this.curveProblem(curve) };
+        if (e.type !== "IFCARBITRARYPROFILEDEFWITHVOIDS") return { points };
+        // Every hole read: they go with the outline. One that has arcs or isn't a closed line: the outline alone, and the reason.
+        const inner = e.args[3]?.kind === "list" ? e.args[3].items.map((item) => this.curvePoints(this.entity(item))) : [];
+        const holes = inner.filter((hole): hole is { x: number; y: number }[] => hole !== null);
+        return holes.length === inner.length ? { points, holes } : { points, unread: OUTLINE_WITH_HOLES };
       }
       default:
         return null;
     }
   }
 
-  /** A straight-edged closed curve's points (2D), or null when it has arcs or isn't one this reads. */
+  /**
+   * A straight-edged closed curve's points (2D), in the order the curve runs through them, or null when it has arcs
+   * or isn't one this reads.
+   */
   curvePoints(curve: ReadEntity | null): { x: number; y: number }[] | null {
     if (!curve) return null;
     if (curve.type === "IFCPOLYLINE") {
@@ -304,18 +325,56 @@ export class GeometryReader {
       return out.length >= 3 ? out : null;
     }
     if (curve.type === "IFCINDEXEDPOLYCURVE") {
-      if (curve.args[1] && curve.args[1].kind === "list" && curve.args[1].items.some((s) => s.kind === "typed" && s.type === "IFCARCINDEX")) return null;
+      const segments = curve.args[1]?.kind === "list" ? curve.args[1].items : null;
+      if (hasArcs(segments)) return null;
       const list = this.entity(curve.args[0]);
       const coords = list?.args[0]?.kind === "list" ? list.args[0].items : [];
-      const out = coords.flatMap((c) => {
+      const stored = coords.flatMap((c) => {
         if (c.kind !== "list") return [];
         const [x, y] = c.items.map((i) => (this.num(i) ?? 0) * this.scale);
         return [{ x: x ?? 0, y: y ?? 0 }];
       });
-      return out.length >= 3 ? out : null;
+      // No segments: a line through the points as stored. With segments: through them in the order the segments say.
+      if (!segments) return stored.length >= 3 ? stored : null;
+      const path = stored.length === coords.length ? indexedPath(segments, stored.length) : null;
+      const out = path?.flatMap((i) => stored[i - 1] ?? []) ?? [];
+      return path && out.length === path.length && out.length >= 3 ? out : null;
     }
     return null;
   }
+
+  /** Why `curvePoints` read nothing of an outline, in a report's words. */
+  private curveProblem(curve: ReadEntity | null): string {
+    const segments = curve?.type === "IFCINDEXEDPOLYCURVE" && curve.args[1]?.kind === "list" ? curve.args[1].items : null;
+    return segments && !hasArcs(segments) ? "an outline whose segments don't join up" : "a curved outline";
+  }
+}
+
+function hasArcs(segments: readonly StepToken[] | null): boolean {
+  return segments?.some((s) => s.kind === "typed" && s.type === "IFCARCINDEX") ?? false;
+}
+
+/**
+ * The points (1-based) an IfcIndexedPolyCurve's straight segments run through, in order, the closing point left off.
+ * Null when the segments don't run on from one another as one line through each point once, or name a point that
+ * isn't there: the points as stored are then not the outline.
+ */
+function indexedPath(segments: readonly StepToken[], count: number): number[] | null {
+  const path: number[] = [];
+  for (const segment of segments) {
+    if (segment.kind !== "typed" || segment.type !== "IFCLINEINDEX" || segment.value.kind !== "list") return null;
+    const run: number[] = [];
+    for (const item of segment.value.items) {
+      if (item.kind !== "number" || !Number.isInteger(item.value) || item.value < 1 || item.value > count) return null;
+      run.push(item.value);
+    }
+    if (run.length < 2) return null;
+    if (path.length === 0) path.push(...run);
+    else if (run[0] === path[path.length - 1]) path.push(...run.slice(1));
+    else return null;
+  }
+  if (path.length > 1 && path[0] === path[path.length - 1]) path.pop();
+  return new Set(path).size === path.length ? path : null;
 }
 
 export function boundsOf(points: readonly ImportPoint[]): { min: ImportPoint; max: ImportPoint } | null {
@@ -329,6 +388,33 @@ export function boundsOf(points: readonly ImportPoint[]): { min: ImportPoint; ma
     max.x = Math.max(max.x, p.x);
     max.y = Math.max(max.y, p.y);
     max.z = Math.max(max.z, p.z);
+  }
+  return { min, max };
+}
+
+/**
+ * The box of host-frame points as `frame` sees them: from its origin, along
+ * its own axes (`apply` undone; a frame's axes are unit vectors at right
+ * angles). One pass and no second list of points, since a mesh has many.
+ */
+export function boundsIn(frame: Frame, points: readonly ImportPoint[]): { min: ImportPoint; max: ImportPoint } | null {
+  if (points.length === 0) return null;
+  const { o, x: ax, y: ay, z: az } = frame;
+  const min = { x: Infinity, y: Infinity, z: Infinity };
+  const max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  for (const p of points) {
+    const dx = p.x - o.x;
+    const dy = p.y - o.y;
+    const dz = p.z - o.z;
+    const x = ax.x * dx + ax.y * dy + ax.z * dz;
+    const y = ay.x * dx + ay.y * dy + ay.z * dz;
+    const z = az.x * dx + az.y * dy + az.z * dz;
+    min.x = Math.min(min.x, x);
+    min.y = Math.min(min.y, y);
+    min.z = Math.min(min.z, z);
+    max.x = Math.max(max.x, x);
+    max.y = Math.max(max.y, y);
+    max.z = Math.max(max.z, z);
   }
   return { min, max };
 }

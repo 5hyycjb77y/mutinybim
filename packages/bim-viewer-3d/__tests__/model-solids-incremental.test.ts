@@ -60,6 +60,32 @@ describe("incremental modelSolids equivalence", () => {
     };
     expect(sortSolids(modelSolids(afterDelete))).toEqual(sortSolids(freshSolids(afterDelete)));
 
+    // 3b. Replace 1 provisional element with 2 committed elements (addedCount > removedCount must still evict removed IDs)
+    const previewId = asElementId("route:0");
+    const committedA = asElementId("committed-seg-a");
+    const committedB = asElementId("committed-seg-b");
+    const withPreview: ModelState = {
+      ...afterDelete,
+      revision: asRevision(Number(afterDelete.revision) + 1),
+      elements: {
+        ...afterDelete.elements,
+        [previewId]: { ...seg, id: previewId, version: 1 },
+      },
+    };
+    expect(sortSolids(modelSolids(withPreview))).toEqual(sortSolids(freshSolids(withPreview)));
+    const afterCommit: ModelState = {
+      ...afterDelete,
+      revision: asRevision(Number(withPreview.revision) + 1),
+      elements: {
+        ...afterDelete.elements,
+        [committedA]: { ...seg, id: committedA, version: 1 },
+        [committedB]: { ...seg, id: committedB, version: 1, start: { x: seg.start.x, y: seg.start.y + 500 }, end: { x: seg.end.x, y: seg.end.y + 500 } },
+      },
+    };
+    const committedSolids = modelSolids(afterCommit);
+    expect(committedSolids.some((s) => s.elementId === previewId)).toBe(false);
+    expect(sortSolids(committedSolids)).toEqual(sortSolids(freshSolids(afterCommit)));
+
     // 4. Level elevation change (non-local kind -> full invalidation)
     const afterLevel: ModelState = {
       ...afterDelete,

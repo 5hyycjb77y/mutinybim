@@ -16,6 +16,13 @@ import type { ElementCore, ElementId, ModelElementBase, Vec2 } from "../types";
 /** Peers read and store `ceiling` records. */
 export const CEILINGS_FEATURE = "elements:ceilings";
 
+/** The most corners a ceiling's outline, or one of its holes, can have. */
+export const CEILING_OUTLINE_MAX_POINTS = 2000;
+/** The most holes a ceiling can have. */
+export const CEILING_HOLES_MAX = 200;
+/** The greatest height above its level a ceiling can have, mm (about 330 ft). */
+export const CEILING_HEIGHT_MAX_MM = 100_000;
+
 export const KNOWN_CEILING_FORMS = ["flat", "sloped", "cloud", "soffit", "open_to_structure"] as const;
 export type CeilingForm = (typeof KNOWN_CEILING_FORMS)[number] | (string & {});
 

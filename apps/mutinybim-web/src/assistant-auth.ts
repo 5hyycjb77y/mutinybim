@@ -113,6 +113,7 @@ export function bearerChallenge(origin: string, family: string, error?: "invalid
 }
 
 const BLOCKED_SCHEMES = new Set(["javascript:", "data:", "file:", "vbscript:", "about:", "blob:", "filesystem:", "ws:", "wss:"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * Where an assistant may send people back to: https anywhere, plain http
@@ -130,8 +131,30 @@ export function redirectUriProblem(value: string): string | null {
   if (url.hash) return "has a # part";
   if (BLOCKED_SCHEMES.has(url.protocol)) return `uses ${url.protocol}, which is not allowed`;
   if (url.protocol === "https:") return null;
-  if (url.protocol === "http:") return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ? null : "uses plain http to another computer (use https)";
+  if (url.protocol === "http:") return LOOPBACK_HOSTS.has(url.hostname) ? null : "uses plain http to another computer (use https)";
   return /^[a-z][a-z0-9+.-]*:$/.test(url.protocol) ? null : "has a scheme that isn't allowed";
+}
+
+/**
+ * Whether a requested redirect_uri matches a registered one. Exact match
+ * everywhere except loopback http addresses (127.0.0.1, [::1], localhost),
+ * where RFC 8252 §7.3 (and Claude Code's metadata document) allow any
+ * ephemeral port when scheme, host, path and query match.
+ */
+export function redirectUriMatches(registered: string, requested: string): boolean {
+  if (registered === requested) return true;
+  let reg: URL;
+  let req: URL;
+  try {
+    reg = new URL(registered);
+    req = new URL(requested);
+  } catch {
+    return false;
+  }
+  if (reg.protocol !== "http:" || req.protocol !== "http:") return false;
+  if (!LOOPBACK_HOSTS.has(reg.hostname) || reg.hostname !== req.hostname) return false;
+  if (reg.hash || req.hash || reg.username || reg.password || req.username || req.password) return false;
+  return reg.pathname === req.pathname && reg.search === req.search;
 }
 
 function stringList(value: unknown): string[] | null {
@@ -216,10 +239,44 @@ export function metadataClientCanUseNone(meta: Record<string, unknown>): boolean
 
 const defaultResolve: ResolveHost = async (hostname) => (await lookup(hostname, { all: true })).map((a) => a.address);
 
+interface PinnedMetadataClient {
+  readonly clientName: string;
+  readonly redirectUris: readonly string[];
+}
+
+/**
+ * Known assistants whose metadata address may refuse this server's fetch.
+ * claude.ai's Cloudflare edge answers 403 to requests from some cloud hosting
+ * IPs, which would otherwise stop every Claude and Claude Code sign-in. An
+ * entry is used only in memory when the live fetch fails and nothing is kept
+ * from an earlier live fetch; a document that arrives always wins and is
+ * cached, and the pin is not written to the database so a future live fetch
+ * or pin update takes effect right away.
+ */
+const PINNED_METADATA_CLIENTS: ReadonlyMap<string, PinnedMetadataClient> = new Map([
+  ["https://claude.ai/oauth/mcp-oauth-client-metadata", { clientName: "Claude", redirectUris: ["https://claude.ai/api/mcp/auth_callback"] }],
+  ["https://claude.ai/oauth/claude-code-client-metadata", { clientName: "Claude Code", redirectUris: ["http://localhost/callback", "http://127.0.0.1/callback"] }],
+]);
+
+function pinnedMetadataClient(clientId: string): AssistantClientRow | null {
+  const pinned = PINNED_METADATA_CLIENTS.get(clientId);
+  if (!pinned) return null;
+  return {
+    client_id: clientId,
+    client_name: pinned.clientName,
+    redirect_uris: pinned.redirectUris,
+    kind: "metadata",
+    token_auth_method: "none",
+    secret_hash: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
 /**
  * A client ID metadata document: the client_id is an https address the
  * assistant's maker publishes. Fetched only from public addresses, without
- * following redirects, small and quick, and kept for a day.
+ * following redirects, small and quick, and kept for a day. When the fetch
+ * fails, a copy kept from an earlier live fetch or a pinned entry stands in.
  */
 async function metadataClient(clientId: string, options: AssistantAuthOptions): Promise<AssistantClientRow | string> {
   const cached = await options.db.assistantClient(clientId);
@@ -239,16 +296,29 @@ async function metadataClient(clientId: string, options: AssistantAuthOptions): 
     console.error("[mutinybim-web] an assistant's metadata address didn't resolve", { clientId, err });
     return "The assistant's client_id address couldn't be found.";
   }
+  // The maker's site didn't hand the document over (some refuse fetches from
+  // cloud hosting IPs): use the copy kept from an earlier live fetch, then
+  // the pinned entry for a known assistant, before giving up.
+  const unreachable = (problem: string): AssistantClientRow | string => {
+    if (cached) {
+      console.warn("[mutinybim-web] an assistant's metadata couldn't be refreshed; using the kept copy", { clientId, problem });
+      return cached;
+    }
+    const pinned = pinnedMetadataClient(clientId);
+    if (!pinned) return problem;
+    console.warn("[mutinybim-web] an assistant's metadata couldn't be fetched; using the pinned entry", { clientId, problem });
+    return pinned;
+  };
   let doc: unknown;
   try {
     const response = await (options.fetchImpl ?? fetch)(url.href, { redirect: "error", signal: AbortSignal.timeout(5_000), headers: { accept: "application/json" } });
-    if (!response.ok) return `The assistant's metadata answered ${response.status}.`;
+    if (!response.ok) return unreachable(`The assistant's metadata answered ${response.status}.`);
     const text = await response.text();
     if (text.length > METADATA_DOCUMENT_MAX_BYTES) return "The assistant's metadata is larger than 5 KB.";
     doc = JSON.parse(text);
   } catch (err) {
     console.error("[mutinybim-web] fetching an assistant's metadata failed", { clientId, err });
-    return "The assistant's metadata couldn't be read.";
+    return unreachable("The assistant's metadata couldn't be read.");
   }
   if (typeof doc !== "object" || doc === null) return "The assistant's metadata is not a JSON object.";
   const meta = doc as Record<string, unknown>;
@@ -318,7 +388,9 @@ export async function checkAuthorize(params: URLSearchParams, options: Assistant
   if (typeof found === "string") return { ok: false, show: found };
   if (!found) return { ok: false, show: "This server doesn't know that assistant. Remove MutinyBIM from the assistant and add it again, so it registers afresh." };
   const redirectUri = params.get("redirect_uri") ?? (found.redirect_uris.length === 1 ? found.redirect_uris[0] ?? "" : "");
-  if (!found.redirect_uris.includes(redirectUri)) return { ok: false, show: "The assistant asked to send you back to an address it didn't register, so this was stopped." };
+  if (!redirectUri || redirectUriProblem(redirectUri) !== null || !found.redirect_uris.some((u) => redirectUriMatches(u, redirectUri))) {
+    return { ok: false, show: "The assistant asked to send you back to an address it didn't register, so this was stopped." };
+  }
   const state = params.get("state");
   const back = (error: string, description: string): AuthorizeCheck => ({ ok: false, redirect: errorRedirect(options.origin, redirectUri, state, error, description) });
   if (params.get("response_type") !== "code") return back("unsupported_response_type", "Only response_type=code is offered.");
@@ -418,7 +490,7 @@ export async function exchangeToken(form: URLSearchParams, options: AssistantAut
     if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier) || s256(verifier) !== found.code_challenge) return oauthError(400, "invalid_grant", "The PKCE code_verifier doesn't match.");
     const resource = form.get("resource");
     if (resource !== null && canonicalResource(options.origin, options.families, resource) !== found.resource) return oauthError(400, "invalid_target", "The resource doesn't match the sign-in.");
-    const client = await options.db.assistantClient(clientId);
+    const client = (await options.db.assistantClient(clientId)) ?? pinnedMetadataClient(clientId);
     const tokens = issueTokens();
     await options.db.createAssistantGrant({
       id: randomUUID(),

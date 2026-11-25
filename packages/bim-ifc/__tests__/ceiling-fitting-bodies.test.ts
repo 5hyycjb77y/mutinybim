@@ -168,6 +168,11 @@ describe("exportIfc: a run fitting's body (#59)", () => {
       const body = bodyOf(file, e);
       expect(body.type).toBe("Tessellation");
       expect(body.items.map((i) => i.type)).toEqual(["IFCTRIANGULATEDFACESET"]);
+      // The schema's order: Coordinates, Normals, Closed, CoordIndex, PnIndex. No normals; sheet metal is an open shell.
+      expect(body.items[0]?.args).toHaveLength(5);
+      expect(body.items[0]?.args[1]).toEqual({ kind: "null" });
+      expect(body.items[0]?.args[2]).toEqual({ kind: "enum", value: "F" });
+      expect(body.items[0]?.args[3]?.kind).toBe("list");
       const coords = get(file, ref(body.items[0] ?? e, 0)).args[0];
       const points = coords?.kind === "list" ? coords.items.map((p) => (p.kind === "list" ? p.items.map((t) => (t.kind === "number" ? t.value : NaN)) : [])) : [];
       expect(points.length).toBeGreaterThan(8);

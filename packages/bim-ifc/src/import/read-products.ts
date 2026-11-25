@@ -1,7 +1,7 @@
-import type { ImportGroup, ImportPort, ImportProduct, ImportSource, ImportStorey, ParamValue } from "@permitzip/bim-kernel";
+import { OUTLINE_WITH_HOLES, type ImportGroup, type ImportPort, type ImportProduct, type ImportSource, type ImportStorey, type ParamValue } from "@permitzip/bim-kernel";
 import { readStep, type ReadEntity, type StepFile, type StepToken } from "../read";
-import { ifcEntityName, ownAttributes } from "../schema-ifc4x3";
-import { GeometryReader, apply, boundsOf, compose, hostFrame, type Frame } from "./geometry";
+import { ifcEntityName, isInstantiableEntity, ownAttributes } from "../schema-ifc4x3";
+import { GeometryReader, apply, boundsIn, boundsOf, compose, hostFrame, type Frame } from "./geometry";
 
 /**
  * Read a linked IFC model into the importer's neutral products (round 9
@@ -108,6 +108,20 @@ function siScale(u: ReadEntity): number {
   return prefix ? (per[prefix] ?? 1000) : 1000;
 }
 
+/** A predefined type that says nothing: left out, or NOTDEFINED. */
+const unset = (predefined: string | null): boolean => predefined === null || predefined === "NOTDEFINED";
+
+/** Where a type object's own attributes start: after the shared prefix and its ElementType. */
+const TYPE_OWN_START = 9;
+
+/** The PredefinedType of a product's type object, or null when the type has none (an IFC2X3 style, a property-only type). */
+function typePredefined(type: ReadEntity | undefined): string | null {
+  if (!type || !type.type.endsWith("TYPE")) return null;
+  const name = ifcEntityName(type.type);
+  const i = name ? ownAttributes(name).indexOf("PredefinedType") : -1;
+  return i >= 0 ? enumOf(type.args[TYPE_OWN_START + i]) : null;
+}
+
 /** The attribute index of a named own attribute after the 8-attribute element prefix (null when the entity doesn't have it). */
 function ownIndex(entity: string, name: string): number | null {
   // Only element entities share the 8-attribute prefix; a space or a grid doesn't.
@@ -163,7 +177,12 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
   const psetsOf = new Map<number, number[]>();
   for (const r of all("IFCRELDEFINESBYPROPERTIES")) for (const o of refs(r.args[4])) psetsOf.set(o, [...(psetsOf.get(o) ?? []), ...refs(r.args[5])]);
   const voidHost = new Map<number, number>();
-  for (const r of all("IFCRELVOIDSELEMENT")) voidHost.set(refs(r.args[5])[0] ?? -1, refs(r.args[4])[0] ?? -1);
+  const openingsIn = new Map<number, number>();
+  for (const r of all("IFCRELVOIDSELEMENT")) {
+    const host = refs(r.args[4])[0] ?? -1;
+    voidHost.set(refs(r.args[5])[0] ?? -1, host);
+    openingsIn.set(host, (openingsIn.get(host) ?? 0) + 1);
+  }
   const filledHost = new Map<number, number>();
   for (const r of all("IFCRELFILLSELEMENT")) {
     const opening = refs(r.args[4])[0] ?? -1;
@@ -237,18 +256,42 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
   };
 
   const products: ImportProduct[] = [];
-  const unreadable = new Map<string, { entity: string; count: number; reason: string }>();
+  const unreadable: ImportSource["unreadable"][number][] = [];
+  const shapeless = new Map<string, number>();
   let seen = 0;
   for (const e of file.entities.values()) {
     if (NOT_PRODUCTS.has(e.type) || groupIds.has(e.id)) continue;
-    const placementRef = e.args[5];
-    if (placementRef?.kind !== "ref" || !PLACEMENTS.has(file.entities.get(placementRef.id)?.type ?? "")) continue;
     const sourceId = globalIdOf(e);
     if (!sourceId) continue;
-    if (++seen % 2000 === 0 && opts.isCancelled?.()) throw new IfcReadCancelled();
+    const placementRef = e.args[5];
+    const placement = placementRef?.kind === "ref" ? file.entities.get(placementRef.id) : undefined;
+    const placed = placement !== undefined && PLACEMENTS.has(placement.type);
     const entity = schemaEntity(e.type);
-    const frame = world(placementRef);
+    // Without a placement, distinguish product occurrences from types, relationships and properties.
+    if (!placed && entity !== "IfcSpace" && entity !== "IfcGrid" && (entity.endsWith("Type") || !isInstantiableEntity(entity))) continue;
+    if (++seen % 2000 === 0 && opts.isCancelled?.()) throw new IfcReadCancelled();
+    const spatial = e.type === "IFCSPACE";
     const type = typeOf.get(e.id);
+    const predefinedIndex = spatial ? 9 : ownIndex(entity, "PredefinedType");
+    // What a product is may be said once, on its type: its own PredefinedType wins, and the type's fills in when it is unset.
+    const own = predefinedIndex !== null ? enumOf(e.args[predefinedIndex]) : null;
+    const typed = unset(own) ? typePredefined(type) : null;
+    const predefinedType = unset(typed) ? own : typed;
+    // A user-defined kind named on the type is named in the type's ElementType.
+    const objectType = str(e.args[4]) ?? (typed === "USERDEFINED" ? str(type?.args[TYPE_OWN_START - 1]) : null);
+    const name = str(e.args[2]);
+    if (!placed) {
+      const label = name ? `${name} (${sourceId})` : sourceId;
+      let reason = `${label} has no placement reference in the file`;
+      if (placementRef?.kind === "ref") {
+        reason = placement
+          ? `${label} refers to #${placementRef.id}, which is not a placement`
+          : `the placement of ${label} refers to #${placementRef.id}, which is missing from the file`;
+      }
+      unreadable.push({ entity, count: 1, reason, classHint: { predefinedType, objectType } });
+      continue;
+    }
+    const frame = world(placementRef);
     const shape = geo.readShape(e.args[6], frame);
     if (shape.extrusions.length === 0 && shape.points.length === 0 && type) {
       // No shape of its own: its type's representation maps, placed at the product.
@@ -257,17 +300,13 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
         if (map) geo.readRepresentation(map.args[1], compose(frame, geo.axis2(map.args[0])), shape);
       }
     }
-    if (placementRef && file.entities.get(placementRef.id)?.type !== "IFCLOCALPLACEMENT") shape.unread ??= "placed on a grid or alignment";
+    const local = placement.type === "IFCLOCALPLACEMENT";
+    if (!local) shape.unread ??= "placed on a grid or alignment";
     const hasShape = shape.extrusions.length > 0 || shape.points.length > 0;
     if (!hasShape && e.args[6]?.kind !== "ref") {
-      const key = entity;
-      const u = unreadable.get(key) ?? { entity, count: 0, reason: "it has no shape of its own (its parts may come in on their own)" };
-      u.count += 1;
-      unreadable.set(key, u);
+      shapeless.set(entity, (shapeless.get(entity) ?? 0) + 1);
       continue;
     }
-    const spatial = e.type === "IFCSPACE";
-    const predefinedIndex = spatial ? 9 : ownIndex(entity, "PredefinedType");
     const widthIndex = ownIndex(entity, "OverallWidth");
     const heightIndex = ownIndex(entity, "OverallHeight");
     const ports: ImportPort[] = (portsOf.get(e.id) ?? []).flatMap((pid) => {
@@ -278,20 +317,23 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
       return [{ id, name: str(port.args[2]), position: at, flow: enumOf(port.args[7]), connectedTo: (joined.get(pid) ?? []).flatMap((j) => gid(j) ?? []) }];
     });
     const hostId = filledHost.get(e.id);
+    const openings = openingsIn.get(e.id) ?? 0;
     products.push({
       sourceId,
       entity,
-      predefinedType: predefinedIndex !== null ? enumOf(e.args[predefinedIndex]) : null,
-      objectType: str(e.args[4]),
-      name: str(e.args[2]),
+      predefinedType,
+      objectType,
+      name,
       longName: spatial ? str(e.args[7]) : null,
       tag: spatial ? null : str(e.args[7]),
       storeyId: storeyOf(e.id),
       typeId: type ? globalIdOf(type) : null,
       typeName: type ? str(type.args[2]) : null,
       hostId: hostId !== undefined ? gid(hostId) : null,
+      ...(openings > 0 ? { openings } : {}),
       groupIds: groupsOf.get(e.id) ?? [],
-      geometry: { extrusions: shape.extrusions, bounds: boundsOf(shape.points), unread: shape.unread },
+      geometry: { extrusions: shape.extrusions, bounds: boundsOf(shape.points), unread: shape.unread ?? (shape.holed ? OUTLINE_WITH_HOLES : null) },
+      placement: local ? { origin: frame.o, xAxis: frame.x, zAxis: frame.z, bounds: boundsIn(frame, shape.points) } : null,
       properties: properties(e.id, type),
       overall: {
         width: widthIndex !== null ? numberOf(e.args[widthIndex], scale) : null,
@@ -301,7 +343,8 @@ export function readIfcSource(text: string, opts: IfcReadOptions): ImportSource 
       ports,
     });
   }
-  return { id: opts.sourceId, label: opts.label, disciplines: opts.disciplines, storeys, groups, products, unreadable: [...unreadable.values()] };
+  for (const [entity, count] of shapeless) unreadable.push({ entity, count, reason: "it has no shape of its own (its parts may come in on their own)" });
+  return { id: opts.sourceId, label: opts.label, disciplines: opts.disciplines, storeys, groups, products, unreadable };
 }
 
 function numberOf(t: StepToken | undefined, scale: number): number | null {

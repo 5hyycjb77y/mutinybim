@@ -9,11 +9,29 @@
  * Fails on round 8b's code: there was no import and no report.
  */
 import { importIfc } from "../src";
-import { architectureAndStructure, hostModel, mechanicalAndSprinkler } from "./i9-fixtures";
+import { architectureAndStructure, hostModel, IfcText, mechanicalAndSprinkler } from "./i9-fixtures";
 
 const opts = (label: string, disciplines: readonly string[]) => ({ model: hostModel(), referenceId: "ref", sourceKey: "v1", sourceId: "ver-1", label, disciplines });
 
 describe("i9-report", () => {
+  it("identifies unplaced walls by name and GlobalId and leaves type definitions out of the count", () => {
+    const file = IfcText.start();
+    const point = file.pt(0, 0, 0);
+    const named = "00000000000000000000AA";
+    const unnamed = "00000000000000000000BB";
+    file.add("IFCWALL", `'${named}',$,'West stair wall',$,$,$,$,$,.STANDARD.`);
+    file.add("IFCWALLSTANDARDCASE", `'${unnamed}',$,$,$,$,#${point},$,$,.STANDARD.`);
+    file.add("IFCWALLTYPE", `${file.guid()},$,'Wall type',$,$,$,$,$,$,.STANDARD.`);
+
+    const { report } = importIfc(file.text(), opts("Shell", ["architecture"]));
+    expect(report).toMatchObject({ converted: 0, stayLinked: 2, classes: [{
+      classId: "arch.wall", linked: expect.arrayContaining([
+        { count: 1, reason: expect.stringContaining(`West stair wall (${named}) has no placement`) },
+        { count: 1, reason: expect.stringContaining(`${unnamed} refers to #${point}, which is not a placement`) },
+      ]),
+    }] });
+  });
+
   it("one sentence of what converted and what stays linked", () => {
     const plan = importIfc(architectureAndStructure().text, opts("Main St shell", ["architecture", "structure"]));
     // Round 14: the Architecture add-on's import rules bring the roof and the stair in (a14-ifc-import-roof-stair).

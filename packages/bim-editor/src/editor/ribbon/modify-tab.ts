@@ -252,18 +252,6 @@ function clipboardCommands(ctx: BuildingModelRibbonContext): RibbonCommand[] {
   ]
 }
 
-/** Mirror ▾: Draw Axis on the face, Pick Axis in the arrow menu. */
-function mirrorCommand(ctx: BuildingModelRibbonContext): RibbonCommand {
-  const face = draftOp(ctx, 'mirror')
-  return { ...face, id: 'draft-mirror-menu', split: true, children: [face, draftOp(ctx, 'mirror_pick')], testId: 'ribbon-draft-mirror' }
-}
-
-/** Fillet / Chamfer ▾: Fillet Arc on the face, Chamfer in the arrow menu. */
-function filletChamferCommand(ctx: BuildingModelRibbonContext): RibbonCommand {
-  const face = draftOp(ctx, 'fillet_arc')
-  return { ...face, id: 'draft-fillet-chamfer', split: true, children: [face, draftOp(ctx, 'chamfer')], testId: 'ribbon-draft-fillet-arc' }
-}
-
 /** The Modify, Geometry and Edit groups (shared by the Modify tab and the drawn-items tab). `modelToolReason` is why model tools are off here, if they are. */
 export function modifyGroups(ctx: BuildingModelRibbonContext, modelToolReason: string | null): RibbonGroup[] {
   return [
@@ -275,11 +263,18 @@ export function modifyGroups(ctx: BuildingModelRibbonContext, modelToolReason: s
         move(ctx),
         draftOp(ctx, 'copy'),
         rotate(ctx),
-        mirrorCommand(ctx),
-        { id: 'draft-modify-more', label: 'More', icon: MoreHorizontal, description: ctx.clipboard ? 'Copy and paste parts, scale, align, match type and arrays' : 'Scale, align, match type and arrays', children: [...clipboardCommands(ctx), draftOp(ctx, 'match_type'), draftOp(ctx, 'scale'), draftOp(ctx, 'align'), draftOp(ctx, 'array'), draftOp(ctx, 'polar_array')], testId: 'ribbon-draft-modify-more' },
+        draftOp(ctx, 'mirror'),
+        {
+          id: 'draft-modify-more',
+          label: 'More',
+          icon: MoreHorizontal,
+          description: ctx.clipboard ? 'Copy and paste parts, mirror by line, chamfer, scale, align, match type and arrays' : 'Mirror by line, chamfer, scale, align, match type and arrays',
+          children: [...clipboardCommands(ctx), draftOp(ctx, 'mirror_pick'), draftOp(ctx, 'chamfer'), draftOp(ctx, 'match_type'), draftOp(ctx, 'scale'), draftOp(ctx, 'align'), draftOp(ctx, 'array'), draftOp(ctx, 'polar_array')],
+          testId: 'ribbon-draft-modify-more',
+        },
       ],
     },
-    { id: 'geometry', label: 'Geometry', shared: true, commands: [draftOp(ctx, 'offset'), trimExtend(ctx), split(ctx), filletChamferCommand(ctx)] },
+    { id: 'geometry', label: 'Geometry', shared: true, commands: [draftOp(ctx, 'offset'), trimExtend(ctx), split(ctx), draftOp(ctx, 'fillet_arc')] },
     { id: 'edit', label: 'Edit', shared: true, commands: [deleteCommand(ctx), pinCommand(ctx), measure(ctx, modelToolReason)] },
   ]
 }
