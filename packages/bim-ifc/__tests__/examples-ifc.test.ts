@@ -233,6 +233,67 @@ describe("electrical-room", () => {
     expect(ofType(file, "IFCSIUNIT").some((unit) => text(unit, 1) === "ELECTRICCURRENTUNIT" && text(unit, 3) === "AMPERE")).toBe(true);
   });
 
+  /** The MutinyBIM_Circuit property named `name` on a circuit, as the STEP entity. */
+  const circuitProperty = (f: StepFile, circuit: ReadEntity, name: string): ReadEntity | undefined => {
+    const set = ofType(f, "IFCRELDEFINESBYPROPERTIES").filter((rel) => refs(rel, 4).includes(circuit.id))
+      .map((rel) => get(f, ref(rel, 5))).find((entry) => text(entry, 2) === "MutinyBIM_Circuit");
+    if (!set) throw new Error("Missing circuit properties");
+    return refs(set, 4).map((id) => get(f, id)).find((entry) => text(entry, 0) === name);
+  };
+
+  it("names each circuit's source by the board's GlobalId, and the port that feeds it", () => {
+    const circuits = ofType(file, "IFCDISTRIBUTIONCIRCUIT");
+    expect(circuits).toHaveLength(2);
+    const globalId = text(board, 0);
+    expect(globalId).toMatch(/^[0-3][0-9A-Za-z_$]{21}$/);
+    for (const circuit of circuits) {
+      expect(circuitProperty(file, circuit, "Source")?.args[2]).toEqual({ kind: "typed", type: "IFCLABEL", value: { kind: "string", value: globalId } });
+      expect(circuitProperty(file, circuit, "SourcePort")?.args[2]).toEqual({ kind: "typed", type: "IFCLABEL", value: { kind: "string", value: "bus" } });
+      // The value finds exactly one entity in the file: the board, which is also in the circuit's group.
+      const source = psets(file, circuit).MutinyBIM_Circuit?.Source;
+      const found = [...file.entities.values()].filter((e) => text(e, 0) === source && e.args[1]?.kind !== "string");
+      expect(found.map((e) => e.id)).toEqual([board.id]);
+      expect(related(file, "IFCRELASSIGNSTOGROUP", 6, 4, circuit.id)).toContain(board.id);
+    }
+  });
+
+  it("leaves out the source and its port when the source is not in the file", async () => {
+    const model = await build(electricalRoom);
+    const panel = Object.values(model.elements).find((e) => e.kind === "part" && e.mark === "LP-1");
+    if (!panel) throw new Error("no LP-1");
+    const elements = Object.fromEntries(Object.entries(model.elements).filter(([id]) => id !== panel.id));
+    const output = exported({ ...model, elements });
+    expect(ofType(output, "IFCELECTRICDISTRIBUTIONBOARD")).toHaveLength(0);
+    const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
+    expect(circuits).toHaveLength(2);
+    for (const circuit of circuits) {
+      const set = psets(output, circuit).MutinyBIM_Circuit ?? {};
+      expect(set).toMatchObject({ Role: "branch", Adapter: "electrical" });
+      expect(Object.keys(set)).not.toContain("Source");
+      expect(Object.keys(set)).not.toContain("SourcePort");
+    }
+  });
+
+  it("a stored circuit with no source port still exports, with the source and no port", async () => {
+    const model = await build(electricalRoom);
+    const elements = Object.fromEntries(
+      Object.entries(model.elements).map(([id, e]) => {
+        const source: unknown = Reflect.get(e, "source");
+        if (e.kind !== "service_link" || !source || typeof source !== "object") return [id, e];
+        const { port: _port, ...rest } = source as Record<string, unknown>;
+        return [id, { ...e, source: rest }];
+      }),
+    ) as typeof model.elements;
+    const output = exported({ ...model, elements });
+    const circuits = ofType(output, "IFCDISTRIBUTIONCIRCUIT");
+    expect(circuits).toHaveLength(2);
+    for (const circuit of circuits) {
+      const set = psets(output, circuit).MutinyBIM_Circuit ?? {};
+      expect(Object.keys(set)).toContain("Source");
+      expect(Object.keys(set)).not.toContain("SourcePort");
+    }
+  });
+
   it("writes one circuit per room, each grouping the board, and every outlet in one", () => {
     const circuits = ofType(file, "IFCDISTRIBUTIONCIRCUIT");
     expect(circuits.map((c) => text(c, 2)).sort()).toEqual(["Bedroom receptacles", "Living room receptacles"]);
