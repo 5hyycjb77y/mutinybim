@@ -241,7 +241,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const templates = documents.viewTemplates(ctx);
-    ctx.report({ count: templates.length, names: templates.map((t) => t.name) });
+    ctx.report("View templates", { count: templates.length, names: templates.map((t) => t.name) });
   },
 });
 ```
@@ -1189,7 +1189,7 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     const sets = documents.listStandardNoteSets("electrical");
-    ctx.report({ sets: sets.map((s) => s.id) });
+    ctx.report("Standard note sets", { sets: sets.map((s) => s.id) });
   },
 });
 ```

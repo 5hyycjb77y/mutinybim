@@ -702,7 +702,7 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "documents.viewTemplates",
     summary: "Lists all active view templates in the model with their locks, applicable view types, library source id, and bound view ids.",
     signature: "viewTemplates(ctx: ScriptContext): readonly ViewTemplateSummary[]",
-    example: layout(`    const templates = documents.viewTemplates(ctx);\n    ctx.report({ count: templates.length, names: templates.map((t) => t.name) });`),
+    example: layout(`    const templates = documents.viewTemplates(ctx);\n    ctx.report("View templates", { count: templates.length, names: templates.map((t) => t.name) });`),
     topics: ["view template", "list templates", "audit view"],
   },
   {
@@ -982,14 +982,14 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "electrical.removeDisconnect",
     summary: "Removes an inline local disconnect switch feeding a piece of equipment and restores direct feed from its upstream panel circuit (preserving breaker positions and ratings).",
     signature: "removeDisconnect(ctx: ScriptContext, equipmentRef: PlacedPart | string): { removedDisconnectId: string; restoredLinkId: string | null }",
-    example: layout(`${WALLS}\n    const hp = equipment.place(ctx, { level: "L1", type: "builtin:panelboard-225-480@1", at: { x: units.ft(2), y: units.ft(2) }, mark: "HP-1" });\n    const rtu = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5ton@1", at: { x: units.ft(20), y: units.ft(10) }, mark: "RTU-1" });\n    ctx.edit({ type: "create_service_link", linkId: "ckt-rtu", sourceId: hp.id, positions: [1, 3, 5], members: [{ elementId: rtu.id }], electrical: { ratingA: 40 } });\n    electrical.insertDisconnect(ctx, rtu, { ratingA: 60 });\n    electrical.removeDisconnect(ctx, rtu);`),
+    example: layout(`${WALLS}\n    const hp = equipment.place(ctx, { level: "L1", type: "builtin:panelboard-225-480@1", at: { x: units.ft(2), y: units.ft(2) }, mark: "HP-1" });\n    const rtu = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5-ton@1", at: { x: units.ft(20), y: units.ft(10) }, mark: "RTU-1" });\n    ctx.edit({ type: "create_service_link", linkId: "ckt-rtu", sourceId: hp.id, positions: [1, 3, 5], members: [{ elementId: rtu.id }], electrical: { ratingA: 40 } });\n    electrical.insertDisconnect(ctx, rtu, { ratingA: 60 });\n    electrical.removeDisconnect(ctx, rtu);`),
     topics: ["disconnect", "remove disconnect", "direct feed", "equipment connection", "bypass disconnect"],
   },
   {
     name: "electrical.setDisconnectRequirement",
     summary: "Marks whether a piece of equipment requires a local disconnect switch (set required: false for integral factory disconnects or lockable breakers per NEC 430.102(B) Exception to silence equipment-missing-disconnect warnings).",
     signature: "setDisconnectRequirement(ctx: ScriptContext, equipmentRef: PlacedPart | string, required: boolean, reason?: string): { equipmentId: string; disconnectRequired: boolean }",
-    example: layout(`${WALLS}\n    const ef = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5ton@1", at: { x: units.ft(12), y: units.ft(8) }, mark: "EF-1" });\n    electrical.setDisconnectRequirement(ctx, ef, false, "Factory integral disconnect");`),
+    example: layout(`${WALLS}\n    const ef = equipment.place(ctx, { level: "L1", type: "builtin:rtu-5-ton@1", at: { x: units.ft(12), y: units.ft(8) }, mark: "EF-1" });\n    electrical.setDisconnectRequirement(ctx, ef, false, "Factory integral disconnect");`),
     topics: ["disconnect", "disconnect not required", "exempt", "integral disconnect", "lockable breaker", "nec 440.14", "nec 430.102"],
   },
   {
@@ -1003,7 +1003,7 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     name: "documents.listStandardNoteSets",
     summary: "Lists reusable discipline general-notes and specification sets (electrical-general, electrical-demolition, mechanical-general, plumbing-general, fire-protection-general, architectural-general, structural-steel-concrete) so scripts pull standard notes instead of regenerating boilerplate.",
     signature: "listStandardNoteSets(discipline?: string): readonly StandardNoteSetSummary[]",
-    example: layout(`    const sets = documents.listStandardNoteSets("electrical");\n    ctx.report({ sets: sets.map((s) => s.id) });`, "{ ids: [] }"),
+    example: layout(`    const sets = documents.listStandardNoteSets("electrical");\n    ctx.report("Standard note sets", { sets: sets.map((s) => s.id) });`, "{ ids: [] }"),
     topics: ["general notes", "standard notes", "spec library", "boilerplate", "sheet notes"],
   },
   {

@@ -268,7 +268,12 @@ const disconnectRules: readonly RuleDef[] = [
       const hasPower = type.definition.connectors.some((c) => c.domain === "electrical");
       if (!hasPower) return;
       // Engineer explicitly marked equipment as exempt (integral factory disconnect or lockable breaker per NEC 430.102(B) Ex.)
-      if (el.values.disconnect_required === false || el.values.local_disconnect === "not_required") return;
+      if (
+        el.values["electrical.disconnect_required"] === false ||
+        el.values["electrical.local_disconnect"] === "not_required" ||
+        el.values.disconnect_required === false ||
+        el.values.local_disconnect === "not_required"
+      ) return;
       const link = Object.values(ctx.model.elements).find(
         (cand) =>
           cand.kind === "service_link" &&
