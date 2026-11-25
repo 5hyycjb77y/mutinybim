@@ -391,3 +391,30 @@ export function boundsOf(points: readonly ImportPoint[]): { min: ImportPoint; ma
   }
   return { min, max };
 }
+
+/**
+ * The box of host-frame points as `frame` sees them: from its origin, along
+ * its own axes (`apply` undone; a frame's axes are unit vectors at right
+ * angles). One pass and no second list of points, since a mesh has many.
+ */
+export function boundsIn(frame: Frame, points: readonly ImportPoint[]): { min: ImportPoint; max: ImportPoint } | null {
+  if (points.length === 0) return null;
+  const { o, x: ax, y: ay, z: az } = frame;
+  const min = { x: Infinity, y: Infinity, z: Infinity };
+  const max = { x: -Infinity, y: -Infinity, z: -Infinity };
+  for (const p of points) {
+    const dx = p.x - o.x;
+    const dy = p.y - o.y;
+    const dz = p.z - o.z;
+    const x = ax.x * dx + ax.y * dy + ax.z * dz;
+    const y = ay.x * dx + ay.y * dy + ay.z * dz;
+    const z = az.x * dx + az.y * dy + az.z * dz;
+    min.x = Math.min(min.x, x);
+    min.y = Math.min(min.y, y);
+    min.z = Math.min(min.z, z);
+    max.x = Math.max(max.x, x);
+    max.y = Math.max(max.y, y);
+    max.z = Math.max(max.z, z);
+  }
+  return { min, max };
+}

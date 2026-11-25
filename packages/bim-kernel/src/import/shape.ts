@@ -155,7 +155,7 @@ function dedupe(points: readonly Vec2[]): Vec2[] {
   return out;
 }
 
-/** Round a plan point to 0.1 mm, as kernel commands do. */
+/** Round a plan point to 0.1 mm, as kernel commands do (never `-0`). */
 export function roundPlan(p: Vec2): Vec2 {
-  return { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 };
+  return { x: Math.round(p.x * 10) / 10 + 0, y: Math.round(p.y * 10) / 10 + 0 };
 }

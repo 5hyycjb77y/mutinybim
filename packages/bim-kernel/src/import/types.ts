@@ -49,6 +49,21 @@ export interface ImportGeometry {
   readonly unread: string | null;
 }
 
+/**
+ * Where the file puts a product: its own origin and axes in the host frame,
+ * and its shape's box measured along them. A part is placed by a point and a
+ * turn, so a rule that writes one reads them here instead of guessing them
+ * from the world box.
+ */
+export interface ImportPlacement {
+  readonly origin: ImportPoint;
+  /** Unit vectors along its own x and z axes (its y is z cross x). */
+  readonly xAxis: ImportPoint;
+  readonly zAxis: ImportPoint;
+  /** The box of everything read of its shape, from `origin` along its own axes. Null: no shape it could read. */
+  readonly bounds: { readonly min: ImportPoint; readonly max: ImportPoint } | null;
+}
+
 /** A connection point on a product (an IFC port), for the report and for joins. */
 export interface ImportPort {
   readonly id: string;
@@ -82,6 +97,8 @@ export interface ImportProduct {
   /** Groups it is assigned to (distribution systems), by `sourceId`. */
   readonly groupIds: readonly string[];
   readonly geometry: ImportGeometry;
+  /** Its own placement. Absent or null: the reader can't say (placed on a grid or an alignment). */
+  readonly placement?: ImportPlacement | null;
   /** Property and quantity sets, by set name then property name. */
   readonly properties: Readonly<Record<string, Readonly<Record<string, ParamValue>>>>;
   /** Overall width and height the file states (doors and windows carry them). */
