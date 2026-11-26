@@ -112,7 +112,7 @@ export function nativeBrowserRoutes(sql: Sql, env: NodeJS.ProcessEnv, local: boo
       stage = "origin";
       return reject(403, `Open the editor at ${origin} to sign in.`, "Editor origin differs", { expected: origin, received: receivedOrigin(req.headers.origin) });
     }
-    if (req.method !== "POST" || req.headers["content-type"] !== "application/json") {
+    if (req.method !== "POST" || req.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       return reject(403, "Open sign-in from the editor.", "Expected a JSON POST");
     }
     let claimed: ClaimedSignIn | undefined;

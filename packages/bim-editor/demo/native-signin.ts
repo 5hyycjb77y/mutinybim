@@ -17,7 +17,23 @@ async function post(path: string, fields: object) {
 
 function pending(): PendingSignIn | null {
   const value = sessionStorage.getItem(pendingKey)
-  return value ? JSON.parse(value) : null
+  if (!value) return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Record<string, unknown>).id === 'string' &&
+      typeof (parsed as Record<string, unknown>).state === 'string' &&
+      typeof (parsed as Record<string, unknown>).target === 'string'
+    ) {
+      return parsed as PendingSignIn
+    }
+  } catch {
+    // Malformed sessionStorage state is cleared below so sign-in can recover cleanly.
+  }
+  sessionStorage.removeItem(pendingKey)
+  return null
 }
 
 // Capture the callback before loading configuration. Never send the code as a referrer or keep it in history.

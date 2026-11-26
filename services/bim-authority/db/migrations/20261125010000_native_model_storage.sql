@@ -197,6 +197,7 @@ revoke all on function bim.native_authority_immutable() from public;
 do $$ begin
   if exists(select 1 from bim.installation where id and mode='hosted')
      and exists(select 1 from pg_roles where rolname='service_role') then
+    grant select on table bim.installation to service_role;
     grant select,insert,update,delete on bim.people, bim.person_identities,
       bim.legacy_identity_mappings, bim.model_authority, bim.model_members to service_role;
   end if;

@@ -177,3 +177,10 @@ it.each(["", cookie + "; " + cookie])("requires exactly one binding cookie for t
   expect(PgNativeSessionStore.prototype.completeSignIn).not.toHaveBeenCalled();
   failure("claim");
 });
+
+it("accepts application/json content-type with charset parameters", async () => {
+  await mount();
+  const response = await post("start", { "content-type": "Application/JSON; charset=utf-8" });
+  expect(response.status).toBe(200);
+  expect(PgNativeSessionStore.prototype.startSignIn).toHaveBeenCalledTimes(1);
+});
