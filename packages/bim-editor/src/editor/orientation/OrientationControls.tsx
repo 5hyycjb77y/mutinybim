@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Home, LayoutTemplate, Scan } from 'lucide-react'
+import { Camera, ChevronDown, Home, LayoutTemplate, Scan } from 'lucide-react'
 import type { ModelViewer3D } from '@permitzip/bim-viewer-3d'
 import {
   isElevationSide,
@@ -58,6 +58,8 @@ interface Props {
   readonly trueNorthDeg: number
   readonly projection: Projection
   readonly onProjectionChange: (projection: Projection) => void
+  readonly onCameraTools?: () => void
+  readonly cameraToolsOpen?: boolean
 }
 
 export const PROJECTION_LABEL: Record<Projection, string> = { perspective: 'Perspective', orthographic: 'Orthographic' }
@@ -69,7 +71,7 @@ export const otherProjection = (p: Projection): Projection => (p === 'orthograph
  * true north, and a menu that lists every preset view. When the camera sits
  * square on the top or a side, it offers to save that as a plan or elevation.
  */
-export function OrientationControls({ viewer, rightInset, canCreateViews, blockedReason, onCreatePlan, onCreateElevation, trueNorthDeg, projection, onProjectionChange }: Props) {
+export function OrientationControls({ viewer, rightInset, canCreateViews, blockedReason, onCreatePlan, onCreateElevation, trueNorthDeg, projection, onProjectionChange, onCameraTools, cameraToolsOpen }: Props) {
   const dialRef = useRef<HTMLSpanElement | null>(null)
   const [squareOn, setSquareOn] = useState<Side | null>(null)
   const [available, setAvailable] = useState(true)
@@ -125,6 +127,12 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
     >
       <OrientationBall viewer={viewer} />
       <div className="flex items-center gap-1 rounded-md border bg-background/95 p-0.5 shadow-sm" role="toolbar" aria-label="View orientation">
+        {onCameraTools && <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="Camera tools" aria-expanded={cameraToolsOpen} onClick={onCameraTools}><Camera /></Button>
+          </TooltipTrigger>
+          <TooltipContent>Camera tools</TooltipContent>
+        </Tooltip>}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" aria-label="Home view" data-testid="orientation-home" onClick={() => void viewer.frame().catch((err: unknown) => console.error('[OrientationControls] home failed', err))}>

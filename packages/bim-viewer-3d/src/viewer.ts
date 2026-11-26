@@ -7,7 +7,7 @@
 import * as THREE from "three";
 import CameraControls from "camera-controls";
 import { FragmentsModels, type FragmentsModel } from "@thatopen/fragments";
-import { asElementId, elementEntries, type Aabb3, type CropBox3d, type CropFace, type DisplayContext, type ElementId, type ModelState, type RouteJoin, type View3dCamera, findLevelByName, normalizeLevelName } from "@permitzip/bim-kernel";
+import { asElementId, elementEntries, type Aabb3, type CropBox3d, type CropFace, type DisplayContext, type ElementId, type ModelState, type Point3, type RouteJoin, type View3dCamera, findLevelByName, normalizeLevelName, samePoint } from "@permitzip/bim-kernel";
 import { liveDisplayOf, liveViewRangeExcludes, type CategoryView } from "./live-display";
 import { livePlanSymbols, symbolPositions, type LivePlanText } from "./live-plan-graphics";
 import { buildScalarHeatmapGroup, type ScalarHeatmapOverlay } from "./scalar-heatmap";
@@ -39,6 +39,7 @@ import {
 import { ViewerPalette, type ViewerColors } from "./viewer-colors";
 import { matchCamera, orthoZoomFor, type Projection, type ViewCamera } from "./projection";
 import { makeCameraControls, pinOrbitPoint, zoomFloorFor, type PointZoomControls, type ZoomAnchorQuery } from "./navigation";
+import { cameraRouteGuide } from "./camera-route-guide";
 import { NORMAL_REFERENCE_TONE, PICK_HIGHLIGHT_ID, baseMaterials, overlayMaterial, referenceMayWinPick, sameReferenceTone, toneMaterial, type ReferenceTone } from "./reference-tone";
 import { NO_INSETS, planFit, type FrameInsets } from "./plan-fit";
 import { CropBoxOutline, cropBoxScenePlanes, faceDragOffsetMm, gripsOnScreen, keptByPlanes, type GripOnScreen } from "./crop-box";
@@ -370,6 +371,7 @@ export class ModelViewer3D {
   private readonly cropOutline: CropBoxOutline;
   private readonly cameraListeners = new Set<() => void>();
   private readonly cameraSettledListeners = new Set<() => void>();
+  private endCameraMotion: (() => void) | null = null;
   private fovDirty = false;
   private readonly pointerClaims = new Set<symbol>();
   private selected: Pick | null = null;
@@ -573,6 +575,7 @@ export class ModelViewer3D {
     });
     // "sleep": the first frame with no movement after moving (a zoom or orbit has eased out, or an instant move landed).
     controls.addEventListener("sleep", () => {
+      if (this.endCameraMotion) return;
       for (const listener of this.cameraSettledListeners) listener();
     });
     return controls;
@@ -1390,6 +1393,7 @@ export class ModelViewer3D {
    */
   setMode(mode: ViewMode, cutElevationMm?: number) {
     if (mode === this.mode) return;
+    this.endCameraMotion?.();
     const target = new THREE.Vector3();
     this.controls.getTarget(target);
     const enabled = this.controls.enabled;
@@ -1562,6 +1566,8 @@ export class ModelViewer3D {
    * In plan it is remembered for the next 3D view.
    */
   setProjection(projection: Projection) {
+    if (projection === this.projection) return;
+    this.endCameraMotion?.();
     if (projection === this.projection) return;
     const from = this.camera3d();
     this.projection = projection;
@@ -1931,6 +1937,45 @@ export class ModelViewer3D {
     const k = (v: THREE.Vector3) => ({ x: v.x / MM, y: -v.z / MM, z: v.y / MM });
     const ortho = this.orthoView;
     return { eye: k(camera.position), target: k(ahead), up: { x: 0, y: 0, z: 1 }, fovDeg: this.perspective.fov, orthoHeightMm: (ortho.top - ortho.bottom) / ortho.zoom / MM };
+  }
+
+  /** Drive the live camera in kernel mm. Ordinary camera updates stream fragments during playback. */
+  beginCameraMotion(route?: readonly Point3[]) {
+    if (this.disposed || this.mode === "plan" || this.pointerClaimed() || !this.controls.enabled || this.endCameraMotion) return null;
+    const previous = this.projection;
+    this.setProjection("perspective");
+    const controls = this.controls;
+    controls.stop();
+    controls.clearFallbackPivot();
+    controls.clearPassThrough();
+    this.emitPassThrough(false);
+    controls.setFocalOffset(0, 0, 0, false);
+    const releasePointer = this.claimPointer("Camera tools");
+    const guide = route?.length ? cameraRouteGuide(this.scene, route, this.palette.css("selection")) : null;
+    let lastPose: { eye: Point3; target: Point3 } | null = null;
+    const release = () => {
+      if (this.endCameraMotion !== release) return;
+      this.endCameraMotion = null;
+      guide?.dispose();
+      releasePointer();
+      if (this.disposed || this.controls !== controls) return;
+      this.setProjection(previous);
+      for (const listener of this.cameraSettledListeners) listener();
+    };
+    this.endCameraMotion = release;
+    return {
+      look: ({ eye, target }: { eye: Point3; target: Point3 }) => {
+        if (this.endCameraMotion !== release) return false;
+        if (lastPose && samePoint(eye, lastPose.eye, 0) && samePoint(target, lastPose.target, 0)) return true;
+        lastPose = { eye, target };
+        guide?.move(target);
+        this.orbitPointPinned = true;
+        void controls.setLookAt(...kernelToScene(eye.x, eye.y, eye.z), ...kernelToScene(target.x, target.y, target.z), false);
+        controls.update(0);
+        return true;
+      },
+      release,
+    };
   }
 
   /** Where the plan camera looks and how far it is zoomed; null outside plan. `setPlanCamera` puts it back. */
@@ -2738,6 +2783,7 @@ export class ModelViewer3D {
       this.planFootprintsIdle = null;
     }
     this.disposed = true;
+    this.endCameraMotion?.();
     this.surfacePicker.dispose();
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();
