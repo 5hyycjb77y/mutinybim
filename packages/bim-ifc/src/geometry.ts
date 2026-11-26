@@ -72,6 +72,37 @@ export class GeometryWriter {
     return this.axis(origin, { x: 0, y: 0, z: 1 }, { x: Math.cos(a), y: Math.sin(a), z: 0 });
   }
 
+  /** One IfcDirection per distinct unit vector (to 1e-9), for the many frames that face the same few ways. */
+  private readonly unitDirections = new Map<string, StepRef>();
+
+  private unitDirection(v: Vec3): StepRef {
+    const r = (n: number) => Math.round(n * 1e9) / 1e9 + 0;
+    const d = { x: r(v.x), y: r(v.y), z: r(v.z) };
+    const key = `${d.x},${d.y},${d.z}`;
+    let ref = this.unitDirections.get(key);
+    if (!ref) this.unitDirections.set(key, (ref = this.direction(d)));
+    return ref;
+  }
+
+  /**
+   * A port's frame at `origin`: local z points along `out` (out of the element, along the connection).
+   * Local x is square to it: `across` when given (a rectangular connector's width axis), else level and
+   * to the left of `out` seen from above (z-up × out, the way a run's width lies), else +y for a plumb `out`.
+   * No direction (`out` has no length): a frame at `origin` with the parent's axes.
+   */
+  facing(origin: Vec3, out: Vec3, across?: Vec3): StepRef {
+    const z = unit(out);
+    if (!z) return this.axis(origin);
+    const square = (v: Vec3): Vec3 | null => {
+      const k = v.x * z.x + v.y * z.y + v.z * z.z;
+      const s = { x: v.x - k * z.x, y: v.y - k * z.y, z: v.z - k * z.z };
+      return Math.hypot(s.x, s.y, s.z) < 1e-6 ? null : unit(s);
+    };
+    const x = (across ? square(across) : null) ?? (Math.abs(z.z) < 0.999 ? unit({ x: -z.y, y: z.x, z: 0 }) : null) ?? square({ x: 0, y: 1, z: 0 }) ?? square({ x: 1, y: 0, z: 0 });
+    if (!x) return this.axis(origin);
+    return this.g.add("IFCAXIS2PLACEMENT3D", [this.point(origin), this.unitDirection(z), this.unitDirection(x)]);
+  }
+
   placement(relTo: StepRef | null, axis: StepRef): StepRef {
     return this.g.add("IFCLOCALPLACEMENT", [relTo ?? $, axis]);
   }

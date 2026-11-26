@@ -93,6 +93,7 @@ describe("a14 ifc import roof and stair", () => {
       level: () => level,
       partition: () => GLOBAL_PARTITION,
       converted: () => null,
+      joinedTo: () => [],
       group: () => null,
       shared: (_key, make) => make(),
       values: () => ({}),

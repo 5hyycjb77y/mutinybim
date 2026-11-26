@@ -402,6 +402,8 @@ Contract version: **1.13.0**
 - `type IfcSyntheticObject`
 - `IMPORTED_BODY_FORMATS`
 - `type ImportedBodyRef`
+- `type ImportJoin`
+- `type ImportPort`
 - `type ImportProduct`
 - `type ImportRuleContext`
 - `type ImportRuleDef`

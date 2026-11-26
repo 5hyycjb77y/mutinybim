@@ -10,9 +10,20 @@
  * Fails on round 8b's code: there is no reverse class map, no import rule
  * point and no import at all (`reverseClassMap`, `IFC_IMPORT_RULE_POINT`).
  */
-import { BUILTIN_CLASSES, IFC_IMPORT_RULE_POINT, KERNEL_IMPORT_RULES, activeClassRegistry, builtinRegistry, reverseClassMap } from "@permitzip/bim-kernel";
-import { PackSet, withPackSet } from "@permitzip/bim-kernel/packs";
+import { BUILTIN_CLASSES, CLASS_POINT, IFC_IMPORT_RULE_POINT, KERNEL_IMPORT_RULES, activeClassRegistry, builtinRegistry, reverseClassMap, type ImportRuleDef } from "@permitzip/bim-kernel";
+import { PackSet, contribute, definePack, withPackSet } from "@permitzip/bim-kernel/packs";
+import { readIfcSource } from "../src";
 import { FIRE_PROTECTION_TEST_PACK, HEAD_CLASS, HEAD_RULE } from "./fixtures/i9-fire-protection-pack";
+import { IfcText } from "./i9-fixtures";
+
+/** A trade add-on that wants its own behaviour for one fitting entity: a class homed on that entity, with its own rule. */
+const OWN_FITTING_CLASS = "tdf.fitting";
+const OWN_FITTING_RULE = "tdf.fitting_rule";
+const ownFittingRule: ImportRuleDef = { id: OWN_FITTING_RULE, label: "Test fittings", convert: () => ({ ok: false, reason: "a test rule" }) };
+const OWN_FITTING_TEST_PACK = definePack({ id: "tdf", name: "Test duct fittings", version: "1.0.0", kernel: "^1.4.0" }, [
+  contribute(CLASS_POINT, [{ id: OWN_FITTING_CLASS, label: "Test fittings", discipline: "mechanical", ifc: { entity: "IfcDuctFitting", import: { rule: OWN_FITTING_RULE } }, recognize: { elementKinds: ["run_fitting"], where: [{ path: "classId", op: "equals", value: OWN_FITTING_CLASS }] } }]),
+  contribute(IFC_IMPORT_RULE_POINT, [ownFittingRule]),
+]);
 
 describe("i9-reverse-map", () => {
   it("maps every built-in class with an IFC home back to itself", () => {
@@ -49,6 +60,48 @@ describe("i9-reverse-map", () => {
     expect(segment.ok && segment.choice.fields).toEqual({ domain: "duct" });
     const part = map.choose({ entity: "IfcAirTerminal", predefinedType: "DIFFUSER", objectType: null });
     expect(part.ok && part.choice.rule.id).toBe("kernel.part");
+  });
+
+  it("a class homed on a general entity takes a product of a more specific one when the reader says it is one (#59)", () => {
+    const map = reverseClassMap(builtinRegistry(), KERNEL_IMPORT_RULES);
+    // One class covers a fitting on any run; the writer picks the duct, pipe or cable carrier fitting.
+    const bare = { entity: "IfcDuctFitting", predefinedType: "BEND", objectType: null };
+    expect(map.candidates(bare)).toEqual([]);
+    expect(map.choose(bare)).toEqual({ ok: false, cls: null, reason: "no class in this model takes it" });
+    for (const entity of ["IfcDuctFitting", "IfcPipeFitting", "IfcCableCarrierFitting"]) {
+      const fitting = map.choose({ ...bare, entity, generalEntities: ["IfcFlowFitting"] });
+      expect(fitting.ok && fitting.choice.cls.id).toBe("mep.run_fitting");
+      expect(fitting.ok && fitting.choice.rule.id).toBe("kernel.run_fitting");
+    }
+    // A class that names the product's own entity still wins over one that names a general entity.
+    const segment = map.choose({ entity: "IfcDuctSegment", predefinedType: null, objectType: null, generalEntities: ["IfcFlowFitting"] });
+    expect(segment.ok && segment.choice.cls.id).toBe("mep.duct");
+    // The reader says so for the fitting entities the writer writes, and for nothing else.
+    const read = (entity: string) => {
+      const t = IfcText.start();
+      t.storey("Level 1", 0);
+      t.product("Level 1", entity, "X", [0, 0, 0], t.body([t.extrude(t.rect(100, 100), 100)]));
+      return readIfcSource(t.text(), { sourceId: "s", label: "S", disciplines: [] }).products[0]?.generalEntities;
+    };
+    expect(read("IFCDUCTFITTING")).toEqual(["IfcFlowFitting"]);
+    expect(read("IFCPIPEFITTING")).toEqual(["IfcFlowFitting"]);
+    expect(read("IFCCABLECARRIERFITTING")).toEqual(["IfcFlowFitting"]);
+    expect(read("IFCDUCTSEGMENT")).toBeUndefined();
+    expect(read("IFCWALL")).toBeUndefined();
+  });
+
+  it("an add-on's class homed on the specific fitting entity wins over the general fallback; other fittings still fall back (#135)", () => {
+    const set = PackSet.create([OWN_FITTING_TEST_PACK]);
+    withPackSet(set, () => {
+      const map = reverseClassMap(activeClassRegistry(), set.items(IFC_IMPORT_RULE_POINT));
+      const duct = map.choose({ entity: "IfcDuctFitting", predefinedType: "BEND", objectType: null, generalEntities: ["IfcFlowFitting"] });
+      expect(duct.ok && duct.choice.cls.id).toBe(OWN_FITTING_CLASS);
+      expect(duct.ok && duct.choice.rule.id).toBe(OWN_FITTING_RULE);
+      // The add-on said nothing about pipe fittings, so those still come in through the one general class.
+      const pipe = map.choose({ entity: "IfcPipeFitting", predefinedType: "BEND", objectType: null, generalEntities: ["IfcFlowFitting"] });
+      expect(pipe.ok && pipe.choice.cls.id).toBe("mep.run_fitting");
+      expect(pipe.ok && pipe.choice.rule.id).toBe("kernel.run_fitting");
+    });
   });
 
   it("a pack's class with a home imports through its own rule, with zero kernel edits", () => {

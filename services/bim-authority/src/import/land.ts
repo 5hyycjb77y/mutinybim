@@ -3,6 +3,7 @@ import {
   importChunks,
   planIfcImport,
   usesDropped,
+  withoutDropped,
   type Actor,
   type BimElement,
   type BranchRef,
@@ -21,7 +22,8 @@ import type { Sequencer } from "@permitzip/bim-sync";
  * from Main's head, then the records land in chunks through the branch's
  * sequencer as server-only `import_elements` revisions attributed to the
  * person. A chunk the model refuses for named records lands without them
- * (each stays on the linked model, with the reason in the report); Cancel
+ * (each stays on the linked model, with the reason in the report, and a
+ * join to one of them is taken off the record that stays); Cancel
  * between chunks closes the half-made branch, and Main never changes.
  */
 
@@ -76,7 +78,7 @@ export async function landImportOnBranch(deps: ImportLandDeps, input: ImportLand
       await closeQuietly(deps, branch.modelId);
       return { status: "cancelled", report: withDropped(plan.report, dropped, plan.records), landed };
     }
-    let pending: BimElement[] = chunk.filter((r) => !dropped.some((d) => r.id === d.id || usesDropped(r, d.id)));
+    let pending: BimElement[] = withoutDropped(chunk, new Set(dropped.map((d) => d.id)));
     for (let attempt = 0; pending.length > 0; attempt++) {
       const head = await sequencer.head();
       const outcome = await sequencer.submit(
@@ -102,7 +104,7 @@ export async function landImportOnBranch(deps: ImportLandDeps, input: ImportLand
         throw new ImportRefusal(`The model server refused part of this import: ${outcome.error.message} The branch was closed; Main didn't change.`);
       }
       for (const r of hit) if (!dropped.some((d) => d.id === r.id)) dropped.push({ id: r.id, reason: outcome.error.message });
-      pending = pending.filter((r) => !named.has(r.id) && !dropped.some((d) => usesDropped(r, d.id)));
+      pending = withoutDropped(pending, new Set(dropped.map((d) => d.id)));
     }
     input.onProgress?.({ landed, total: plan.records.length, branch });
   }

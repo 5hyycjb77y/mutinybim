@@ -22,7 +22,9 @@ import {
   ifcOrganizationProperties,
   linkAdapterId,
   loadAnchorOf,
+  hostedPoints,
   localBounds,
+  mountPoint,
   mountedPositions,
   organizationOf,
   parameterOfParamDef,
@@ -30,9 +32,12 @@ import {
   partMesh,
   phaseStatusAt,
   placementOf,
+  portWidthAxis,
   rawRegistryWords,
   resolveConnectors,
   resolveGeometry,
+  riserWidthAxis,
+  segmentWidthAxis,
   siteMapConversion,
   siteOf,
   spaceAreaM2,
@@ -51,6 +56,7 @@ import {
   type PartTypeElement,
   type PortRef,
   type Registry,
+  type RunFitting,
   type RunSize,
   type ServiceLink,
   type ServiceRegistry,
@@ -174,6 +180,23 @@ const ZONE_PURPOSE_SPATIAL: Readonly<Record<string, string>> = {
 const PHASE_STATUS: Readonly<Record<string, string>> = { new: "NEW", existing: "EXISTING", demolished: "DEMOLISH", temporary: "TEMPORARY" };
 const PORT_DOMAIN: Readonly<Record<string, string>> = { duct: "DUCT", pipe: "PIPE", electrical: "CABLE", conduit: "CABLECARRIER" };
 const FLOW_DIRECTION: Readonly<Record<string, string>> = { in: "SINK", out: "SOURCE", bidirectional: "SOURCEANDSINK" };
+/** ObjectType of the port a trunk has where a branch fitting leaves it, and of that fitting's port into the trunk. */
+const TRUNK_BRANCH_PORT = "Branch";
+const FITTING_TRUNK_PORT = "Trunk";
+
+/** What a port's standard property set can say: its opening (mm) and what it is designed to carry. */
+interface PortFacts {
+  readonly width?: number;
+  readonly height?: number;
+  readonly diameter?: number;
+  /** CFM at a duct port, GPM at a pipe port. */
+  readonly flow?: number;
+  readonly voltage?: number;
+}
+
+function sizeFacts(s: RunSize): PortFacts {
+  return s.shape === "rect" || s.shape === "oval" ? { width: s.width, height: s.height } : { diameter: s.shape === "round" ? s.diameter : s.shape === "pipe" ? s.nominalMm : s.tradeSizeMm };
+}
 
 function push<V>(m: Map<string, V[]>, k: string, v: V): void {
   const items = m.get(k);
@@ -959,9 +982,64 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   }
 
   // ---------------------------------------------------------------- ports and connections
+  // Every port's ObjectPlacement is relative to its host's own placement. Location is where the port is; local z (Axis)
+  // points out of the host through the port, along the connection; local x (RefDirection) is square to it
+  // (GeometryWriter.facing). Two joined ports sit at one point and face opposite ways. A planned part has no placement,
+  // so its ports have none.
   const ports = new Map<string, { readonly ref: StepRef; readonly guid: string }>();
   const nests = new Map<string, { readonly host: Product; readonly items: StepRef[] }>();
-  const writePort = (hostId: string, portId: string, name: string, flow: string | undefined, domain: string | undefined, systemKind: string | undefined, placement: StepRef | null): StepRef | null => {
+  // Size and flow go in the IFC 4.3 standard port sets, by the port's kind. Ports with the same values share one set.
+  const portSets = new Map<string, { readonly ref: StepRef; readonly guid: string; readonly ports: StepRef[] }>();
+  const describePort = (port: StepRef, kind: string | undefined, facts: PortFacts) => {
+    const props: Array<PropertyInput & { readonly kind: "number" }> = [];
+    const length = (name: string, value: number | undefined, measure: "IFCPOSITIVELENGTHMEASURE" | "IFCNONNEGATIVELENGTHMEASURE") => {
+      if (value !== undefined && value > 0) props.push({ kind: "number", name, value: Math.round(value * 1e6) / 1e6, unit: "mm", measure });
+    };
+    // A design value the standard set defines as a bounded value: written as its set point.
+    const design = (name: string, value: number | undefined, unit: string) => {
+      if (value !== undefined && value > 0) props.push({ kind: "number", name, value, unit, bounded: true });
+    };
+    let setName: string;
+    if (kind === "DUCT") {
+      setName = "Pset_DistributionPortTypeDuct";
+      // NominalWidth is the width, or the diameter of a round opening; NominalHeight is for an opening with flat sides only.
+      length("NominalWidth", facts.width ?? facts.diameter, "IFCNONNEGATIVELENGTHMEASURE");
+      length("NominalHeight", facts.height, "IFCPOSITIVELENGTHMEASURE");
+      design("VolumetricFlowRate", facts.flow, "cfm");
+    } else if (kind === "PIPE") {
+      setName = "Pset_DistributionPortTypePipe";
+      length("NominalDiameter", facts.diameter, "IFCPOSITIVELENGTHMEASURE");
+      design("VolumetricFlowRate", facts.flow, "gpm");
+    } else if (kind === "CABLE") {
+      setName = "Pset_DistributionPortTypeCable";
+      design("Voltage", facts.voltage, "V");
+    } else return;
+    if (props.length === 0) return;
+    // To a millionth, so 3 in computed two ways (76.2 and 76.19999999999999) is one size.
+    const key = `${setName}|${props.map((p) => `${p.name}=${Math.round(p.value * 1e6) / 1e6}`).join("|")}`;
+    let shared = portSets.get(key);
+    if (!shared) {
+      const bag = new PropertyBag();
+      for (const p of props) bag.set(setName, p);
+      const guid = guids.derived(`port-set:${key}`);
+      const written = writeSets(g, units, bag, () => guid)[0];
+      if (!written) return;
+      portSets.set(key, (shared = { ref: written.ref, guid, ports: [] }));
+      counts.propertySets++;
+    }
+    shared.ports.push(port);
+  };
+  const writePort = (
+    hostId: string,
+    portId: string,
+    name: string,
+    flow: string | undefined,
+    domain: string | undefined,
+    systemKind: string | undefined,
+    placement: StepRef | null,
+    facts: PortFacts,
+    objectType?: string,
+  ): StepRef | null => {
     const host = products.get(hostId);
     if (!host) return null;
     const key = `${hostId}|${portId}`;
@@ -969,18 +1047,41 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const guid = guids.derived(`port:${key}`);
     const sys = systemKind ? services.byId.get(systemKind)?.ifc : undefined;
     const sysType = sys && sys.system === "IfcDistributionSystem" && predefinedTypes("IfcDistributionSystem").has(sys.predefinedType) ? en(sys.predefinedType) : $;
-    const ref = g.add("IFCDISTRIBUTIONPORT", [str(guid), $, str255(name), $, $, placement ?? $, $, en(FLOW_DIRECTION[flow ?? ""] ?? "NOTDEFINED"), en(PORT_DOMAIN[domain ?? ""] ?? "NOTDEFINED"), sysType]);
+    const kind = PORT_DOMAIN[domain ?? ""];
+    const ref = g.add("IFCDISTRIBUTIONPORT", [str(guid), $, str255(name), $, objectType ? str(objectType) : $, placement ?? $, $, en(FLOW_DIRECTION[flow ?? ""] ?? "NOTDEFINED"), en(kind ?? "NOTDEFINED"), sysType]);
     ports.set(key, { ref, guid });
     const n = nests.get(hostId) ?? { host, items: [] };
     n.items.push(ref);
     nests.set(hostId, n);
     counts.ports++;
+    describePort(ref, kind, facts);
     return ref;
   };
   const systemKindOf = (systemId: string): string | undefined => {
     const s = els[systemId];
     return s?.kind === "mep_system" ? s.systemKind : undefined;
   };
+  // A branch fitting (tap, tee, wye) sits on a trunk that stays one piece. The trunk gets a port where the branch
+  // leaves it, facing the branch, and the fitting a port at its own point that faces into the trunk; the two are
+  // joined like any other pair. Found before the ports are written, so a trunk's branch ports follow its two ends.
+  const branchesOn = new Map<string, Array<{ readonly fitting: RunFitting; readonly at: Vec3; readonly outward: Vec3 }>>();
+  const trunkOf = new Map<string, { readonly trunkId: string; readonly at: Vec3; readonly outward: Vec3; readonly along: Vec3 }>();
+  // A port with flat sides that faces straight up or down: "level and to the left" says nothing there, so its local x is
+  // the width axis the kernel draws the run with (a riser takes it from the elbow that turns into it; a tap off the top
+  // or bottom of a trunk lies along the trunk). Round openings need none.
+  const needsWidthAxis = (size: RunSize | undefined, out: Vec3): boolean => (size?.shape === "rect" || size?.shape === "oval") && Math.abs(out.z) >= 0.999 * Math.hypot(out.x, out.y, out.z);
+  for (const el of elements) {
+    if (el.kind !== "run_fitting" || !el.host || el.ports.length === 0 || !products.has(el.id)) continue;
+    const trunk = els[el.host.segmentId];
+    if (trunk?.kind !== "run_segment" || !products.has(trunk.id)) {
+      warn(`${el.id}: the run it branches from is not in the file, so the file does not say where on that run it sits`);
+      continue;
+    }
+    const where = hostedPoints(trunk, el.host.s, el.host.side, el.host.dir, el.host.face, el.host.t);
+    push(branchesOn, trunk.id, { fitting: el, at: where.onAxis, outward: where.outward });
+    // In the fitting's own coordinates when it is on the trunk's level; otherwise at the fitting's point.
+    trunkOf.set(el.id, { trunkId: trunk.id, at: el.levelId === trunk.levelId ? where.onAxis : el.position, outward: where.outward, along: { x: trunk.end.x - trunk.start.x, y: trunk.end.y - trunk.start.y, z: trunk.end.z - trunk.start.z } });
+  }
   const connections: Array<readonly [string, string]> = [];
   for (const el of elements) {
     const host = products.get(el.id);
@@ -989,26 +1090,57 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const type = partTypeOf(el);
       if (!type) continue;
       for (const c of resolveConnectors(type.definition, el.values)) {
-        const placement = host.placement ? geo.placement(host.placement, geo.axis({ x: c.position[0], y: c.position[1], z: c.position[2] })) : null;
-        const flow = type.definition.connectors.find((d) => d.id === c.id)?.flowDirection;
-        writePort(el.id, c.id, c.label, flow, c.domain, c.systemKind, placement);
+        const def = type.definition.connectors.find((d) => d.id === c.id);
+        // In the part's own frame, as the part is mounted; the part's placement carries its position and plan rotation.
+        const [x, y, z] = mountPoint(el.mount, c.position);
+        const [dx, dy, dz] = mountPoint(el.mount, c.direction);
+        const across = def?.widthAxis ? mountPoint(el.mount, def.widthAxis) : null;
+        const placement = host.placement ? geo.placement(host.placement, geo.facing({ x, y, z }, { x: dx, y: dy, z: dz }, across ? { x: across[0], y: across[1], z: across[2] } : undefined)) : null;
+        const facts: PortFacts = c.shape === "rect" ? { width: c.width, height: c.height, flow: c.flow, voltage: c.voltage } : { diameter: c.diameter, flow: c.flow, voltage: c.voltage };
+        writePort(el.id, c.id, c.label, def?.flowDirection, c.domain, c.systemKind, placement, facts);
       }
       for (const [connector, link] of Object.entries(el.links ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) connections.push([`${el.id}|${connector}`, `${link.elementId}|${link.port}`]);
     } else if (el.kind === "run_segment") {
       const sk = systemKindOf(el.systemId);
-      const at = (p: Vec3) => (host.placement ? geo.placement(host.placement, geo.axis(p)) : null);
-      writePort(el.id, "start", "Start", undefined, el.domain, sk, at(el.start));
-      writePort(el.id, "end", "End", undefined, el.domain, sk, at(el.end));
+      // A segment's placement is its level's frame, so its ports are at the run's own coordinates. Each end faces away from the other.
+      const at = (p: Vec3, out: Vec3, across?: Vec3) => (host.placement ? geo.placement(host.placement, geo.facing(p, out, across)) : null);
+      const along = { x: el.end.x - el.start.x, y: el.end.y - el.start.y, z: el.end.z - el.start.z };
+      const across = needsWidthAxis(el.size, along) ? segmentWidthAxis(els, el) : undefined;
+      // What a duct carries is a volume of air. A pipe's number may be fixture units, which is no flow rate, so it is left out.
+      const facts: PortFacts = el.domain === "duct" ? { ...sizeFacts(el.size), flow: el.flow } : sizeFacts(el.size);
+      writePort(el.id, "start", "Start", undefined, el.domain, sk, at(el.start, { x: -along.x, y: -along.y, z: -along.z }, across), facts);
+      writePort(el.id, "end", "End", undefined, el.domain, sk, at(el.end, along, across), facts);
       const ends: Array<readonly ["start" | "end", PortRef | undefined]> = [
         ["start", el.links.start],
         ["end", el.links.end],
       ];
       for (const [end, link] of ends) if (link) connections.push([`${el.id}|${end}`, `${link.elementId}|${link.port}`]);
+      const branches = [...(branchesOn.get(el.id) ?? [])].sort((a, b) => (a.fitting.host?.s ?? 0) - (b.fitting.host?.s ?? 0) || byId(a.fitting, b.fitting));
+      for (const b of branches) {
+        const size = b.fitting.ports[0]?.size;
+        writePort(el.id, `branch|${b.fitting.id}`, "Branch", undefined, el.domain, sk, at(b.at, b.outward, needsWidthAxis(size, b.outward) ? along : undefined), size ? sizeFacts(size) : {}, TRUNK_BRANCH_PORT);
+      }
     } else if (el.kind === "run_fitting") {
       const sk = systemKindOf(el.systemId);
+      // A fitting's placement is at its own point, unturned, so a port's place is its offset from that point.
+      const local = (p: Vec3): Vec3 => ({ x: p.x - el.position.x, y: p.y - el.position.y, z: p.z - el.position.z });
+      const trunk = trunkOf.get(el.id);
+      // The width axis the fitting's body is drawn with at this port: the trunk's line for a branch fitting, else the riser it joins, else what its other side leaves it.
+      const widthAt = (port: RunFitting["ports"][number]): Vec3 | undefined => {
+        if (!needsWidthAxis(port.size, port.direction)) return undefined;
+        if (trunk) return trunk.along;
+        const joined = port.link ? els[port.link.elementId] : undefined;
+        return (joined?.kind === "run_segment" ? riserWidthAxis(els, joined, new Set([el.id])) : null) ?? portWidthAxis(els, { elementId: el.id, port: port.id }) ?? undefined;
+      };
       for (const port of [...el.ports].sort(byId)) {
-        writePort(el.id, port.id, port.id, undefined, el.domain, sk, host.placement ? geo.placement(frameOf(levelOf(el)), geo.axis(port.position)) : null);
+        writePort(el.id, port.id, port.id, undefined, el.domain, sk, host.placement ? geo.placement(host.placement, geo.facing(local(port.position), port.direction, widthAt(port))) : null, sizeFacts(port.size));
         if (port.link) connections.push([`${el.id}|${port.id}`, `${port.link.elementId}|${port.link.port}`]);
+      }
+      if (trunk) {
+        const size = el.ports[0]?.size;
+        const into = { x: -trunk.outward.x, y: -trunk.outward.y, z: -trunk.outward.z };
+        writePort(el.id, `trunk|${trunk.trunkId}`, "Trunk", undefined, el.domain, sk, host.placement ? geo.placement(host.placement, geo.facing(local(trunk.at), into, needsWidthAxis(size, into) ? trunk.along : undefined)) : null, size ? sizeFacts(size) : {}, FITTING_TRUNK_PORT);
+        connections.push([`${trunk.trunkId}|branch|${el.id}`, `${el.id}|trunk|${trunk.trunkId}`]);
       }
     }
   }
@@ -1023,6 +1155,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     if (!pa || !pb) continue;
     g.add("IFCRELCONNECTSPORTS", [str(guids.rel("IfcRelConnectsPorts", [pa.guid, pb.guid])), $, $, $, pa.ref, pb.ref, $]);
   }
+  for (const set of portSets.values()) g.add("IFCRELDEFINESBYPROPERTIES", [str(guids.rel("IfcRelDefinesByProperties", [set.guid])), $, $, $, list(set.ports), set.ref]);
 
   // Load points: a port for what is connected where no fixture is modelled.
   for (const lp of elements.filter((e): e is LoadPointElement => e.kind === "load_point")) {

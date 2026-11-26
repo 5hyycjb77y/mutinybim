@@ -102,7 +102,7 @@ export {
 // Contract 1.7.0 (round 9): add-on-owned element kinds, connector end types, IFC import rules.
 export { ELEMENT_KIND_POINT, type ElementKindItem, type ElementKindValue, type ElementKindIssue, readKindValue, writeKindValue, kindValue, headlineKindValue, registerKindLiftSteps } from "@permitzip/bim-kernel";
 export { CONNECTOR_END_TYPE_POINT, type ConnectorEndTypeItem, type ConnectorEndTypeVia, type EndTypeJoin, connectorEndTypeTable, type ConnectorIntegrityIssue, type PartImportReport } from "@permitzip/bim-kernel";
-export { IFC_IMPORT_RULE_POINT, type ImportRuleDef, type ImportRuleContext, type ImportProduct } from "@permitzip/bim-kernel";
+export { IFC_IMPORT_RULE_POINT, type ImportRuleDef, type ImportRuleContext, type ImportProduct, type ImportPort, type ImportJoin } from "@permitzip/bim-kernel";
 
 // Contract 1.8.0 (round 10).
 // P10: pipe products (kernel.pipe_product v1) and the stored-joint reader.
