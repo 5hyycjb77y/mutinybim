@@ -26,6 +26,30 @@ describe('the standalone editor host', () => {
     await expect(createLocalEditorHost({ authorityUrl: AUTHORITY, token: null }).session.getAccessToken()).resolves.toBeNull()
   })
 
+  it('offers member management only for an explicitly configured native session', () => {
+    expect(createLocalEditorHost({ authorityUrl: AUTHORITY }).data.modelMembers).toBeUndefined()
+    expect(createLocalEditorHost({ authorityUrl: AUTHORITY, token: 'hosted' }).data.modelMembers).toBeUndefined()
+    expect(createLocalEditorHost({ authorityUrl: AUTHORITY, nativeMembership: true }).data.modelMembers).toBeUndefined()
+  })
+
+  it.each(['wss://authority.example/sync', 'https://authority.example/sync'])('sends membership operations to the same secure authority (%s)', async authorityUrl => {
+    const previousFetch = global.fetch
+    const calls = jest.fn().mockResolvedValue({})
+    global.fetch = calls
+    try {
+      const members = createLocalEditorHost({ authorityUrl, token: 'fixture-session', nativeMembership: true }).data.modelMembers!
+      const signal = new AbortController().signal
+      await members.read('east plant', 'a+b', signal)
+      const change = { personId: 'jules', expectedRole: 'viewer' as const, role: null }
+      await members.change('east plant', change)
+      const [read, write] = calls.mock.calls
+      expect(String(read[0])).toBe('https://authority.example/models/east%20plant/members?personId=a%2Bb')
+      expect(read[1]).toMatchObject({ headers: { Authorization: 'Bearer fixture-session' }, credentials: 'omit', redirect: 'error', cache: 'no-store', signal })
+      expect(String(write[0])).toBe('https://authority.example/models/east%20plant/members')
+      expect(write[1]).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer fixture-session', 'Content-Type': 'application/json' }, body: JSON.stringify(change) })
+    } finally { global.fetch = previousFetch }
+  })
+
   it('moves through the browser history and re-renders the location', () => {
     window.history.replaceState(null, '', '/m/demo')
     const { result } = renderHook(() => historyRouter.useLocation())

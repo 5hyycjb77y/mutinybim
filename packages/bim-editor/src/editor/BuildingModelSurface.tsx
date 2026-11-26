@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { RefreshCw, Wind, X, ArrowLeft } from 'lucide-react'
 import { AUTO_TAG_CATEGORIES, ORGANIZATION_ZONE, elementsOfKind, lockOf, planAutoTags, runLabel, type RunFitting, type RunSegment, SYSTEM_KINDS, displayContextOf, documentIndex, viewCamera3d, type Aabb3, normalizeLevelName, organizationOf, sheetDependsOn, sheetViewports, type Actor, type DisplayContext, type GroupVisibility, type ModelState, type PartInstance, type PartTypeDefinition, type SectionCut, type Sheet, type Vec2, type ViewElement, originPointPosition, viewFloorMm, viewModelLevel, canonicalViewLevel, modelLevels, viewRotationDeg, type OriginPoint, diagramKindLabel, type StoredDiagramKind, type ScheduleCategory, type ElementId, type WorkFrame, asElementId, type AuthorRef, type BranchRef, parseBranchModelId, type SubmittalCommand, matchingPlanCrop, projectParametersOf } from '@permitzip/bim-kernel'
 import type { ConnectionStatus, Presence, SaveState } from '@permitzip/bim-sync'
-import { type ConnectionProblem } from './operator-messages'
+import { AWAITING_WRITE_ACCESS, type ConnectionProblem } from './operator-messages'
 import { SHEET_FIRM_NAME, type SheetTitle } from '../contracts/building-model/sheet-title'
 import { panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
 import type { LoadedReference, ModelViewer3D, Pick as ViewerPick, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
@@ -70,6 +70,7 @@ const AddonsPreview = dynamic(() => import('./settings/AddonsPreview').then((m) 
 const TagStylesDialog = dynamic(() => import('./organization/TagStylesDialog').then((m) => m.TagStylesDialog), { ssr: false })
 const TextStylesDialog = dynamic(() => import('./organization/TextStylesDialog').then((m) => m.TextStylesDialog), { ssr: false })
 const ManageGroupsDialog = dynamic(() => import('./organization/ManageGroupsDialog').then((m) => m.ManageGroupsDialog), { ssr: false })
+const ManageMembersDialog = dynamic(() => import('./membership/ManageMembersDialog').then((m) => m.ManageMembersDialog), { ssr: false })
 const NewListScheduleDialog = dynamic(() => import('./schedules/NewListScheduleDialog').then((m) => m.NewScheduleWindow), { ssr: false })
 const SheetFigureDialog = dynamic(() => import('./views-sheets/SheetFigureDialog').then((m) => m.SheetFigureDialog), { ssr: false })
 const InsertCalculationDialog = dynamic(() => import('./calc-sheets/InsertCalculationDialog').then((m) => m.InsertCalculationDialog), { ssr: false })
@@ -234,6 +235,8 @@ interface Props {
   userName: string
   userId: string
   initialView: BuildingModelView
+  /** The standalone native host can end the current tab's session. */
+  onSignOut?: () => void
   /** Open this view (a schedule from the project tree) as soon as the model shows it; a new id opens that one. */
   openViewId?: string
   /** Optional single-key shortcuts for collapsing the left/right sidebars (defaults: `[` and `]`, avoiding host Cmd+B / Cmd+Shift+K / Cmd+J). Pass `null` to disable either side. */
@@ -297,7 +300,7 @@ function RibbonTrailing({ targetId, children }: { targetId: string; children: Re
 /** The project's black-only printing choice (Sheets › Black only), re-read only when the model changes. */
 const printBlackOnlySelector: ModelSelector<boolean> = (snapshot) => (snapshot.model ? organizationOf(snapshot.model).printBlackOnly : false)
 
-export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId, sidebarShortcuts }: Props) {
+export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId, sidebarShortcuts, onSignOut }: Props) {
   const host = useEditorHost()
   const { openConfig: openModelConfig, getAccessToken } = host.session
   const referencesPort = host.data.references
@@ -305,6 +308,8 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const linkedModelsPort = host.data.linkedModels
   const linkSources = useMemo(() => linkSourcesOf(linkedModelsPort), [linkedModelsPort])
   const firmLibraryPort = host.data.firmLibrary
+  const [membersOpen, setMembersOpen] = useState(false)
+  const membersModelId = parseBranchModelId(projectId)?.baseModelId ?? projectId
   const sheetTitle = useMemo<SheetTitle>(() => ({ projectName, projectNumber: projectNumber ?? '', firmName: SHEET_FIRM_NAME }), [projectName, projectNumber])
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const sessionRef = useRef<ModelSession | null>(null)
@@ -899,13 +904,14 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   }, [referenceLevels, ownLevelNames])
 
   const status: ConnectionStatus | 'read_only' = config && !config.authority ? 'read_only' : connection
-  const canEdit = status !== 'read_only' && model !== null && problem?.kind !== 'no_access' && status !== 'denied'
+  const nativeBlocked = hostCapabilities.requireWriteGrant ? (live ? sessionChrome.editPaused : AWAITING_WRITE_ACCESS) : null
+  const canEdit = status !== 'read_only' && model !== null && problem?.kind !== 'no_access' && status !== 'denied' && !nativeBlocked
   const blockedReason =
     status === 'read_only' || problem?.kind === 'no_model'
       ? "Live editing isn't connected for this project, so views and sheets can't be made here yet."
       : problem?.kind === 'no_access' || status === 'denied'
         ? "You can look, but you don't have editing access to this model. Ask a project lead."
-        : 'Connecting to the model server…'
+        : nativeBlocked ?? 'Connecting to the model server…'
 
   // Branches, versions, responsibilities, merges and change orders (round 8b) ride the same model socket.
   const syncChannel = sessionChrome.channel
@@ -2870,6 +2876,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     }
   }, [tool, spacesDrawing, ceilingTool.active, drawingTool, stopSpacesTool, stopCeilingTool, openKey])
   const ribbonInput: Parameters<typeof buildingModelRibbon>[0] = {
+    openManageMembers: host.data.modelMembers ? () => setMembersOpen(true) : undefined,
+    signOut: onSignOut ? () => {
+      sessionRef.current?.dispose()
+      sessionRef.current = null
+      onSignOut()
+    } : undefined,
     addons,
     ceiling: ceilingTool.ribbon,
     clipboard: { copyBlocked, copy: copyParts, pasteBlocked: partPasteBlocked, paste: pasteParts },
@@ -4100,6 +4112,10 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           />
         )}
       </div>
+      {membersOpen && host.data.modelMembers && (
+        <ManageMembersDialog key={JSON.stringify([membersModelId, userId])} port={host.data.modelMembers} modelId={membersModelId}
+          actorId={userId} onClose={() => setMembersOpen(false)} />
+      )}
       {organizationDialog !== null && (
         <ModelFromStore store={modelStore}>
           {(shown) =>

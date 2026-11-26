@@ -27,6 +27,9 @@ import {
   PipelineBrokenError,
   RECENT_KEPT,
   StaleLeaseError,
+  agentOnBehalfOf,
+  authorizationModelId,
+  keyReusedOutcome,
   mergeHistory,
   historyMissing,
   rememberAnswer,
@@ -42,9 +45,11 @@ import {
 } from "@permitzip/bim-sync";
 import { collectPages } from "./paged-load";
 import { loadBranchHead, type BaseSource } from "./pg-branches";
+import { nativeCopyGrant } from "./auth/native-socket";
 
 export type Sql = postgres.Sql;
 type Tx = postgres.TransactionSql;
+export type QuerySql = Sql | Tx;
 
 /**
  * Server-side limits ride on the connection's startup parameters, so they cost
@@ -172,6 +177,8 @@ export async function loadHeadTimed(sql: Sql | Tx, modelId: string, pageSize = B
 
 export interface PgStoreOptions {
   readonly modelId: string;
+  /** Native membership and author decisions use the base authority row as their common lock. */
+  readonly nativeSaveOrder?: boolean;
   /** This process (config.owner): unique per start. */
   readonly owner: string;
   readonly ownerMachine: string | null;
@@ -233,6 +240,7 @@ const NO_STORAGE_FEATURES: StorageFeatures = { changesetPatch: false, checkpoint
 // The epoch (created_at) is compared as text: the driver turns a timestamptz
 // parameter into a JS Date, which drops the microseconds, and nothing matches.
 export class PostgresCommitStore implements PipelinedCommitStore {
+  get allowsGroupCommit(): boolean { return !this.opts.nativeSaveOrder; }
   private cache: CachedHead | null = null;
   private headLoading: Promise<CachedHead> | null = null;
   private recent: Changeset[] = [];
@@ -423,6 +431,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
     history: readonly Changeset[] = [],
     commandDigest?: string,
   ): LocalDecision {
+    if (this.opts.nativeSaveOrder) return { kind: "fallback", reason: "native_membership" };
     const term = this.term;
     if (!term || term.generation !== generation) throw new StaleLeaseError(generation, term?.generation ?? -1);
     const prior = this.answered.get(idempotencyKey);
@@ -458,6 +467,10 @@ export class PostgresCommitStore implements PipelinedCommitStore {
    * batch is never written twice.
    */
   async flush(generation: number, commits: readonly DecidedCommit[]): Promise<void> {
+    if (this.opts.nativeSaveOrder) {
+      if (commits.length) throw new Error("Native saves must use the membership-ordered transaction.");
+      return;
+    }
     const term = this.term;
     const cache = this.cache;
     if (!term || term.generation !== generation || !cache) throw new PipelineBrokenError(generation, new StaleLeaseError(generation, term?.generation ?? -1));
@@ -588,6 +601,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
     const term = this.term;
     if (!term || term.generation !== generation) throw new StaleLeaseError(generation, term?.generation ?? -1);
     this.count("attempt");
+    if (this.opts.nativeSaveOrder) return this.lockedTransact(term, idempotencyKey, baseRevision, decide, actorId, commandDigest);
     try {
       const fast = await this.fastCommit(term, idempotencyKey, baseRevision, decide, actorId, commandDigest);
       if (fast) return fast;
@@ -796,7 +810,25 @@ export class PostgresCommitStore implements PipelinedCommitStore {
     this.count("locked_fallback");
     // Begin, one read, one write, commit while the model row is locked. The
     // connection's statement and lock timeouts bound how long that can last.
-    const done = await this.sql.begin(async (tx): Promise<LockedResult> => {
+    const write = async (tx: Tx): Promise<LockedResult> => {
+      // Membership writers take this row FOR UPDATE. Read roles in a fresh statement after any lock wait.
+      let authorizationRevision: string | undefined;
+      let mayWrite = true;
+      if (this.opts.nativeSaveOrder) {
+        const [authority] = await tx<{ revision: string }[]>`
+          select authorization_revision::text as revision from bim.model_authority
+          where model_id = ${authorizationModelId(id)} and permission_source = 'native' for share`;
+        const grant = authority && await nativeCopyGrant(tx, id, agentOnBehalfOf(actorId) ?? actorId);
+        if (!authority || !grant?.ok) {
+          const outcome: CommitOutcome = { status: "rejected", error: { code: "forbidden", message: "You no longer have access to this model.", elementIds: [] } };
+          return { result: { outcome, replayed: false }, committed: null };
+        }
+        authorizationRevision = authority.revision;
+        mayWrite = grant.canWrite;
+      }
+      const stamp = (value: CommitOutcome): CommitOutcome => withCommandDigest(
+        authorizationRevision === undefined ? value : { ...value, authorizationRevision }, commandDigest,
+      );
       const cache = this.cache;
       const from = cache ? Math.min(baseRevision, cache.model.revision) : baseRevision;
       const [read] = await tx<DeltaRead[]>`
@@ -808,7 +840,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
         )
         select
           (select row_to_json(m) from m) as model,
-          ${priorAnswer(tx, id, idempotencyKey)} as prior,
+          ${priorAnswer(tx, id, idempotencyKey, this.opts.nativeSaveOrder ? actorId : undefined)} as prior,
           coalesce((select jsonb_agg(body order by revision) from bim.changesets
                     where model_id = ${id} and revision > ${from}), '[]'::jsonb) as since`;
       const m = read?.model;
@@ -823,7 +855,8 @@ export class PostgresCommitStore implements PipelinedCommitStore {
         if (!branchAcceptsEdits(state)) {
           // Merged or closed (perhaps from another machine): refused and recorded, behind the same lock and lease.
           this.opts.onBranchState?.(state);
-          const outcome: CommitOutcome = { status: "rejected", error: { code: "forbidden", message: branchClosedMessage(state), elementIds: [] } };
+          const refusal: CommitOutcome = { status: "rejected", error: { code: "forbidden", message: branchClosedMessage(state), elementIds: [] } };
+          const outcome = this.opts.nativeSaveOrder ? stamp(refusal) : refusal;
           await tx`insert into bim.command_outcomes (model_id, idempotency_key, actor_id, outcome)
             values (${id}, ${idempotencyKey}, ${actorId}, ${tx.json(toJson(outcome))})`;
           this.count("locked_branch_refused");
@@ -848,10 +881,12 @@ export class PostgresCommitStore implements PipelinedCommitStore {
         this.adopt(head);
       }
       const sinceBase = read.since.filter((c) => c.revision > baseRevision);
-      const decision = decide(head.model, sinceBase);
+      const decision: CommitDecision = mayWrite ? decide(head.model, sinceBase) : {
+        ok: false, error: { code: "forbidden", message: "Your role allows viewing this copy. Your change was not saved.", elementIds: [] },
+      };
 
       if (!decision.ok) {
-        const outcome = withCommandDigest({ status: "rejected", error: decision.error, conflict: decision.conflict }, commandDigest);
+        const outcome = stamp({ status: "rejected", error: decision.error, conflict: decision.conflict });
         const stored = await tx`insert into bim.command_outcomes (model_id, idempotency_key, actor_id, outcome)
           select ${id}, ${idempotencyKey}, ${actorId}, ${tx.json(toJson(outcome))}
           from bim.models m where m.id = ${id} and m.lease_owner = ${term.owner} and m.lease_generation = ${term.generation}
@@ -865,7 +900,7 @@ export class PostgresCommitStore implements PipelinedCommitStore {
       }
 
       const cs = decision.changeset;
-      const outcome = withCommandDigest({ status: "committed", revision: cs.revision, rebased: cs.rebased }, commandDigest);
+      const outcome = stamp({ status: "committed", revision: cs.revision, rebased: cs.rebased });
       const patch = this.patchFor(cs, head.model);
       // One statement: batch-upsert the changed elements, append the changeset,
       // advance the head and record the outcome, all behind the lease fence.
@@ -916,7 +951,8 @@ export class PostgresCommitStore implements PipelinedCommitStore {
         result: { outcome, changeset: cs, replayed: false },
         committed: { head: { model: decision.model, epoch: head.epoch }, changeset: cs, patch },
       };
-    });
+    };
+    const done = this.opts.nativeSaveOrder ? await this.sql.begin("isolation level read committed", write) : await this.sql.begin(write);
     if (done.committed) {
       this.cache = done.committed.head;
       this.remember(done.committed.changeset);
@@ -1146,10 +1182,13 @@ interface DeltaRead {
  * The first answer for a request key: its stored outcome, or, once outcomes
  * past the retention window are purged, the committed changeset itself.
  */
-function priorAnswer(sql: Sql | Tx, modelId: string, idempotencyKey: string) {
+function priorAnswer(sql: Sql | Tx, modelId: string, idempotencyKey: string, actorId?: string) {
+  // Keys are unique per copy. A collision with a different author must never reveal that author's outcome.
+  const own = (value: ReturnType<typeof sql>) => actorId === undefined ? value :
+    sql`case when actor_id = ${actorId} then ${value} else ${sql.json(toJson(keyReusedOutcome()))}::jsonb end`;
   return sql`coalesce(
-    (select outcome from bim.command_outcomes where model_id = ${modelId} and idempotency_key = ${idempotencyKey}),
-    (select jsonb_build_object('status', 'committed', 'revision', c.revision, 'rebased', coalesce((c.body->>'rebased')::boolean, false))
+    (select ${own(sql`outcome`)} from bim.command_outcomes where model_id = ${modelId} and idempotency_key = ${idempotencyKey}),
+    (select ${own(sql`jsonb_build_object('status', 'committed', 'revision', c.revision, 'rebased', coalesce((c.body->>'rebased')::boolean, false))`)}
      from bim.changesets c where c.model_id = ${modelId} and c.idempotency_key = ${idempotencyKey}))`;
 }
 

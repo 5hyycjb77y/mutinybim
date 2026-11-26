@@ -4,6 +4,8 @@ export type CommitOutcome = (
   | { readonly status: "committed"; readonly revision: number; readonly rebased: boolean }
   | { readonly status: "rejected"; readonly error: CommandError; readonly conflict?: ConflictDetail }
 ) & {
+  /** Native membership revision held through the durable decision. Model revisions count different events. */
+  readonly authorizationRevision?: string;
   /** Server-side only: the digest of the command that earned this answer (`commandDigest`). Never sent to a client. */
   readonly commandDigest?: string;
 };
@@ -77,6 +79,8 @@ export interface TransactResult {
  * (R2, R3). Rejections are recorded too, so a retry gets the same answer.
  */
 export interface CommitStore {
+  /** Some stores must decide and publish each edit in a durable transaction, even when grouping is requested. */
+  readonly allowsGroupCommit?: boolean;
   acquireLease(): Promise<number>;
   head(): Promise<ModelState>;
   changesSince(revision: number): Promise<readonly Changeset[]>;

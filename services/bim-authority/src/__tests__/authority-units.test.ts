@@ -22,6 +22,16 @@ const baseEnv = {
 };
 
 describe("configuration", () => {
+  it("serves a native database explicitly with its own sessions", () => {
+    const native = { MUTINYBIM_AUTH_MODE: "native", MUTINYBIM_DB_URL: "postgresql://operator@db.invalid/plant",
+      BIM_AUTHORITY_SERVED_MODELS: "east-plant" };
+    expect(loadConfig(native)).toMatchObject({ authMode: "native", dbRef: "native", hostModule: null, testAuthUrl: null });
+    expect(loadConfig(baseEnv).authMode).toBe("hosted");
+    expect(() => loadConfig({ ...native, MUTINYBIM_AUTHORIZER_MODULE: "./host.ts" })).toThrow(/cannot be combined/);
+    expect(() => loadConfig({ ...native, MUTINYBIM_SUPABASE_URL: "http://localhost:5678" })).toThrow(/cannot be combined/);
+    expect(() => loadConfig({ ...native, MUTINYBIM_AUTH_MODE: "auto" })).toThrow(/MUTINYBIM_AUTH_MODE/);
+  });
+
   it("a laptop test authority takes a database and sign-ins on this machine only, and is refused on Fly", () => {
     const local = {
       NODE_ENV: "test" as const,

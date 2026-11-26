@@ -2,6 +2,7 @@ import { BRANCH_SEPARATOR, branchModelId, isBranchId } from '@permitzip/bim-kern
 import type {
   EditorHost,
   EditorLocation,
+  EditorModelMembersPort,
   EditorPreferenceState,
   EditorPreferences,
   EditorPreferenceValue,
@@ -24,6 +25,9 @@ export { sonnerNotifier }
  * through the tool server, not through the editor.
  */
 export interface LocalEditorHostOptions {
+  /** The authority issued this tab a native session and serves model memberships. */
+  readonly nativeMembership?: boolean
+  readonly requireWriteGrant?: boolean
   /** The local model server's WebSocket address, e.g. `ws://127.0.0.1:3095/sync`. */
   readonly authorityUrl: string
   readonly userId?: string
@@ -102,10 +106,30 @@ export function memoryPreferences(): EditorPreferences {
   }
 }
 
+function nativeModelMembers(authorityUrl: string, token: string): EditorModelMembersPort {
+  const origin = new URL(authorityUrl)
+  if (origin.protocol === 'wss:') origin.protocol = 'https:'
+  else if (origin.protocol === 'ws:') origin.protocol = 'http:'
+  const address = (modelId: string) => new URL('/models/' + encodeURIComponent(modelId) + '/members', origin)
+  const auth = { Authorization: 'Bearer ' + token }
+  return {
+    read(modelId, personId, signal) {
+      const url = address(modelId)
+      if (personId !== undefined) url.searchParams.set('personId', personId)
+      return fetch(url, { headers: auth, signal, credentials: 'omit', cache: 'no-store', redirect: 'error' })
+    },
+    change(modelId, input) {
+      return fetch(address(modelId), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify(input), credentials: 'omit', cache: 'no-store', redirect: 'error' })
+    },
+  }
+}
+
 export function createLocalEditorHost(options: LocalEditorHostOptions): EditorHost {
   const token = options.token === undefined ? 'local' : options.token
   return {
-    data: createLocalDataHost(),
+    data: { ...createLocalDataHost(), ...(options.nativeMembership && options.token
+      ? { modelMembers: nativeModelMembers(options.authorityUrl, options.token) } : {}) },
     shell: createLocalShellHost(),
     identity: { userId: options.userId ?? 'local-user', displayName: options.displayName ?? 'You' },
     session: {
@@ -123,6 +147,6 @@ export function createLocalEditorHost(options: LocalEditorHostOptions): EditorHo
     links: { hrefFor: () => null },
     notify: sonnerNotifier,
     preferences: memoryPreferences(),
-    capabilities: { hostName: 'this computer', connectHint: options.connectHint ?? null },
+    capabilities: { hostName: 'this computer', connectHint: options.connectHint ?? null, requireWriteGrant: options.requireWriteGrant },
   }
 }
