@@ -5,7 +5,6 @@ import {
   activeClassRegistry,
   activeServiceRegistry,
   classSolidsOf,
-  gridAxisFamily,
   fieldProviderRegistry,
   hostLineOf,
   hostVoidsOf,
@@ -63,6 +62,7 @@ import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { elementTypeOf, elementTypeValue } from "@permitzip/bim-kernel/elements";
 import { LEGACY_QUANTITY_KEYS, QUANTITY_BINDINGS } from "@permitzip/bim-units";
 import { GeometryWriter, type Section, type Vec3 } from "./geometry";
+import { sortGridAxes } from "./grid-axes";
 import { derivedIfcGuid, isIfcGuid, isUuid, projectNamespace, relationshipIfcGuid, uuidToIfcGuid } from "./guid";
 import { PROXY, primaryClass, resolveIfcClass, type ResolvedIfcClass } from "./mapping";
 import { ParameterHomes, PropertyBag, baselineParameterHomes, registryParameterHomes, writeSets, type ParameterHome, type PropertyInput } from "./properties";
@@ -894,14 +894,30 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   if (grids.length > 0) {
     const point = (p: { readonly x: number; readonly y: number }): StepRef => g.add("IFCCARTESIANPOINT", [list([real(p.x), real(p.y)])]);
     const axis = (gl: GridLine): StepRef => g.add("IFCGRIDAXIS", [str255(gl.label.trim() || gl.id), g.add("IFCPOLYLINE", [list([point(gl.start), point(gl.end)])]), bool(true)]);
-    const u = grids.filter((gl) => gridAxisFamily(gl.start, gl.end) === "U").map(axis);
-    const v = grids.filter((gl) => gridAxisFamily(gl.start, gl.end) === "V").map(axis);
+    const sorted = sortGridAxes(grids);
+    for (const gl of sorted.noLength) warn(`${gl.id}: this grid line starts and ends at the same point, so it is left out of the file`);
     const lowest = levels[0]?.id ?? null;
-    const guid = guids.derived("grid");
-    const ref = g.add("IFCGRID", [str(guid), $, str("Grid"), $, $, geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), $, list(u), list(v), $, en("RECTANGULAR")]);
-    byEntity.IfcGrid = (byEntity.IfcGrid ?? 0) + 1;
-    byEntity.IfcGridAxis = (byEntity.IfcGridAxis ?? 0) + u.length + v.length;
-    containIn(lowest, null, ref);
+    if (sorted.u.length > 0 && sorted.v.length > 0) {
+      const u = sorted.u.map(axis);
+      const v = sorted.v.map(axis);
+      const guid = guids.derived("grid");
+      const ref = g.add("IFCGRID", [str(guid), $, str("Grid"), $, $, geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), $, list(u), list(v), $, en(sorted.rectangular ? "RECTANGULAR" : "IRREGULAR")]);
+      byEntity.IfcGrid = (byEntity.IfcGrid ?? 0) + 1;
+      byEntity.IfcGridAxis = (byEntity.IfcGridAxis ?? 0) + u.length + v.length;
+      containIn(lowest, null, ref);
+    } else {
+      // IfcGrid.UAxes and VAxes are LIST [1:?]: lines that all run one way can't be an IfcGrid. Each is kept as a named line instead.
+      const oneWay = [...sorted.u, ...sorted.v];
+      for (const gl of oneWay) {
+        const curve = g.add("IFCPOLYLINE", [list([point(gl.start), point(gl.end)])]);
+        const shape = g.add("IFCPRODUCTDEFINITIONSHAPE", [$, $, list([g.add("IFCSHAPEREPRESENTATION", [context, str("Annotation"), str("Curve2D"), list([curve])])])]);
+        const ref = g.add("IFCANNOTATION", [str(guids.record(gl)), $, str255(`Grid ${gl.label.trim() || gl.id}`), $, str("Grid line"), geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), shape, en("USERDEFINED")]);
+        byEntity.IfcAnnotation = (byEntity.IfcAnnotation ?? 0) + 1;
+        containIn(lowest, null, ref);
+      }
+      if (oneWay.length === 1) warn(`${oneWay[0]?.id}: it is the only grid line, and an IFC grid needs lines in two directions, so it is written as a named reference line (IfcAnnotation). Add a grid line across it to export a grid`);
+      else if (oneWay.length > 1) warn(`The ${oneWay.length} grid lines all run the same way, and an IFC grid needs lines in two directions, so they are written as named reference lines (IfcAnnotation) with their labels. Add a grid line across them to export a grid`);
+    }
   }
 
   // ---------------------------------------------------------------- typicals as assemblies
