@@ -5,7 +5,7 @@
  * and an optional quote link.
  * One Node process, no framework; see README.md.
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import os from "node:os";
@@ -18,7 +18,7 @@ import { parseBranchModelId } from "@permitzip/bim-kernel";
 import { TOOL_FAMILIES } from "@permitzip/bim-mcp";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { LocalScriptRunner } from "@permitzip/bim-script-runner/local";
-import type { SyncHub } from "@permitzip/bim-sync";
+import { readClientMessage, type SyncHub } from "@permitzip/bim-sync";
 import { createEditorDemo, type EditorDemo } from "../../../packages/bim-editor/demo/server";
 import { ApprovalBook, approvalTitle } from "./assistant-approvals";
 import { approveAuthorize, checkAuthorize, errorRedirect, type AssistantAuthOptions } from "./assistant-auth";
@@ -27,8 +27,9 @@ import type { OAuthProviderConfig, WebConfig } from "./config";
 import { DEFAULT_RUNNER_DIR, localScripts, ScriptSandbox, scriptsOff, sealedScripts, type HostedScripts } from "./script-sandbox";
 import { isColorScheme, openDb, type Db, type ModelAccess, type ModelRow, type ShareRole, type UserRow } from "./db";
 import { openSupabaseStore } from "./db-supabase";
-import { esc, setWaitingApprovals, type Flash } from "./ui";
+import { esc, formatWhen, setWaitingApprovals, type Flash } from "./ui";
 import { ModelStore, summarize, type StarterKind } from "./models";
+import { ModelCreator } from "./model-creation";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
 import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
 import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
@@ -178,10 +179,6 @@ function safeReturn(value: string | null | undefined, fallback = "/models"): str
   return value;
 }
 
-function newModelId(): string {
-  return `m-${randomBytes(10).toString("hex")}`;
-}
-
 function baseModelOf(modelId: string): string {
   return parseBranchModelId(modelId)?.baseModelId ?? modelId;
 }
@@ -210,6 +207,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   const models = new ModelStore(path.join(config.dataDir, "models"), (modelId) => {
     void db.touchModel(modelId).catch((err: unknown) => console.error("[mutinybim-web] touching model updated_at failed", { modelId, err }));
   });
+  const creator = new ModelCreator(db, path.join(config.dataDir, "models"));
   const throttle = new Throttle(20, 10 * 60_000);
   const ipOf = (req: IncomingMessage): string => clientIp(req, Boolean(config.trustProxy));
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
@@ -373,8 +371,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   }
 
   async function modelsView(user: UserRow, flash: Flash | null, status = 200, fresh = false): Promise<{ status: number; body: string }> {
-    const [own, shared, linked] = await Promise.all([db.modelsOf(user.id), db.sharedWith(user.id), linkedModelsView(user, fresh)]);
-    return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked) };
+    const [own, shared, linked, pending, inbox] = await Promise.all([
+      db.modelsOf(user.id), db.sharedWith(user.id), linkedModelsView(user, fresh), db.pendingCreations(user.id), db.transfers.inbox(user.id),
+    ]);
+    return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked, pending, inbox) };
   }
 
   async function handleAuthCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: OAuthProviderConfig): Promise<void> {
@@ -755,6 +755,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (user && pathname === "/models") {
       if (method === "GET") {
         const welcome = url.searchParams.get("welcome") === "1";
+        await creator.recover(user.id);
         const deleted = url.searchParams.get("deleted");
         const flash = welcome
           ? { kind: "ok" as const, text: `Welcome, ${user.display_name}. Make your first model below.` }
@@ -788,16 +789,41 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           const view = await modelsView(user, { kind: "error", text: "Give the model a name." }, 400);
           return html(res, view.status, view.body);
         }
-        if ((await db.countModelsOf(user.id)) >= config.modelLimit) {
-          const view = await modelsView(user, { kind: "error", text: `A free account keeps up to ${config.modelLimit} models. Delete one to make another.` }, 409);
+        const key = form.get("creation_key") ?? randomUUID();
+        if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(key)) {
+          const view = await modelsView(user, { kind: "error", text: "Open My models and submit a fresh creation form." }, 400);
           return html(res, view.status, view.body);
         }
-        const id = newModelId();
-        await models.create(id, start);
-        await db.createModel({ id, ownerId: user.id, name });
-        console.log("[mutinybim-web] model made", { modelId: id, userId: user.id, start });
-        return redirect(res, `/m/${id}?view=plan`);
+        const result = await creator.create(user.id, key, name, start, config.modelLimit);
+        if (result === "quota") {
+          const unit = config.modelLimit === 1 ? "model" : "models";
+          const view = await modelsView(user, { kind: "error", text: `A free account keeps up to ${config.modelLimit} ${unit}. Free a slot to make another.` }, 409);
+          return html(res, view.status, view.body);
+        }
+        if (result === "conflict") {
+          const view = await modelsView(user, { kind: "error", text: "This form already requested a different model. Use a fresh form to make another." }, 409);
+          return html(res, view.status, view.body);
+        }
+        if (result === "busy") {
+          res.setHeader("retry-after", "1");
+          const view = await modelsView(user, { kind: "error", text: "Your model is being created. Reopen My models to see it." }, 503);
+          return html(res, view.status, view.body);
+        }
+        if (result.state === "abandoned") {
+          const view = await modelsView(user, { kind: "error", text: "The starter could not be published. Use a fresh form to create the model." }, 410);
+          return html(res, view.status, view.body);
+        }
+        return redirect(res, `/m/${result.model_id}?view=plan`);
       }
+    }
+    if (user && method === "POST" && pathname === "/models/creations/cancel") {
+      const form = await readForm(req);
+      const result = await creator.cancel(user.id, form.get("creation_key") ?? "");
+      if (result === "busy") {
+        const view = await modelsView(user, { kind: "error", text: "This model is being saved. Reopen My models to check its status." }, 409);
+        return html(res, view.status, view.body);
+      }
+      return redirect(res, "/models");
     }
     const modelAction = pathname.match(/^\/models\/([a-z0-9-]+)\/(rename|delete)$/);
     if (user && method === "POST" && modelAction?.[1]) {
@@ -808,44 +834,104 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           const view = await modelsView(user, { kind: "error", text: "A model needs a name." }, 400);
           return html(res, view.status, view.body);
         }
-        await db.renameModel(model.id, name);
+        if (!(await db.renameModel(model.id, name, user.id))) throw new Refusal(404, NOT_YOURS);
         return redirect(res, "/models");
       }
-      await db.deleteModel(model.id);
+      if (!(await db.deleteModel(model.id, user.id))) throw new Refusal(404, NOT_YOURS);
       disconnect(model.id, null);
       await models.remove(model.id);
       console.log("[mutinybim-web] model deleted", { modelId: model.id, userId: user.id });
       return redirect(res, `/models?deleted=${encodeURIComponent(model.name)}`);
     }
 
+    const offerRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/transfer$/);
+    if (user && method === "POST" && offerRoute?.[1]) {
+      const model = await ownModel(user, offerRoute[1]);
+      const form = await readForm(req);
+      const retained = form.get("retained") ?? "edit";
+      if (retained !== "edit" && retained !== "view" && retained !== "none") throw new Refusal(400, "Choose your access after the transfer.");
+      const result = await db.transfers.offer(randomUUID(), model.id, user.id, form.get("recipient") ?? "", retained);
+      if (result === "unavailable") throw new Refusal(404, NOT_YOURS);
+      if (result === "exists") throw new Refusal(409, "An offer is already open. Cancel it before sending another.");
+      if (typeof result === "string") throw new Refusal(409, "Choose someone who has a direct share on this model.");
+      return redirect(res, `/models/${model.id}/share`);
+    }
+    const receiptRoute = pathname.match(/^\/transfers\/([a-f0-9-]{36})\/receipt$/);
+    if (user && method === "GET" && receiptRoute?.[1]) {
+      const receipt = await db.transfers.forRecipient(receiptRoute[1], user.id);
+      if (receipt?.state !== "accepted" || !receipt.accepted_at) throw new Refusal(404, "This transfer receipt is unavailable.");
+      return html(res, 200, messagePage(config, user, "Ownership transfer accepted",
+        `You accepted “${receipt.model_name}” from ${receipt.sender_name} on ${formatWhen(receipt.accepted_at)}.`,
+        { href: "/models", label: "My models" }));
+    }
+    const answerRoute = pathname.match(/^\/transfers\/([a-f0-9-]{36})\/(accept|decline|cancel)$/);
+    if (user && method === "POST" && answerRoute?.[1]) {
+      const action = answerRoute[2];
+      if (action !== "accept" && action !== "decline" && action !== "cancel") throw new Refusal(404, NOT_YOURS);
+      // The database can commit even if its reply is lost. Identify the affected live sessions first.
+      const candidate = action === "accept" ? await db.transfers.forRecipient(answerRoute[1], user.id) : null;
+      let result;
+      try {
+        result = await db.transfers.respond(answerRoute[1], user.id, action, config.modelLimit);
+      } catch (err) {
+        if (candidate?.state === "open") {
+          disconnect(candidate.model_id, candidate.sender_id);
+          disconnect(candidate.model_id, candidate.recipient_id);
+        }
+        throw err;
+      }
+      if (result === "quota") {
+        const view = await modelsView(user, { kind: "error", text: "Your account has no free model slot. Free a slot and accept this offer again before it expires." }, 409);
+        return html(res, view.status, view.body);
+      }
+      if (typeof result === "string") throw new Refusal(404, "This transfer offer is unavailable.");
+      const expected = action === "accept" ? "accepted" : action === "decline" ? "declined" : "cancelled";
+      if (result.state !== expected) {
+        const message = action === "accept"
+          ? "Check My models for a newer offer. If you still need one, ask the model owner to send a new offer."
+          : "Check My models for current offers.";
+        return html(res, 409, messagePage(config, user, "Ownership offer ended", message, { href: "/models", label: "My models" }));
+      }
+      if (action === "accept") {
+        if (candidate?.state === "open") {
+          disconnect(result.model_id, result.sender_id);
+          disconnect(result.model_id, result.recipient_id);
+        }
+        return redirect(res, `/transfers/${result.id}/receipt`);
+      }
+      return redirect(res, action === "cancel" ? `/models/${result.model_id}/share` : "/models");
+    }
     const shareRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/share$/);
     if (user && shareRoute?.[1]) {
       const model = await ownModel(user, shareRoute[1]);
-      if (method === "GET") return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id)));
+      const renderShare = async (options: { email?: string; flash?: Flash } = {}) =>
+        sharePage(config, user, model, await db.sharesOf(model.id), { ...options, offer: await db.transfers.outgoing(model.id) });
+      if (method === "GET") return html(res, 200, await renderShare());
       if (method === "POST") {
         const form = await readForm(req);
         const email = (form.get("email") ?? "").trim().toLowerCase();
         const role: ShareRole = form.get("role") === "view" ? "view" : "edit";
-        const fail = async (status: number, text: string) => html(res, status, sharePage(config, user, model, await db.sharesOf(model.id), { email, flash: { kind: "error", text } }));
+        const fail = async (status: number, text: string) => html(res, status, await renderShare({ email, flash: { kind: "error", text } }));
         const person = email ? await db.userByEmail(email) : null;
         if (!person) return fail(404, `No MutinyBIM account here uses ${email || "that email"}. Ask them to sign up first (this app sends no invitations), then share again.`);
         if (person.id === user.id) return fail(400, "That's you; you already own this model.");
         const before = (await db.sharesOf(model.id)).find((s) => s.user_id === person.id);
-        await db.share({ modelId: model.id, userId: person.id, role, invitedBy: user.id });
+        if (!(await db.share({ modelId: model.id, userId: person.id, role, invitedBy: user.id }))) throw new Refusal(404, NOT_YOURS);
         if (before && before.role !== role) disconnect(model.id, person.id);
         console.log("[mutinybim-web] model shared", { modelId: model.id, ownerId: user.id, userId: person.id, role });
         const words = before ? `${person.display_name} can now ${role === "edit" ? "edit" : "only view"} it.` : `Shared with ${person.display_name}. They see it under “Shared with you” on My models.`;
-        return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { flash: { kind: "ok", text: words } }));
+        return html(res, 200, await renderShare({ flash: { kind: "ok", text: words } }));
       }
     }
     const unshareRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/share\/([0-9a-f-]{36})\/delete$/);
     if (user && method === "POST" && unshareRoute?.[1] && unshareRoute[2]) {
       const model = await ownModel(user, unshareRoute[1]);
       const removed = (await db.sharesOf(model.id)).find((s) => s.user_id === unshareRoute[2]);
-      await db.unshare(model.id, unshareRoute[2]);
+      if (!(await db.unshare(model.id, unshareRoute[2], user.id))) throw new Refusal(404, NOT_YOURS);
       disconnect(model.id, unshareRoute[2]);
       console.log("[mutinybim-web] model unshared", { modelId: model.id, ownerId: user.id, userId: unshareRoute[2] });
-      return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { flash: { kind: "ok", text: removed ? `${removed.display_name} no longer has “${model.name}”.` : "They already didn't have it." } }));
+      return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { offer: await db.transfers.outgoing(model.id),
+        flash: { kind: "ok", text: removed ? `${removed.display_name} no longer has “${model.name}”.` : "They already didn't have it." } }));
     }
 
     if (user && pathname === "/settings" && method === "GET") {
@@ -1093,11 +1179,17 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   });
 
   /** Open model connections, by base model, so losing access disconnects at once. */
-  const live = new Map<string, Set<{ readonly userId: string; readonly endpoint: ModelEndpoint }>>();
+  interface LiveModelConnection { readonly base: string; readonly userId: string; readonly access: ModelAccess; active: boolean; readonly endpoint: ModelEndpoint }
+  const live = new Map<string, Set<LiveModelConnection>>();
+  function closeChanged(entry: LiveModelConnection): void {
+    if (!entry.active) return;
+    entry.active = false;
+    entry.endpoint.close(4403, "Your access to this model changed. Reopen it from My models.");
+  }
   /** Closes connections to a model: everyone's (`userId` null, the model was deleted) or one person's. They reconnect and are checked again. */
   function disconnect(baseModelId: string, userId: string | null): void {
     for (const entry of live.get(baseModelId) ?? []) {
-      if (userId === null || entry.userId === userId) entry.endpoint.close(4403, "Your access to this model changed. Reopen it from My models.");
+      if (userId === null || entry.userId === userId) closeChanged(entry);
     }
   }
 
@@ -1109,12 +1201,24 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
    * read-only when the model was shared with them to view.
    */
   const attach: AttachModel = (person, actorId, modelFromUrl, endpoint) => {
-    const conn = { id: randomUUID(), send: (data: string) => endpoint.send(data) };
+    let entry: LiveModelConnection | null = null;
+    const conn = { id: randomUUID(), send: (data: string) => { if (entry?.active !== false) endpoint.send(data); } };
     let joined: SyncHub | null = null;
-    let entry: { readonly userId: string; readonly endpoint: ModelEndpoint } | null = null;
+    async function current(binding: LiveModelConnection): Promise<boolean> {
+      try {
+        const access = await db.accessTo(person.id, binding.base);
+        if (binding.active && access?.access === binding.access) return true;
+      } catch (err) {
+        closeChanged(binding);
+        throw err;
+      }
+      closeChanged(binding);
+      return false;
+    }
     const deny = (reason: string) => conn.send(JSON.stringify({ type: "denied", reason }));
     return {
       async receive(raw) {
+        if (entry?.active === false) return;
         if (!joined) {
           if (!raw.startsWith('{"type":"hello"')) {
             conn.send(JSON.stringify({ type: "error", message: "Say hello first: this connection has not named a model yet." }));
@@ -1132,12 +1236,16 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           }
           const hub = await models.hubFor(base, requested);
           if (!hub) return deny("That branch was closed or no longer exists. Switch back to Main.");
-          joined = hub;
-          entry = { userId: person.id, endpoint };
+          entry = { base, userId: person.id, access: found.access, active: true, endpoint };
           const set = live.get(base) ?? new Set();
           set.add(entry);
           live.set(base, set);
+          if (!(await current(entry))) return;
+          joined = hub;
           joined.join(conn, { actorId, canWrite: found.access !== "view" });
+        } else if (entry) {
+          const message = readClientMessage(raw);
+          if (message.ok && message.message.type !== "heartbeat" && message.message.type !== "presence" && !(await current(entry))) return;
         }
         await joined.handle(conn, raw);
       },

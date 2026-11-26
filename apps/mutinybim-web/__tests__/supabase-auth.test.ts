@@ -307,6 +307,29 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
   expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh"]);
 });
 
+test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {
+  const model = { id: "plant", name: "East plant", owner_id: "alex", created_at: "2026-11-26", updated_at: "2026-11-26" };
+  const reads: URL[] = [];
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    reads.push(url);
+    // Acceptance commits immediately after the first model read, consuming Bea's direct share.
+    if (url.pathname === "/rest/v1/model_shares") return Response.json([]);
+    expect(url.pathname).toBe("/rest/v1/models");
+    expect(url.searchParams.get("id")).toBe("eq.plant");
+    const snapshot = { ...model, model_shares: model.owner_id === "alex" ? [{ role: "view" }] : [] };
+    model.owner_id = "bea";
+    return Response.json([snapshot]);
+  } });
+  expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "alex" }, access: "view" });
+  expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "bea" }, access: "owner" });
+  expect(reads).toHaveLength(2);
+  for (const url of reads) {
+    expect(url.searchParams.get("select")).toContain("model_shares(role)");
+    expect(url.searchParams.get("model_shares.user_id")).toBe("eq.bea");
+  }
+});
+
 test("configured provider domains show a dismissible opt-in link prompt on My models only for matching unlinked users", async () => {
   await start({
     supabase: null,
@@ -343,6 +366,18 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
     passwordHash: "scrypt$hash",
   });
   await sqlite.createModel({ id: "mdl-1", ownerId: legacyUser.id, name: "Studio" });
+  const peer = await sqlite.createUser({ id: "peer", email: "peer@example.test", displayName: "Peer", passwordHash: null });
+  await sqlite.share({ modelId: "mdl-1", userId: peer.id, role: "view", invitedBy: legacyUser.id });
+  const offer = await sqlite.transfers.offer("offer-1", "mdl-1", legacyUser.id, peer.id, "edit");
+  if (typeof offer === "string") throw new Error("Missing test offer");
+  await sqlite.createModel({ id: "archived", ownerId: legacyUser.id, name: "Archived job" });
+  await sqlite.share({ modelId: "archived", userId: peer.id, role: "edit", invitedBy: legacyUser.id });
+  await sqlite.transfers.offer("offer-2", "archived", legacyUser.id, peer.id, "none");
+  const receipt = await sqlite.transfers.respond("offer-2", peer.id, "accept", 3);
+  if (typeof receipt === "string") throw new Error("Missing test receipt");
+  await sqlite.deleteModel("archived", peer.id);
+  await sqlite.reserveCreation({ owner_id: legacyUser.id, creation_key: "form-1", model_id: "next-job", name: "Next job",
+    starter: "blank", starter_hash: "a".repeat(64), state: "reserved" }, 3);
   await sqlite.linkIdentity("org", "sub-1", legacyUser.id);
   await sqlite.createSession("tok-hash", legacyUser.id, new Date(Date.now() + 60_000), "password");
   await sqlite.saveOAuthClient("org", "https://app.example.test/auth/org/callback", "cid-1");
@@ -376,6 +411,18 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   const summary = await migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   expect(summary.remappedUsers).toBe(1);
   expect(summary.tables.models).toBe(1);
+  expect(summary.tables.model_creations).toBe(1);
+  expect(summary.tables.model_shares).toBe(1);
+  expect(summary.tables.model_transfers).toBe(2);
+  expect(posted.find((p) => p.path === "/rest/v1/model_creations")?.body).toEqual([
+    expect.objectContaining({ owner_id: existingPgId, creation_key: "form-1", model_id: "next-job", state: "reserved" }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/model_shares")?.body).toEqual([
+    expect.objectContaining({ model_id: "mdl-1", user_id: peer.id, grant_id: offer.share_id, invited_by: existingPgId }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/model_transfers")?.body).toEqual(expect.arrayContaining([
+    { ...offer, sender_id: existingPgId }, { ...receipt, sender_id: existingPgId },
+  ]));
   expect(summary.tables.identities).toBe(1);
   expect(summary.tables.sessions).toBe(1);
   expect(summary.tables.oauth_clients).toBe(1);
