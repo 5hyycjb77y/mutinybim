@@ -5,12 +5,14 @@
  * every form says what went wrong in words.
  */
 import type { ComponentProps, ReactNode } from "react";
+import { randomUUID } from "node:crypto";
 import { Badge, Button, buttonVariants, Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, cn, Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle, Field, FieldHint, Input, Label, NativeSelect, Separator } from "@permitzip/bim-ui";
 import type { OAuthProviderConfig, QuoteConfig, WebConfig } from "./config";
 import { approvalTitle, type PendingApproval } from "./assistant-approvals";
-import type { AgentKeyRow, AssistantGrantRow, LinkedModelRow, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
+import type { AgentKeyRow, AssistantGrantRow, LinkedModelRow, ModelCreation, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
 import type { LinkedProvider, LinkedView } from "./linked-hosts";
 import type { ModelSummary } from "./models";
+import type { Transfer } from "./model-transfers";
 import { formatWhen, page, waitingApprovalsOf, type Flash, type FrameUser } from "./ui";
 
 function frameUser(user: UserRow): FrameUser {
@@ -511,11 +513,30 @@ function LinkedSection({ view }: { view: LinkedView }) {
   );
 }
 
-export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash, linked: LinkedModelsView = { sections: [], keyMissing: [] }): string {
-  const atLimit = models.length >= config.modelLimit;
+export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash, linked: LinkedModelsView = { sections: [], keyMissing: [] }, pending: readonly ModelCreation[] = [], inbox: readonly Transfer[] = []): string {
+  const atLimit = models.length + pending.length >= config.modelLimit;
   return page(
     <>
       <PageTitle>My models</PageTitle>
+      {inbox.map((offer) => (
+        <Card key={offer.id}>
+          <CardHeader>
+            <CardTitle>Take ownership of {offer.model_name}?</CardTitle>
+            <CardDescription>{offer.sender_name} offered you this model.{" "}
+              {atLimit ? "Your model slots are full. Free one to accept this offer." : "Accepting uses one of your model slots."}
+              {" "}{offer.retained === "none" ? "The sender gives up their personal access." : `The sender keeps ${offer.retained} access.`}
+              {" "}The offer expires {formatWhen(offer.expires_at)}.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <ConfirmForm action={`/transfers/${offer.id}/accept`} question={`Take ownership of “${offer.model_name}”?`}>
+              <Button type="submit">Accept transfer</Button>
+            </ConfirmForm>
+            <form method="post" action={`/transfers/${offer.id}/decline`}>
+              <Button type="submit" variant="outline">Decline</Button>
+            </form>
+          </CardContent>
+        </Card>
+      ))}
       {(linked.linkPrompts ?? []).map((p) => {
         const host = providerName(p);
         const domain = user.email.split("@")[1] ?? "";
@@ -597,9 +618,26 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
           <CardDescription>Projects from {providerName(p)} can't be shown on this server yet: its operator hasn't set the key it keeps those connections under. Your own models are fine.</CardDescription>
         </Card>
       ))}
+      {pending.map((request) => (
+        <Card key={request.model_id}>
+          <CardHeader><CardTitle>Creating {request.name}</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <form method="post" action="/models">
+              <input type="hidden" name="creation_key" value={request.creation_key} />
+              <input type="hidden" name="name" value={request.name} />
+              <input type="hidden" name="start" value={request.starter} />
+              <Button type="submit" size="sm">Resume creation</Button>
+            </form>
+            <form method="post" action="/models/creations/cancel">
+              <input type="hidden" name="creation_key" value={request.creation_key} />
+              <Button type="submit" size="sm" variant="outline">Cancel creation</Button>
+            </form>
+          </CardContent>
+        </Card>
+      ))}
       {atLimit ? (
         <Card>
-          <CardDescription>You have {models.length} models, the most one free account can keep. Delete one to make another.</CardDescription>
+          <CardDescription>{pending.length ? "Pending creations reserve model slots. Cancelling a pending creation frees its slot." : "All your model slots are in use. Delete a model to make room for another."}</CardDescription>
         </Card>
       ) : (
         <Card>
@@ -607,6 +645,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
             <CardTitle>New model</CardTitle>
           </CardHeader>
           <form method="post" action="/models" className="flex flex-col gap-4">
+            <input type="hidden" name="creation_key" value={randomUUID()} />
             <TextField label="Name" name="name" required maxLength={120} placeholder="Sample Warehouse" />
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-1 text-sm font-medium">Start from</legend>
@@ -630,7 +669,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
   );
 }
 
-export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, shares: readonly ShareRow[], options: { email?: string; flash?: Flash } = {}): string {
+export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, shares: readonly ShareRow[], options: { email?: string; flash?: Flash; offer?: Transfer | null } = {}): string {
   return page(
     <>
       <PageTitle lede="People you share with see it under “Shared with you” on their My models page. They need a MutinyBIM account on this server; this app sends no email, so tell them yourself.">Share “{model.name}”</PageTitle>
@@ -661,7 +700,10 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
                     Change
                   </Button>
                 </form>
-                <ConfirmForm action={`/models/${model.id}/share/${s.user_id}/delete`} question={`Stop sharing “${model.name}” with ${s.display_name}? They are disconnected at once.`}>
+                <ConfirmForm action={`/models/${model.id}/share/${s.user_id}/delete`}
+                  question={`Stop sharing “${model.name}” with ${s.display_name}? ` + (options.offer?.recipient_id === s.user_id
+                    ? "This disconnects them and ends their ownership offer."
+                    : "They are disconnected at once.")}>
                   <Button type="submit" size="sm" variant="ghost" className="text-(--mutiny-danger)">
                     Remove
                   </Button>
@@ -694,6 +736,40 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
           </Button>
         </form>
       </Card>
+      {options.offer ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ownership offered to {options.offer.recipient_name}</CardTitle>
+            <CardDescription>You own this model until they accept. The offer expires {formatWhen(options.offer.expires_at)}.</CardDescription>
+          </CardHeader>
+          <CardContent><form method="post" action={`/transfers/${options.offer.id}/cancel`}>
+            <Button type="submit" variant="outline">Cancel offer</Button>
+          </form></CardContent>
+        </Card>
+      ) : shares.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Transfer ownership</CardTitle>
+            <CardDescription>The model and its history stay together. The recipient must accept.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ConfirmForm action={`/models/${model.id}/transfer`} question={`Send an ownership offer for “${model.name}”?`} className="flex flex-col gap-3">
+              <Field><Label htmlFor="transfer-recipient">New owner</Label>
+                <NativeSelect name="recipient" id="transfer-recipient" data-confirm-label="New owner" required defaultValue="">
+                  <option value="" disabled>Choose someone with a share</option>
+                  {shares.map((s) => <option key={s.user_id} value={s.user_id}>{s.display_name} ({s.email})</option>)}
+                </NativeSelect>
+              </Field>
+              <Field><Label htmlFor="transfer-retained">Your personal access after transfer</Label>
+                <NativeSelect name="retained" id="transfer-retained" data-confirm-label="Your personal access after transfer" defaultValue="edit">
+                  <option value="edit">Can edit</option><option value="view">Can view</option><option value="none">None</option>
+                </NativeSelect>
+              </Field>
+              <div><Button type="submit">Send ownership offer</Button></div>
+            </ConfirmForm>
+          </CardContent>
+        </Card>
+      )}
       <div>
         <Button asChild variant="ghost">
           <a href="/models">← Back to my models</a>

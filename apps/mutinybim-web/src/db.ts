@@ -15,6 +15,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { occupiedSlots, sqliteTransfers, SQLITE_TRANSFER_SCHEMA, type Transfers } from "./model-transfers";
 
 export interface UserRow {
   readonly id: string;
@@ -41,6 +42,17 @@ export interface ModelRow {
 }
 
 export type ShareRole = "view" | "edit";
+export interface ModelCreation {
+  readonly owner_id: string;
+  readonly creation_key: string;
+  readonly model_id: string;
+  readonly name: string;
+  readonly starter: "blank" | "sample";
+  readonly starter_hash: string;
+  readonly state: "reserved" | "ready" | "abandoned";
+}
+export type CreationReservation = ModelCreation | "quota" | "conflict" | "id_used";
+
 export type ModelAccess = "owner" | ShareRole;
 
 /** A model someone else shared with this person. */
@@ -197,6 +209,17 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS model_creations (
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  creation_key TEXT NOT NULL,
+  model_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  starter TEXT NOT NULL CHECK (starter IN ('blank', 'sample')),
+  starter_hash TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('reserved', 'ready', 'abandoned')),
+  PRIMARY KEY (owner_id, creation_key)
+);
+CREATE INDEX IF NOT EXISTS model_creations_pending ON model_creations(owner_id) WHERE state = 'reserved';
 CREATE TABLE IF NOT EXISTS identities (
   provider TEXT NOT NULL,
   subject TEXT NOT NULL,
@@ -360,6 +383,7 @@ CREATE TABLE IF NOT EXISTS linked_offers (
 `;
 
 export interface WebStore {
+  readonly transfers: Transfers;
   close(): Promise<void>;
 
   createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): Promise<UserRow>;
@@ -385,18 +409,22 @@ export interface WebStore {
   usePasswordReset(tokenHash: string): Promise<void>;
 
   createModel(input: { id: string; ownerId: string; name: string }): Promise<ModelRow>;
+  creationByKey(ownerId: string, key: string): Promise<ModelCreation | null>;
+  pendingCreations(ownerId: string): Promise<readonly ModelCreation[]>;
+  reserveCreation(input: ModelCreation, limit: number): Promise<CreationReservation>;
+  finishCreation(ownerId: string, key: string, state: "ready" | "abandoned"): Promise<ModelCreation>;
   modelsOf(userId: string): Promise<readonly ModelRow[]>;
   modelById(id: string): Promise<ModelRow | null>;
   countModelsOf(userId: string): Promise<number>;
-  renameModel(id: string, name: string): Promise<void>;
+  renameModel(id: string, name: string, ownerId: string): Promise<boolean>;
   touchModel(id: string): Promise<void>;
-  deleteModel(id: string): Promise<void>;
+  deleteModel(id: string, ownerId: string): Promise<boolean>;
 
   accessTo(userId: string, modelId: string): Promise<{ readonly model: ModelRow; readonly access: ModelAccess } | null>;
   sharedWith(userId: string): Promise<readonly SharedModelRow[]>;
   sharesOf(modelId: string): Promise<readonly ShareRow[]>;
-  share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<void>;
-  unshare(modelId: string, userId: string): Promise<void>;
+  share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<boolean>;
+  unshare(modelId: string, userId: string, ownerId: string): Promise<boolean>;
 
   createAgentKey(input: { id: string; userId: string; keyHash: string; label: string; last4: string }): Promise<void>;
   agentKeysOf(userId: string): Promise<readonly AgentKeyRow[]>;
@@ -481,6 +509,17 @@ export function toUser(row: unknown): UserRow | null {
 export function toModel(row: unknown): ModelRow | null {
   if (!isRecord(row)) return null;
   return { id: str(row, "id"), owner_id: str(row, "owner_id"), name: str(row, "name"), created_at: str(row, "created_at"), updated_at: str(row, "updated_at") };
+}
+
+export function toModelCreation(row: unknown): ModelCreation {
+  if (!isRecord(row)) throw new Error("Missing model creation record");
+  const starter = row.starter;
+  const state = row.state;
+  if ((starter !== "blank" && starter !== "sample") || (state !== "reserved" && state !== "ready" && state !== "abandoned")) {
+    throw new Error("Invalid model creation record");
+  }
+  return { owner_id: str(row, "owner_id"), creation_key: str(row, "creation_key"), model_id: str(row, "model_id"),
+    name: str(row, "name"), starter, starter_hash: str(row, "starter_hash"), state };
 }
 
 export function toAgentKey(row: unknown): AgentKeyRow | null {
@@ -630,22 +669,42 @@ const UPGRADES: readonly string[] = [
   "ALTER TABLE users ADD COLUMN color_scheme TEXT NOT NULL DEFAULT 'system' CHECK (color_scheme IN ('light', 'dark', 'system'))",
   "ALTER TABLE assistant_clients ADD COLUMN token_auth_method TEXT NOT NULL DEFAULT 'none' CHECK (token_auth_method IN ('none', 'client_secret_post', 'client_secret_basic'))",
   "ALTER TABLE assistant_clients ADD COLUMN secret_hash TEXT",
+  SQLITE_TRANSFER_SCHEMA,
 ];
 
 export function openDb(file: string): WebStore {
   if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-  db.exec(SCHEMA);
-  const versionRow = db.prepare("PRAGMA user_version").get();
-  const version = isRecord(versionRow) && typeof versionRow.user_version === "number" ? versionRow.user_version : 0;
-  for (const [index, sql] of UPGRADES.entries()) {
-    if (index < version) continue;
-    db.exec(sql);
-    db.exec(`PRAGMA user_version = ${index + 1}`);
+  db.exec("PRAGMA busy_timeout = 3000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+  writeTransaction(() => {
+    db.exec(SCHEMA);
+    const version = Number(db.prepare("PRAGMA user_version").get()?.user_version);
+    for (const [index, sql] of UPGRADES.entries()) {
+      if (index < version) continue;
+      db.exec(sql);
+      db.exec(`PRAGMA user_version = ${index + 1}`);
+    }
+  });
+
+  function creationByKey(ownerId: string, key: string): ModelCreation | null {
+    const row = db.prepare("SELECT * FROM model_creations WHERE owner_id = ? AND creation_key = ?").get(ownerId, key);
+    return row ? toModelCreation(row) : null;
+  }
+
+  function writeTransaction<T>(body: () => T): T {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = body();
+      db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   return {
+    transfers: sqliteTransfers(db, writeTransaction),
     async close() {
       db.close();
     },
@@ -723,6 +782,43 @@ export function openDb(file: string): WebStore {
       if (!model) throw new Error("[mutinybim-web db] the new model was not saved");
       return model;
     },
+    async creationByKey(ownerId, key) {
+      return creationByKey(ownerId, key);
+    },
+    async pendingCreations(ownerId) {
+      return db.prepare("SELECT * FROM model_creations WHERE owner_id = ? AND state = 'reserved' ORDER BY model_id")
+        .all(ownerId).map(toModelCreation);
+    },
+    async reserveCreation(input, limit) {
+      return writeTransaction(() => {
+        const prior = creationByKey(input.owner_id, input.creation_key);
+        if (prior) return prior.name === input.name && prior.starter === input.starter ? prior : "conflict";
+        if (occupiedSlots(db, input.owner_id) >= limit) return "quota";
+        const used = db.prepare(`SELECT 1 FROM models WHERE id = ?
+          UNION ALL SELECT 1 FROM model_creations WHERE model_id = ?
+          UNION ALL SELECT 1 FROM model_transfers WHERE model_id = ? LIMIT 1`)
+          .get(input.model_id, input.model_id, input.model_id);
+        if (used) return "id_used";
+        db.prepare(`INSERT INTO model_creations (owner_id, creation_key, model_id, name, starter, starter_hash, state)
+          VALUES (?, ?, ?, ?, ?, ?, 'reserved')`)
+          .run(input.owner_id, input.creation_key, input.model_id, input.name, input.starter, input.starter_hash);
+        return { ...input, state: "reserved" as const };
+      });
+    },
+    async finishCreation(ownerId, key, state) {
+      return writeTransaction(() => {
+        const row = creationByKey(ownerId, key);
+        if (!row) throw new Error("Model creation request no longer exists");
+        if (row.state !== "reserved") return row;
+        if (state === "ready") {
+          const at = now();
+          db.prepare("INSERT INTO models (id, owner_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+            .run(row.model_id, ownerId, row.name, at, at);
+        }
+        db.prepare("UPDATE model_creations SET state = ? WHERE owner_id = ? AND creation_key = ?").run(state, ownerId, key);
+        return { ...row, state };
+      });
+    },
     async modelsOf(userId) {
       return db.prepare("SELECT * FROM models WHERE owner_id = ? ORDER BY updated_at DESC").all(userId).flatMap((r) => toModel(r) ?? []);
     },
@@ -733,22 +829,24 @@ export function openDb(file: string): WebStore {
       const row = db.prepare("SELECT count(*) AS n FROM models WHERE owner_id = ?").get(userId);
       return isRecord(row) && typeof row.n === "number" ? row.n : 0;
     },
-    async renameModel(id, name) {
-      db.prepare("UPDATE models SET name = ?, updated_at = ? WHERE id = ?").run(name, now(), id);
+    async renameModel(id, name, ownerId) {
+      return db.prepare("UPDATE models SET name = ?, updated_at = ? WHERE id = ? AND owner_id = ?").run(name, now(), id, ownerId).changes === 1;
     },
     async touchModel(id) {
       db.prepare("UPDATE models SET updated_at = ? WHERE id = ?").run(now(), id);
     },
-    async deleteModel(id) {
-      db.prepare("DELETE FROM models WHERE id = ?").run(id);
+    async deleteModel(id, ownerId) {
+      return db.prepare("DELETE FROM models WHERE id = ? AND owner_id = ?").run(id, ownerId).changes === 1;
     },
 
     async accessTo(userId, modelId) {
-      const model = toModel(db.prepare("SELECT * FROM models WHERE id = ?").get(modelId));
+      const row = db.prepare(`SELECT m.*, s.role FROM models m
+        LEFT JOIN model_shares s ON s.model_id = m.id AND s.user_id = ?
+        WHERE m.id = ?`).get(userId, modelId);
+      const model = toModel(row);
       if (!model) return null;
       if (model.owner_id === userId) return { model, access: "owner" };
-      const row = db.prepare("SELECT role FROM model_shares WHERE model_id = ? AND user_id = ?").get(modelId, userId);
-      return isRecord(row) ? { model, access: shareRole(row.role) } : null;
+      return row?.role == null ? null : { model, access: shareRole(row.role) };
     },
     async sharedWith(userId) {
       return db
@@ -766,10 +864,17 @@ export function openDb(file: string): WebStore {
         .flatMap((r) => (isRecord(r) ? [{ user_id: str(r, "user_id"), email: str(r, "email"), display_name: str(r, "display_name"), role: shareRole(r.role), created_at: str(r, "created_at") }] : []));
     },
     async share(input) {
-      db.prepare("INSERT INTO model_shares (model_id, user_id, role, invited_by, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (model_id, user_id) DO UPDATE SET role = excluded.role").run(input.modelId, input.userId, input.role, input.invitedBy, now());
+      return db.prepare(`INSERT INTO model_shares (model_id, user_id, role, invited_by, created_at)
+        SELECT id, ?, ?, owner_id, ? FROM models WHERE id = ? AND owner_id = ? AND owner_id <> ?
+        ON CONFLICT (model_id, user_id) DO UPDATE SET role = excluded.role`)
+        .run(input.userId, input.role, now(), input.modelId, input.invitedBy, input.userId).changes === 1;
     },
-    async unshare(modelId, userId) {
-      db.prepare("DELETE FROM model_shares WHERE model_id = ? AND user_id = ?").run(modelId, userId);
+    async unshare(modelId, userId, ownerId) {
+      return writeTransaction(() => {
+        if (!db.prepare("SELECT 1 FROM models WHERE id = ? AND owner_id = ?").get(modelId, ownerId)) return false;
+        db.prepare("DELETE FROM model_shares WHERE model_id = ? AND user_id = ?").run(modelId, userId);
+        return true;
+      });
     },
 
     async createAgentKey(input) {
