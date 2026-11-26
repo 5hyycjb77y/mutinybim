@@ -157,7 +157,9 @@ All optional; read once at start.
 
 Set `MUTINYBIM_WEB_SUPABASE_URL` and `MUTINYBIM_WEB_SUPABASE_PUBLISHABLE_KEY` to delegate email/password sign-up, password-reset emails, and **Continue with Google** (OAuth 2.0 PKCE) to a Supabase project:
 
-1. If Postgres stores the app's accounts, apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` in filename order before updating the app. The sign-in code uses the account lookup and creation functions in `20261126040000_supabase_user_identity.sql`. SQLite handles the update automatically.
+1. If Postgres stores the app's accounts, apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` in filename order before updating the app.
+   The handover migration adds the shared quota check, creation reservations and ownership offers. The next migration, `20261126000000_team_model_access.sql`, adds team grants and the queries used to open and list models.
+   The sign-in code uses the account lookup and creation functions in `20261126040000_supabase_user_identity.sql`. SQLite handles the update automatically.
 2. In Supabase Auth → URL Configuration, add `<MUTINYBIM_WEB_ORIGIN>/auth/supabase/callback` to **Redirect URLs**.
 3. Keep **Confirm email** on (Supabase Auth → Sign In / Providers → Email). With it off, Supabase treats every address as confirmed at sign-up.
 4. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
@@ -234,8 +236,21 @@ services firm for quotes: `MUTINYBIM_WEB_QUOTE` takes a JSON object with
 The owner of a model shares it with another account on the same server by
 email: **Can edit** (edit, make branches, save versions) or **View only** (the
 model server refuses their edits). There are no invitations by email; the
-person needs an account first. Changing or removing someone's access
-disconnects them at once. Only the owner shares, renames or deletes.
+person needs an account first. When a personal share changes, the app
+rechecks that person's open editors and disconnects any whose role changed.
+Only the model owner shares, renames or deletes.
+
+The hosted stores resolve personal and team grants together. A person with
+personal view and team edit can edit. Shared models appear once in **My
+models** and the assistant's model list, with the names of the teams through
+which the person has access. Team owners, managers and ordinary members use
+the role granted to their team. Each model counts toward its individual
+owner's limit. The roster and team-sharing forms are a following feature.
+
+Run the access matrix with `npm test -- --runInBand --runTestsByPath apps/mutinybim-web/__tests__/team-access.test.ts`.
+To exercise the same cases on a migrated disposable PostgREST stack, set
+`MUTINYBIM_TEST_TEAM_SUPABASE_URL` and `MUTINYBIM_TEST_TEAM_SUPABASE_KEY`
+to its gateway URL and test service key. The fixture creates synthetic records.
 
 Under **Transfer ownership**, choose a direct viewer or editor and the access
 you want to keep. The recipient has 14 days to accept in **My models**.

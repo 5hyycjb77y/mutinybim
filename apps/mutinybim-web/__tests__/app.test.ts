@@ -19,6 +19,7 @@ import { ModelStore, starterModel } from "../src/models";
 import { digest, randomToken } from "../src/secrets";
 import type { WebConfig } from "../src/config";
 import type { Fetch } from "../src/oauth";
+import { seedTeamShare } from "../__fixtures__/team-share";
 
 let dataDir = "";
 let app: App | null = null;
@@ -331,6 +332,59 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   expect((await fetch(`${base}/m/${id}`, { headers: { cookie: guest } })).status).toBe(404);
   expect(await (await fetch(`${base}/models`, { headers: { cookie: guest } })).text()).not.toContain("Shared warehouse");
 });
+
+test("East plant team edit survives personal unsharing, while the original handover offer ends", async () => {
+  await start({ modelLimit: 1 });
+  const alex = await signUp("alex@example.test", "Alex");
+  const bea = await signUp("bea@example.test", "Bea");
+  const id = await makeModel(alex, "East plant room");
+  const alexId = (await app?.db.userByEmail("alex@example.test"))?.id;
+  const beaId = (await app?.db.userByEmail("bea@example.test"))?.id;
+  if (!alexId || !beaId || !app) throw new Error("Missing fixture accounts");
+  seedTeamShare(path.join(dataDir, "accounts.sqlite"), {
+    id: "hvac", name: "Mechanical", ownerId: alexId, memberId: beaId, modelId: id, role: "edit",
+  });
+  const share = `/models/${id}/share`;
+  const offer = `/models/${id}/transfer`;
+  const terms = { recipient: beaId, retained: "none" };
+  const list = await (await fetch(base + "/models", { headers: { cookie: bea } })).text();
+  expect(list.match(/East plant room/g)).toHaveLength(1);
+  expect(list).toContain("Can edit");
+  expect(list).toContain("via Mechanical");
+  expect((await fetch(base + share, { headers: { cookie: bea } })).status).toBe(403);
+  expect(await app.db.sharesOf(id)).toEqual([]);
+  const directPage = await (await fetch(base + share, { headers: { cookie: alex } })).text();
+  expect(directPage).toContain("No personal shares yet.");
+  expect(directPage).not.toContain("Transfer ownership");
+  expect((await post(offer, terms, alex)).status).toBe(409);
+  // Being a team editor takes none of Bea's one personal model slot.
+  const own = await makeModel(bea, "Bea's first model");
+  expect((await post(`/models/${own}/delete`, {}, bea)).status).toBe(303);
+  const key = await makeAgentKey(bea);
+  const session = await AgentSession.open({ url: `${base.replace(/^http/, "ws")}/sync?key=${key}`, token: "local",
+    modelId: id, actor: agentActor("bea", "team-edit", "Bea"), socketFactory: builtinWebSocketFactory() });
+  try {
+    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    expect((await post(offer, terms, alex)).status).toBe(303);
+    const [first] = await app.db.transfers.inbox(beaId);
+    if (!first) throw new Error("Missing direct-share offer");
+    const removed = await post(`${share}/${beaId}/delete`, {}, alex);
+    expect(await removed.text()).toContain("They can still edit it.");
+    expect(await session.edit({ type: "create_level", levelId: "mezz", name: "Mezzanine", elevationMm: 4000 },
+      { idempotencyKey: "existing-team-editor" })).toMatchObject({ status: "saved" });
+    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    expect((await post(`/transfers/${first.id}/accept`, {}, bea)).status).toBe(409);
+  } finally { session.close(); }
+  expect((await post(offer, terms, alex)).status).toBe(303);
+  const [second] = await app.db.transfers.inbox(beaId);
+  if (!second) throw new Error("Missing replacement offer");
+  expect((await post(`/transfers/${second.id}/accept`, {}, bea)).status).toBe(303);
+  expect(await app.db.accessTo(alexId, id)).toMatchObject({ access: "edit" });
+  expect(await app.db.sharesOf(id)).toEqual([]);
+  expect(await app.db.sharedWith(beaId)).toEqual([]);
+  expect((await fetch(base + share, { headers: { cookie: alex } })).status).toBe(403);
+  expect((await fetch(base + share, { headers: { cookie: bea } })).status).toBe(200);
+}, 30_000);
 
 test("removing the recipient's share explains how to recover an ended offer", async () => {
   await start();

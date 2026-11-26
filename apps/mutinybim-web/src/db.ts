@@ -16,6 +16,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { occupiedSlots, sqliteTransfers, SQLITE_TRANSFER_SCHEMA, type Transfers } from "./model-transfers";
+import { SQLITE_MODEL_ACCESS, SQLITE_SHARED_MODELS, SQLITE_TEAM_SCHEMA } from "./team-access";
 
 export interface UserRow {
   readonly id: string;
@@ -60,6 +61,7 @@ export type ModelAccess = "owner" | ShareRole;
 export interface SharedModelRow extends ModelRow {
   readonly role: ShareRole;
   readonly owner_name: string;
+  readonly team_names: readonly string[];
 }
 
 export interface ShareRow {
@@ -437,6 +439,7 @@ export interface WebStore {
 
   accessTo(userId: string, modelId: string): Promise<{ readonly model: ModelRow; readonly access: ModelAccess } | null>;
   sharedWith(userId: string): Promise<readonly SharedModelRow[]>;
+  /** Personal grants only. A model handover offer binds to one of these grants. */
   sharesOf(modelId: string): Promise<readonly ShareRow[]>;
   share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<boolean>;
   unshare(modelId: string, userId: string, ownerId: string): Promise<boolean>;
@@ -524,6 +527,19 @@ export function toUser(row: unknown): UserRow | null {
 export function toModel(row: unknown): ModelRow | null {
   if (!isRecord(row)) return null;
   return { id: str(row, "id"), owner_id: str(row, "owner_id"), name: str(row, "name"), created_at: str(row, "created_at"), updated_at: str(row, "updated_at") };
+}
+
+export function toModelAccess(row: unknown, userId: string): { model: ModelRow; access: ModelAccess } | null {
+  const model = toModel(row);
+  if (!model || !isRecord(row)) return null;
+  if (model.owner_id === userId) return { model, access: "owner" };
+  return row.role == null ? null : { model, access: shareRole(row.role) };
+}
+
+export function toSharedModel(row: unknown): SharedModelRow | null {
+  const model = toModel(row);
+  if (!model || !isRecord(row)) return null;
+  return { ...model, role: shareRole(row.role), owner_name: str(row, "owner_name"), team_names: stringList(parseJsonValue(row.team_names)) };
 }
 
 export function toModelCreation(row: unknown): ModelCreation {
@@ -685,6 +701,7 @@ const UPGRADES: readonly string[] = [
   "ALTER TABLE assistant_clients ADD COLUMN token_auth_method TEXT NOT NULL DEFAULT 'none' CHECK (token_auth_method IN ('none', 'client_secret_post', 'client_secret_basic'))",
   "ALTER TABLE assistant_clients ADD COLUMN secret_hash TEXT",
   SQLITE_TRANSFER_SCHEMA,
+  SQLITE_TEAM_SCHEMA,
 ];
 
 // This account upgrade can run before or after the numbered model and team upgrades.
@@ -924,22 +941,10 @@ export function openDb(file: string): WebStore {
     },
 
     async accessTo(userId, modelId) {
-      const row = db.prepare(`SELECT m.*, s.role FROM models m
-        LEFT JOIN model_shares s ON s.model_id = m.id AND s.user_id = ?
-        WHERE m.id = ?`).get(userId, modelId);
-      const model = toModel(row);
-      if (!model) return null;
-      if (model.owner_id === userId) return { model, access: "owner" };
-      return row?.role == null ? null : { model, access: shareRole(row.role) };
+      return toModelAccess(db.prepare(SQLITE_MODEL_ACCESS).get({ $person: userId, $model: modelId }), userId);
     },
     async sharedWith(userId) {
-      return db
-        .prepare("SELECT m.*, s.role, u.display_name AS owner_name FROM model_shares s JOIN models m ON m.id = s.model_id JOIN users u ON u.id = m.owner_id WHERE s.user_id = ? ORDER BY m.updated_at DESC")
-        .all(userId)
-        .flatMap((r) => {
-          const model = toModel(r);
-          return model && isRecord(r) ? [{ ...model, role: shareRole(r.role), owner_name: str(r, "owner_name") }] : [];
-        });
+      return db.prepare(SQLITE_SHARED_MODELS).all(userId, userId).flatMap((r) => toSharedModel(r) ?? []);
     },
     async sharesOf(modelId) {
       return db
