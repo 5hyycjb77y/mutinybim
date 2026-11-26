@@ -10,6 +10,7 @@ import {
   hostLineOf,
   hostVoidsOf,
   ifcRelationRowsFor,
+  kindRowOf,
   spaceBoundaryFacts,
   withPackParameters,
   buildClassIndex,
@@ -767,9 +768,24 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const p = typeof pos === "object" && pos !== null ? { x: finite(Reflect.get(pos, "x")), y: finite(Reflect.get(pos, "y")), z: finite(Reflect.get(pos, "z")) } : null;
       const rotation = numberField(el, "rotationDeg") ?? 0;
       const offsetZ = el.kind === "component" && el.placement?.kind === "point" ? el.placement.offsetMm : 0;
-      const placement = p ? geo.placement(frame, geo.turned({ x: p.x, y: p.y, z: p.z + offsetZ }, rotation)) : null;
+      // A kind whose row states a body (a roof, a stair): placed in its storey's frame, where that body is measured.
+      const solidFace = kindRowOf(el.kind)?.solid;
+      const placement = solidFace ? geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 })) : p ? geo.placement(frame, geo.turned({ x: p.x, y: p.y, z: p.z + offsetZ }, rotation)) : null;
       let body: StepRef | null = null;
-      if (el.kind === "component" && el.category === "footing" && el.size.x > 0 && el.size.y > 0) {
+      if (solidFace) {
+        // The same blocks the 3D view and sections draw, from above project zero to above its storey.
+        const storey = levelId ? els[levelId] : undefined;
+        const floorMm = storey?.kind === "level" ? storey.elevationMm : 0;
+        const down = (q: Vec3): Vec3 => ({ x: q.x, y: q.y, z: q.z - floorMm });
+        try {
+          const shape = solidFace(el, { elements: els, floorMm });
+          if (shape?.form === "run") body = geo.sweep(down(shape.a), down(shape.b), sectionOf(shape.size));
+          else if (shape) body = geo.blocks((shape.form === "prisms" ? shape.blocks : [shape]).map((b) => ({ ...b, z0: b.z0 - floorMm, z1: b.z1 - floorMm })));
+        } catch (err) {
+          console.error("[bim-ifc] a kind's body did not resolve; exported without a body", { elementId: el.id, kind: el.kind, err });
+        }
+        if (!body) warn(`${el.id}: the model has no shape for this ${(kindRowOf(el.kind)?.label ?? el.kind).toLowerCase()}, so it has no body in the file. Open it in a 3D view: if it is missing there too, fix it in the model and export again`);
+      } else if (el.kind === "component" && el.category === "footing" && el.size.x > 0 && el.size.y > 0) {
         const rawThick = elementTypeValue(els, el, "struct.footing_thickness_mm");
         const thickMm = typeof rawThick === "number" && Number.isFinite(rawThick) && rawThick > 0 ? rawThick : 18 * 25.4;
         body = geo.box({ x: -el.size.x / 2, y: -el.size.y / 2, z: -thickMm }, { x: el.size.x / 2, y: el.size.y / 2, z: 0 });

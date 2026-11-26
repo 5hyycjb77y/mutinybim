@@ -1,4 +1,4 @@
-import type { Vec2 } from "@permitzip/bim-kernel";
+import { tiltedZ, type Tilt, type Vec2 } from "@permitzip/bim-kernel";
 import { $, bool, en, int, list, real, str, type StepGraph, type StepRef, type StepValue } from "./step";
 
 /**
@@ -18,6 +18,18 @@ export interface Vec3 {
 
 /** A swept profile's section: a rectangle (width, height) or a circle (diameter), mm. */
 export type Section = { readonly width: number; readonly height: number } | { readonly diameter: number };
+
+/**
+ * One upright block of a body, as the kernel's solids state it: a plan outline from `z0` to `z1`.
+ * A tilted end is a sloped plane through that height (a pitched roof); absent: level.
+ */
+export interface Block {
+  readonly outline: readonly Vec2[];
+  readonly z0: number;
+  readonly z1: number;
+  readonly tilt0?: Tilt;
+  readonly tilt1?: Tilt;
+}
 
 const EPS = 1e-9;
 
@@ -88,8 +100,9 @@ export class GeometryWriter {
     return this.g.add("IFCPRODUCTDEFINITIONSHAPE", [$, $, list([rep])]);
   }
 
-  private extrude(profile: StepRef, position: StepRef, depth: number): StepRef {
-    return this.g.add("IFCEXTRUDEDAREASOLID", [profile, position, this.direction({ x: 0, y: 0, z: 1 }), real(depth)]);
+  /** `along`: the push in the profile's own frame. Absent: straight out of its plane. */
+  private extrude(profile: StepRef, position: StepRef, depth: number, along: Vec3 = { x: 0, y: 0, z: 1 }): StepRef {
+    return this.g.add("IFCEXTRUDEDAREASOLID", [profile, position, this.direction(along), real(depth)]);
   }
 
   private rectangle(w: number, h: number, centre: Vec2 = { x: 0, y: 0 }): StepRef {
@@ -134,6 +147,44 @@ export class GeometryWriter {
     });
     const profile = voids.length > 0 ? this.g.add("IFCARBITRARYPROFILEDEFWITHVOIDS", [en("AREA"), $, curve, list(voids)]) : this.g.add("IFCARBITRARYCLOSEDPROFILEDEF", [en("AREA"), $, curve]);
     return this.shape(this.extrude(profile, this.axis({ x: 0, y: 0, z }), depth));
+  }
+
+  /**
+   * Several upright blocks as one body (a roof left in pieces round its openings, a stair's steps), each an extrusion.
+   * A level block is its outline pushed up. A block whose bottom and top slope alike (a pitched roof) is its sloped
+   * bottom face pushed straight up, so its sides stay upright. A block with fewer than three corners or no height is
+   * left out. Null when none is left, or when a block's bottom and top slope differently (no extrusion is that shape).
+   */
+  blocks(blocks: readonly Block[]): StepRef | null {
+    const solids: StepRef[] = [];
+    for (const b of blocks) {
+      const ring = this.ring(b.outline);
+      const first = ring?.[0];
+      if (!ring || !first) continue;
+      const rise = b.tilt0?.rise ?? { x: 0, y: 0 };
+      const riseTop = b.tilt1?.rise ?? { x: 0, y: 0 };
+      if (Math.abs(rise.x - riseTop.x) > EPS || Math.abs(rise.y - riseTop.y) > EPS) return null;
+      const base = tiltedZ(b.z0, b.tilt0, first);
+      const depth = tiltedZ(b.z1, b.tilt1, first) - base;
+      if (!(depth > EPS)) continue;
+      if (Math.abs(rise.x) <= EPS && Math.abs(rise.y) <= EPS) {
+        solids.push(this.extrude(this.g.add("IFCARBITRARYCLOSEDPROFILEDEF", [en("AREA"), $, this.closedPolyline(ring)]), this.axis({ x: 0, y: 0, z: base }), depth));
+        continue;
+      }
+      // The sloped face's own frame, at its first corner: z square to the slope, x up the slope over plan x.
+      const z = unit({ x: -rise.x, y: -rise.y, z: 1 });
+      const x = unit({ x: 1, y: 0, z: rise.x });
+      if (!z || !x) continue;
+      const y = { x: z.y * x.z - z.z * x.y, y: z.z * x.x - z.x * x.z, z: z.x * x.y - z.y * x.x };
+      const inFace = ring.map((p) => {
+        const d = { x: p.x - first.x, y: p.y - first.y, z: rise.x * (p.x - first.x) + rise.y * (p.y - first.y) };
+        return { x: d.x * x.x + d.y * x.y + d.z * x.z, y: d.x * y.x + d.y * y.y + d.z * y.z };
+      });
+      const profile = this.g.add("IFCARBITRARYCLOSEDPROFILEDEF", [en("AREA"), $, this.closedPolyline(inFace)]);
+      // Straight up, said in the face's frame.
+      solids.push(this.extrude(profile, this.axis({ x: first.x, y: first.y, z: base }, z, x), depth, { x: x.z, y: y.z, z: z.z }));
+    }
+    return solids.length > 0 ? this.shape(...solids) : null;
   }
 
   /** A wall-like slab of plan length `length` along local x, `thickness` across, `height` up. */
