@@ -19,6 +19,6 @@
     "type-check": "tsc -p ../tsconfig.bim.json"
   },
   "dependencies": {
-    "manifold-3d": "3.5.4"
+    "manifold-3d": "^3.5.5"
   }
 }

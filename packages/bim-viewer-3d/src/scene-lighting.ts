@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MM, kernelToScene } from "./coords";
-import { buildMoodEnvironment } from "./procedural-textures";
+import { buildMoodEnvironment, disposeEnvironmentTexture } from "./procedural-textures";
 
 /**
  * Trade-agnostic 3D atmosphere, time-of-day sky/sun presets, and physical
@@ -966,7 +966,7 @@ export class SceneLightingController {
     this.scoredIndices = [];
     this.bounceChosen = [];
     for (const [mood, tex] of this.envCache) {
-      if (mood !== "day" && tex) tex.dispose();
+      if (mood !== "day" && tex) disposeEnvironmentTexture(tex);
     }
     this.envCache.clear();
   }

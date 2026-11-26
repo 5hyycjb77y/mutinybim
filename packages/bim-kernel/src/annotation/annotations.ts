@@ -929,7 +929,8 @@ export function tagFieldValue(model: Pick<ModelState, "elements">, el: BimElemen
       if (a !== undefined) return String(a);
     }
     if (name === "type") return type?.kind === "part_type" ? type.definition.typeName : "";
-    if (name === "mark") return mark;
+    if (name === "type_mark") return type?.kind === "part_type" ? (type.definition.typeMark ?? "") : "";
+    if (name === "mark") return mark || (type?.kind === "part_type" ? (type.definition.typeMark ?? "") : "");
     if (name === "elevation") return feetInches(levelZ(model, el.levelId) + el.offsetMm);
     return "";
   }
@@ -1097,9 +1098,11 @@ export function tagLines(model: Pick<ModelState, "elements">, spec: TagSpec): st
     // If a mark-only style (e.g. `tst-mark-clean`) was attached to a space, room, ceiling, or run with no `mark`, fall back to the element's template text instead of printing "?".
   }
   const template = spec.template === "auto" ? autoTemplate(model, el) : spec.template;
-  const mark = "mark" in el && typeof el.mark === "string" ? el.mark : "";
-  const param = (name: string): string => tagFieldValue(model, el, name);
   const partType = el.kind === "part" ? model.elements[el.typeId] : undefined;
+  const mark =
+    ("mark" in el && typeof el.mark === "string" && el.mark) ||
+    (partType?.kind === "part_type" ? (partType.definition.typeMark ?? "") : "");
+  const param = (name: string): string => tagFieldValue(model, el, name);
   const typeName = partType?.kind === "part_type" ? partType.definition.typeName : "typeName" in el && typeof el.typeName === "string" ? el.typeName : "";
   switch (template) {
     case "duct_size":

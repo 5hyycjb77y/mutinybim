@@ -111,6 +111,7 @@ export type LinkedSurfaceSources = (extra: Extra, projectId: string) => Promise<
 
 export type AgentBranchResult =
   | { readonly status: "started"; readonly branch: BranchRef; readonly thread: "switched" | "no_thread" | "not_switched"; readonly message: string }
+  | { readonly status: "checked_out"; readonly branch: BranchRef | null; readonly thread: "switched" | "no_thread" | "not_switched"; readonly message: string }
   | { readonly status: "proposed"; readonly proposalId: string; readonly message: string }
   | { readonly status: "refused"; readonly message: string };
 
@@ -118,6 +119,8 @@ export type AgentBranchResult =
 export interface CallerBranchActions {
   /** Start a branch from Main (the session is on Main), then point this thread at it. */
   start(input: { readonly session: AgentSession; readonly name: string; readonly fromVersion?: number }): Promise<AgentBranchResult>;
+  /** Switch this thread onto an existing open branch (by id or name), or "main" to return to Main. */
+  checkout(input: { readonly session: AgentSession; readonly target: string }): Promise<AgentBranchResult>;
   /** Propose this thread's branch to Main; people approve it. */
   proposeMerge(input: { readonly session: AgentSession; readonly userId: string }): Promise<AgentBranchResult>;
 }

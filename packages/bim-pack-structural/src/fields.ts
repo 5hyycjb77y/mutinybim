@@ -150,6 +150,39 @@ export const STRUCTURAL_FIELD_PROVIDER: FieldProvider = {
       const b = idx.beams.get(el.id);
       return b ? Math.max(b.startReaction.total, b.endReaction.total) : null;
     }),
+    {
+      path: "max_deflection",
+      label: "Max deflection",
+      classes: ["struct.beam"],
+      valueType: "quantity",
+      kind: "length",
+      unit: "in",
+      writer: locked("Computed by the gravity load path when E and section Ix are set."),
+      group: "Loads",
+      deps: READS_FRAME,
+      read: (el, ctx) => {
+        const b = loadPathFor(ctx.elements).beams.get(el.id);
+        return b?.maxDeflection !== undefined ? finite(to(b.maxDeflection, "in")) : null;
+      },
+    },
+    {
+      path: "deflection_ratio",
+      label: "Deflection ratio (L/Δ)",
+      classes: ["struct.beam"],
+      valueType: "text",
+      writer: locked("Computed by the gravity load path when E and section Ix are set."),
+      group: "Loads",
+      deps: READS_FRAME,
+      read: (el, ctx) => {
+        const b = loadPathFor(ctx.elements).beams.get(el.id);
+        if (b?.maxDeflection === undefined) return null;
+        const mag = Math.abs(b.maxDeflection);
+        if (!(mag > 1e-9)) return "—";
+        const ratio = Math.round(b.span / mag);
+        if (!Number.isFinite(ratio) || ratio <= 0) return "—";
+        return ratio > 9999 ? ">L/9999" : `L/${ratio}`;
+      },
+    },
 
     // Pad footing thickness
     mmLength(

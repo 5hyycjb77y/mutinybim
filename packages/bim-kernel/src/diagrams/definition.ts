@@ -89,12 +89,22 @@ export const diagramHintsSchema = z
     faultCurrent: z.boolean(),
     /** How run lengths without an explicit `lengthFt` are resolved (`explicit` = 0 ft worst-case, `shortest` = 3D straight-line, `manhattan` = 3D rectilinear). */
     lengthMode: z.enum(["explicit", "shortest", "manhattan"]),
+    /** Minimum protective device rating (A) for branch loads / equipment shown on this diagram. Absent or 0: show all. */
+    minLoadRatingA: z.number().finite().min(0).max(10000),
+    /** Renovation/phase scope for this diagram: all equipment, new work only (hides demolished), existing only, or demolition view. */
+    phaseScope: z.enum(["all", "new", "existing", "demolition"]),
+    /** Specific equipment element ids to always include as diagram loads (bypassing minLoadRatingA / showLoads). */
+    includeEquipmentIds: z.array(idSchema).max(200),
+    /** Specific equipment element ids to exclude from diagram loads even when they match minLoadRatingA. */
+    excludeEquipmentIds: z.array(idSchema).max(200),
   })
   .partial()
   .strict();
 
 /** Peers that store and draw a one-line's "Show fault current" (an older peer's strict hints schema refuses the field). */
 export const DIAGRAM_FAULT_CURRENT_FEATURE = "diagrams:fault_current";
+/** Peers that store and evaluate diagram load-rating and phase-scope filters (`minLoadRatingA`, `phaseScope`). */
+export const DIAGRAM_FILTERS_FEATURE = "diagrams:filters";
 
 export const diagramDefinitionSchema = z
   .object({ kind: z.string().max(80).regex(DIAGRAM_KIND_ID, "A diagram kind is lower case words with underscores (an add-on's own: <pack>.<name>)."), hints: diagramHintsSchema.optional() })

@@ -91,11 +91,20 @@ export function NoteEditor({ origin, rotation, width, height, paper, pxPerMm, si
     editorProps: {
       attributes: { 'aria-label': 'Note text', 'data-testid': 'note-editor', spellcheck: 'true' },
       handleKeyDown: (view, event) => {
-        if (event.key !== 'Escape') return false
-        event.preventDefault()
-        event.stopPropagation()
-        latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
-        return true
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
+          return true
+        }
+        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+          // Cmd/Ctrl+Enter commits and closes; plain Enter inserts a new line or list item.
+          event.preventDefault()
+          event.stopPropagation()
+          latest.current.onCommit(docToParagraphs(view.state.doc.toJSON()))
+          return true
+        }
+        return false
       },
     },
     onUpdate: ({ editor: ed }) => latest.current.onDraft(docToParagraphs(ed.getJSON())),

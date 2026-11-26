@@ -391,6 +391,8 @@ export type PartHostingMode = (typeof PART_HOSTING_MODES)[number];
 export const partTypeDefinitionSchema = z.object({
   familyName: z.string().min(1).max(200),
   typeName: z.string().min(1).max(200),
+  /** Optional standard AEC Type Mark shared by every instance of this type (e.g. "SD-1", "RG-1", "F1", "WC-1"). */
+  typeMark: z.string().trim().max(48).optional(),
   category: z.enum(PART_CATEGORIES),
   description: z.string().max(400).optional(),
   /** Optional placement hosting rule: `"wall_face"` snaps flush onto wall finish faces (+Y into room). */
@@ -559,7 +561,7 @@ export function partTypeIssues(def: PartTypeDefinition): PartIssue[] {
   issues.push(...clearanceZoneIssues(def.clearances));
   issues.push(...partPositionIssues(def.positions));
   for (const f of def.tagFields) {
-    if (f !== "mark" && f !== "type_name" && !names.has(f)) issues.push({ field: f, message: `Tag field ${f} is not a parameter` });
+    if (f !== "mark" && f !== "type_mark" && f !== "type_name" && !names.has(f)) issues.push({ field: f, message: `Tag field ${f} is not a parameter` });
   }
   const connectorIds = new Set<string>();
   for (const c of def.connectors) {
@@ -970,12 +972,13 @@ export function partFootprint(type: PartTypeElement, part: PartInstance): Vec2[]
   ].map((p) => partToWorld(part, p));
 }
 
-/** What a tag on the part reads: its tag fields joined, falling back to mark then type name. */
+/** What a tag on the part reads: its tag fields joined, falling back to mark, typeMark, then type name. */
 export function partTagText(type: PartTypeElement, part: PartInstance): string {
   const def = type.definition;
   const parts = def.tagFields
     .map((f) => {
-      if (f === "mark") return part.mark;
+      if (f === "mark") return part.mark || def.typeMark || "";
+      if (f === "type_mark") return def.typeMark ?? "";
       if (f === "type_name") return def.typeName;
       const v = paramValue(def, part.values, f);
       if (v === undefined || v === "") return "";
@@ -984,7 +987,7 @@ export function partTagText(type: PartTypeElement, part: PartInstance): string {
     })
     .filter((s) => s.length > 0);
   if (parts.length > 0) return parts.join(" ");
-  return part.mark || def.typeName;
+  return part.mark || def.typeMark || def.typeName;
 }
 
 const UNIT_SUFFIX: Readonly<Record<ParamUnit, string>> = LEGACY_PARAM_UNIT_SUFFIXES;

@@ -1,4 +1,6 @@
 import type { BimElement, ElementId, ModelState } from "../types";
+import { elementViewCategory } from "../categories/element";
+import { activeCategoryRegistry } from "../categories/registry";
 import { storedField } from "../kinds";
 import { elementKindTable } from "../registry/element-kind-point";
 import { DEFAULT_GROUP_ID, DEFAULT_PHASE_ID, groupOf, isOrganized, organizationOf, type Organization } from "./model";
@@ -74,24 +76,57 @@ export interface LockRefusal {
  */
 export function lockRefusal(base: ModelState, working: Readonly<Record<string, BimElement>>, ids: readonly ElementId[]): LockRefusal | null {
   const org = organizationOf(base);
-  if (!org.groups.some((g) => g.entry.locked)) return null;
+  const hasGroupLock = org.groups.some((g) => g.entry.locked);
+  const hasElementLock = org.lockedElementIds.size > 0;
+  const hasCategoryLock = org.lockedCategories.size > 0;
+  if (!hasGroupLock && !hasElementLock && !hasCategoryLock) return null;
   const blocked: ElementId[] = [];
-  let first: { el: BimElement; group: string } | null = null;
+  let first: { el: BimElement; reason: "group" | "element" | "category"; label: string } | null = null;
   for (const id of ids) {
     const before = base.elements[id];
     const after = working[id];
     const subject = before ?? after;
     if (!subject || after === before) continue;
-    const group = lockedName(org, before) ?? lockedName(org, after);
-    if (group === null) continue;
-    blocked.push(id);
-    if (!first) first = { el: subject, group };
+    if (hasGroupLock) {
+      const group = lockedName(org, before) ?? lockedName(org, after);
+      if (group !== null) {
+        blocked.push(id);
+        if (!first) first = { el: subject, reason: "group", label: group };
+        continue;
+      }
+    }
+    if (hasElementLock && org.lockedElementIds.has(id)) {
+      blocked.push(id);
+      if (!first) first = { el: subject, reason: "element", label: describe(subject) };
+      continue;
+    }
+    if (hasCategoryLock && isOrganized(subject)) {
+      const cat = elementViewCategory(before ? base.elements : working, subject);
+      if (cat && org.lockedCategories.has(cat)) {
+        blocked.push(id);
+        if (!first) first = { el: subject, reason: "category", label: activeCategoryRegistry().get(cat)?.label ?? cat };
+      }
+    }
   }
   if (!first) return null;
   const more = blocked.length > 1 ? ` (and ${blocked.length - 1} more)` : "";
   const created = !base.elements[first.el.id];
+  if (first.reason === "element") {
+    return {
+      message: `${describe(first.el)}${more} is locked, so it can't be changed. Right-click and choose Unlock element first.`,
+      elementIds: blocked,
+    };
+  }
+  if (first.reason === "category") {
+    return {
+      message: created
+        ? `Category "${first.label}" is locked, so new ${first.label.toLowerCase()} elements can't be added. Unlock the category first.`
+        : `${describe(first.el)}${more} is in the locked category "${first.label}", so it can't be changed. Unlock the category first.`,
+      elementIds: blocked,
+    };
+  }
   const message = created
-    ? `New elements go in "${first.group}", which is locked. Make another group active, or unlock "${first.group}" (Manage › Groups & phases).`
-    : `${describe(first.el)}${more} is in the locked group "${first.group}", so it can't be changed. Unlock the group first (Manage › Groups & phases).`;
+    ? `New elements go in "${first.label}", which is locked. Make another group active, or unlock "${first.label}" (Manage › Groups & phases).`
+    : `${describe(first.el)}${more} is in the locked group "${first.label}", so it can't be changed. Unlock the group first (Manage › Groups & phases).`;
   return { message, elementIds: blocked };
 }

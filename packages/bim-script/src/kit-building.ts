@@ -10,6 +10,7 @@ import {
   builtinPartType,
   ceilingGrid,
   ceilingGridCellCenter,
+  isCoreElement,
   nearestWallFace,
   planLevelSync,
   surfacesAt,
@@ -451,6 +452,8 @@ export interface LevelSpec {
   readonly name: string;
   /** Its height above the project's zero. */
   readonly elevation: Measure;
+  /** True for an occupied building story, false for a ceiling/roof/parapet datum reference. */
+  readonly buildingStory?: boolean;
   readonly id?: string;
 }
 
@@ -599,7 +602,13 @@ export const building = {
     const elevationMm = mm(spec.elevation, "Elevation");
     const existing = existingLevel(ctx, spec.name, elevationMm, spec.id);
     if (existing) return existing;
-    const command: CreateLevel = { type: "create_level", levelId: spec.id ?? ctx.id("level"), name: spec.name, elevationMm };
+    const command: CreateLevel = {
+      type: "create_level",
+      levelId: spec.id ?? ctx.id("level"),
+      name: spec.name,
+      elevationMm,
+      ...(spec.buildingStory !== undefined ? { buildingStory: spec.buildingStory } : {}),
+    };
     ctx.edit(command);
     return command.levelId;
   },
@@ -989,15 +998,25 @@ export const building = {
     const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
     ctx.edit({ type: "set_element_values", elementIds: ids, values: { [MATERIAL_ID_KEY]: materialId } });
   },
-  /** Pin / lock elements so interactive selection and drags leave them alone. */
+  /** Pin / lock elements (building, structure, parts, or MEP runs) so edits leave them alone. */
   lock(ctx: ScriptContext, elementIds: string | readonly string[], reason = "Pinned by script"): void {
     const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
-    ctx.edit({ type: "lock_elements", elementIds: ids, state: "existing", reason });
+    const coreIds = ids.filter((id) => isCoreElement(ctx.model.find(id)));
+    const otherIds = ids.filter((id) => !isCoreElement(ctx.model.find(id)));
+    if (coreIds.length > 0) ctx.edit({ type: "lock_elements", elementIds: coreIds, state: "existing", reason });
+    if (otherIds.length > 0) ctx.edit({ type: "set_element_locks", ids: otherIds, locked: true });
   },
-  /** Unpin / unlock previously locked elements. */
+  /** Unpin / unlock previously locked elements (building, structure, parts, or MEP runs). */
   unlock(ctx: ScriptContext, elementIds: string | readonly string[]): void {
     const ids = typeof elementIds === "string" ? [elementIds] : [...elementIds];
-    ctx.edit({ type: "unlock_elements", elementIds: ids });
+    const coreIds = ids.filter((id) => isCoreElement(ctx.model.find(id)));
+    const otherIds = ids.filter((id) => !isCoreElement(ctx.model.find(id)));
+    if (coreIds.length > 0) ctx.edit({ type: "unlock_elements", elementIds: coreIds });
+    if (otherIds.length > 0) ctx.edit({ type: "set_element_locks", ids: otherIds, locked: false });
+  },
+  /** Lock or unlock an entire view category across the model (e.g. "lighting_fixtures", "equipment"). */
+  lockCategory(ctx: ScriptContext, category: string, locked = true): void {
+    ctx.edit({ type: "lock_category", category, locked });
   },
   /** Any kind the registry draws on a line (a beam, a grid line, a pack's own kind), by its id. */
   elements(ctx: ScriptContext, kind: string, spec: ChainSpec): ChainHandle {

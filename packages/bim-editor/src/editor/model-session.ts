@@ -15,7 +15,8 @@ import type { EditorHostCapabilities, EditorReferencesPort } from '@permitzip/bi
 import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
 import type { RevitElementParameters, RevitParametersResponse, UnplacedElementsResponse, UnplacedElementView } from '../contracts/building-model/revit-parameters-contract'
 import { connectionProblem, editsPausedMessage, operatorMessage, problemForDenied, type ConnectionProblem } from './operator-messages'
-import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, WALL_FACE_SNAP_MM, defaultHeightMm, describeElement, feetInches, newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
+import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, WALL_FACE_SNAP_MM, defaultHeightMm, describeElement, feetInches,  nearestLinkedWallFace,
+  newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
 import { linkedSnapNear } from './linked-reference/linked-reference-store'
 import { isStarterLevelRace, starterLevelCommand } from './levels/starter-level'
 import { axisBadge, resolveRoutePoint, snapDrag, type AxisLock, type RouteAxis } from './route-axis'
@@ -106,6 +107,8 @@ export interface SessionEvents {
   onBranchState?(branch: BranchRef): void
   /** The places the route being drawn meets an add-on's rule (a rated wall, a ceiling), in the add-on's words; empty when none or not routing. */
   onRouteChecks?(checks: readonly RouteCheck[]): void
+  /** The 3D WebGL viewer could not start (e.g. GPU process reset or WebGL unavailable); 2D plans, sheets and schedules stay live. */
+  onViewerError?(message: string | null): void
 }
 
 /** One place the route being drawn meets a rule: the Route tool's line for it and where its tick goes on plan. */
@@ -534,8 +537,9 @@ export class ModelSession {
   private referenceInfo = new Map<string, ReferenceInfo>()
   private unplaced = new Map<string, Map<string, UnplacedElementView>>()
   private revitParametersUrl: string | null = null
-  /** Your views/sheets edits, undone client-side by restoring the records (no redo). */
+  /** Your views/sheets edits, undone and redone client-side by restoring the records. */
   private readonly documentUndoStack: DocumentUndo[] = []
+  private readonly documentRedoStack: DocumentUndo[] = []
   /** Orders both undo stacks, so Undo takes back whichever of your edits is newest. */
   private undoSeq = 0
   /** Bumped on every selection, so a slow answer for an earlier pick never overwrites the current one. */
@@ -665,13 +669,22 @@ export class ModelSession {
     this.ratedRoutes = ratedRoutes
     this.viewerModule = viewerModule
     this.syncModule = sync
-    this.viewer = new viewerModule.ModelViewer3D(this.container, {
-      workerUrl: '/api/building-model/fragments-worker',
-      onStats: (stats) => this.events.onStats(stats),
-      colors: this.viewerColors,
-    })
-    this.viewer.setDisplayContext(this.displayContext)
-    this.viewer.setCategoryView(this.categoryView)
+    try {
+      this.viewer = new viewerModule.ModelViewer3D(this.container, {
+        workerUrl: '/api/building-model/fragments-worker',
+        onStats: (stats) => this.events.onStats(stats),
+        colors: this.viewerColors,
+      })
+      this.viewer.setDisplayContext(this.displayContext)
+      this.viewer.setCategoryView(this.categoryView)
+      this.events.onViewerError?.(null)
+    } catch (err: unknown) {
+      // Do not block 2D plans, sheets, one-lines, schedules or live editing if WebGL fails to initialize.
+      console.error('[ModelSession] 3D WebGL viewer unavailable; continuing in 2D/sheets mode', err)
+      this.viewer = null
+      const msg = err instanceof Error ? err.message : 'WebGL context could not be created.'
+      this.events.onViewerError?.(msg)
+    }
     if (process.env.NODE_ENV === 'development') Reflect.set(window, '__buildingModelSession', this)
 
     // Live editing connects alongside the reference downloads; a slow or failed reference never blocks it.
@@ -680,13 +693,37 @@ export class ModelSession {
     if (authority) this.connect(sync, authority)
     this.revitParametersUrl = config.revitParametersUrl ?? null
 
-    await this.syncReferences(config.references)
-    if (this.disposed) return
-
-    this.referencesReady = true
-    this.framedWork = this.view !== null
-    await this.frameWork()
+    if (this.viewer) {
+      await this.syncReferences(config.references)
+      if (this.disposed) return
+      this.referencesReady = true
+      this.framedWork = this.view !== null
+      await this.frameWork()
+    }
     this.events.onPhase('')
+  }
+
+  /** Retry initializing the 3D WebGL viewer without disconnecting live editing or reloading the page. */
+  retry3d(): ModelViewer3D | null {
+    if (this.disposed || this.viewer || !this.viewerModule) return this.viewer
+    try {
+      this.viewer = new this.viewerModule.ModelViewer3D(this.container, {
+        workerUrl: '/api/building-model/fragments-worker',
+        onStats: (stats) => this.events.onStats(stats),
+        colors: this.viewerColors,
+      })
+      this.viewer.setDisplayContext(this.displayContext)
+      this.viewer.setCategoryView(this.categoryView)
+      this.events.onViewerError?.(null)
+      this.redraw()
+      void this.frameWork()
+      return this.viewer
+    } catch (err: unknown) {
+      console.error('[ModelSession] 3D WebGL viewer retry failed', err)
+      this.viewer = null
+      this.events.onViewerError?.(err instanceof Error ? err.message : 'WebGL context could not be created.')
+      return null
+    }
   }
 
   /**
@@ -837,6 +874,7 @@ export class ModelSession {
     this.undoStack = []
     this.redoStack = []
     this.documentUndoStack.length = 0
+    this.documentRedoStack.length = 0
     this.undoing.clear()
     this.emitUndoState()
     this.people.clear()
@@ -1166,9 +1204,9 @@ export class ModelSession {
   }
 
   private redraw() {
-    if (!this.viewer || !this.accepted || !this.view) return
-    this.viewer.setAuthored(this.accepted, this.preview ?? this.view)
+    if (!this.accepted || !this.view) return
     const shown = this.preview ?? this.view
+    this.viewer?.setAuthored(this.accepted, shown)
     this.events.onModel(this.accepted, shown, this.changedSinceLastModel(shown))
     if (this.selectedId) {
       const element = (this.preview ?? this.view).elements[this.selectedId]
@@ -2237,19 +2275,28 @@ export class ModelSession {
       this.undoStack.push({ revision: outcome.revision, label: describeCommand(this.accepted, request.command), seq: ++this.undoSeq })
       if (this.undoStack.length > 100) this.undoStack.shift()
       this.redoStack = []
+      this.documentRedoStack.length = 0
     }
     this.emitUndoState()
     if (!undo && this.view) this.events.onSaved?.(request.command, this.view)
   }
 
   undoState(): UndoState {
-    return { undo: this.newestUndo()?.label ?? null, redo: this.redoStack[this.redoStack.length - 1]?.label ?? null }
+    return { undo: this.newestUndo()?.label ?? null, redo: this.newestRedo()?.label ?? null }
   }
 
   /** Your newest undoable edit, from either stack. */
   private newestUndo(): { readonly kind: 'model' | 'document'; readonly label: string } | null {
     const model = this.undoStack[this.undoStack.length - 1]
     const doc = this.documentUndoStack[this.documentUndoStack.length - 1]
+    if (doc && (!model || doc.seq > model.seq)) return { kind: 'document', label: doc.label }
+    return model ? { kind: 'model', label: model.label } : null
+  }
+
+  /** Your newest redoable edit, from either stack. */
+  private newestRedo(): { readonly kind: 'model' | 'document'; readonly label: string } | null {
+    const model = this.redoStack[this.redoStack.length - 1]
+    const doc = this.documentRedoStack[this.documentRedoStack.length - 1]
     if (doc && (!model || doc.seq > model.seq)) return { kind: 'document', label: doc.label }
     return model ? { kind: 'model', label: model.label } : null
   }
@@ -2274,6 +2321,16 @@ export class ModelSession {
   }
 
   redo(): string | null {
+    if (this.newestRedo()?.kind === 'document') {
+      const res = this.redoDocumentEdit()
+      this.emitUndoState()
+      if (res.ok) {
+        this.events.onActivity(`Redid ${res.label}.`)
+        return null
+      }
+      this.events.onRefused?.(res.message)
+      return res.message
+    }
     return this.step('redo')
   }
 
@@ -2465,14 +2522,21 @@ export class ModelSession {
       const where = this.planeLocked ? `Work plane locked (L unlocks): ${feetInches(spec.heightMm)} above ${levelName}` : `${this.shiftHeld ? 'Shift' : 'Nothing under the pointer'}: on ${levelName}'s floor plane, ${feetInches(spec.heightMm)} up`
       target = { levelId: spec.levelId, raw, offsetMm: spec.heightMm, where, reference: this.referenceNear(clientX, clientY, raw) }
     }
+    const linkedCandidates = this.linkedNear(target.levelId, target.raw)
     const wallHit =
       !this.shiftHeld && !target.planeId && this.view && kernel.isWallFaceMountable(spec.definition)
         ? kernel.nearestWallFace(this.view, target.levelId, target.raw, { maxDistanceMm: WALL_FACE_SNAP_MM })
         : null
+    const linkedWallHit =
+      !wallHit && !this.shiftHeld && !target.planeId && kernel.isWallFaceMountable(spec.definition)
+        ? nearestLinkedWallFace(target.raw, linkedCandidates, WALL_FACE_SNAP_MM)
+        : null
     const snapped = wallHit
       ? { point: wallHit.position, kind: 'reference' as const, label: 'wall finish face' }
-      : snapPoint(target.raw, this.snapTargetsFor(target.levelId, []), target.reference, this.workFrame ?? undefined, this.linkedNear(target.levelId, target.raw))
-    const placementRot = wallHit ? wallHit.rotationDeg : spec.rotationDeg
+      : linkedWallHit
+        ? { point: linkedWallHit.position, kind: 'linked' as const, label: linkedWallHit.label }
+        : snapPoint(target.raw, this.snapTargetsFor(target.levelId, []), target.reference, this.workFrame ?? undefined, linkedCandidates)
+    const placementRot = wallHit ? wallHit.rotationDeg : linkedWallHit ? linkedWallHit.rotationDeg : spec.rotationDeg
     const type: PartTypeElement = { id: kernel.asElementId(spec.typeId), kind: 'part_type', version: 0, authoredRev: {}, definition: spec.definition }
     const part: PartInstance = {
       id: kernel.asElementId('placement-preview'),
@@ -3971,6 +4035,8 @@ export class ModelSession {
       }
       this.documentUndoStack.push(entry)
       if (this.documentUndoStack.length > 50) this.documentUndoStack.shift()
+      this.documentRedoStack.length = 0
+      this.redoStack = []
       this.emitUndoState()
     }
     return null
@@ -4005,6 +4071,46 @@ export class ModelSession {
     const refusal = this.submitCommand({ type: 'restore_document_elements', items })
     if (refusal) return { ok: false, message: refusal }
     this.documentUndoStack.pop()
+    this.documentRedoStack.push({ ...entry, seq: ++this.undoSeq })
+    if (this.documentRedoStack.length > 50) this.documentRedoStack.shift()
+    return { ok: true, label: entry.label }
+  }
+
+  /**
+   * Redo your last undone views/sheets change, unless someone changed the same
+   * element since (then nothing changes and the reason comes back).
+   */
+  redoDocumentEdit(): { ok: true; label: string } | { ok: false; message: string } {
+    const kernel = this.kernel
+    const view = this.client?.view()
+    const entry = this.documentRedoStack[this.documentRedoStack.length - 1]
+    if (!kernel || !view) return { ok: false, message: "Live editing isn't connected, so nothing can be redone." }
+    if (!entry) return { ok: false, message: 'Nothing to redo.' }
+    const strip = (el: BimElement) => kernel.canonicalJson({ ...el, version: 0, authoredRev: {} })
+    const items = []
+    for (const [id, after] of Object.entries(entry.after)) {
+      const current = view.elements[id]
+      if (!current) {
+        this.documentRedoStack.pop()
+        return { ok: false, message: `Someone changed this since your undo, so redo would overwrite their work. Nothing was redone.` }
+      }
+      const prior = entry.before[id] ?? null
+      const matchesPrior =
+        prior === null
+          ? (current as { readonly deleted?: boolean }).deleted === true
+          : strip(current) === strip(prior)
+      if (!matchesPrior) {
+        this.documentRedoStack.pop()
+        return { ok: false, message: `Someone changed this since your undo, so redo would overwrite their work. Nothing was redone.` }
+      }
+      const record = kernel.toDocumentRecord(after)
+      items.push({ elementId: id, before: record, expectedVersion: current.version })
+    }
+    const refusal = this.submitCommand({ type: 'restore_document_elements', items })
+    if (refusal) return { ok: false, message: refusal }
+    this.documentRedoStack.pop()
+    this.documentUndoStack.push({ ...entry, seq: ++this.undoSeq })
+    if (this.documentUndoStack.length > 50) this.documentUndoStack.shift()
     return { ok: true, label: entry.label }
   }
 

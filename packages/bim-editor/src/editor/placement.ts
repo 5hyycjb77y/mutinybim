@@ -106,6 +106,47 @@ export function snapPoint(raw: Vec2, targets: readonly SnapTarget[], reference: 
   return { point, kind: 'grid', label: frame.angleDeg === 0 ? '6" grid' : '6" grid along the working angle' }
 }
 
+/** A linked model's wall finish face within `maxDistanceMm`, with outward room-facing `rotationDeg` so wall-hosted parts auto-orient onto IFC walls just like native walls. */
+export function nearestLinkedWallFace(
+  raw: Vec2,
+  linked: ReferenceSnapCandidates | null | undefined,
+  maxDistanceMm = WALL_FACE_SNAP_MM,
+): { readonly position: Vec2; readonly rotationDeg: number; readonly label: string } | null {
+  if (!linked || linked.lines.length === 0) return null
+  // Prefer explicit wall face lines (`kind === 'face'`); fall back to outline segments if none are nearby.
+  let best: { readonly position: Vec2; readonly rotationDeg: number; readonly label: string; readonly d: number; readonly priority: number } | null = null
+  for (const l of linked.lines) {
+    const priority = l.kind === 'face' ? 0 : l.kind === 'edge' ? 1 : 2
+    if (priority > 1) continue
+    const dx = l.end.x - l.start.x
+    const dy = l.end.y - l.start.y
+    const len2 = dx * dx + dy * dy
+    if (len2 < 1e-3) continue
+    const t = Math.max(0, Math.min(1, ((raw.x - l.start.x) * dx + (raw.y - l.start.y) * dy) / len2))
+    const q = { x: l.start.x + dx * t, y: l.start.y + dy * t }
+    const d = Math.hypot(raw.x - q.x, raw.y - q.y)
+    if (d > maxDistanceMm) continue
+    if (best && (priority > best.priority || (priority === best.priority && d >= best.d))) continue
+    // Wall local +X runs along the wall; local +Y points outward into the room (towards the pointer side).
+    const len = Math.sqrt(len2)
+    const tx = dx / len
+    const ty = dy / len
+    // Left normal (-ty, tx); if pointer lies on the opposite side, flip wall direction 180° so +Y faces the pointer.
+    const cross = -ty * (raw.x - q.x) + tx * (raw.y - q.y)
+    const dirX = cross >= 0 ? tx : -tx
+    const dirY = cross >= 0 ? ty : -ty
+    const angleDeg = ((Math.atan2(dirY, dirX) * 180) / Math.PI + 360) % 360
+    best = {
+      position: { x: Math.round(q.x), y: Math.round(q.y) },
+      rotationDeg: Math.round(angleDeg * 10) / 10,
+      label: l.label || 'linked IFC wall face',
+      d,
+      priority,
+    }
+  }
+  return best ? { position: best.position, rotationDeg: best.rotationDeg, label: best.label } : null
+}
+
 /** A linked model's end or corner within the point reach, else the nearest face or centre line within the line-up reach. */
 function linkedSnap(raw: Vec2, linked: ReferenceSnapCandidates): Snapped | null {
   let point: Snapped | null = null
@@ -290,6 +331,19 @@ export function drawingPlacementTarget(model: ModelState, vop: ViewOnPaper, pape
             rotationDeg: wallHit.rotationDeg,
             host: { kind: 'wall_face', elementId: wallHit.wallId, stationMm: wallHit.stationMm, side: wallHit.side },
             where: `On ${level.name}, ${feetInches(heightMm)} up, flush on wall face (Shift: free placement)`,
+          },
+        }
+      }
+      const linkedWall = nearestLinkedWallFace({ x: at.x, y: at.y }, opts.linked?.(level.id, { x: at.x, y: at.y }), WALL_FACE_SNAP_MM)
+      if (linkedWall) {
+        return {
+          ok: true,
+          target: {
+            levelId: level.id,
+            position: linkedWall.position,
+            offsetMm: Math.round(heightMm),
+            rotationDeg: linkedWall.rotationDeg,
+            where: `On ${level.name}, ${feetInches(heightMm)} up, flush on ${linkedWall.label} (Shift: free placement)`,
           },
         }
       }

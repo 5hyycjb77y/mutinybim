@@ -95,6 +95,7 @@ export const oneLineFeederSchema = z
     conduit: text.optional().describe('e.g. 3" C.'),
     length_ft: z.number().positive().max(10000).optional(),
     type_mark: z.string().trim().min(1).max(12).optional().describe("Feeder type mark drawn in an oval on the conductor, e.g. F225."),
+    load: text.optional().describe("Calculated connected/demand load carried on this feeder when showLoads is enabled."),
   })
   .strict();
 export type OneLineFeeder = z.infer<typeof oneLineFeederSchema>;
@@ -169,7 +170,7 @@ function feederDevice(node: ElectricalOneLineNode, parentIsBus: boolean): OneLin
 function feederTag(f: OneLineFeeder | undefined): OneLineTextLine[] {
   if (!f) return [];
   const cond = [f.sets && f.sets > 1 ? `(${f.sets}) SETS` : "", f.conductors ?? ""].filter((s) => s.length > 0).join(" ");
-  return [cond, f.conduit ?? "", f.length_ft !== undefined ? `L = ${Math.round(f.length_ft)}'` : ""].filter((l) => l.length > 0).map((l) => ({ text: l.toUpperCase() }));
+  return [cond, f.conduit ?? "", f.length_ft !== undefined ? `L = ${Math.round(f.length_ft)}'` : "", f.load ?? ""].filter((l) => l.length > 0).map((l) => ({ text: l.toUpperCase() }));
 }
 
 /** A rating line starting "! " is a warning about the equipment: it prints bold. */

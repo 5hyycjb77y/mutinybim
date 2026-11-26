@@ -23,7 +23,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.assemblyThermal`](#buildingassemblythermal): Compute steady-state ISO 6946 / ASHRAE R-value and U-value of a layered wall/roof/floor assembly from registered `kernel.material` conductivities.
 - [`building.setMaterial`](#buildingsetmaterial): Assign a registered material id (`building.materials()`) to one or more elements so both 2D plan poché and 3D textures reflect it.
 - [`building.lock`](#buildinglock): Pin / lock elements so interactive selection and drags leave them alone.
-- [`building.unlock`](#buildingunlock): Unpin / unlock previously locked elements.
+- [`building.unlock`](#buildingunlock): Unpin / unlock previously locked elements (building, structure, parts, or MEP runs).
+- [`building.lockCategory`](#buildinglockcategory): Lock or unlock an entire view category across the model (e.g. lighting_fixtures, equipment) to prevent accidental or agent edits.
 - [`building.elements`](#buildingelements): Any kind the registry draws on a line (a beam, a grid line, a pack's own kind), by its id, along the points.
 - [`building.door`](#buildingdoor): A door in a wall, its centre `along` the wall from its start; returns its id.
 - [`building.flipDoor`](#buildingflipdoor): Flips an existing door's swing face (`"swing"`), hinge/hand (`"hinge"`, works on single swing, double-acting, swing+fixed, sliding, and folding doors), or both (`"both"`).
@@ -499,7 +500,7 @@ export default defineScript({
 
 ## building.unlock
 
-Unpin / unlock previously locked elements.
+Unpin / unlock previously locked elements (building, structure, parts, or MEP runs).
 
 ```ts
 unlock(ctx: ScriptContext, elementIds: string | readonly string[]): void
@@ -519,6 +520,32 @@ export default defineScript({
     const walls = building.walls(ctx, { level: "L1", points: [{ x: units.ft(0), y: units.ft(0) }, { x: units.ft(30), y: units.ft(0) }, { x: units.ft(30), y: units.ft(20) }, { x: units.ft(0), y: units.ft(20) }], closed: true, thickness: units.in(8), height: units.ft(10) });
     building.lock(ctx, walls.element(1));
     building.unlock(ctx, walls.element(1));
+  },
+});
+```
+
+</details>
+
+## building.lockCategory
+
+Lock or unlock an entire view category across the model (e.g. lighting_fixtures, equipment) to prevent accidental or agent edits.
+
+```ts
+lockCategory(ctx: ScriptContext, category: string, locked?: boolean): void
+```
+
+Topics: lock, category, freeze, protect
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+building.lockCategory(ctx, "lighting_fixtures", true);
   },
 });
 ```

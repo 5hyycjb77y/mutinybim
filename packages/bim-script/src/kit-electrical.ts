@@ -1,4 +1,4 @@
-import { elementsOfKind, type ModelState, type ParamValue, type ViewElement, type ViewProps } from "@permitzip/bim-kernel";
+import { builtinPartType, elementsOfKind, type ModelState, type ParamValue, type PartInstance, type ServiceLink, type ViewElement, type ViewProps } from "@permitzip/bim-kernel";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import type { ScriptContext } from "./context";
 import type { PlacedPart } from "./kit-building";
@@ -162,6 +162,37 @@ export interface PhotometricOverlaySpec {
   readonly gridSpacing?: Measure | number;
   readonly workplaneHeight?: Measure | number;
   readonly contourLevels?: readonly number[];
+}
+
+export interface InsertDisconnectSpec {
+  /** Optional explicit disconnect part ID (defaults to `disc-<equipmentId>`). */
+  readonly disconnectId?: string;
+  /** Disconnect mark shown on plan & One-Line (defaults to `SD-<equipment.mark>`). */
+  readonly mark?: string;
+  /** Optional explicit built-in or model part type ID (defaults to NEMA 3R/1 non-fused or fused disconnect matched to ratingA). */
+  readonly typeId?: string;
+  /** Choose a fused disconnect switch when auto-selecting the built-in type (default false). */
+  readonly fused?: boolean;
+  /** Optional XY offset from the equipment's position (defaults to `[-900 mm, 0]`, within sight per NEC 440.14). */
+  readonly offset?: { readonly x?: Measure | number; readonly y?: Measure | number };
+  /** Optional mounting height AFF (defaults to the equipment's offsetMm or 1200 mm). */
+  readonly height?: Measure | number;
+  /** Optional upstream panel/bus ID when the equipment is not yet circuited. */
+  readonly sourceId?: string;
+  /** Optional breaker positions on `sourceId` when creating a new upstream link. */
+  readonly positions?: readonly number[];
+  /** Optional circuit rating in amps (defaults to existing circuit rating or 30 A). */
+  readonly ratingA?: number;
+  /** Optional downstream link ID (defaults to `ckt-<disconnectId>-to-<equipmentId>`). */
+  readonly downstreamLinkId?: string;
+}
+
+export interface InsertDisconnectResult {
+  readonly disconnectId: string;
+  readonly mark: string;
+  readonly typeId: string;
+  readonly upstreamLinkId: string | null;
+  readonly downstreamLinkId: string;
 }
 
 function asFt(value: Measure | number | undefined): number | undefined {
@@ -416,5 +447,201 @@ export const electrical = {
       viewId: view.id,
       props: { photometrics } as ViewProps,
     });
+  },
+
+  /**
+   * Places a local disconnect switch within sight of a piece of HVAC/motor equipment
+   * (NEC 440.14 / 430.102) and routes power inline (`panel -> disconnect -> equipment`),
+   * preserving the existing upstream circuit's breaker positions and ratings.
+   */
+  insertDisconnect(ctx: ScriptContext, equipmentRef: PlacedPart | string, spec: InsertDisconnectSpec = {}): InsertDisconnectResult {
+    const refId = typeof equipmentRef === "string" ? equipmentRef : equipmentRef.id;
+    const found = onWorking(ctx, "electrical.insertDisconnect", (m) => {
+      const parts = elementsOfKind(m.elements, "part");
+      const part: PartInstance | undefined =
+        parts.find((p) => p.id === refId) ??
+        parts.find((p) => p.mark.trim().toLowerCase() === refId.trim().toLowerCase());
+      if (!part) throw new Error(`Equipment "${refId}" was not found in the model.`);
+      const links = elementsOfKind(m.elements, "service_link");
+      const upstream: ServiceLink | undefined = links.find((l) => l.members.some((mem) => mem.elementId === part.id));
+      const ratingA = spec.ratingA ?? upstream?.electrical?.ratingA ?? 30;
+      const typeId =
+        spec.typeId ??
+        (spec.fused
+          ? ratingA > 60
+            ? "builtin:disconnect-fused-100-480@1"
+            : "builtin:disconnect-fused-60-480@1"
+          : ratingA > 30
+            ? "builtin:disconnect-nf-60-480@1"
+            : "builtin:disconnect-nf-30-480@1");
+      const inModel = m.elements[typeId]?.kind === "part_type";
+      const libraryDef = inModel ? undefined : builtinPartType(typeId)?.definition;
+      return { part, upstream, ratingA, typeId, libraryDef };
+    });
+
+    const slug = (found.part.mark.trim() || found.part.id).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "eq";
+    const disconnectId = spec.disconnectId ?? `disc-${slug}`;
+    const mark = spec.mark ?? `SD-${found.part.mark.trim() || found.part.id}`;
+    const dx = spec.offset?.x !== undefined ? asMm(spec.offset.x) : -900;
+    const dy = spec.offset?.y !== undefined ? asMm(spec.offset.y) : 0;
+    const offsetMm = spec.height !== undefined ? asMm(spec.height) : found.part.offsetMm || 1200;
+
+    ctx.edit({
+      type: "place_part",
+      partId: disconnectId,
+      typeId: found.typeId,
+      ...(found.libraryDef ? { partType: found.libraryDef } : {}),
+      levelId: found.part.levelId,
+      position: { x: Math.round(found.part.position.x + dx), y: Math.round(found.part.position.y + dy) },
+      offsetMm: Math.round(offsetMm),
+      mark,
+    });
+
+    let upstreamLinkId: string | null = null;
+    if (found.upstream) {
+      if (found.upstream.members.length === 1) {
+        // Disconnect switches require their own dedicated feeder link (cannot share a circuit
+        // with the downstream load), so replace the single-member link with the same ID,
+        // source, breaker positions, and electrical rating pointing at the disconnect.
+        upstreamLinkId = found.upstream.id;
+        ctx.edit({
+          type: "delete_elements",
+          ids: [found.upstream.id],
+          policy: "cascade",
+        });
+        ctx.edit({
+          type: "create_service_link",
+          linkId: upstreamLinkId,
+          sourceId: found.upstream.source.elementId,
+          ...(found.upstream.source.positions.length > 0 ? { positions: [...found.upstream.source.positions] } : {}),
+          members: [{ elementId: disconnectId }],
+          ...(found.upstream.description ? { description: found.upstream.description } : {}),
+          ...(found.upstream.electrical ? { electrical: found.upstream.electrical } : { electrical: { ratingA: found.ratingA } }),
+        });
+      } else {
+        // Multi-member branch circuit: pull the equipment off the shared circuit and feed the
+        // disconnect on a dedicated feeder from the same source.
+        ctx.edit({
+          type: "remove_link_members",
+          linkId: found.upstream.id,
+          elementIds: [found.part.id],
+        });
+        upstreamLinkId = `ckt-${found.upstream.source.elementId}-to-${disconnectId}`;
+        ctx.edit({
+          type: "create_service_link",
+          linkId: upstreamLinkId,
+          sourceId: found.upstream.source.elementId,
+          ...(spec.positions ? { positions: [...spec.positions] } : {}),
+          members: [{ elementId: disconnectId }],
+          description: `${found.part.mark || found.part.id} (via ${mark})`,
+          electrical: { ratingA: found.ratingA },
+        });
+      }
+    } else if (spec.sourceId) {
+      upstreamLinkId = `ckt-${spec.sourceId}-to-${disconnectId}`;
+      ctx.edit({
+        type: "create_service_link",
+        linkId: upstreamLinkId,
+        sourceId: spec.sourceId,
+        ...(spec.positions ? { positions: [...spec.positions] } : {}),
+        members: [{ elementId: disconnectId }],
+        description: `${found.part.mark || found.part.id} (via ${mark})`,
+        electrical: { ratingA: found.ratingA },
+      });
+    }
+
+    const downstreamLinkId = spec.downstreamLinkId ?? `ckt-${disconnectId}-to-${slug}`;
+    ctx.edit({
+      type: "create_service_link",
+      linkId: downstreamLinkId,
+      sourceId: disconnectId,
+      members: [{ elementId: found.part.id }],
+      description: `${found.part.mark || found.part.id} local feed`,
+      electrical: { ratingA: found.ratingA },
+    });
+
+    return {
+      disconnectId,
+      mark,
+      typeId: found.typeId,
+      upstreamLinkId,
+      downstreamLinkId,
+    };
+  },
+
+  /**
+   * Removes an inline local disconnect switch feeding a piece of equipment and restores
+   * direct feed from its upstream panel circuit (preserving breaker positions and ratings).
+   */
+  removeDisconnect(ctx: ScriptContext, equipmentRef: PlacedPart | string): { readonly removedDisconnectId: string; readonly restoredLinkId: string | null } {
+    const refId = typeof equipmentRef === "string" ? equipmentRef : equipmentRef.id;
+    const found = onWorking(ctx, "electrical.removeDisconnect", (m) => {
+      const parts = elementsOfKind(m.elements, "part");
+      const part =
+        parts.find((p) => p.id === refId) ??
+        parts.find((p) => p.mark.trim().toLowerCase() === refId.trim().toLowerCase());
+      if (!part) throw new Error(`Equipment "${refId}" was not found in the model.`);
+      const links = elementsOfKind(m.elements, "service_link");
+      const downstream = links.find((l) => l.members.some((mem) => mem.elementId === part.id));
+      if (!downstream) throw new Error(`Equipment "${part.mark || part.id}" is not fed from a local disconnect.`);
+      const disc = m.elements[downstream.source.elementId];
+      const discType = disc?.kind === "part" ? m.elements[disc.typeId] : undefined;
+      if (disc?.kind !== "part" || discType?.kind !== "part_type" || !/disconnect/i.test(discType.definition.familyName)) {
+        throw new Error(`Equipment "${part.mark || part.id}" is fed directly, not through a local disconnect switch.`);
+      }
+      const upstream = links.find((l) => l.members.some((mem) => mem.elementId === disc.id)) ?? null;
+      return { part, disc, downstream, upstream };
+    });
+
+    ctx.edit({
+      type: "delete_elements",
+      ids: [found.downstream.id, found.disc.id, ...(found.upstream ? [found.upstream.id] : [])],
+      policy: "cascade",
+    });
+    let restoredLinkId: string | null = null;
+    if (found.upstream) {
+      restoredLinkId = ctx.id("ckt");
+      ctx.edit({
+        type: "create_service_link",
+        linkId: restoredLinkId,
+        sourceId: found.upstream.source.elementId,
+        ...(found.upstream.source.positions.length > 0 ? { positions: [...found.upstream.source.positions] } : {}),
+        members: [{ elementId: found.part.id }],
+        ...(found.upstream.description ? { description: found.upstream.description } : {}),
+        ...(found.upstream.electrical ? { electrical: found.upstream.electrical } : {}),
+      });
+    }
+    return { removedDisconnectId: found.disc.id, restoredLinkId };
+  },
+
+  /**
+   * Marks whether a piece of equipment requires a local disconnect switch (e.g. set `required: false`
+   * when the unit has a factory-installed integral disconnect or lockable breaker per NEC 430.102(B)).
+   */
+  setDisconnectRequirement(
+    ctx: ScriptContext,
+    equipmentRef: PlacedPart | string,
+    required: boolean,
+    reason?: string,
+  ): { readonly equipmentId: string; readonly disconnectRequired: boolean } {
+    const refId = typeof equipmentRef === "string" ? equipmentRef : equipmentRef.id;
+    const partId = onWorking(ctx, "electrical.setDisconnectRequirement", (m) => {
+      const parts = elementsOfKind(m.elements, "part");
+      const part =
+        parts.find((p) => p.id === refId) ??
+        parts.find((p) => p.mark.trim().toLowerCase() === refId.trim().toLowerCase());
+      if (!part) throw new Error(`Equipment "${refId}" was not found in the model.`);
+      return part.id;
+    });
+    ctx.edit({
+      type: "set_element_values",
+      elementIds: [partId],
+      values: {
+        "electrical.disconnect_required": required,
+        "electrical.local_disconnect": required ? "required" : "not_required",
+        ...(reason ? { "electrical.disconnect_note": reason } : {}),
+      },
+    });
+    return { equipmentId: partId, disconnectRequired: required };
   },
 };

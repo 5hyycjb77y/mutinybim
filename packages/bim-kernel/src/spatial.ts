@@ -696,6 +696,86 @@ export function partFloorMm(model: ModelState, part: PartInstance): number {
   return level?.kind === "level" ? level.elevationMm : 0;
 }
 
+/**
+ * Automatically shift a wider-than-equipment clearance zone (e.g. 30" working space
+ * on a 500 mm wide unit) away from an adjacent perpendicular wall, clamped to
+ * the box's own depth/width so the footprint still covers the equipment's full
+ * width (per working-space width rules). Skipped whenever the engineer set a manual `offset`.
+ */
+function autoShiftClearanceForWalls(
+  model: ModelState,
+  part: PartInstance,
+  box: { readonly min: readonly [number, number, number]; readonly max: readonly [number, number, number] },
+  z: ReturnType<typeof resolveClearances>[number],
+): ReturnType<typeof resolveClearances>[number] {
+  if (part.clearances?.[z.id]?.offset !== undefined) return z;
+  const alongX = z.face === "left" || z.face === "right";
+  const alongY = z.face === "front" || z.face === "back";
+  if (!alongX && !alongY) return z;
+  const spanIdx: 0 | 1 = alongX ? 0 : 1;
+  const depthIdx: 0 | 1 = alongX ? 1 : 0;
+  const equipSpan = box.max[spanIdx] - box.min[spanIdx];
+  const zoneSpan = z.max[spanIdx] - z.min[spanIdx];
+  const maxShift = (zoneSpan - equipSpan) / 2;
+  if (maxShift <= 1) return z;
+
+  const hostWallId = part.host?.kind === "wall_face" ? part.host.elementId : null;
+  const rad = (-part.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const toLocal = (wx: number, wy: number): readonly [number, number] => {
+    const dx = wx - part.position.x;
+    const dy = wy - part.position.y;
+    return [dx * cos - dy * sin, dx * sin + dy * cos];
+  };
+
+  const zLo = z.min[spanIdx];
+  const zHi = z.max[spanIdx];
+  const zMid = (zLo + zHi) / 2;
+  const dLo = z.min[depthIdx] + 25;
+  const dHi = z.max[depthIdx] - 25;
+  if (dHi <= dLo) return z;
+
+  let pushRight = 0; // positive shift needed to clear a wall intruding from zLo
+  let pushLeft = 0; // positive magnitude of negative shift needed to clear a wall intruding from zHi
+
+  const partLevelName = (() => {
+    const lvl = model.elements[part.levelId];
+    return lvl?.kind === "level" ? lvl.name : part.partition?.level ?? null;
+  })();
+
+  for (const el of elementsOfKind(model.elements, "wall")) {
+    if (el.id === hostWallId) continue;
+    if (partLevelName && el.partition?.level && el.partition.level !== partLevelName) continue;
+    const halfT = el.thickness / 2;
+    const a = toLocal(el.start.x, el.start.y);
+    const b = toLocal(el.end.x, el.end.y);
+    const wDMin = Math.min(a[depthIdx], b[depthIdx]) - halfT;
+    const wDMax = Math.max(a[depthIdx], b[depthIdx]) + halfT;
+    if (wDMax <= dLo || wDMin >= dHi) continue;
+    const wSMin = Math.min(a[spanIdx], b[spanIdx]) - halfT;
+    const wSMax = Math.max(a[spanIdx], b[spanIdx]) + halfT;
+    if (wSMax <= zLo + 1 || wSMin >= zHi - 1) continue;
+    const wMid = (wSMin + wSMax) / 2;
+    if (wMid < zMid) {
+      pushRight = Math.max(pushRight, wSMax - zLo);
+    } else {
+      pushLeft = Math.max(pushLeft, zHi - wSMin);
+    }
+  }
+
+  let shift = 0;
+  if (pushRight > 0 && pushLeft === 0) shift = Math.min(maxShift, pushRight);
+  else if (pushLeft > 0 && pushRight === 0) shift = -Math.min(maxShift, pushLeft);
+  if (Math.abs(shift) <= 0.5) return z;
+
+  const nextMin: [number, number, number] = [z.min[0], z.min[1], z.min[2]];
+  const nextMax: [number, number, number] = [z.max[0], z.max[1], z.max[2]];
+  nextMin[spanIdx] += shift;
+  nextMax[spanIdx] += shift;
+  return { ...z, min: nextMin, max: nextMax };
+}
+
 /** A placed part's clearance zones in the world (type zones with its overrides, then the envelopes of its current and travel positions). Empty when its type has none. */
 export function partClearances(model: ModelState, part: PartInstance): PlacedClearance[] {
   if (part.planned !== undefined) return [];
@@ -705,7 +785,10 @@ export function partClearances(model: ModelState, part: PartInstance): PlacedCle
   if (!def.clearances?.length && !part.clearances && !def.positions?.length) return [];
   const box = localBounds(resolveGeometry(def, part.values));
   const dim = (d: Dim) => resolveDim(def, part.values, d);
-  const zones = [...resolveClearances(def.clearances, part.clearances, box, dim), ...resolvePositionEnvelopes(def.positions, part.positionId, box, dim)];
+  const zones = [
+    ...resolveClearances(def.clearances, part.clearances, box, dim).map((z) => autoShiftClearanceForWalls(model, part, box, z)),
+    ...resolvePositionEnvelopes(def.positions, part.positionId, box, dim),
+  ];
   if (zones.length === 0) return [];
   const base = partBaseMm(model, part);
   const floor = partFloorMm(model, part);

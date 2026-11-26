@@ -1,6 +1,6 @@
 import type { Rect } from "../crop";
 import { documentIndex } from "../commands/views";
-import type { Viewport } from "../documents";
+import { resolveViewElement, type Viewport } from "../documents";
 import { frameForViewport, modelToPaper, paperToModel, viewCropAndWindow, type ViewFrame } from "../drawing/views";
 import type { RunPoint } from "../routing/types";
 import type { ModelState, Sheet, Vec2, ViewElement } from "../types";
@@ -56,7 +56,8 @@ function paperBounds(frame: ViewFrame): Rect {
   return { min: { x: frame.center.x - frame.size.x / 2, y: frame.center.y - frame.size.y / 2 }, max: { x: frame.center.x + frame.size.x / 2, y: frame.center.y + frame.size.y / 2 } };
 }
 
-export function viewOnPaper(model: ModelState, view: ViewElement, frame: ViewFrame, viewport: Viewport | null = null): ViewOnPaper {
+export function viewOnPaper(model: ModelState, rawView: ViewElement, frame: ViewFrame, viewport: Viewport | null = null): ViewOnPaper {
+  const view = resolveViewElement(model.elements, rawView);
   return { view, mapping: viewMapping(model, view), frame, window: viewCropAndWindow(model, view).window, paperRect: paperBounds(frame), viewport };
 }
 

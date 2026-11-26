@@ -107,6 +107,9 @@ export const noBranchActions: BranchActions = async () => ({
   async start() {
     return { status: "refused", message: "Branches need a hosted MutinyBIM model server; this local server edits Main only." };
   },
+  async checkout() {
+    return { status: "refused", message: "Branches need a hosted MutinyBIM model server; this local server edits Main only." };
+  },
   async proposeMerge() {
     return { status: "refused", message: "Branches need a hosted MutinyBIM model server; this local server edits Main only." };
   },

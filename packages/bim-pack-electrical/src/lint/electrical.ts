@@ -248,8 +248,68 @@ const faultCurrentRules: readonly RuleDef[] = [
   },
 ];
 
-/** Distribution, then NEC 240.24(D), then fault current (the order the Coordination panel groups them). */
-export const electricalRules: readonly RuleDef[] = [...distributionRules, ...ignitableMaterialRules, ...faultCurrentRules];
+const IN_SIGHT_LIMIT_MM = 50 * 304.8; // NEC 440.14 / 430.102(B): "within sight" = visible and not more than 50 ft (15 m)
+
+const disconnectRules: readonly RuleDef[] = [
+  {
+    id: "equipment-missing-disconnect",
+    version: 1,
+    pack: "electrical",
+    severity: "warning",
+    title: "Remote HVAC / motor equipment fed without a local disconnect within sight (NEC 440.14 / 430.102)",
+    scope: "element",
+    kinds: ["part"],
+    run: (ctx, el) => {
+      if (el.kind !== "part" || el.planned !== undefined) return;
+      const type = ctx.model.elements[el.typeId];
+      if (!type || type.kind !== "part_type") return;
+      // Target HVAC / mechanical / motor-driven equipment (RTU, AHU, EF, CU, pumps, water heaters > 120V)
+      if (type.definition.category !== "mechanical_equipment") return;
+      const hasPower = type.definition.connectors.some((c) => c.domain === "electrical");
+      if (!hasPower) return;
+      // Engineer explicitly marked equipment as exempt (integral factory disconnect or lockable breaker per NEC 430.102(B) Ex.)
+      if (
+        el.values["electrical.disconnect_required"] === false ||
+        el.values["electrical.local_disconnect"] === "not_required" ||
+        el.values.disconnect_required === false ||
+        el.values.local_disconnect === "not_required"
+      ) return;
+      const link = Object.values(ctx.model.elements).find(
+        (cand) =>
+          cand.kind === "service_link" &&
+          cand.members.some((m) => m.elementId === el.id),
+      );
+      if (!link || link.kind !== "service_link") return;
+      const sourceId = typeof link.source === "string" ? link.source : "elementId" in link.source ? link.source.elementId : null;
+      if (!sourceId) return;
+      const source = ctx.model.elements[sourceId];
+      if (!source || source.kind !== "part") return;
+      const sourceType = ctx.model.elements[source.typeId];
+      const sourceFamily = sourceType?.kind === "part_type" ? sourceType.definition.familyName.toLowerCase() : "";
+      // Already fed through a disconnect switch or starter!
+      if (sourceFamily.includes("disconnect") || sourceFamily.includes("starter") || sourceFamily.includes("switch")) return;
+      const differentLevel = source.levelId !== el.levelId;
+      const distMm = Math.hypot(source.position.x - el.position.x, source.position.y - el.position.y);
+      if (!differentLevel && distMm <= IN_SIGHT_LIMIT_MM) return;
+      const mark = (typeof el.values.mark === "string" && el.values.mark) || el.mark || type.definition.typeName;
+      const srcName = (typeof source.values.panel_name === "string" && source.values.panel_name) || source.mark || "panel";
+      const why = differentLevel
+        ? `on a different level from ${srcName}`
+        : `${Math.round(distMm / 304.8)} ft from ${srcName} (> 50 ft)`;
+      ctx.emit({
+        rule: "equipment-missing-disconnect",
+        severity: "warning",
+        elementIds: [el.id, source.id],
+        at: atOf(ctx, el.id),
+        message: clip(`${mark} is fed directly from ${srcName} (${why}) with no local disconnect switch within sight (NEC 440.14 / 430.102)`),
+        fix: { tool: "bim_run_script", hint: clip(`place a NEMA 3R/1 disconnect switch beside ${mark} and route ${srcName} -> disconnect -> ${mark}`, 120) },
+      });
+    },
+  },
+];
+
+/** Distribution, then NEC 240.24(D), then fault current, then local equipment disconnects (the order the Coordination panel groups them). */
+export const electricalRules: readonly RuleDef[] = [...distributionRules, ...ignitableMaterialRules, ...faultCurrentRules, ...disconnectRules];
 
 export const processRules: readonly RuleDef[] = [
   {

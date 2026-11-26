@@ -29,11 +29,11 @@ jobs:
       CI_JOB_KEY: proof-packs
       CI_JOB_NAME: Proof-pack commits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Self-test the check
@@ -45,7 +45,7 @@ jobs:
         run: bash .github/scripts/report.sh --kind lines --name "Proof-pack commits" -- bash scripts/bim/check-proof-pack-commits.sh "$BASE_SHA" "$HEAD_SHA"
       - name: Upload the full log
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ci-logs-${{ env.CI_JOB_KEY }}
           path: ${{ runner.temp }}/ci-artifacts

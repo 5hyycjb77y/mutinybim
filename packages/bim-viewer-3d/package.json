@@ -23,13 +23,13 @@
     "type-check": "tsc -p ../tsconfig.bim.json"
   },
   "dependencies": {
-    "@thatopen/fragments": "3.4.8",
-    "camera-controls": "3.1.2",
-    "three": "0.185.1",
-    "web-ifc": "0.0.78"
+    "@thatopen/fragments": "^3.6.1",
+    "camera-controls": "^3.1.2",
+    "three": "^0.187.0",
+    "web-ifc": ">=0.0.78 <0.1.0"
   },
   "devDependencies": {
-    "@types/three": "0.185.3"
+    "@types/three": "^0.187.0"
   },
   "peerDependencies": {
     "@permitzip/bim-kernel": "*",

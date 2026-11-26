@@ -24,11 +24,13 @@ describe("kit-use-warnings", () => {
   });
 
   it("names a ctx.edit command that doesn't exist, also when the object starts on the next line", () => {
-    const found = kitUseWarnings(script("defineScript", '  ctx.edit({ type: "create_levels", name: "Level 2" });\n  ctx.edit({\n    type: "invent_wall",\n  });'));
-    expect(found.map((w) => w.line)).toEqual([3, 4]);
+    const found = kitUseWarnings(script("defineScript", '  ctx.edit({ type: "create_levels", name: "Level 2" });\n  ctx.edit({\n    type: "invent_wall",\n  });\n  ctx.edit({ type: "add_sheet_note", ownerId: "s1" });'));
+    expect(found.map((w) => w.line)).toEqual([3, 4, 7]);
     expect(found[0]?.message).toContain('"create_levels"');
     expect(found[0]?.message).toContain("Near: create_level");
     expect(found[1]?.message).toContain('"invent_wall"');
+    expect(found[2]?.message).toContain('"add_sheet_note"');
+    expect(found[2]?.message).toContain("create_text_note");
   });
 
   it("says each mistake once, and nothing about real functions and commands", () => {

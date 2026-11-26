@@ -9,7 +9,7 @@ import { peerReads } from "../elements/feature";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { ANNOTATION_LINKED_ANCHORS_FEATURE } from "../reference-geometry/linked-anchors";
 import { TAGS_MASK_LEADER_FEATURE } from "../organization/model";
-import { DIAGRAM_FAULT_CURRENT_FEATURE } from "../diagrams/definition";
+import { DIAGRAM_FAULT_CURRENT_FEATURE, DIAGRAM_FILTERS_FEATURE } from "../diagrams/definition";
 import { viewGraphicsHintsRefusal, viewGraphicsRowByKey, type ViewGraphicsHints } from "../layout/view-graphics-point";
 import {
   CUT_PATTERNS,
@@ -25,10 +25,17 @@ import {
   SCHEDULE_FILTER_OPS,
   TITLE_BLOCK_TYPES,
   VIEW_CATEGORIES,
+  VIEW_HIDDEN_ELEMENTS_FEATURE,
+  VIEW_RANGE_AND_BROWSER_FEATURE,
+  VIEW_TEMPLATE_LOCK_KEYS,
+  VIEW_TEMPLATES_FEATURE,
+  VIEW_TOP_REFS,
   VIEWPORT_NORTH_ARROW_OFFSET_FEATURE,
   type DrawingItem,
   type SheetProps,
   type ViewProps,
+  type ViewTemplateElement,
+  type ViewTemplateProps,
   type Viewport,
 } from "../documents";
 import { titleBlockRowSchema } from "../drawing/title-block-definition";
@@ -246,10 +253,21 @@ const viewPropsPatchObject = z
     viewDepthMm: z.number().finite().min(0).max(30000),
     /** null: no lower limit again. */
     viewBottomMm: z.number().finite().min(-30000).max(30000).nullable(),
-    /** null: no upper limit again. */
-    viewTopMm: z.number().finite().min(0).max(60000).nullable(),
+    /** null: no upper limit again. Negative offsets are allowed when `viewTopRef` is `"level_above"`. */
+    viewTopMm: z.number().finite().min(-30000).max(60000).nullable(),
+    /** null: reset to default automatic/associated behavior. */
+    viewTopRef: z.enum(VIEW_TOP_REFS).nullable(),
+    /** null: detach any bound view template. */
+    viewTemplateId: id.nullable(),
+    /** null: clear explicit browser group. */
+    browserGroup: z.string().trim().min(1).max(80).nullable(),
+    /** null: clear explicit browser sort order. */
+    sortOrder: z.number().finite().nullable(),
     discipline: disciplineSchema.nullable(),
     hiddenCategories: z.array(z.enum(VIEW_CATEGORIES)).max(VIEW_CATEGORIES.length),
+    hiddenElementIds: z.array(id).max(5000),
+    showClearanceLabels: z.boolean(),
+    hideDeviceMarks: z.boolean(),
     hiddenDraftingCategories: z.array(z.enum(DRAFTING_CATEGORIES)).max(DRAFTING_CATEGORIES.length),
     references: z.record(id, referenceDisplaySchema),
     linkedHiddenLines: z.boolean(),
@@ -339,7 +357,17 @@ const documentRecord = z.discriminatedUnion("kind", [
     viewType: z.enum(["floor_plan", "ceiling_plan", "section", "elevation", "three_d", "schedule", "detail"]),
     cropMin: vec2,
     cropMax: vec2,
-    props: viewPropsPatchObject.extend({ discipline: disciplineSchema, workingAngleDeg: z.number().finite().min(-45).max(45), viewBottomMm: z.number().finite().min(-30000).max(30000), viewTopMm: z.number().finite().min(0).max(60000), cropPolygon: z.array(vec2).min(3).max(200).readonly(), ...view3dPropsShape }).partial().optional(),
+    props: viewPropsPatchObject.extend({ discipline: disciplineSchema, workingAngleDeg: z.number().finite().min(-45).max(45), viewBottomMm: z.number().finite().min(-30000).max(30000), viewTopMm: z.number().finite().min(-30000).max(60000), viewTopRef: z.enum(VIEW_TOP_REFS), browserGroup: z.string().trim().min(1).max(80), sortOrder: z.number().finite(), viewTemplateId: id.transform(asElementId), cropPolygon: z.array(vec2).min(3).max(200).readonly(), ...view3dPropsShape }).partial().optional(),
+  }),
+  z.object({
+    ...base,
+    kind: z.literal("view_template"),
+    name,
+    description: z.string().max(400).optional(),
+    viewTypes: z.array(z.enum(["floor_plan", "ceiling_plan", "section", "elevation", "three_d", "detail", "schedule"])).max(7).optional(),
+    locks: z.array(z.enum(VIEW_TEMPLATE_LOCK_KEYS)).max(VIEW_TEMPLATE_LOCK_KEYS.length),
+    props: viewPropsPatchObject.extend({ discipline: disciplineSchema, workingAngleDeg: z.number().finite().min(-45).max(45), viewBottomMm: z.number().finite().min(-30000).max(30000), viewTopMm: z.number().finite().min(-30000).max(60000), viewTopRef: z.enum(VIEW_TOP_REFS), browserGroup: z.string().trim().min(1).max(80), sortOrder: z.number().finite() }).partial(),
+    sourceLibraryId: z.string().min(1).max(200).optional(),
   }),
   z.object({
     ...base,
@@ -377,14 +405,40 @@ const documentRecord = z.discriminatedUnion("kind", [
 ]);
 type DocumentRecord = z.infer<typeof documentRecord>;
 
-/** A view, sheet, viewport or drawing item as `restore_document_elements` takes it back (null for any other kind). */
+/** A view, view template, sheet, viewport or drawing item as `restore_document_elements` takes it back (null for any other kind). */
 export function toDocumentRecord(el: BimElement): DocumentRecord | null {
-  if (el.kind !== "view" && el.kind !== "sheet" && el.kind !== "viewport" && el.kind !== "drawing_item") return null;
+  if (el.kind !== "view" && el.kind !== "view_template" && el.kind !== "sheet" && el.kind !== "viewport" && el.kind !== "drawing_item") return null;
   const parsed = documentRecord.safeParse(JSON.parse(canonicalJson(el)));
   return parsed.success ? parsed.data : null;
 }
 
+const viewTemplateTypeEnum = z.enum(["floor_plan", "ceiling_plan", "section", "elevation", "three_d", "detail", "schedule"]);
+const viewTemplateLockEnum = z.enum(VIEW_TEMPLATE_LOCK_KEYS);
+
 export const viewCommandSchemas = [
+  z.object({
+    type: z.literal("create_view_template"),
+    viewTemplateId: id,
+    name,
+    description: z.string().max(400).optional(),
+    viewTypes: z.array(viewTemplateTypeEnum).max(7).optional(),
+    locks: z.array(viewTemplateLockEnum).max(VIEW_TEMPLATE_LOCK_KEYS.length),
+    props: viewPropsPatch,
+    sourceLibraryId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    type: z.literal("update_view_template"),
+    viewTemplateId: id,
+    name: name.optional(),
+    description: z.string().max(400).nullable().optional(),
+    viewTypes: z.array(viewTemplateTypeEnum).max(7).nullable().optional(),
+    locks: z.array(viewTemplateLockEnum).max(VIEW_TEMPLATE_LOCK_KEYS.length).optional(),
+    props: viewPropsPatch.optional(),
+  }),
+  z.object({
+    type: z.literal("delete_view_template"),
+    viewTemplateId: id,
+  }),
   z.object({
     type: z.literal("create_view"),
     viewId: id,
@@ -549,9 +603,10 @@ export function isViewCommand(command: { readonly type: string }): command is Vi
 
 // ── Document index ───────────────────────────────────────────────────────────
 
-/** Live (not deleted) views, sheets and what is placed on each, for one element record. */
+/** Live (not deleted) views, view templates, sheets and what is placed on each, for one element record. */
 export interface DocumentIndex {
   readonly views: readonly ViewElement[];
+  readonly viewTemplates: readonly ViewTemplateElement[];
   readonly sheets: readonly Sheet[];
   readonly viewportsBySheet: ReadonlyMap<string, readonly Viewport[]>;
   readonly viewportByView: ReadonlyMap<string, Viewport>;
@@ -569,6 +624,7 @@ export function documentIndex(model: Pick<ModelState, "elements" | "connections"
   const cached = indexes.get(model.elements);
   if (cached) return cached;
   const views: ViewElement[] = [];
+  const viewTemplates: ViewTemplateElement[] = [];
   const sheets: Sheet[] = [];
   const viewportsBySheet = new Map<string, Viewport[]>();
   const viewportByView = new Map<string, Viewport>();
@@ -577,6 +633,9 @@ export function documentIndex(model: Pick<ModelState, "elements" | "connections"
     switch (el.kind) {
       case "view":
         if (!el.deleted) views.push(el);
+        break;
+      case "view_template":
+        if (!el.deleted) viewTemplates.push(el);
         break;
       case "sheet":
         if (!el.deleted) sheets.push(el);
@@ -593,7 +652,7 @@ export function documentIndex(model: Pick<ModelState, "elements" | "connections"
         break;
     }
   }
-  const built: DocumentIndex = { views, sheets, viewportsBySheet, viewportByView, itemsByOwner };
+  const built: DocumentIndex = { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner };
   indexes.set(model.elements, built);
   return built;
 }
@@ -620,8 +679,8 @@ export function matchingPlanCrop(model: Pick<ModelState, "elements" | "connectio
   return found ? { min: found.cropMin, max: found.cropMax } : null;
 }
 
-const isDocument = (el: BimElement | undefined): el is ViewElement | Sheet | Viewport | DrawingItem =>
-  el !== undefined && (el.kind === "view" || el.kind === "sheet" || el.kind === "viewport" || el.kind === "drawing_item");
+const isDocument = (el: BimElement | undefined): el is ViewElement | ViewTemplateElement | Sheet | Viewport | DrawingItem =>
+  el !== undefined && (el.kind === "view" || el.kind === "view_template" || el.kind === "sheet" || el.kind === "viewport" || el.kind === "drawing_item");
 
 function withoutId<T extends { readonly id: ElementId }>(list: readonly T[], elementId: string): T[] {
   return list.filter((x) => x.id !== elementId);
@@ -653,6 +712,7 @@ function shareDocumentIndex(from: Readonly<Record<string, BimElement>>, to: Pick
   const prev = indexes.get(from);
   if (!prev || indexes.has(to.elements)) return;
   let views = prev.views;
+  let viewTemplates = prev.viewTemplates;
   let sheets = prev.sheets;
   const viewportsBySheet = new Map(prev.viewportsBySheet);
   const viewportByView = new Map(prev.viewportByView);
@@ -664,6 +724,18 @@ function shareDocumentIndex(from: Readonly<Record<string, BimElement>>, to: Pick
     if (before && after && before.kind !== after.kind) return;
     const beforeLive = isDocument(before) && !before.deleted;
     const afterLive = isDocument(after) && !after.deleted;
+    if (after?.kind === "view_template" || before?.kind === "view_template") {
+      if (beforeLive && afterLive && after.kind === "view_template") {
+        const next = replaced(viewTemplates, after);
+        if (!next) return;
+        viewTemplates = next;
+      } else if (beforeLive) viewTemplates = withoutId(viewTemplates, elementId);
+      else if (afterLive && after.kind === "view_template") {
+        if (before) return;
+        viewTemplates = [...viewTemplates, after];
+      }
+      continue;
+    }
     if (after?.kind === "view" || before?.kind === "view") {
       if (beforeLive && afterLive && after.kind === "view") {
         const next = replaced(views, after);
@@ -727,7 +799,7 @@ function shareDocumentIndex(from: Readonly<Record<string, BimElement>>, to: Pick
       itemsByOwner.set(ownerId, [...list, a]);
     }
   }
-  indexes.set(to.elements, { views, sheets, viewportsBySheet, viewportByView, itemsByOwner });
+  indexes.set(to.elements, { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -740,7 +812,7 @@ function fail(message: string, ids: readonly string[] = [], code: "invalid_value
   throw new KernelError(code, message, ids.map(asElementId));
 }
 
-function live<K extends "view" | "sheet" | "viewport" | "drawing_item">(reader: TrackedReader, elementId: string, kind: K, label: string): Extract<BimElement, { kind: K }> {
+function live<K extends "view" | "view_template" | "sheet" | "viewport" | "drawing_item">(reader: TrackedReader, elementId: string, kind: K, label: string): Extract<BimElement, { kind: K }> {
   const el = reader.find(asElementId(elementId));
   if (!el || ("deleted" in el && el.deleted)) fail(`${label} no longer exists. Someone may have removed it.`, [elementId], "element_not_found");
   if (!isKind(el, kind)) fail(`${elementId} is a ${el.kind}, not a ${label.toLowerCase()}`, [elementId], "wrong_kind");
@@ -771,8 +843,13 @@ function replacedScheduleKinds(current: ViewProps | undefined, patch: z.infer<ty
 
 /** Patch fields replace; `discipline: null` clears the discipline (everything prints in ink). */
 function mergeProps(current: ViewProps | undefined, patch: z.infer<typeof viewPropsPatch>): ViewProps {
-  const { discipline, workingAngleDeg, viewBottomMm, viewTopMm, categoryOverrides, cropPolygon, ...rest } = patch;
+  const { discipline, workingAngleDeg, viewBottomMm, viewTopMm, viewTopRef, viewTemplateId, browserGroup, sortOrder, categoryOverrides, cropPolygon, hiddenElementIds, ...rest } = patch;
   let merged: ViewProps = { ...current, ...rest };
+  if (hiddenElementIds !== undefined) {
+    const { hiddenElementIds: _oldHidden, ...withoutHidden } = merged;
+    const deduped = [...new Set(hiddenElementIds)];
+    merged = deduped.length === 0 ? withoutHidden : { ...withoutHidden, hiddenElementIds: deduped };
+  }
   if (cropPolygon !== undefined) {
     const { cropPolygon: _oldPoly, ...withoutPoly } = merged;
     if (cropPolygon === null) {
@@ -790,10 +867,10 @@ function mergeProps(current: ViewProps | undefined, patch: z.infer<typeof viewPr
     const { [key]: _replaced, ...without } = merged;
     merged = without;
   }
-  for (const [key, value] of [["viewBottomMm", viewBottomMm], ["viewTopMm", viewTopMm]] as const) {
+  for (const [key, value] of [["viewBottomMm", viewBottomMm], ["viewTopMm", viewTopMm], ["viewTopRef", viewTopRef], ["viewTemplateId", viewTemplateId], ["browserGroup", browserGroup], ["sortOrder", sortOrder]] as const) {
     if (value === undefined) continue;
     const { [key]: _old, ...without } = merged;
-    merged = value === null ? without : { ...without, [key]: value };
+    merged = value === null ? without : { ...without, [key]: key === "viewTemplateId" ? asElementId(String(value)) : value };
   }
   if (workingAngleDeg === null) {
     const { workingAngleDeg: _model, ...withoutOwnAngle } = merged;
@@ -860,11 +937,27 @@ function checkProps(viewType: ViewElement["viewType"], props: ViewProps, viewId:
   }
   if (viewType !== "section" && viewType !== "elevation" && props.section) fail("Only section and elevation views have a cut line.", [viewId]);
   const isPlan = viewType === "floor_plan" || viewType === "ceiling_plan";
-  if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
+  if (
+    (props.diagram?.hints?.minLoadRatingA !== undefined ||
+      props.diagram?.hints?.phaseScope !== undefined ||
+      props.diagram?.hints?.includeEquipmentIds !== undefined ||
+      props.diagram?.hints?.excludeEquipmentIds !== undefined) &&
+    !peerReads(DIAGRAM_FILTERS_FEATURE)
+  ) {
+    fail("Diagram filters can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
+  }
   if (props.showLineCodes !== undefined && !peerReads(VIEW_SCHEMATIC_DETAIL_FEATURE)) fail("Inline service code settings can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
   if (props.symbolScale !== undefined && !peerReads(VIEW_SYMBOL_SCALE_FEATURE)) fail("View symbol scale can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
-  if (!isPlan && (props.viewBottomMm !== undefined || props.viewTopMm !== undefined)) fail("Only plans have a top and bottom to what they show. A section's reach is its far clip depth.", [viewId]);
-  if (isPlan && props.viewTopMm !== undefined && props.viewTopMm < (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The top of the view must be at or above the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);
+  if (props.hiddenElementIds && props.hiddenElementIds.length > 0 && !peerReads(VIEW_HIDDEN_ELEMENTS_FEATURE)) fail("Hiding individual elements in a view can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  if ((props.viewTopRef !== undefined || props.browserGroup !== undefined || props.sortOrder !== undefined) && !peerReads(VIEW_RANGE_AND_BROWSER_FEATURE)) {
+    fail("Level-relative view range and browser view organization can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  }
+  if (props.viewTemplateId !== undefined && !peerReads(VIEW_TEMPLATES_FEATURE)) {
+    fail("View templates can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [viewId]);
+  }
+  if (!isPlan && (props.viewBottomMm !== undefined || props.viewTopMm !== undefined || props.viewTopRef !== undefined)) fail("Only plans have a top and bottom to what they show. A section's reach is its far clip depth.", [viewId]);
+  if (isPlan && props.viewTopMm !== undefined && (!props.viewTopRef || props.viewTopRef === "associated_level") && props.viewTopMm < (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The top of the view must be at or above the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);
   if (isPlan && viewType === "floor_plan" && props.viewBottomMm !== undefined && props.viewBottomMm > (props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM)) fail(`The bottom of the view must be at or below the cut height (${Math.round((props.cutHeightMm ?? DEFAULT_CUT_HEIGHT_MM) / 30.48) / 10} ft).`, [viewId]);
   if (viewType !== "floor_plan" && viewType !== "ceiling_plan" && props.orientation !== undefined && props.orientation !== "plan_north") fail(props.orientation === "true_north" ? "Only plans turn to true north. Sections, 3D and detail views keep their own direction." : "Only plans turn to the working angle. Sections, 3D and detail views keep their own direction.", [viewId]);
   if (viewType === "schedule") {
@@ -1225,11 +1318,97 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
     refuseDiagramFrameEdit(model, command);
 
     switch (command.type) {
+      case "create_view_template": {
+        if (!peerReads(VIEW_TEMPLATES_FEATURE)) {
+          fail("View templates can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [command.viewTemplateId]);
+        }
+        mustBeNew(model, command.viewTemplateId);
+        checkCategoryOverridesPatch(command.props, command.viewTemplateId);
+        for (const vt of command.viewTypes?.length ? command.viewTypes : (["floor_plan"] as const)) {
+          checkViewGraphicsPatch(vt, command.props, command.viewTemplateId);
+        }
+        const clash = docs().viewTemplates.find((t) => t.name.trim().toLowerCase() === command.name.trim().toLowerCase());
+        if (clash) fail(`A view template named "${clash.name}" already exists. Pick another name.`, [clash.id], "already_exists");
+        const props = mergeProps(undefined, command.props) as ViewTemplateProps;
+        write({
+          ...NEW_META,
+          id: asElementId(command.viewTemplateId),
+          kind: "view_template",
+          name: command.name,
+          ...(command.description !== undefined ? { description: command.description } : {}),
+          ...(command.viewTypes && command.viewTypes.length > 0 ? { viewTypes: [...command.viewTypes] } : {}),
+          locks: [...new Set(command.locks)],
+          props,
+          ...(command.sourceLibraryId ? { sourceLibraryId: command.sourceLibraryId } : {}),
+          partition: documentPartition(undefined, props.discipline),
+        });
+        break;
+      }
+      case "update_view_template": {
+        if (!peerReads(VIEW_TEMPLATES_FEATURE)) {
+          fail("View templates can't be saved yet: the model server this model is open on is an older version. Try again once it is updated.", [command.viewTemplateId]);
+        }
+        const tpl = live(reader, command.viewTemplateId, "view_template", "The view template");
+        if (command.props) {
+          checkCategoryOverridesPatch(command.props, tpl.id);
+          const vts = command.viewTypes === null ? (["floor_plan"] as const) : (command.viewTypes ?? tpl.viewTypes ?? (["floor_plan"] as const));
+          for (const vt of vts.length ? vts : (["floor_plan"] as const)) {
+            checkViewGraphicsPatch(vt, command.props, tpl.id);
+          }
+        }
+        if (command.name !== undefined) {
+          const clash = docs().viewTemplates.find((t) => t.id !== tpl.id && t.name.trim().toLowerCase() === command.name!.trim().toLowerCase());
+          if (clash) fail(`A view template named "${clash.name}" already exists. Pick another name.`, [clash.id], "already_exists");
+        }
+        const nextProps = command.props ? (mergeProps(tpl.props as ViewProps, command.props) as ViewTemplateProps) : tpl.props;
+        const nextLocks = command.locks !== undefined ? [...new Set(command.locks)] : tpl.locks;
+        const nextDesc = command.description === null ? undefined : (command.description ?? tpl.description);
+        const nextViewTypes = command.viewTypes === null ? undefined : (command.viewTypes ?? tpl.viewTypes);
+        const updated: ViewTemplateElement = {
+          ...tpl,
+          name: command.name ?? tpl.name,
+          ...(nextDesc !== undefined ? { description: nextDesc } : { description: undefined }),
+          ...(nextViewTypes && nextViewTypes.length > 0 ? { viewTypes: [...nextViewTypes] } : { viewTypes: undefined }),
+          locks: nextLocks,
+          props: nextProps,
+          partition: documentPartition(undefined, nextProps.discipline),
+        };
+        write(updated);
+        if (command.name !== undefined) authored.push({ elementId: tpl.id, field: F.name, value: updated.name });
+        if (command.locks !== undefined) authored.push({ elementId: tpl.id, field: "doc:locks", value: canonicalJson(updated.locks) });
+        if (command.props) {
+          for (const key of Object.keys(command.props)) {
+            authored.push({ elementId: tpl.id, field: F.prop(key), value: canonicalJson(propValue(updated.props as ViewProps, key)) });
+          }
+        }
+        break;
+      }
+      case "delete_view_template": {
+        const tpl = live(reader, command.viewTemplateId, "view_template", "The view template");
+        // Detach bound views cleanly so deleting a template never leaves dangling template ids.
+        for (const v of docs().views) {
+          if (v.props?.viewTemplateId !== tpl.id) continue;
+          const liveV = live(reader, v.id, "view", "The view");
+          const nextProps = { ...liveV.props };
+          delete (nextProps as Record<string, unknown>).viewTemplateId;
+          write({ ...liveV, props: nextProps });
+          authored.push({ elementId: liveV.id, field: F.prop("viewTemplateId"), value: canonicalJson(undefined) });
+        }
+        write({ ...tpl, deleted: true });
+        authored.push({ elementId: tpl.id, field: F.deleted, value: "true" });
+        break;
+      }
       case "create_view": {
         mustBeNew(model, command.viewId);
         checkCategoryOverridesPatch(command.props, command.viewId);
         checkViewGraphicsPatch(command.viewType, command.props, command.viewId);
         checkDiagramKindPatch(command.props, command.viewId);
+        if (command.props?.viewTemplateId) {
+          const tpl = live(reader, command.props.viewTemplateId, "view_template", "The view template");
+          if (tpl.viewTypes && tpl.viewTypes.length > 0 && !tpl.viewTypes.includes(command.viewType)) {
+            fail(`View template "${tpl.name}" does not apply to ${command.viewType} views.`, [command.viewId, tpl.id]);
+          }
+        }
         const props = withCanonicalLevel(model, defaultViewProps(command.viewType, command.props));
         checkProps(command.viewType, props, command.viewId);
         uniqueViewName(docs(), command.name, null);
@@ -1293,6 +1472,12 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         checkCategoryOverridesPatch(command.props, view.id);
         checkViewGraphicsPatch(view.viewType, command.props, view.id);
         checkDiagramKindPatch(command.props, view.id, view.props);
+        if (command.props.viewTemplateId) {
+          const tpl = live(reader, command.props.viewTemplateId, "view_template", "The view template");
+          if (tpl.viewTypes && tpl.viewTypes.length > 0 && !tpl.viewTypes.includes(view.viewType)) {
+            fail(`View template "${tpl.name}" does not apply to ${view.viewType} views.`, [view.id, tpl.id]);
+          }
+        }
         const props = withCanonicalLevel(model, mergeProps(view.props, command.props));
         checkProps(view.viewType, props, view.id);
         const organizationProblem = viewOrganizationProblem(model, command.props);
@@ -1757,7 +1942,7 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         for (const entry of command.items) {
           const current = reader.find(asElementId(entry.elementId));
           if (!current) fail("Nothing to undo: that element is gone.", [entry.elementId], "element_not_found");
-          if (current.kind !== "view" && current.kind !== "sheet" && current.kind !== "viewport" && current.kind !== "drawing_item") {
+          if (current.kind !== "view" && current.kind !== "view_template" && current.kind !== "sheet" && current.kind !== "viewport" && current.kind !== "drawing_item") {
             fail(`Undo here only restores views, sheets and drawing content, not a ${current.kind}.`, [entry.elementId], "wrong_kind");
           }
           if (current.version !== entry.expectedVersion) {
@@ -1782,6 +1967,8 @@ function describe(el: BimElement): string {
   switch (el.kind) {
     case "view":
       return `View "${el.name}"`;
+    case "view_template":
+      return `View template "${el.name}"`;
     case "sheet":
       return `Sheet ${el.number}`;
     case "viewport":
@@ -1800,6 +1987,8 @@ function restoreRecord(before: DocumentRecord, current: BimElement): BimElement 
   const restored = { ...rest, id: asElementId(before.id), version: current.version, authoredRev: current.authoredRev, ...(deleted ? { deleted } : {}) };
   switch (restored.kind) {
     case "view":
+      return restored;
+    case "view_template":
       return restored;
     case "sheet":
       return { ...restored, viewIds: restored.viewIds.map(asElementId) };

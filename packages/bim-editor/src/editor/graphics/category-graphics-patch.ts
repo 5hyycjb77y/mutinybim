@@ -23,6 +23,7 @@ import {
 export type GraphicsEdit =
   | { readonly field: 'visible'; readonly value: boolean }
   | { readonly field: 'halftone'; readonly value: boolean }
+  | { readonly field: 'hiddenLines'; readonly value: boolean }
   | { readonly field: 'cut' | 'projection'; readonly value: LineWeight | null }
   | { readonly field: 'pattern'; readonly value: string | null }
   | { readonly field: 'detailLevel'; readonly value: DetailLevel | null }
@@ -68,6 +69,12 @@ export function graphicsPatch(view: Pick<ViewElement, 'props'>, id: CategoryId, 
   const props = view.props ?? {}
   const overrides = props.categoryOverrides
   const own = overrides?.[id]
+  if (isViewCategory(id) && edit.field === 'hiddenLines') {
+    const dashed = new Set(props.hiddenLineCategories ?? [])
+    if (edit.value) dashed.add(id)
+    else dashed.delete(id)
+    return { hiddenLineCategories: [...dashed] }
+  }
   if (isViewCategory(id) && edit.field === 'visible' && own?.visible === undefined) {
     const hidden = new Set(props.hiddenCategories ?? [])
     if (edit.value) hidden.delete(id)
@@ -83,6 +90,8 @@ export function graphicsPatch(view: Pick<ViewElement, 'props'>, id: CategoryId, 
   }
   let next: CategoryOverride
   switch (edit.field) {
+    case 'hiddenLines':
+      return {}
     case 'visible': {
       const base = withoutField(own, 'visible')
       next = edit.value === inheritedLook(view, id, 'visible', categories).visible ? base : { ...base, visible: edit.value }

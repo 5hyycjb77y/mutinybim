@@ -20,7 +20,7 @@ Panels, circuits, feeders and their loads; dedicated equipment space; electrical
 | Agent tools | 17 |
 | Block dependencies | 1 |
 | Block hops | 1 |
-| Built-in part types | 40 |
+| Built-in part types | 44 |
 | Calculations | 10 |
 | Catalog record types | 4 |
 | Commands | 1 |
@@ -36,12 +36,12 @@ Panels, circuits, feeders and their loads; dedicated equipment space; electrical
 | Field resolvers | 1 |
 | Form schedules | 8 |
 | Link-type catalogs | 1 |
-| Lint rules | 9 |
+| Lint rules | 10 |
 | Load sections | 1 |
 | Measure rules | 1 |
 | Network adapters | 1 |
 | Pack reads | 10 |
-| Parameter sets | 1 |
+| Parameter sets | 2 |
 | Position policies | 1 |
 | Preview calculations | 1 |
 | Proposers | 1 |

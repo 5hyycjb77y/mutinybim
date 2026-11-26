@@ -69,6 +69,10 @@ export interface DiagramNode {
   readonly placeholder?: boolean;
   /** Equipment that exists but isn't placed in the drawing yet: drawn dashed and marked NOT PLACED. */
   readonly planned?: boolean;
+  /** Visual tone driven by phase (e.g. "halftone" for existing equipment). */
+  readonly tone?: "ink" | "halftone";
+  /** Draw the node and its feed dashed (e.g. demolished equipment). */
+  readonly dashed?: boolean;
   /** Bus equipment with a main breaker (drawn ahead of its bus). */
   readonly mainBreaker?: boolean;
   /** Piping: its place on the line, and where it is in the model (project mm, z above the project's zero). */

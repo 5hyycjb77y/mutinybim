@@ -50,8 +50,48 @@ import { ELECTRICAL_SCHEDULE_TEMPLATES } from "./schedules/list-templates";
 import { ELECTRICAL_CLASSES } from "./classes";
 import { CLASS_POINT } from "@permitzip/bim-pack/runtime";
 import { ELECTRICAL_KEYNOTE_TABLES } from "./keynotes";
-import { LIBRARY_ROWS_POINT, PARAMETER_SET_POINT } from "@permitzip/bim-kernel";
+import { LIBRARY_ROWS_POINT, PARAMETER_SET_POINT, type PackParameterSet } from "@permitzip/bim-kernel";
 import { ELECTRICAL_PHOTOMETRICS_PARAMETER_SET, PHOTOMETRIC_GRID_ROW } from "./photometrics";
+
+const DISCONNECT_PARAM_CLASSES = [
+  "mep.equipment",
+  "mep.plumbing_fixture",
+  "mep.air_terminal",
+  "mep.electrical_device",
+  "mep.lighting_fixture",
+  "gen.generic_model",
+] as const;
+
+export const ELECTRICAL_DISCONNECT_PARAMETER_SET: PackParameterSet = {
+  id: "electrical.disconnect",
+  label: "Electrical local disconnect",
+  parameters: [
+    {
+      key: "electrical.disconnect_required",
+      label: "Local disconnect required",
+      classes: DISCONNECT_PARAM_CLASSES,
+      valueType: "boolean",
+      group: "Electrical",
+      description: "Whether NEC 440.14 / 430.102 requires a local disconnect switch for this equipment.",
+    },
+    {
+      key: "electrical.local_disconnect",
+      label: "Local disconnect status",
+      classes: DISCONNECT_PARAM_CLASSES,
+      valueType: "text",
+      group: "Electrical",
+      description: "Local disconnect requirement state ('required' or 'not_required').",
+    },
+    {
+      key: "electrical.disconnect_note",
+      label: "Local disconnect note",
+      classes: DISCONNECT_PARAM_CLASSES,
+      valueType: "text",
+      group: "Electrical",
+      description: "Optional code exemption or equipment disconnect note (e.g. factory integral disconnect).",
+    },
+  ],
+};
 
 const [serviceLayoutSchema] = serviceLayoutCommandSchemas;
 
@@ -197,7 +237,7 @@ const PART_TYPES: readonly BuiltinPartTypeRow[] = [
 export const ELECTRICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(DISCIPLINE_POINT, ELECTRICAL_DISCIPLINES),
   contribute(CLASS_POINT, ELECTRICAL_CLASSES),
-  contribute(PARAMETER_SET_POINT, [ELECTRICAL_PHOTOMETRICS_PARAMETER_SET]),
+  contribute(PARAMETER_SET_POINT, [ELECTRICAL_PHOTOMETRICS_PARAMETER_SET, ELECTRICAL_DISCONNECT_PARAMETER_SET]),
   contribute(COMMAND_POINT, [SERVICE_LAYOUT_COMMAND]),
   contribute(NETWORK_ADAPTER_POINT, [ADAPTER]),
   contribute(DERIVED_ZONE_RULE_POINT, [DEDICATED_SPACE]),

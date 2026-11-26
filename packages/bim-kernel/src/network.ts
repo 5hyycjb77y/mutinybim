@@ -19,7 +19,7 @@ import { isModelSetupRecordId } from "./organization/setup";
 export { downstreamEndsOf, upstreamEndOf } from "./kinds/ends";
 
 /** Kinds with no connectors and no references to other elements. */
-const DOCUMENT_ONLY_KINDS: ReadonlySet<BimElement["kind"]> = new Set(["view", "sheet", "viewport", "drawing_item", "organization"]);
+const DOCUMENT_ONLY_KINDS: ReadonlySet<BimElement["kind"]> = new Set(["view", "view_template", "sheet", "viewport", "drawing_item", "organization"]);
 
 /**
  * Kinds that sit outside the connected network and the reference graph: a

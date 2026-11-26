@@ -26,6 +26,7 @@ export const DOWNSTREAM_ENDS: Record<BimElement["kind"], readonly ConnectorEnd[]
   riser_segment: [],
   component: [],
   view: [],
+  view_template: [],
   sheet: [],
   tag: [],
   dimension: [],

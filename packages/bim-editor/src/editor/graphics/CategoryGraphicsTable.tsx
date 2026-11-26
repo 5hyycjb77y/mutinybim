@@ -38,6 +38,8 @@ import { useFirmClassCategoriesFrom } from './use-firm-class-categories'
 
 const WEIGHT_LABEL: Record<LineWeight, string> = { thin: 'Thin', medium: 'Medium', wide: 'Wide', heavy: 'Heavy' }
 const DETAIL_LABEL: Record<DetailLevel, string> = { coarse: 'Coarse', medium: 'Medium', fine: 'Fine' }
+/** View categories without solid 3D bodies whose hidden edges can be dashed. */
+const NO_HIDDEN_EDGES: ReadonlySet<string> = new Set(['tags', 'dimensions', 'rooms', 'grids', 'doors_windows', 'opening_tags'])
 
 const NEWER_GROUP = 'Other categories this view sets'
 const GROUP_ORDER = ['Mechanical', 'Plumbing', 'Electrical', 'Fire protection', 'Architecture', 'Structure', 'Civil', 'General contracting', 'Systems', 'Firm library', 'General', 'Documentation', 'Drafting', NEWER_GROUP] as const
@@ -199,6 +201,7 @@ export function CategoryGraphicsTable({ view, canEdit, disabledHint, onPatch, se
                     <TableHead className="h-7 px-1">Category</TableHead>
                     <TableHead className="h-7 px-1 text-center">Show</TableHead>
                     <TableHead className="h-7 px-1 text-center">Halftone</TableHead>
+                    <TableHead className="h-7 px-1 text-center" title="Dash hidden edges behind nearer elements">Hidden</TableHead>
                     <TableHead className="h-7 px-1">Cut</TableHead>
                     <TableHead className="h-7 px-1">Beyond</TableHead>
                     <TableHead className="h-7 px-1">Pattern</TableHead>
@@ -262,6 +265,19 @@ function CategoryRow({ view, category: c, categories, canEdit, disabledHint, onE
       </TableCell>
       <TableCell className="px-1 py-1 text-center">
         <Checkbox aria-label={`Halftone ${name}`} checked={look.halftone === true} disabled={!canEdit} title={disabledHint} onCheckedChange={(v) => onEdit(c, { field: 'halftone', value: v === true }, `${v === true ? 'halftone' : 'print in ink'} ${name}`)} />
+      </TableCell>
+      <TableCell className="px-1 py-1 text-center">
+        {isViewCategory(c.id) && !NO_HIDDEN_EDGES.has(c.id) ? (
+          <Checkbox
+            aria-label={`Dash hidden ${name}`}
+            checked={view.props?.showHiddenLines === true || (view.props?.hiddenLineCategories ?? []).includes(c.id)}
+            disabled={!canEdit || view.props?.showHiddenLines === true}
+            title={view.props?.showHiddenLines === true ? 'Show hidden lines is enabled for all categories' : disabledHint}
+            onCheckedChange={(v) => onEdit(c, { field: 'hiddenLines', value: v === true }, `${v === true ? 'dash' : 'hide'} hidden ${name}`)}
+          />
+        ) : (
+          <span className="text-muted-foreground/50">—</span>
+        )}
       </TableCell>
       <TableCell className="px-1 py-1">{weightSelect('cut')}</TableCell>
       <TableCell className="px-1 py-1">{weightSelect('projection')}</TableCell>

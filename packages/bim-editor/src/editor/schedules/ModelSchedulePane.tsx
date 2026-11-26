@@ -14,7 +14,7 @@ import { viewScheduleDefinition } from './schedule-planner'
 import { documentIndex, type Command, type ModelState, type ScheduleDefinitionV2, type ViewElement } from '@permitzip/bim-kernel'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '../../ui/empty'
 import { Button } from '../../ui/button'
-import { FileText } from 'lucide-react'
+import { ArrowLeft, FileText } from 'lucide-react'
 import { Spinner } from '../../ui/spinner'
 import type { ModelSession } from '../model-session'
 import { KernelCellPlanner } from './schedule-planner'
@@ -55,6 +55,8 @@ interface Props {
   readonly onOpenSheet?: (sheetId: string) => void
   /** Open the interactive editor for a form schedule whose add-on provides one. */
   readonly onOpenFormEditor?: (kind: string, elementId: string) => boolean
+  /** Return button when the schedule was opened from a sheet (rendered inline above the grid so it never overlaps the title). */
+  readonly backSheet?: { readonly number: string; readonly onBack: () => void } | null
 }
 
 /**
@@ -62,7 +64,7 @@ interface Props {
  * Rows come from the model server for the whole building; a cell edit goes
  * through the kernel's field writer and saves as one undoable change.
  */
-export function ModelSchedulePane({ projectId, session, connected, view, actor, model, onShowInModel, onUndo, onRedo, submit, editBlocked, branchChannel = null, onOpenSheet, onOpenFormEditor }: Props) {
+export function ModelSchedulePane({ projectId, session, connected, view, actor, model, onShowInModel, onUndo, onRedo, submit, editBlocked, branchChannel = null, onOpenSheet, onOpenFormEditor, backSheet = null }: Props) {
   const client = connected ? session?.scheduleClient() ?? null : null
   const modelRef = useLatest(model)
   const undoRef = useLatest({ onUndo, onRedo })
@@ -106,6 +108,14 @@ export function ModelSchedulePane({ projectId, session, connected, view, actor, 
   if (!view.props?.schedule && !view.props?.scheduleV2) return <FormScheduleOpens view={view} model={model} onOpenSheet={onOpenSheet} onOpenFormEditor={onOpenFormEditor} />
   return (
     <div className="h-full overflow-auto p-3" data-testid="model-schedule-grid">
+      {backSheet && (
+        <div className="mb-2">
+          <Button size="sm" variant="secondary" onClick={backSheet.onBack} data-testid="back-to-sheet">
+            <ArrowLeft data-icon="inline-start" />
+            Back to {backSheet.number}
+          </Button>
+        </div>
+      )}
       {isTakeoffSchedule(definition) && <PriceWith projectId={projectId} model={model} />}
       <ShowMainBeside channel={branchChannel} model={model} viewId={view.id} onShowInModel={onShowInModel} />
       {prefs.loaded ? (

@@ -42,7 +42,7 @@ Input: `project_id`?, `model_id`?, `script`, `values`?, `output_hash`, `parts`, 
 
 ### bim_model_summary
 
-Counts by element kind, the areas (level / zone / discipline) the model has, systems with their total airflow, open validation issues, the Not placed yet list (parts that exist before they are drawn, each with its circuit), open questions and assumptions, and the revision this was read at. Start here, then read one area at a time.
+Counts by element kind, the areas (level / zone / discipline) the model has, systems with their total airflow, open validation issues, the Not placed yet list (parts that exist before they are drawn, each with its circuit), open questions and assumptions, the revision this was read at, and (on hosted models) the current branch and list of existing model branches. Start here, then read one area at a time.
 
 Input: `project_id`?, `model_id`, `level`?, `zone`?, `questions`?
 
@@ -876,7 +876,7 @@ Input: `project_id`, `model_id`, `base_revision`?, `element_ids`, `group`
 
 ### bim_set_active_group_and_phase
 
-Set the model's active group (new ducts, pipes and parts go in it) or active phase (new elements are built in it; demolish uses it), typical_cap, switch an add-on on or off for this model (addon), or branch: start one (Main is untouched) or propose this thread's branch to Main; people approve merges. Give one of them per call. A locked group can't be made active.
+Set the model's active group (new ducts, pipes and parts go in it) or active phase (new elements are built in it; demolish uses it), typical_cap, switch an add-on on or off for this model (addon), or branch: start a new branch from Main (branch.start), switch this thread onto an existing open branch or "main" (branch.checkout), or propose this thread's branch to Main (branch.propose_merge); people approve merges. Give one of them per call. A locked group can't be made active.
 
 Input: `project_id`, `model_id`, `base_revision`?, `group`?, `phase`?, `typical_cap`?, `addon`?, `branch`?
 

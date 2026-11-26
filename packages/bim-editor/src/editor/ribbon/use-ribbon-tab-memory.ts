@@ -13,11 +13,17 @@ import { useCallback, useState } from 'react'
  */
 export function useRibbonTabMemory(context: string): { readonly picked: string | null; readonly pick: (tab: string) => void } {
   const [memo, setMemo] = useState<{ readonly context: string; readonly tab: string } | null>(null)
-  // Adjust during render when the context moves on (React's "state from a prop" pattern): the pick is gone before anything reads it.
+  // Adjust during render when the context moves on (React's "state from a prop" pattern): the pick is gone before anything reads it,
+  // EXCEPT when the person explicitly chose Annotate while working on the same open drawing/sheet (so finishing a note or clicking a drawn line never kicks them out of Annotate).
   const [seen, setSeen] = useState(context)
   if (seen !== context) {
+    const prevOpen = seen.split('|').slice(0, 2).join('|')
+    const nextOpen = context.split('|').slice(0, 2).join('|')
     setSeen(context)
-    if (memo !== null) setMemo(null)
+    if (memo !== null) {
+      if (memo.tab === 'annotate' && prevOpen === nextOpen) setMemo({ context, tab: 'annotate' })
+      else setMemo(null)
+    }
   }
   const pick = useCallback((tab: string) => setMemo({ context, tab }), [context])
   return { picked: memo && memo.context === context ? memo.tab : null, pick }

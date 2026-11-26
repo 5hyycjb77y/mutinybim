@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Download, Plus, Printer, Stamp, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, Download, Plus, Printer, Stamp, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { elementsOfKind, scaleLabel, setOrder, type ModelState, type Sheet, type SheetRevision } from '@permitzip/bim-kernel'
+import { DEFAULT_LINT_CONFIG, LintEngine } from '@permitzip/bim-lint'
+import { requireAddOns } from '../../contracts/building-model/add-ons'
 import { Alert, AlertDescription, AlertTitle } from '../../ui/alert'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
@@ -246,6 +248,145 @@ function when(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
+// ── Pre-print quality gate (live model lint summary) ─────────────────────────
+
+export interface PrePrintQualityReport {
+  readonly errors: ReadonlyArray<{ readonly id: string; readonly severity: string; readonly message: string }>
+  readonly warnings: ReadonlyArray<{ readonly id: string; readonly severity: string; readonly message: string }>
+}
+
+/** Run the live model lint engine inside the model's pinned packs for pre-print / pre-issue QA. */
+export function runPrePrintQualityGate(model: ModelState): PrePrintQualityReport | null {
+  try {
+    const findings = requireAddOns().host.withPinnedPacks(model, () => {
+      const engine = new LintEngine()
+      engine.build(model, [])
+      return engine.check({ config: DEFAULT_LINT_CONFIG })
+    })
+    return {
+      errors: findings.filter((f) => f.severity === 'error'),
+      warnings: findings.filter((f) => f.severity === 'warning'),
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Format pre-print QA findings as plain-text checklist lines for review notes or clipboard export. */
+export function formatPrePrintQualityReport(report: PrePrintQualityReport): string {
+  const lines = [
+    `Pre-Print Quality Gate — ${report.errors.length} error(s), ${report.warnings.length} warning(s)`,
+    ...report.errors.map((f) => `[ERROR] ${f.message}`),
+    ...report.warnings.map((f) => `[WARN] ${f.message}`),
+  ]
+  return lines.join('\n')
+}
+
+function PrePrintQualityGate({
+  model,
+  report: externalReport,
+  errorsAccepted,
+  onErrorsAcceptedChange,
+}: {
+  readonly model: ModelState
+  readonly report?: PrePrintQualityReport | null
+  readonly errorsAccepted?: boolean
+  readonly onErrorsAcceptedChange?: (checked: boolean) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const computed = useMemo(() => (externalReport !== undefined ? externalReport : runPrePrintQualityGate(model)), [model, externalReport])
+  if (!computed) return null
+  const { errors, warnings } = computed
+  const total = errors.length + warnings.length
+  const top = [...errors, ...warnings].slice(0, 8)
+  const copyReport = () => {
+    const text = formatPrePrintQualityReport(computed)
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1800)
+      })
+    }
+  }
+  return (
+    <div
+      className={`rounded-md border px-3 py-2 text-xs ${
+        errors.length > 0
+          ? 'border-destructive/40 bg-destructive/5 text-destructive'
+          : warnings.length > 0
+            ? 'border-amber-500/40 bg-amber-500/5 text-amber-800 dark:text-amber-300'
+            : 'border-emerald-500/30 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300'
+      }`}
+      data-testid="preprint-quality-gate"
+      data-error-count={errors.length}
+      data-warning-count={warnings.length}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 font-medium">
+          {total === 0 ? <CheckCircle2 className="size-3.5 shrink-0" /> : <AlertTriangle className="size-3.5 shrink-0" />}
+          <span>
+            {total === 0
+              ? 'Quality gate clear — 0 errors, 0 warnings'
+              : `Quality gate: ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}, ${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`}
+          </span>
+        </div>
+        {total > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto p-0 text-[11px] text-current"
+              onClick={copyReport}
+              data-testid="preprint-copy-report"
+            >
+              {copied ? 'Copied' : 'Copy report'}
+            </Button>
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto p-0 text-[11px] text-current"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+            >
+              {expanded ? 'Hide details' : 'Review'}
+              <ChevronDown data-icon="inline-end" className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            </Button>
+          </div>
+        )}
+      </div>
+      {expanded && top.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 border-t border-current/15 pt-2 text-[11px]">
+          {top.map((f) => (
+            <li key={f.id} className="flex items-baseline gap-1.5">
+              <span className="shrink-0 font-semibold uppercase">{f.severity === 'error' ? 'ERR' : 'WARN'}</span>
+              <span className="min-w-0 flex-1">{f.message}</span>
+            </li>
+          ))}
+          {total > top.length && <li className="opacity-75">…and {total - top.length} more in Manage › Coordination.</li>}
+        </ul>
+      )}
+      {errors.length > 0 && onErrorsAcceptedChange && (
+        <div className="mt-2 border-t border-current/15 pt-2">
+          <Field orientation="horizontal">
+            <Checkbox
+              id="is-accept-errors"
+              checked={errorsAccepted === true}
+              onCheckedChange={(c) => onErrorsAcceptedChange(c === true)}
+              data-testid="issue-accept-errors"
+            />
+            <FieldLabel htmlFor="is-accept-errors" className="text-[11px] font-normal">
+              Acknowledge {errors.length} {errors.length === 1 ? 'error' : 'errors'} and issue anyway
+            </FieldLabel>
+          </Field>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Print set ────────────────────────────────────────────────────────────────
 
 export function PrintSetDialog({ projectId, modelId, model, save, onCancel }: { projectId: string; modelId: string; model: ModelState; save: SaveState; onCancel: () => void }) {
@@ -299,7 +440,10 @@ export function PrintSetDialog({ projectId, modelId, model, save, onCancel }: { 
             <p className="text-xs text-muted-foreground">The link works for {Math.round(printed.expiresInSeconds / 60)} minutes.</p>
           </div>
         ) : (
-          <SheetPicker sheets={sheets} picked={picked} onChange={setPicked} />
+          <div className="flex flex-col gap-3">
+            <PrePrintQualityGate model={model} />
+            <SheetPicker sheets={sheets} picked={picked} onChange={setPicked} />
+          </div>
         )}
         {save.pending > 0 && !printed && <p className="text-xs text-muted-foreground">{save.pending} of your changes {save.pending === 1 ? "isn't" : "aren't"} saved yet; the set prints once they are.</p>}
         {error && <p className="text-sm text-danger-600" role="alert">{error}</p>}
@@ -343,6 +487,7 @@ export function IssueSetDialog({ projectId, modelId, model, save, canIssue, bloc
   const [revDate, setRevDate] = useState(today)
   const [revText, setRevText] = useState('ISSUED FOR PERMIT')
   const [accepted, setAccepted] = useState(false)
+  const qualityReport = useMemo(() => runPrePrintQualityGate(model), [model])
   const [issued, setIssued] = useState<Extract<IssueSetResult, { status: 'issued' | 'already_issued' }> | null>(null)
   const [verifyIssue, setVerifyIssue] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -450,6 +595,10 @@ export function IssueSetDialog({ projectId, modelId, model, save, canIssue, bloc
           <p className="text-sm text-danger-600" role="alert">{status.check.message}</p>
         ) : ready ? (
           <FieldGroup>
+            <PrePrintQualityGate
+              model={model}
+              report={qualityReport}
+            />
             <Alert className={differs ? 'border-warning-300 bg-warning-50' : 'border-success-300 bg-success-50'} data-testid="issue-print-check" data-status={ready.comparison.status}>
               <AlertTitle>{differs ? 'Changed since the last print' : 'Matches the last print'}</AlertTitle>
               <AlertDescription>

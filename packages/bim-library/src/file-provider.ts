@@ -139,6 +139,7 @@ function emptyHeader(scope: LibraryScope): LibraryBundle {
     elementTypes: [],
     titleBlocks: [],
     keynoteTables: [],
+    viewTemplates: [],
   };
 }
 

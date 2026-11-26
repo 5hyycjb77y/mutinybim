@@ -47,7 +47,7 @@ export function registerBimSummaryReadTools(server: McpServer, host: ReadToolHos
       title: "Summarize a MutinyBIM model",
       annotations: READ_ONLY_TOOL,
       description:
-        "Counts by element kind, the areas (level / zone / discipline) the model has, systems with their total airflow, open validation issues, the Not placed yet list (parts that exist before they are drawn, each with its circuit), open questions and assumptions, and the revision this was read at. Start here, then read one area at a time.",
+        "Counts by element kind, the areas (level / zone / discipline) the model has, systems with their total airflow, open validation issues, the Not placed yet list (parts that exist before they are drawn, each with its circuit), open questions and assumptions, the revision this was read at, and (on hosted models) the current branch and list of existing model branches. Start here, then read one area at a time.",
       inputSchema: {
         ...target,
         ...area,
@@ -61,8 +61,34 @@ export function registerBimSummaryReadTools(server: McpServer, host: ReadToolHos
           const projectName = (ask && host.reads?.projectLabel ? await host.reads.projectLabel(extra, args.project_id) : "") || "this project";
           const model = s.model();
           const questions = questionsList(model, args.questions?.toLowerCase() === "all" ? "all" : undefined);
+          let branchBlock: Record<string, unknown> = {};
+          if (typeof s.branchesAvailable === "function" && s.branchesAvailable()) {
+            const cur = s.branch();
+            const current_branch = cur
+              ? { id: cur.branchId, name: cur.name, state: cur.state, base_revision: cur.baseRevision }
+              : null;
+            let branches: Array<{ id: string; name: string; state: string; base_revision: number }> | undefined;
+            try {
+              const ans = await s.request({ type: "branch_list" });
+              if (ans.type === "branches") {
+                branches = ans.branches.map((b) => ({
+                  id: b.branchId,
+                  name: b.name,
+                  state: b.state,
+                  base_revision: b.baseRevision,
+                }));
+              }
+            } catch {
+              // Listing branches is advisory on summary; never fail summary if offline/unsupported.
+            }
+            branchBlock = {
+              current_branch,
+              ...(branches ? { branches } : {}),
+            };
+          }
           return text({
             ...summarizeModel(model),
+            ...branchBlock,
             notPlacedYet: notPlacedYet(model),
             ...(questions.count > 0 || args.questions ? { questions } : {}),
             ...(ask ? { question_email: draftQuestionsEmail(model, { askOf: ask, projectName }) } : {}),

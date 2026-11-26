@@ -208,6 +208,18 @@ export const tagTypeItemSchema = z.object({
   definition: z.record(z.string(), z.unknown()),
 });
 
+/** A reusable view template stored in a firm, project, or add-on library (`kind: "view_template"`). */
+export const viewTemplateItemSchema = z.object({
+  ...itemBase,
+  key: text(120),
+  name: text(120),
+  description: text(400).optional(),
+  discipline: text(64).optional(),
+  viewTypes: z.array(z.enum(["floor_plan", "ceiling_plan", "section", "elevation", "three_d", "detail", "schedule"])).max(7).optional(),
+  locks: z.array(z.enum(["view_range", "category_overrides", "detail_level", "visual_style", "discipline", "annotations", "pack_props"])).max(7),
+  props: z.record(z.string(), z.unknown()),
+});
+
 export const libraryBundleSchema = z.object({
   format: z.literal(LIBRARY_FORMAT),
   version: z.literal(LIBRARY_FORMAT_VERSION),
@@ -238,7 +250,11 @@ export const libraryBundleSchema = z.object({
   titleBlocks: z.array(titleBlockItemSchema).max(200).default([]),
   /** Keynote tables (round 15): a firm's keynotes by key. */
   keynoteTables: z.array(keynoteTableItemSchema).max(500).default([]),
+  /** View templates: reusable view range, V/G override, and pack-graphics presets for firms and add-ons. */
+  viewTemplates: z.array(viewTemplateItemSchema).max(500).default([]),
 });
+
+export type ViewTemplateItem = z.infer<typeof viewTemplateItemSchema>;
 
 export type DisplayProfileItem = z.infer<typeof displayProfileItemSchema>;
 export type ClassItem = z.infer<typeof classItemSchema>;
@@ -272,6 +288,7 @@ export const ITEM_SECTIONS = {
   element_type: "elementTypes",
   title_block: "titleBlocks",
   keynote_table: "keynoteTables",
+  view_template: "viewTemplates",
 } as const satisfies Record<string, keyof LibraryBundle>;
 
 export type LibraryItemType = keyof typeof ITEM_SECTIONS;
@@ -293,6 +310,7 @@ export interface ItemBodyByType {
   readonly element_type: ElementTypeItem;
   readonly title_block: TitleBlockItem;
   readonly keynote_table: KeynoteTableItem;
+  readonly view_template: ViewTemplateItem;
 }
 
 /** One item with its type: what providers return and what pins hold. */
@@ -314,6 +332,7 @@ export const ITEM_TYPE_LABELS: Readonly<Record<LibraryItemType, string>> = {
   element_type: "Element type",
   title_block: "Title block",
   keynote_table: "Keynote table",
+  view_template: "View template",
 };
 
 const ITEM_SCHEMAS = {
@@ -332,6 +351,7 @@ const ITEM_SCHEMAS = {
   element_type: elementTypeItemSchema,
   title_block: titleBlockItemSchema,
   keynote_table: keynoteTableItemSchema,
+  view_template: viewTemplateItemSchema,
 } as const;
 
 /** Pairs a body with its type. (TypeScript can't correlate a generic key with the union it indexes, hence the one assertion.) */

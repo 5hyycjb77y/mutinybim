@@ -48,4 +48,6 @@ export interface EditorShellHost {
    * ribbon.
    */
   readonly useFileChrome?: () => EditorFileChrome | null;
+  /** Optional host display-label overrides keyed by option id (for example `pathStyle.chamfered`). */
+  readonly optionLabels?: Readonly<Record<string, string>>;
 }

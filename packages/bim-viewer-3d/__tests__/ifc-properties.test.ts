@@ -144,9 +144,10 @@ describe("linked IFC properties survive conversion and read back grouped", () =>
     expect(reached.has(OTHER_FURNACE_ID)).toBe(false);
   });
 
-  it("would lose enumerated values, systems and ports with Fragments' default import", async () => {
+  it("would lose systems and ports with Fragments' default import", async () => {
     const { props: plain } = await convertAndRead(false);
-    expect(rows(plain, "Identity Data", "instance")).toEqual({ Mark: "F-1" });
+    // Fragments 3.6+ preserves enumerated property values by default,
+    // but still drops MEP systems and ports unless configureIfcImporter runs.
     expect(plain.systems).toEqual([]);
     expect(plain.ports).toEqual([]);
   }, 60_000);

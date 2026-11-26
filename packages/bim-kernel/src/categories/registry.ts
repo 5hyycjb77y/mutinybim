@@ -130,6 +130,12 @@ export function viewCategoryOfPartCategory(category: PartCategory): ViewCategory
   return CLASS_VIEW_CATEGORY[PART_CATEGORY_CLASSES[category]] ?? "equipment";
 }
 
+/** True for repetitive wall/ceiling plan-symbol device categories (excluding air terminals) whose per-instance auto-marks can be suppressed via `hideDeviceMarks`. */
+export function isRepetitiveDevicePartCategory(category: PartCategory): boolean {
+  const vc = viewCategoryOfPartCategory(category);
+  return vc !== "air_terminal" && VIEW_PLAN_SYMBOL.has(vc);
+}
+
 const DRAFTING_LABELS: Readonly<Record<DraftingCategory, string>> = {
   detail_lines: "Detail lines",
   hatching: "Hatching and fills",

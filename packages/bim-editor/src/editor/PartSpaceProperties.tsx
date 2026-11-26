@@ -163,6 +163,24 @@ function ClearanceList({
       <ItemGroup className="gap-1" aria-label="Clearance zones">
         {zones.map((z) => {
           const depth = z.face === 'front' || z.face === 'back' ? z.max[0] - z.min[0] : z.face === 'left' || z.face === 'right' ? z.max[1] - z.min[1] : z.max[2] - z.min[2]
+          const alongX = z.face === 'left' || z.face === 'right'
+          const alongY = z.face === 'front' || z.face === 'back'
+          const zoneSpan = alongX ? z.max[0] - z.min[0] : alongY ? z.max[1] - z.min[1] : 0
+          const partSpan = alongX ? (typeof part.values.width === 'number' ? part.values.width : typeof type?.typeValues?.width === 'number' ? type.typeValues.width : zoneSpan) : alongY ? (typeof part.values.depth === 'number' ? part.values.depth : typeof type?.typeValues?.depth === 'number' ? type.typeValues.depth : zoneSpan) : zoneSpan
+          const maxShiftMm = Math.max(0, Math.round((zoneSpan - partSpan) / 2))
+          const manualOffset = part.clearances?.[z.id]?.offset
+          const activeAlign = manualOffset === undefined ? 'auto' : manualOffset < -10 ? 'left' : manualOffset > 10 ? 'right' : 'center'
+          const setAlign = (mode: 'auto' | 'left' | 'center' | 'right') => {
+            const cur = { ...(part.clearances?.[z.id] ?? {}) }
+            if (mode === 'auto') {
+              delete cur.offset
+              const next = Object.keys(cur).length === 0 ? null : cur
+              send({ type: 'set_part_clearances', id: part.id, scope: 'instance', overrides: { [z.id]: next } })
+              return
+            }
+            const nextOffset = mode === 'left' ? -maxShiftMm : mode === 'right' ? maxShiftMm : 0
+            send({ type: 'set_part_clearances', id: part.id, scope: 'instance', overrides: { [z.id]: { ...cur, offset: nextOffset } } })
+          }
           return (
             <Item key={z.id} size="xs" data-testid={`clearance-${z.id}`}>
               <ItemContent>
@@ -173,6 +191,24 @@ function ClearanceList({
                 <ItemDescription className="text-xs">
                   {CLEARANCE_PURPOSE_LABELS[z.purpose]} · {z.face} · {feetInches(depth)} deep{z.basis ? ` · NEC ${z.basis.edition} 110.26, condition ${z.basis.condition}` : ''}
                 </ItemDescription>
+                {maxShiftMm > 10 && (
+                  <div className="mt-1 flex items-center gap-1" role="group" aria-label={`Shift ${z.name}`}>
+                    <span className="text-[11px] text-muted-foreground mr-1">Shift:</span>
+                    {(['auto', 'left', 'center', 'right'] as const).map((m) => (
+                      <Button
+                        key={m}
+                        type="button"
+                        size="sm"
+                        variant={activeAlign === m ? 'secondary' : 'ghost'}
+                        className="h-5 px-1.5 text-[11px] capitalize"
+                        disabled={!canEdit}
+                        onClick={() => setAlign(m)}
+                      >
+                        {m}
+                      </Button>
+                    ))}
+                  </div>
+                )}
               </ItemContent>
               <ItemActions>
                 <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(editing === z.id ? null : z.id)} disabled={!canEdit}>

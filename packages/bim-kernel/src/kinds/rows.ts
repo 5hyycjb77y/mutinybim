@@ -61,6 +61,7 @@ export const KERNEL_KIND_ROWS: readonly ElementKindItem[] = [
   row("riser_segment", "Riser segment", "physical", positionOf),
   row("component", "Component", "physical", positionOf),
   row("view", "View", "document"),
+  row("view_template", "View template", "document"),
   row("sheet", "Sheet", "document"),
   row("tag", "Tag", "document"),
   row("dimension", "Dimension", "document"),

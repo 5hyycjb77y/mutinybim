@@ -155,6 +155,8 @@ export interface BuildingModelRibbonContext {
   readonly drawingTools: readonly DrawingTool[]
   /** Tag every untagged duct, pipe, terminal, fixture and piece of equipment in the open plan or section; null elsewhere. */
   readonly tagAll: { readonly run: () => void; readonly disabledReason: string | null } | null
+  /** Insert a reusable discipline general-notes block onto the open sheet or view. */
+  readonly placeStandardNotes?: { readonly run: (setId: string) => void; readonly disabledReason: string | null } | null
   readonly setDrawingTool: (tool: DrawingTool) => void
   /** The shape Annotate › Detail line drew last (its face draws it again); line when unset. */
   readonly lastDetailShape?: DetailShape

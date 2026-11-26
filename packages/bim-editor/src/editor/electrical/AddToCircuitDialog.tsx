@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Cable, CircleAlert, Server } from 'lucide-react'
 import { type ModelState } from '@permitzip/bim-kernel'
-import { defaultCircuitDescription, distributionEquipment, electricalConnections, isCircuitableLoad, memberName, panelSchedule, polesForMembers, slotChoiceLabel, slotChoices, planAddToCircuit, type CircuitTarget } from '@permitzip/bim-pack-electrical'
+import { defaultCircuitDescription, distributionEquipment, electricalConnections, isCircuitableLoad, linkLoad, memberName, panelSchedule, polesForMembers, slotChoiceLabel, slotChoices, planAddToCircuit, type CircuitTarget } from '@permitzip/bim-pack-electrical'
 import { Alert, AlertDescription, AlertTitle } from '../../ui/alert'
 import { Button } from '../../ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/dialog'
@@ -29,16 +29,20 @@ export function AddToCircuitDialog({
   model,
   memberIds,
   initialPanelId,
+  initialCircuitId = null,
   newLinkId,
   submit,
   onClose,
   onDone,
   onPlacePanel,
+  onPickOnPlan,
 }: {
   readonly model: ModelState
   readonly memberIds: readonly string[]
   /** The panel to start on: the one they are on, or the last one used here. */
   readonly initialPanelId: string | null
+  /** Optional pre-selected existing circuit link id (e.g. chosen via "Pick circuit on plan"). */
+  readonly initialCircuitId?: string | null
   /** Id the new circuit gets (kept while the dialog is open, so a retry makes one circuit). */
   readonly newLinkId: string
   readonly submit: SubmitCommand
@@ -46,6 +50,8 @@ export function AddToCircuitDialog({
   /** After it saved: the panel the circuit is on. */
   readonly onDone: (panelId: string) => void
   readonly onPlacePanel: () => void
+  /** Let the user click a circuited device on the plan to join its circuit. */
+  readonly onPickOnPlan?: () => void
 }) {
   const els = model.elements
   const loads = memberIds.filter((id) => {
@@ -56,8 +62,27 @@ export function AddToCircuitDialog({
   const [panelId, setPanelId] = useState<string>(() => (initialPanelId && panels.some((p) => p.id === initialPanelId) ? initialPanelId : panels.length === 1 ? (panels[0]?.id ?? '') : ''))
   const poles = polesForMembers(els, loads.map((elementId) => ({ elementId })))
   const schedule = panelId ? panelSchedule(els, panelId) : null
-  const existing = (schedule?.circuits ?? []).filter((c) => c.role === 'branch' && c.poles === poles)
-  const [circuit, setCircuit] = useState<string>(NEW)
+  const existing = useMemo(
+    () =>
+      (schedule?.circuits ?? [])
+        .filter((c) => c.role === 'branch' && c.poles === poles)
+        .sort((a, b) => (a.positions[0] ?? 0) - (b.positions[0] ?? 0)),
+    [schedule, poles],
+  )
+  const skippedCircuits = (schedule?.circuits.length ?? 0) - existing.length
+  const existingLoads = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of existing) map.set(c.linkId, Math.round(linkLoad(model, c.linkId)?.inventory.va ?? 0))
+    return map
+  }, [model, existing])
+  const loadVoltage = useMemo(() => {
+    for (const id of loads) {
+      const v = electricalConnections(els, id)[0]?.voltage
+      if (v && v > 0) return v
+    }
+    return null
+  }, [els, loads])
+  const [circuit, setCircuit] = useState<string>(() => (initialCircuitId && existing.some((c) => c.linkId === initialCircuitId) ? initialCircuitId : NEW))
   const choices = panelId && poles ? slotChoices(els, panelId, poles) : []
   const [slotsPick, setSlotsPick] = useState<{ panel: string; key: string } | null>(null)
   const slotsKey = slotsPick && slotsPick.panel === panelId && (slotsPick.key === AUTO || choices.some((c) => c.join(',') === slotsPick.key)) ? slotsPick.key : AUTO
@@ -141,13 +166,22 @@ export function AddToCircuitDialog({
                   </SelectContent>
                 </Select>
               </Field>
-              {existing.length > 0 && (
+              {(existing.length > 0 || onPickOnPlan) && (
                 <Field>
                   <FieldLabel>Circuit</FieldLabel>
-                  <ToggleGroup type="single" variant="outline" value={circuit === NEW ? NEW : 'existing'} onValueChange={(v) => v && setCircuit(v === NEW ? NEW : (existing[0]?.linkId ?? NEW))} aria-label="New or existing circuit">
-                    <ToggleGroupItem value={NEW}>New circuit</ToggleGroupItem>
-                    <ToggleGroupItem value="existing">Add to one on {schedule?.name}</ToggleGroupItem>
-                  </ToggleGroup>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {existing.length > 0 && (
+                      <ToggleGroup type="single" variant="outline" value={circuit === NEW ? NEW : 'existing'} onValueChange={(v) => v && setCircuit(v === NEW ? NEW : (existing[0]?.linkId ?? NEW))} aria-label="New or existing circuit">
+                        <ToggleGroupItem value={NEW}>New circuit</ToggleGroupItem>
+                        <ToggleGroupItem value="existing">Add to one on {schedule?.name}</ToggleGroupItem>
+                      </ToggleGroup>
+                    )}
+                    {onPickOnPlan && (
+                      <Button type="button" variant="outline" size="sm" onClick={onPickOnPlan} data-testid="circuit-pick-on-plan">
+                        Pick circuit on plan
+                      </Button>
+                    )}
+                  </div>
                 </Field>
               )}
               {circuit !== NEW ? (
@@ -159,14 +193,25 @@ export function AddToCircuitDialog({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {existing.map((c) => (
-                          <SelectItem key={c.linkId} value={c.linkId}>
-                            {c.name} · {c.description || 'no description'} · {c.members.length} on it
-                          </SelectItem>
-                        ))}
+                        {existing.map((c) => {
+                          const va = existingLoads.get(c.linkId) ?? 0
+                          const breakerCapVa = loadVoltage && c.ratingA ? loadVoltage * c.ratingA : null
+                          const pct = breakerCapVa && breakerCapVa > 0 ? Math.round((va / breakerCapVa) * 100) : null
+                          const loadText = `${va} VA${c.ratingA ? ` / ${c.ratingA}A` : ''}${pct !== null ? ` (${pct}%)` : ''}`
+                          return (
+                            <SelectItem key={c.linkId} value={c.linkId}>
+                              {c.name} · {c.description || 'no description'} · {loadText} · {c.members.length} on it
+                            </SelectItem>
+                          )
+                        })}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                  {skippedCircuits > 0 && (
+                    <FieldDescription>
+                      Showing {poles ? `${poles}-pole` : 'matching'} branch circuits on {schedule?.name}. {skippedCircuits} other {skippedCircuits === 1 ? 'circuit is' : 'circuits are'} hidden (different pole count or feeder).
+                    </FieldDescription>
+                  )}
                 </Field>
               ) : (
                 panelId && (
@@ -211,11 +256,16 @@ export function AddToCircuitDialog({
               return (
                 <Item key={id} size="sm" variant="muted">
                   <ItemContent>
-                    <ItemTitle className="text-xs">{el?.kind === 'part' ? memberName(els, el) : id}</ItemTitle>
+                    <ItemTitle className="text-xs">
+                      {el?.kind === 'part' ? memberName(els, el) : id}
+                      {conn?.circuit ? (
+                        <span className="ml-1.5 font-normal text-muted-foreground">(circuit {conn.circuit.name})</span>
+                      ) : null}
+                    </ItemTitle>
                     <ItemDescription className="text-xs">
                       {conn?.voltage ? `${conn.voltage} V, ${conn.poles ?? 1} pole${(conn.poles ?? 1) === 1 ? '' : 's'}` : 'no voltage set'}
                       {conn?.loadVa ? `, ${Math.round(conn.loadVa)} VA` : ''}
-                      {conn?.circuit ? ` · now on ${conn.circuit.name}` : ''}
+                      {conn?.circuit ? ` · currently on circuit ${conn.circuit.name}` : ' · not circuited yet'}
                     </ItemDescription>
                   </ItemContent>
                 </Item>

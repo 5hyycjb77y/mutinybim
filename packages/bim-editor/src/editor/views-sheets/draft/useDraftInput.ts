@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { asElementId, drawDetailItem, modifyCommand, resolveNote, type DrawingItem, type Primitive, type Vec2 } from '@permitzip/bim-kernel'
 import { newId, type SubmitCommand } from '../types'
-import type { SnapPoint } from '../annotation-tools'
+import type { GraphicsSnapIndex, SnapPoint } from '../annotation-tools'
 import {
   PICK_ELEMENT_OPS,
   clickDimension,
@@ -42,8 +42,10 @@ export interface DraftInputContext {
   readonly reachMm: number
   /** The working angle on paper, degrees counter-clockwise: ortho and polar steps start from it. Absent: 0. */
   readonly trackBaseDeg?: number
-  /** Points a dimension follows (model ends and edges, or detail linework corners). */
+  /** Points a dimension and detail lines follow (model ends and edges, or detail linework corners). */
   readonly anchors: readonly SnapPoint[]
+  /** Real rendered model graphics index (wall corners/faces, grid lines/intersections). */
+  readonly graphicsIndex?: GraphicsSnapIndex | null
   readonly send: (command: Parameters<SubmitCommand>[0], label: string) => boolean
   readonly onSaved: (selectId: string | null) => void
   readonly onRefused: (reason: string) => void
@@ -54,6 +56,7 @@ export interface DraftInput {
   readonly active: boolean
   readonly prompt: string | null
   readonly preview: {
+    readonly tool: string | null
     readonly prims: Primitive[]
     readonly rubber: readonly Vec2[]
     readonly marker: Constrained | null
@@ -62,6 +65,8 @@ export interface DraftInput {
   }
   readonly down: (at: Vec2) => void
   readonly move: (at: Vec2) => void
+  /** Pointer release: finishes a 2-point shape (`line`/`rect`) when dragged from press to release, while leaving a stationary click open for click-click drafting. */
+  readonly up: (at: Vec2) => void
   /** Listening dimension key input while drawing (digits, ', ", -, /, ., m, Backspace, Enter). True if handled. */
   readonly handleKey: (key: string) => boolean
   /** Enter or double-click: finish an open shape. */
@@ -75,7 +80,13 @@ export interface DraftInput {
 }
 
 export function useDraftInput(ctx: DraftInputContext): DraftInput {
-  const [clicks, setClicks] = useState<Constrained[]>([])
+  const [clicks, setClicksState] = useState<Constrained[]>([])
+  const clicksRef = useRef<Constrained[]>([])
+  const dragStartRef = useRef<Vec2 | null>(null)
+  const setClicks = useCallback((next: Constrained[]) => {
+    clicksRef.current = next
+    setClicksState(next)
+  }, [])
   const [hover, setHover] = useState<Constrained | null>(null)
   const [typedLength, setTypedLength] = useState('')
   const { tool, settings, pending } = ctx
@@ -83,16 +94,35 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
   const active = pending !== null || shapeTool !== null
 
   const constrain = useCallback(
-    (at: Vec2, from: Vec2 | null, opts: { nearest?: boolean; anchors?: boolean; pickElement?: boolean } = {}) =>
-      constrainPoint({ at, from, items: ctx.items, toPaper: ctx.toPaper, settings: ctx.settings, reachMm: ctx.reachMm, trackBaseDeg: ctx.trackBaseDeg ?? 0, ...(opts.anchors ? { anchors: ctx.anchors } : {}), ...(opts.nearest ? { nearest: true } : {}), ...(opts.pickElement ? { pickElement: true } : {}) }),
-    [ctx.items, ctx.toPaper, ctx.settings, ctx.reachMm, ctx.anchors, ctx.trackBaseDeg],
+    (
+      at: Vec2,
+      from: Vec2 | null,
+      opts: { nearest?: boolean; anchors?: boolean; preferAnchors?: boolean; pickElement?: boolean; chainPoints?: readonly Vec2[]; allowCloseLoop?: boolean } = {},
+    ) =>
+      constrainPoint({
+        at,
+        from,
+        items: ctx.items,
+        toPaper: ctx.toPaper,
+        settings: ctx.settings,
+        reachMm: ctx.reachMm,
+        trackBaseDeg: ctx.trackBaseDeg ?? 0,
+        ...(opts.anchors !== false ? { anchors: ctx.anchors, graphicsIndex: ctx.graphicsIndex ?? null } : {}),
+        ...(opts.preferAnchors ? { preferAnchors: true } : {}),
+        ...(opts.chainPoints && opts.chainPoints.length > 0 ? { chainPoints: opts.chainPoints } : {}),
+        ...(opts.allowCloseLoop ? { allowCloseLoop: true } : {}),
+        ...(opts.nearest ? { nearest: true } : {}),
+        ...(opts.pickElement ? { pickElement: true } : {}),
+      }),
+    [ctx.items, ctx.toPaper, ctx.settings, ctx.reachMm, ctx.anchors, ctx.graphicsIndex, ctx.trackBaseDeg],
   )
 
   const reset = useCallback(() => {
+    dragStartRef.current = null
     setClicks([])
     setHover(null)
     setTypedLength('')
-  }, [])
+  }, [setClicks])
 
   const commitShape = useCallback(
     (pts: readonly Constrained[]) => {
@@ -143,7 +173,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         }
       } else if (!stays && modifyPicks(op, ctx.params).length === 0) ctx.setPending(null)
     },
-    [pending, ctx, reset],
+    [pending, ctx, reset, setClicks],
   )
 
   // Pin and Unpin take no clicks: they act on the selection as soon as they are picked.
@@ -211,13 +241,48 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         return
       }
       if (!shapeTool) return
-      const c = constrain(raw, last, { anchors: shapeTool === 'dimension', nearest: shapeTool === 'dimension' && clicks.length === 0 && (settings.dimKind === 'radial' || settings.dimKind === 'diameter') })
-      const next = [...clicks, c]
+      const curClicks = clicksRef.current
+      const chainPoints = curClicks.map((pt) => pt.at)
+      const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && curClicks.length >= 3
+      const trackOrigin = shapeTool === 'rect' ? null : (curClicks[curClicks.length - 1]?.at ?? null)
+      const c = constrain(raw, trackOrigin, {
+        anchors: true,
+        preferAnchors: shapeTool === 'dimension',
+        chainPoints: shapeTool === 'rect' ? [] : chainPoints,
+        allowCloseLoop,
+        nearest: shapeTool === 'dimension' && curClicks.length === 0 && (settings.dimKind === 'radial' || settings.dimKind === 'diameter'),
+      })
+      const next = [...curClicks, c]
       const need = clicksFor(shapeTool, settings)
-      if ('fixed' in need && next.length >= need.fixed) commitShape(next)
-      else setClicks(next)
+      if ('fixed' in need && next.length >= need.fixed) {
+        dragStartRef.current = null
+        commitShape(next)
+      } else if (allowCloseLoop && (c.closeLoop || (curClicks[0] && Math.hypot(c.at.x - curClicks[0].at.x, c.at.y - curClicks[0].at.y) < 0.35))) {
+        dragStartRef.current = null
+        commitShape(shapeTool === 'region' ? curClicks : next)
+      } else {
+        dragStartRef.current = (shapeTool === 'line' || shapeTool === 'rect') && next.length === 1 ? c.at : null
+        setClicks(next)
+      }
     },
-    [clicks, pending, ctx, constrain, picksNeeded, runModify, addLeader, shapeTool, settings, commitShape],
+    [clicks, pending, ctx, constrain, picksNeeded, runModify, addLeader, shapeTool, settings, commitShape, setClicks],
+  )
+
+  const up = useCallback(
+    (raw: Vec2) => {
+      const started = dragStartRef.current
+      dragStartRef.current = null
+      if (!started || (shapeTool !== 'line' && shapeTool !== 'rect')) return
+      const curClicks = clicksRef.current
+      if (curClicks.length !== 1) return
+      if (Math.hypot(raw.x - started.x, raw.y - started.y) < 2) return
+      const endC = constrain(raw, shapeTool === 'rect' ? null : curClicks[0]!.at, {
+        anchors: true,
+        chainPoints: shapeTool === 'rect' ? [] : [curClicks[0]!.at],
+      })
+      commitShape([curClicks[0]!, endC])
+    },
+    [shapeTool, constrain, commitShape],
   )
 
   const move = useCallback(
@@ -226,9 +291,11 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         if (hover) setHover(null)
         return
       }
-      const last = clicks[clicks.length - 1]?.at ?? null
+      const last = shapeTool === 'rect' ? null : (clicks[clicks.length - 1]?.at ?? null)
       const needsItem = pending?.kind === 'modify' && pickNeedsItem(pending.op, clicks.length)
-      setHover(constrain(raw, last, { anchors: shapeTool === 'dimension', pickElement: needsItem }))
+      const chainPoints = shapeTool === 'rect' ? [] : clicks.map((pt) => pt.at)
+      const allowCloseLoop = (shapeTool === 'polyline' || shapeTool === 'region') && clicks.length >= 3
+      setHover(constrain(raw, last, { anchors: !needsItem, preferAnchors: shapeTool === 'dimension', chainPoints, allowCloseLoop, pickElement: needsItem }))
     },
     [active, hover, clicks, pending, constrain, shapeTool],
   )
@@ -280,7 +347,7 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
       }
       return false
     },
-    [shapeTool, clicks, typedLength, ctx, hover, settings, commitShape],
+    [shapeTool, clicks, typedLength, ctx, hover, settings, commitShape, setClicks],
   )
 
   const cancel = useCallback(() => {
@@ -324,10 +391,10 @@ export function useDraftInput(ctx: DraftInputContext): DraftInput {
         drawDetailItem({ toPaper: ctx.toPaper, scale: ctx.storedPerPaperMm, prims }, item)
       }
     }
-    return { prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking) ? hover : null, typedLength, storedPerPaperMm: ctx.storedPerPaperMm }
+    return { tool: shapeTool, prims, rubber: active ? pts : [], marker: hover && (hover.snapLabel || hover.tracking || hover.guideLine || hover.closeLoop) ? hover : null, typedLength, storedPerPaperMm: ctx.storedPerPaperMm }
   }, [clicks, hover, shapeTool, settings, ctx.toStored, ctx.toPaper, ctx.storedPerPaperMm, ctx.ownerId, active, typedLength])
 
   const constrainDrag = useCallback((at: Vec2, from: Vec2 | null) => constrain(at, from), [constrain])
 
-  return { active, prompt, preview, down, move, handleKey, finish, cancel, apply, constrain: constrainDrag }
+  return { active, prompt, preview, down, move, up, handleKey, finish, cancel, apply, constrain: constrainDrag }
 }

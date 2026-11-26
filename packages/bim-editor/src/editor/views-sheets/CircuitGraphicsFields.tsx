@@ -1,6 +1,7 @@
 'use client'
 
 import { type ViewElement, type ViewPropsPatch } from '@permitzip/bim-kernel'
+import { useOptionalEditorHost } from '@permitzip/bim-editor/host'
 import { resolveCircuitGraphics, type CircuitGraphicStyle, type CircuitGraphicsProps, type HashMarkStyle } from '@permitzip/bim-pack-electrical'
 import { Button } from '../../ui/button'
 import { Checkbox } from '../../ui/checkbox'
@@ -9,6 +10,7 @@ import { ToggleGroup, ToggleGroupItem } from '../../ui/toggle-group'
 
 const STYLES: ReadonlyArray<{ readonly value: CircuitGraphicStyle; readonly label: string; readonly hint: string }> = [
   { value: 'arcs', label: 'Arcs', hint: 'Curved lines join each circuit’s devices, with a home run on the one nearest the panel.' },
+  { value: 'chamfered', label: 'Chamfered', hint: 'Orthogonal runs with crisp rounded corners, room-side wall stubs, and matching switch legs.' },
   { value: 'orthogonal', label: 'Square', hint: 'Lines with 90° corners. Drag a line on the drawing to move its corner; it stays where you put it.' },
   { value: 'numbers', label: 'Numbers', hint: 'The circuit number beside each device and one home run per circuit (multifamily style).' },
   { value: 'off', label: 'Off', hint: 'No circuiting on this plan.' },
@@ -58,6 +60,7 @@ interface Props {
  * the plan draws, so they follow devices when they move.
  */
 export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Props) {
+  const optionLabels = useOptionalEditorHost()?.shell.optionLabels
   const current: CircuitGraphicsProps = view.props?.circuitGraphics ?? {}
   const resolved = resolveCircuitGraphics(view)
   const change = (patch: Partial<CircuitGraphicsProps>, label: string) => set({ circuitGraphics: { ...current, ...patch } }, label)
@@ -93,11 +96,14 @@ export function CircuitGraphicsFields({ view, canEdit, disabledHint, set }: Prop
             disabled={!canEdit}
             data-testid="view-circuit-style"
           >
-            {STYLES.map((s) => (
-              <ToggleGroupItem key={s.value} value={s.value} aria-label={s.label} data-testid={`view-circuit-style-${s.value}`}>
-                {s.label}
-              </ToggleGroupItem>
-            ))}
+            {STYLES.map((s) => {
+              const label = optionLabels?.[`pathStyle.${s.value}`] ?? s.label
+              return (
+                <ToggleGroupItem key={s.value} value={s.value} aria-label={label} data-testid={`view-circuit-style-${s.value}`}>
+                  {label}
+                </ToggleGroupItem>
+              )
+            })}
           </ToggleGroup>
           <FieldDescription className="text-xs">
             {disabledHint ?? (defaulted ? `${hint} ${view.props?.discipline === 'electrical' ? 'Electrical plans draw arcs unless you pick otherwise.' : 'Plans of other disciplines draw none unless you pick a style.'}` : hint)}

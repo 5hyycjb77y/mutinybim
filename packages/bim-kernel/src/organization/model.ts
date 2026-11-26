@@ -110,10 +110,16 @@ export interface OrganizationSettingsEntry {
   readonly typicalCap?: number;
   /** Sheets print black only (a black-only plotter): colours print black, halftone and fills stay grey. Absent: colour. */
   readonly printBlackOnly?: boolean;
+  /** Individual model element ids locked against edits (move, parameter change, delete). */
+  readonly lockedElementIds?: readonly string[];
+  /** View categories locked against edits across the model. */
+  readonly lockedCategories?: readonly string[];
 }
 
 /** Peers that store the project's black-only printing choice (`set_print_black_only`). */
 export const DOCUMENTS_PRINT_BLACK_ONLY_FEATURE = "documents:print_black_only";
+/** Peers that store per-element and per-category locks (`set_element_locks`, `lock_category`). */
+export const ORGANIZATION_ELEMENT_LOCKS_FEATURE = "organization:element_locks";
 
 /** The contract's default cap on typical types (STATUS decision 15: warn above 10). */
 export const DEFAULT_TYPICAL_CAP = 10;
@@ -390,6 +396,10 @@ export interface Organization {
   readonly typicalCap: number;
   /** Sheets print black only (the project's choice; false: colour). */
   readonly printBlackOnly: boolean;
+  /** Individually locked element ids. */
+  readonly lockedElementIds: ReadonlySet<string>;
+  /** Locked view categories across the model. */
+  readonly lockedCategories: ReadonlySet<string>;
   /** Add-on switches stored on this model (`organization/setup.ts` resolves them with `settings.packs`). */
   readonly addons: readonly Resolved<AddonSetupEntry>[];
   /** Firm disciplines pinned to this model. */
@@ -473,6 +483,8 @@ export function organizationOf(model: Pick<ModelState, "elements" | "connections
     activePhaseId: phaseIndex.has(settings.activePhaseId) ? settings.activePhaseId : (phases[phases.length - 1]?.id ?? DEFAULT_PHASE_ID),
     typicalCap: settings.typicalCap ?? DEFAULT_TYPICAL_CAP,
     printBlackOnly: settings.printBlackOnly === true,
+    lockedElementIds: new Set(settings.lockedElementIds ?? []),
+    lockedCategories: new Set(settings.lockedCategories ?? []),
     addons: merge<AddonSetupEntry>([], stored, "addon"),
     pinnedDisciplines: merge<DisciplineSetupEntry>([], stored, "discipline"),
     projectParameters: merge<ProjectParameterEntry>([], stored, "project_parameter"),
@@ -499,6 +511,7 @@ export function carryOrganization(from: Readonly<Record<string, BimElement>>, to
 /** Kinds that are not model content: they belong to no group and no phase. */
 const UNORGANIZED_KINDS: ReadonlySet<BimElement["kind"]> = new Set([
   "view",
+  "view_template",
   "sheet",
   "viewport",
   "drawing_item",

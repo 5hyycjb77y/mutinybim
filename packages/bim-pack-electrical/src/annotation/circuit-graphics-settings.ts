@@ -8,8 +8,8 @@ import { VIEW_HASH_MARKS_FEATURE, VIEW_LINK_ROUTING_FEATURE, VIEW_TYP_LABELS_FEA
  * the view graphics row (`CIRCUIT_GRAPHICS_ROW.hintsSchema` / `hintsRefusal`).
  */
 
-/** arcs / orthogonal: lines joining each circuit's devices. numbers: the circuit number beside each device (multifamily). off: nothing drawn. */
-export const CIRCUIT_GRAPHIC_STYLES = ["arcs", "orthogonal", "numbers", "off"] as const;
+/** arcs / chamfered / orthogonal: lines joining each circuit's devices. numbers: the circuit number beside each device (multifamily). off: nothing drawn. */
+export const CIRCUIT_GRAPHIC_STYLES = ["arcs", "chamfered", "orthogonal", "numbers", "off"] as const;
 export type CircuitGraphicStyle = (typeof CIRCUIT_GRAPHIC_STYLES)[number];
 
 /** off; the hots long and the neutral short; the same plus the ground (a long mark with a foot). */
@@ -34,6 +34,8 @@ export interface HomeRunHint {
   readonly bendOffset?: Vec2;
   /** Optional offset from the arrow tip to the circuit label position (model mm). */
   readonly labelOffset?: Vec2;
+  /** Optional callout text appended beside the home-run circuit label (e.g. "VIA TIME CLOCK", "SHUNT TRIP", "BREAKER LOCK"). */
+  readonly note?: string;
 }
 
 /** A person's adjustments to one circuit's or switch leg's drawing in one view; the lines themselves are re-derived from the model every time. */
@@ -91,6 +93,7 @@ const homeRunHintSchema = z
     tipOffset: circuitPoint.optional(),
     bendOffset: circuitPoint.optional(),
     labelOffset: circuitPoint.optional(),
+    note: z.string().trim().max(80).optional(),
   })
   .strict();
 

@@ -19,3 +19,4 @@ export * from "./lint";
 export * from "./reference";
 export * from "./starters";
 export * from "./examples";
+export * from "./standard-notes";

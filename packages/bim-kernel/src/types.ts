@@ -1,4 +1,4 @@
-import type { DrawingItem, SheetProps, ViewProps, ViewType, Viewport } from "./documents";
+import type { DrawingItem, SheetProps, ViewProps, ViewTemplateElement, ViewType, Viewport } from "./documents";
 import { readStoredPackPins } from "./packs/pin";
 
 /**
@@ -382,6 +382,8 @@ export interface Level extends ModelElementBase {
   readonly name: string;
   /** Floor elevation above project zero. */
   readonly elevationMm: number;
+  /** True for an occupied floor story, false for a ceiling/soffit/roof/parapet reference datum. When absent, inferred from the level name. */
+  readonly buildingStory?: boolean;
   /** The linked model storey it was made from or matched to; a re-sync updates the level from it. Absent: drawn by a person. */
   readonly source?: LevelSource;
   /** Per linked model (its link id), the storey a person said this level is, when the names and heights don't settle it (`set_level_linked_storey`). */
@@ -471,7 +473,7 @@ export interface PartInstance extends ModelElementBase, ClassifiedCore {
 export type ParamValue = number | string | boolean;
 
 export type BuildingElement = Wall | Slab | Opening | Room | GridLine | Column | Beam | RiserSegment | Component | Ceiling;
-export type DocumentElement = ViewElement | Sheet | Tag | Dimension | Viewport | DrawingItem;
+export type DocumentElement = ViewElement | ViewTemplateElement | Sheet | Tag | Dimension | Viewport | DrawingItem;
 export type PartElement = Level | PartTypeElement | PartInstance | MountingPlane | ElementTypeElement;
 
 /** A group, phase, phase filter or the active-group/phase settings (organization/model.ts). */

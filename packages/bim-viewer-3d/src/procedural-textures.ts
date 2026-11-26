@@ -573,7 +573,32 @@ export function cleanEdgesGeometry(geometry: THREE.BufferGeometry, thresholdDeg 
     return nonIndexed;
   }
 
-  /** Build a rich architectural daylight studio environment texture for authentic glass & metal reflections. */
+const ENV_RENDER_TARGETS = new WeakMap<THREE.Texture, THREE.WebGLRenderTarget>();
+
+function disposeEnvScene(envScene: THREE.Scene): void {
+  envScene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose();
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+      else obj.material.dispose();
+    }
+  });
+  envScene.clear();
+}
+
+/** Dispose both the PMREM render target FBO and texture created by `buildStudioEnvironment`/`buildMoodEnvironment`. */
+export function disposeEnvironmentTexture(tex: THREE.Texture | null | undefined): void {
+  if (!tex) return;
+  const rt = ENV_RENDER_TARGETS.get(tex);
+  if (rt) {
+    ENV_RENDER_TARGETS.delete(tex);
+    rt.dispose();
+  } else {
+    tex.dispose();
+  }
+}
+
+/** Build a rich architectural daylight studio environment texture for authentic glass & metal reflections. */
 export function buildStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture | null {
   try {
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -617,7 +642,9 @@ export function buildStudioEnvironment(renderer: THREE.WebGLRenderer): THREE.Tex
     ground.position.y = -4;
     envScene.add(ground);
     const rt = pmrem.fromScene(envScene, 0.035);
+    disposeEnvScene(envScene);
     pmrem.dispose();
+    ENV_RENDER_TARGETS.set(rt.texture, rt);
     return rt.texture;
   } catch {
     return null;
@@ -664,7 +691,9 @@ export function buildMoodEnvironment(
     ground.position.y = -4;
     envScene.add(ground);
     const rt = pmrem.fromScene(envScene, 0.05);
+    disposeEnvScene(envScene);
     pmrem.dispose();
+    ENV_RENDER_TARGETS.set(rt.texture, rt);
     return rt.texture;
   } catch {
     return null;

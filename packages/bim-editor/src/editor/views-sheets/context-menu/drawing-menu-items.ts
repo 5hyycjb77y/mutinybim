@@ -1,4 +1,4 @@
-import { elementsOfKind, elementViewCategory, VIEW_CATEGORY_LABELS, viewLevelElements, type BimElement, type ModelState, type ViewCategory, type ViewElement } from '@permitzip/bim-kernel'
+import { elementsOfKind, elementViewCategory, organizationOf, VIEW_CATEGORY_LABELS, viewLevelElements, type BimElement, type ModelState, type ViewCategory, type ViewElement } from '@permitzip/bim-kernel'
 import { similarStartFor } from '../../create-similar'
 
 /**
@@ -14,7 +14,7 @@ export type DrawingMenuTarget =
   | { readonly kind: 'viewport'; readonly viewportId: string; readonly view: ViewElement }
   | { readonly kind: 'paper' }
 
-export type DrawingMenuAction = 'properties' | 'select_like' | 'hide_in_view' | 'create_similar' | 'zoom_fit' | 'open_view' | 'remove_from_sheet' | 'add_view'
+export type DrawingMenuAction = 'properties' | 'select_like' | 'hide_element_in_view' | 'hide_in_view' | 'lock_element' | 'lock_category' | 'create_similar' | 'zoom_fit' | 'open_view' | 'remove_from_sheet' | 'add_view'
 
 export interface DrawingMenuItem {
   readonly id: DrawingMenuAction
@@ -77,7 +77,13 @@ export function likeThisIds(model: ModelState, view: ViewElement | null, el: Bim
     .map((e) => e.id)
 }
 
-/** Hide in view: the element's category added to the view's hidden categories; null when it has none this view can hide. */
+/** Hide only this element in this view: adds its id to the view's hiddenElementIds. */
+export function hideElementInViewPatch(view: ViewElement, el: BimElement): { readonly hiddenElementIds: readonly string[] } {
+  const hidden = view.props?.hiddenElementIds ?? []
+  return { hiddenElementIds: hidden.includes(el.id) ? hidden : [...hidden, el.id] }
+}
+
+/** Hide category in view: the element's category added to the view's hidden categories; null when it has none this view can hide. */
 export function hideInViewPatch(model: ModelState, view: ViewElement, el: BimElement): { readonly category: ViewCategory; readonly label: string; readonly hiddenCategories: readonly ViewCategory[] } | null {
   const category = elementViewCategory(model.elements, el)
   if (!category) return null
@@ -125,9 +131,17 @@ export function drawingMenuItems(target: DrawingMenuTarget, ctx: DrawingMenuCont
 
   const el = ctx.model.elements[target.elementId]
   if (!live(el)) return { title: 'Drawing', items: [{ ...ZOOM_FIT, groupStart: false }] }
+  const title = elementTitle(ctx.model, el)
   const like = likeThisIds(ctx.model, ctx.view, el)
   const hide = ctx.view ? hideInViewPatch(ctx.model, ctx.view, el) : null
   const similar = similarStartFor(el)
+  const hideElementWhy = !ctx.canEdit
+    ? ctx.blockedReason
+    : !ctx.view
+      ? 'Double-click the view on the sheet (or open it) to change what it shows.'
+      : ctx.view.props?.hiddenElementIds?.includes(el.id)
+        ? `${title} is already hidden in this view.`
+        : null
   const hideWhy = !ctx.canEdit
     ? ctx.blockedReason
     : !ctx.view
@@ -137,14 +151,37 @@ export function drawingMenuItems(target: DrawingMenuTarget, ctx: DrawingMenuCont
         : ctx.view.props?.hiddenCategories?.includes(hide.category)
           ? `${hide.label} is already hidden in this view.`
           : null
+  const org = organizationOf(ctx.model)
+  const elLocked = org.lockedElementIds.has(el.id)
+  const elCat = elementViewCategory(ctx.model.elements, el)
+  const catLocked = elCat ? org.lockedCategories.has(elCat) : false
+  const catLabel = elCat ? VIEW_CATEGORY_LABELS[elCat] : null
   const similarWhy = !ctx.canEdit ? ctx.blockedReason : similar.kind === 'refused' ? similar.reason : !ctx.canCreateSimilar ? CREATE_SIMILAR_UNAVAILABLE : null
   return {
-    title: elementTitle(ctx.model, el),
+    title,
     items: [
       { id: 'properties', label: 'Properties', hint: 'Selects it and shows its properties.', ...(ctx.canSelect ? {} : { disabledReason: SELECT_UNAVAILABLE }) },
       { id: 'select_like', label: 'Select all like this', hint: `${like.length} in this view`, ...(ctx.canSelect ? {} : { disabledReason: SELECT_UNAVAILABLE }) },
-      { id: 'hide_in_view', label: 'Hide in view', ...(hide ? { hint: `Hides every ${hide.label} in this view.` } : {}), ...(hideWhy ? { disabledReason: hideWhy } : {}) },
-      { id: 'create_similar', label: 'Create similar', hint: 'C S', ...(similarWhy ? { disabledReason: similarWhy } : {}) },
+      { id: 'hide_element_in_view', label: 'Hide in view', hint: `Hides only ${title} in this view.`, ...(hideElementWhy ? { disabledReason: hideElementWhy } : {}) },
+      { id: 'hide_in_view', label: hide ? `Hide category (${hide.label})` : 'Hide category', ...(hide ? { hint: `Hides every ${hide.label} in this view.` } : {}), ...(hideWhy ? { disabledReason: hideWhy } : {}) },
+      {
+        id: 'lock_element',
+        label: elLocked ? 'Unlock element' : 'Lock element',
+        hint: elLocked ? `Allows changes to ${title} again.` : `Prevents moves, edits or deletions of ${title} (including by agents).`,
+        groupStart: true,
+        ...(ctx.canEdit ? {} : { disabledReason: ctx.blockedReason }),
+      },
+      ...(elCat && catLabel
+        ? [
+            {
+              id: 'lock_category' as const,
+              label: catLocked ? `Unlock category (${catLabel})` : `Lock category (${catLabel})`,
+              hint: catLocked ? `Allows changes to ${catLabel.toLowerCase()} again.` : `Locks every ${catLabel.toLowerCase()} element across the model.`,
+              ...(ctx.canEdit ? {} : { disabledReason: ctx.blockedReason }),
+            },
+          ]
+        : []),
+      { id: 'create_similar', label: 'Create similar', hint: 'C S', groupStart: true, ...(similarWhy ? { disabledReason: similarWhy } : {}) },
       ZOOM_FIT,
     ],
   }

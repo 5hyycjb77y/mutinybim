@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Box, ChevronDown, ChevronRight, Compass, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
-import { canonicalViewLevel, documentIndex, type ModelState, type Sheet, type StoredDiagramKind, type ViewElement } from '@permitzip/bim-kernel'
+import { useCallback, useMemo, useState } from 'react'
+import { ArrowUpDown, Box, ChevronDown, ChevronRight, Compass, FileText, Layers, MoreHorizontal, Network, PenLine, Plus, Printer, Scissors, Sparkles, SquareDashed, Stamp, TableProperties } from 'lucide-react'
+import { canonicalViewLevel, disciplineLabel, documentIndex, listDisciplines, resolveViewProps, type ModelState, type Sheet, type StoredDiagramKind, type ViewElement } from '@permitzip/bim-kernel'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible'
@@ -159,7 +159,43 @@ export function NewMenuItems({ onRequest, disabled }: { onRequest: (request: Pan
   )
 }
 
+type ViewGroupMode = 'type' | 'discipline' | 'level' | 'sheet'
+type ViewSortMode = 'default' | 'name' | 'discipline'
+
+function disciplineDisplayLabel(raw: string | undefined): string {
+  const d = raw?.trim().toLowerCase()
+  if (!d) return 'Coordination / All'
+  if (d === 'architecture' || d === 'architectural') return 'Architectural'
+  if (d === 'structure') return 'Structural'
+  return disciplineLabel(d)
+}
+
+const DISCIPLINE_ORDER: Readonly<Record<string, number>> = {
+  Architectural: 10,
+  Structural: 20,
+  ...Object.fromEntries(listDisciplines().map((d, i) => [disciplineLabel(d.id), 30 + i * 10])),
+  'Coordination / All': 90,
+}
+
+function viewCategoryHeading(v: ViewElement): string {
+  if (v.props?.diagram) return 'Diagrams'
+  return GROUPS.find((g) => g.type === v.viewType)?.title ?? 'Views'
+}
+
+const VIEW_CATEGORY_ORDER: Readonly<Record<string, number>> = {
+  'Floor plans': 10,
+  'Ceiling plans': 20,
+  Sections: 30,
+  Elevations: 40,
+  Details: 50,
+  Diagrams: 60,
+  Schedules: 70,
+  '3D views': 80,
+}
+
 export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, onRequest, userId, headerless = false }: Props) {
+  const [viewGroupChoice, setViewGroupChoice] = useState<ViewGroupMode | null>(null)
+  const [viewSortBy, setViewSortBy] = useState<ViewSortMode>('default')
   const index = useMemo(() => (model ? documentIndex(model) : null), [model])
   const sheetNumberOf = useMemo(() => {
     const map = new Map<string, string>()
@@ -168,6 +204,90 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
     for (const [viewId, vp] of index.viewportByView) map.set(viewId, numbers.get(vp.sheetId) ?? '')
     return map
   }, [index])
+  const visibleViews = useMemo(
+    () => (index?.views ?? []).filter((v) => !v.props?.workingFor || v.props.workingFor === userId),
+    [index, userId],
+  )
+  const effectivePropsOf = useCallback(
+    (v: ViewElement) => (model ? resolveViewProps(model.elements, v).props : (v.props ?? {})),
+    [model],
+  )
+  const hasDisciplinedViews = useMemo(() => {
+    const distinct = new Set<string>()
+    for (const v of visibleViews) {
+      const ep = effectivePropsOf(v)
+      const label = ep.browserGroup?.trim() || ep.discipline?.trim()
+      if (label) distinct.add(label.toLowerCase())
+      if (distinct.size >= 2) return true
+    }
+    return false
+  }, [visibleViews, effectivePropsOf])
+  const viewGroupBy: ViewGroupMode = viewGroupChoice ?? (hasDisciplinedViews ? 'discipline' : 'type')
+  const setViewGroupBy = setViewGroupChoice
+  const sortViews = useMemo(() => {
+    const base = model ? byLevelThenName(model) : (a: ViewElement, b: ViewElement) => a.name.localeCompare(b.name, undefined, { numeric: true })
+    return (a: ViewElement, b: ViewElement): number => {
+      if (viewSortBy === 'name') return a.name.localeCompare(b.name, undefined, { numeric: true })
+      const pa = effectivePropsOf(a)
+      const pb = effectivePropsOf(b)
+      if (viewSortBy === 'discipline') {
+        const da = disciplineDisplayLabel(pa.discipline)
+        const db = disciplineDisplayLabel(pb.discipline)
+        return da.localeCompare(db) || base(a, b)
+      }
+      const sa = pa.sortOrder ?? Number.MAX_SAFE_INTEGER
+      const sb = pb.sortOrder ?? Number.MAX_SAFE_INTEGER
+      return sa - sb || base(a, b)
+    }
+  }, [model, viewSortBy, effectivePropsOf])
+  const customViewGroups = useMemo(() => {
+    if (!model || viewGroupBy === 'type') return null
+    const buckets = new Map<string, { readonly label: string; minSort: number; readonly items: ViewElement[] }>()
+    for (const v of visibleViews) {
+      const ep = effectivePropsOf(v)
+      let label: string
+      if (viewGroupBy === 'discipline') {
+        label = ep.browserGroup?.trim() || disciplineDisplayLabel(ep.discipline)
+      } else if (viewGroupBy === 'level') {
+        label = viewLevelLabel(model, v) ?? 'Unassociated (Diagrams / Schedules)'
+      } else {
+        const sh = sheetNumberOf.get(v.id)
+        label = sh ? `Sheet ${sh}` : 'Unplaced views'
+      }
+      const sort = ep.sortOrder ?? Number.MAX_SAFE_INTEGER
+      let b = buckets.get(label)
+      if (!b) {
+        b = { label, minSort: sort, items: [] }
+        buckets.set(label, b)
+      }
+      b.minSort = Math.min(b.minSort, sort)
+      b.items.push(v)
+    }
+    for (const b of buckets.values()) b.items.sort(sortViews)
+    return [...buckets.values()]
+      .sort((a, b) => {
+        if (viewGroupBy === 'discipline') {
+          const da = DISCIPLINE_ORDER[a.label] ?? 80
+          const db = DISCIPLINE_ORDER[b.label] ?? 80
+          if (da !== db) return da - db
+        }
+        return a.minSort - b.minSort || a.label.localeCompare(b.label, undefined, { numeric: true })
+      })
+      .map((b) => {
+        if (viewGroupBy !== 'discipline') return { ...b, subgroups: null as null | ReadonlyArray<{ readonly label: string; readonly items: readonly ViewElement[] }> }
+        const subs = new Map<string, ViewElement[]>()
+        for (const v of b.items) {
+          const cat = viewCategoryHeading(v)
+          const list = subs.get(cat)
+          if (list) list.push(v)
+          else subs.set(cat, [v])
+        }
+        const ordered = [...subs.entries()]
+          .sort(([ca], [cb]) => (VIEW_CATEGORY_ORDER[ca] ?? 99) - (VIEW_CATEGORY_ORDER[cb] ?? 99) || ca.localeCompare(cb))
+          .map(([label, items]) => ({ label, items }))
+        return { ...b, subgroups: ordered.length > 1 ? ordered : null }
+      })
+  }, [model, visibleViews, viewGroupBy, sheetNumberOf, sortViews, effectivePropsOf])
   const sheets = useMemo(
     () =>
       [...(index?.sheets ?? [])].sort(
@@ -226,27 +346,105 @@ export function ViewsSheetsPanel({ model, canEdit, blockedReason, open, onOpen, 
         </Empty>
       ) : (
         <>
-          {GROUPS.map((group) => {
-            const views = (index?.views ?? []).filter((v) => v.viewType === group.type && (!v.props?.workingFor || v.props.workingFor === userId)).sort(byLevelThenName(model))
-            if (views.length === 0) return null
-            return (
-              <Group key={group.type} title={group.title} count={views.length}>
-                {views.map((view) => (
-                  <ViewRow
-                    key={view.id}
-                    view={view}
-                    levelName={viewLevelLabel(model, view)}
-                    onSheet={sheetNumberOf.get(view.id) ?? null}
-                    active={open.kind === 'view' && open.id === view.id}
-                    canEdit={canEdit}
-                    blockedReason={blockedReason}
-                    onOpen={() => onOpen({ kind: 'view', id: view.id })}
-                    onRequest={onRequest}
-                  />
-                ))}
-              </Group>
-            )
-          })}
+          <div className="flex items-center justify-between gap-1 px-1" data-testid="views-browser-controls">
+            <span className="text-[11px] font-medium text-muted-foreground">Views</span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px] text-muted-foreground" data-testid="views-group-sort-trigger">
+                  <ArrowUpDown className="mr-1 size-3" />
+                  {viewGroupBy === 'type' ? 'By type' : viewGroupBy === 'discipline' ? 'By discipline' : viewGroupBy === 'level' ? 'By level' : 'By sheet'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel className="text-xs">Group views by</DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  {([
+                    ['type', 'View type'],
+                    ['discipline', 'Discipline'],
+                    ['level', 'Level'],
+                    ['sheet', 'Sheet placement'],
+                  ] as const).map(([mode, label]) => (
+                    <DropdownMenuItem key={mode} onSelect={() => setViewGroupBy(mode)}>
+                      {viewGroupBy === mode ? `✓ ${label}` : label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs">Sort within group</DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  {([
+                    ['default', 'Order / Level'],
+                    ['name', 'Name (A–Z)'],
+                    ['discipline', 'Discipline'],
+                  ] as const).map(([mode, label]) => (
+                    <DropdownMenuItem key={mode} onSelect={() => setViewSortBy(mode)}>
+                      {viewSortBy === mode ? `✓ ${label}` : label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          {customViewGroups
+            ? customViewGroups.map((g) => (
+                <Group key={g.label} title={g.label} count={g.items.length}>
+                  {g.subgroups
+                    ? g.subgroups.map((sg) => (
+                        <div key={`${g.label}:${sg.label}`} className="flex flex-col gap-0.5 pt-1 first:pt-0">
+                          <span className="px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                            {sg.label} ({sg.items.length})
+                          </span>
+                          {sg.items.map((view) => (
+                            <ViewRow
+                              key={view.id}
+                              view={view}
+                              levelName={viewLevelLabel(model, view)}
+                              onSheet={sheetNumberOf.get(view.id) ?? null}
+                              active={open.kind === 'view' && open.id === view.id}
+                              canEdit={canEdit}
+                              blockedReason={blockedReason}
+                              onOpen={() => onOpen({ kind: 'view', id: view.id })}
+                              onRequest={onRequest}
+                            />
+                          ))}
+                        </div>
+                      ))
+                    : g.items.map((view) => (
+                        <ViewRow
+                          key={view.id}
+                          view={view}
+                          levelName={viewLevelLabel(model, view)}
+                          onSheet={sheetNumberOf.get(view.id) ?? null}
+                          active={open.kind === 'view' && open.id === view.id}
+                          canEdit={canEdit}
+                          blockedReason={blockedReason}
+                          onOpen={() => onOpen({ kind: 'view', id: view.id })}
+                          onRequest={onRequest}
+                        />
+                      ))}
+                </Group>
+              ))
+            : GROUPS.map((group) => {
+                const views = visibleViews.filter((v) => v.viewType === group.type).sort(sortViews)
+                if (views.length === 0) return null
+                return (
+                  <Group key={group.type} title={group.title} count={views.length}>
+                    {views.map((view) => (
+                      <ViewRow
+                        key={view.id}
+                        view={view}
+                        levelName={viewLevelLabel(model, view)}
+                        onSheet={sheetNumberOf.get(view.id) ?? null}
+                        active={open.kind === 'view' && open.id === view.id}
+                        canEdit={canEdit}
+                        blockedReason={blockedReason}
+                        onOpen={() => onOpen({ kind: 'view', id: view.id })}
+                        onRequest={onRequest}
+                      />
+                    ))}
+                  </Group>
+                )
+              })}
           <Group title="Sheets" count={sheets.length}>
             {sheets.length === 0 ? (
               <p className="px-2 py-1 text-xs text-muted-foreground">No sheets yet. Use + to make one, then drag views onto it, or have the agent make the set.</p>

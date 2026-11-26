@@ -107,7 +107,8 @@ export interface ElectricalWorkflow {
 }
 
 type DialogState =
-  | { readonly kind: 'add'; readonly memberIds: readonly string[]; readonly linkId: string }
+  | { readonly kind: 'add'; readonly memberIds: readonly string[]; readonly linkId: string; readonly pickedPanelId?: string | null; readonly pickedCircuitId?: string | null }
+  | { readonly kind: 'add_pick'; readonly memberIds: readonly string[]; readonly linkId: string }
   | { readonly kind: 'edit'; readonly linkId: string }
   | { readonly kind: 'controls' }
   | { readonly kind: 'feed'; readonly panelId: string; readonly linkId: string }
@@ -572,7 +573,8 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
         <AddToCircuitDialog
           model={model}
           memberIds={dialog.memberIds}
-          initialPanelId={singleCircuit?.sourceId ?? lastPanelId}
+          initialPanelId={dialog.pickedPanelId ?? singleCircuit?.sourceId ?? lastPanelId}
+          initialCircuitId={dialog.pickedCircuitId ?? null}
           newLinkId={dialog.linkId}
           submit={submit}
           onClose={() => setDialog(null)}
@@ -584,6 +586,16 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
             setDialog(null)
             ribbon.place('panel_208')
           }}
+          onPickOnPlan={() => setDialog({ kind: 'add_pick', memberIds: dialog.memberIds, linkId: dialog.linkId })}
+        />
+      )}
+      {dialog?.kind === 'add_pick' && (
+        <PlanCircuitPick
+          model={model}
+          pickPartAt={input.pickPartAt}
+          onPicked={(panelId, linkId) => setDialog({ kind: 'add', memberIds: dialog.memberIds, linkId: dialog.linkId, pickedPanelId: panelId, pickedCircuitId: linkId })}
+          onNotify={(msg) => notify(msg, 'info')}
+          onCancel={() => setDialog({ kind: 'add', memberIds: dialog.memberIds, linkId: dialog.linkId })}
         />
       )}
       {dialog?.kind === 'feed' && (
@@ -631,4 +643,59 @@ export function useElectricalWorkflow(input: ElectricalWorkflowInput): Electrica
   ) : null
 
   return { ribbon, autoTab: target.loads.length > 0 || target.panels.length > 0 ? 'circuit' : null, properties, overlay: overlay ?? loadingSchedule, scheduleProperties: schedules.propertiesFor, newScheduleForms: schedules.formSlot, necEdition: nec.necEdition, nec, openPanelView }
+}
+
+/** One-click canvas picker for "Pick circuit on plan": clicks any circuited device and returns its panel & circuit id. */
+function PlanCircuitPick({
+  model,
+  pickPartAt,
+  onPicked,
+  onNotify,
+  onCancel,
+}: {
+  readonly model: ModelState
+  readonly pickPartAt: (clientX: number, clientY: number) => string | null
+  readonly onPicked: (panelId: string, linkId: string) => void
+  readonly onNotify: (msg: string) => void
+  readonly onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    const onClick = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      const targetEl = e.target as HTMLElement | null
+      if (targetEl?.closest('[data-testid="circuit-pick-banner"]')) return
+      const hitId = pickPartAt(e.clientX, e.clientY)
+      if (!hitId) return
+      const conn = electricalConnections(model.elements, hitId).find((c) => c.circuit !== null)
+      const link = conn?.circuit ? model.elements[conn.circuit.linkId] : undefined
+      if (link?.kind !== 'service_link') {
+        onNotify('That device is not on a circuit yet — click a circuited fixture or receptacle, or press Esc.')
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      onPicked(link.source.elementId, link.id)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('click', onClick, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('click', onClick, true)
+    }
+  }, [model, pickPartAt, onPicked, onNotify, onCancel])
+
+  return (
+    <div
+      data-testid="circuit-pick-banner"
+      className="pointer-events-auto fixed top-16 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur"
+    >
+      <span>Click any circuited device on the plan to join its circuit.</span>
+      <Button type="button" size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={onCancel}>
+        Cancel
+      </Button>
+    </div>
+  )
 }

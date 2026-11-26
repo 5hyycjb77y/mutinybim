@@ -180,7 +180,7 @@ describe("clearance zones on drawings", () => {
     const m = withRoofAndUnit();
     m.ok({ type: "set_part_clearances", id: "rtu-1", scope: "type", zones: [SERVICE] });
     m.ok({ type: "create_view", viewId: "v-roof", name: "Roof plan", viewType: "floor_plan", crop: { min: { x: -10 * FT, y: -10 * FT }, max: { x: 50 * FT, y: 40 * FT } }, props: { level: "ROOF", scale: 48 } });
-    const dashed = (scene: ReturnType<typeof buildViewScene>["scene"]) => scene.primitives.filter((p) => p.kind === "line" && canonicalJson(p.dash ?? null) === canonicalJson([3, 1.5]));
+    const dashed = (scene: ReturnType<typeof buildViewScene>["scene"]) => scene.primitives.filter((p) => p.kind === "line" && canonicalJson(p.dash ?? null) === canonicalJson([...CLEARANCE_DASH]));
     const first = buildViewScene(m.head, "v-roof").scene;
     expect(dashed(first)).toHaveLength(4);
     expect(first.primitives.some((p) => p.kind === "text" && p.text === "SERVICE ACCESS")).toBe(true);

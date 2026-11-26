@@ -9,7 +9,7 @@ import { drafting } from "./kit-drafting";
 import { electrical } from "./kit-electrical";
 import { parts } from "./kit-parts";
 import { routes } from "./kit-routes";
-import { scriptCommands } from "./reference";
+import { scriptCommands, searchCommands } from "./reference";
 
 /**
  * The kit's lint, before anything runs: the library's source rules
@@ -136,7 +136,7 @@ export function kitUseWarnings(source: string): ScriptKitWarning[] {
     commands ??= scriptCommands().map((c) => c.type);
     if (commands.includes(type) || seen.has(`edit.${type}`) || commented(line)) continue;
     seen.add(`edit.${type}`);
-    const near = nearNames(type, commands);
+    const near = [...new Set([...searchCommands(type, 4).map((c) => c.type), ...nearNames(type, commands)])].slice(0, 4);
     out.push({ line, rule: "kit", message: `Line ${line} sends ctx.edit a "${type}" command, and there is no such command.${near.length > 0 ? ` Near: ${near.join(", ")}.` : ""} bim_script_reference({ command: "<name>" }) gives one command's fields; ({ search }) finds one.` });
   }
   return out.sort((a, b) => a.line - b.line);

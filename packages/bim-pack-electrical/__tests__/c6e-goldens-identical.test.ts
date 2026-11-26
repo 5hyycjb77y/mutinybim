@@ -52,6 +52,10 @@ function stripUpgradedCabinetSymbol(value: unknown): unknown {
     const rec = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rec)) {
+      if (k === "clearances" && Array.isArray(v) && v.every((z) => (z as Record<string, unknown>)?.id === "working_space")) {
+        // Post-round-6 built-in NEC 110.26 working-space clearances added to starter panels/switchboards.
+        continue;
+      }
       if (k === "symbol" && Array.isArray(v) && v.length >= 2 && (v[0] as Record<string, unknown>)?.fill === "mask" && (v[1] as Record<string, unknown>)?.fill === "solid") {
         out[k] = [
           { kind: "rect", center: [0, { param: "depth", scale: 0.5 }], size: [{ param: "width" }, { param: "depth" }] },

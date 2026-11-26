@@ -175,6 +175,7 @@ export const partCommandSchemas = [
     levelId: idSchema,
     name: z.string().trim().min(1).max(40),
     elevationMm: z.number().finite().min(-1_000_000).max(1_000_000),
+    buildingStory: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("undo"),
@@ -936,6 +937,7 @@ function createLevel(model: ModelState, command: Extract<PartCommand, { type: "c
     partition: GLOBAL_PARTITION,
     name: command.name,
     elevationMm: round(command.elevationMm),
+    ...(command.buildingStory !== undefined ? { buildingStory: command.buildingStory } : {}),
   };
   const working = draftElements(model.elements);
   working[levelId] = level;

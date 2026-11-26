@@ -39,6 +39,8 @@ export const PATTERN_DASH: Readonly<Record<LinePattern, readonly number[] | unde
 export interface LineStyle {
   readonly weight?: Pen;
   readonly pattern?: LinePattern;
+  /** Optional tone (e.g. "halftone" for existing-phase diagram items). */
+  readonly tone?: Tone;
 }
 
 /**
@@ -696,11 +698,12 @@ function drawSymbol(prims: Primitive[], sym: Symbol2D, map: (p: readonly [number
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
 
-function polyLines(prims: Primitive[], pts: readonly Vec2[], pen: Pen, dash: readonly number[] | undefined): void {
+function polyLines(prims: Primitive[], pts: readonly Vec2[], pen: Pen, dash: readonly number[] | undefined, tone?: Tone): void {
+  const toneProp = tone && tone !== "ink" ? { tone } : {};
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1];
     const b = pts[i];
-    if (a && b) prims.push({ kind: "line", a, b, pen, ...(dash ? { dash } : {}) });
+    if (a && b) prims.push({ kind: "line", a, b, pen, ...(dash ? { dash } : {}), ...toneProp });
   }
 }
 
@@ -743,13 +746,14 @@ export interface DetailDrawContext {
 export function drawDetailItem(ctx: DetailDrawContext, item: DrawingItem): boolean {
   const pen = item.lineStyle?.weight ?? (item.shape === "region" ? "thin" : "medium");
   const dash = item.lineStyle?.pattern ? PATTERN_DASH[item.lineStyle.pattern] : undefined;
+  const tone = item.lineStyle?.tone;
   switch (item.shape) {
     case "arc":
     case "circle":
     case "polyline":
     case "spline": {
       const path = itemPath(item);
-      if (path) polyLines(ctx.prims, path.map(ctx.toPaper), pen, dash);
+      if (path) polyLines(ctx.prims, path.map(ctx.toPaper), pen, dash, tone);
       return true;
     }
     case "region": {
@@ -764,14 +768,22 @@ export function drawDetailItem(ctx: DetailDrawContext, item: DrawingItem): boole
       if (fill.pattern === "solid") ctx.prims.push({ kind: "fill", points: paper, grey: fill.grey ?? 0.8, ...(fill.tone ? { tone: fill.tone } : {}) });
       else ctx.prims.push({ kind: "fill", points: paper, grey: 1 });
       for (const [a, b, d] of hatchSegments(paper, fill.pattern, fill.spacingMm)) ctx.prims.push({ kind: "line", a, b, pen: "thin", ...(d ? { dash: d } : {}), ...(fill.tone ? { tone: fill.tone } : {}) });
-      if (fill.boundary !== false) polyLines(ctx.prims, [...paper, ...(paper[0] ? [paper[0]] : [])], pen, dash);
+      if (fill.boundary !== false) polyLines(ctx.prims, [...paper, ...(paper[0] ? [paper[0]] : [])], pen, dash, tone);
       return true;
     }
     case "component": {
       const at = item.points[0];
       const sym = item.component ? detailComponent(item.component.symbolId) : undefined;
       if (!at || !sym || !item.component) return true;
+      const before = ctx.prims.length;
       drawSymbol(ctx.prims, sym, placeSymbol(sym, at, item.component), ctx.toPaper, ctx.scale);
+      if ((tone && tone !== "ink") || dash) {
+        for (let i = before; i < ctx.prims.length; i++) {
+          const pr = ctx.prims[i]!;
+          if (pr.kind === "line") ctx.prims[i] = { ...pr, ...(tone && tone !== "ink" ? { tone } : {}), ...(dash ? { dash } : {}) };
+          else if (pr.kind === "fill" && tone && tone !== "ink") ctx.prims[i] = { ...pr, tone };
+        }
+      }
       return true;
     }
     case "repeat": {
