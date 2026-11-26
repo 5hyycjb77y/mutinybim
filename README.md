@@ -152,7 +152,9 @@ docker compose -f compose.native.yml up --build -d
 For another provider, register `http://127.0.0.1:3095/auth/native/callback`
 for local testing, set `MUTINYBIM_OIDC_ISSUER` and `MUTINYBIM_OIDC_CLIENT_ID`
 and, for a confidential client, `MUTINYBIM_OIDC_CLIENT_SECRET`. Recreate
-the authority with the new configuration. An identity at a different issuer
+the authority with the new configuration. The bundled development provider still
+listens on `127.0.0.1:9999`. The authority accepts sign-in from its configured
+issuer. An identity at a different issuer
 is a separate person. [Native session and role guide](services/bim-authority/NATIVE-SESSIONS.md)
 
 Other root commands:

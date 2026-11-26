@@ -96,14 +96,17 @@ function render(config: Exclude<DemoConfig, { authority: 'native' }>, nativeMemb
   )
 }
 
-loadDemoConfig().then(async config => {
-  const ready = config.authority === 'native' ? await nativeSignIn(config, callback) : config
-  if (ready) render(ready, config.authority === 'native')
-}).catch((err: unknown) => {
-  console.error('[editor-demo] could not read the dev server configuration', err)
+function showStartupError(err: unknown, loadingConfig: boolean) {
+  console.error(loadingConfig ? '[editor-demo] could not read the dev server configuration' : '[editor-demo] could not open the editor')
   const message = document.createElement('p')
   message.setAttribute('role', 'alert')
   message.style.cssText = 'font: 14px system-ui, sans-serif; padding: 24px; max-width: 40rem'
-  message.textContent = `The editor could not start: ${err instanceof Error ? err.message : String(err)} Reload once the dev server is running.`
+  const reason = err instanceof Error ? err.message : 'The editor could not start.'
+  message.textContent = loadingConfig ? `${reason} Reload once the dev server is running.` : reason
   mount.replaceChildren(message)
-})
+}
+
+loadDemoConfig().then(async config => {
+  const ready = config.authority === 'native' ? await nativeSignIn(config, callback) : config
+  if (ready) render(ready, config.authority === 'native')
+}, err => showStartupError(err, true)).catch(err => showStartupError(err, false))

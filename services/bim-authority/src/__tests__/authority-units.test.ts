@@ -8,6 +8,8 @@
  * drills/deployed.ts (see README.md, "Drills").
  */
 import { createHash } from "node:crypto";
+import { isPipelinedStore } from "@permitzip/bim-sync";
+import { PostgresCommitStore, type Sql } from "../pg-store";
 import { isForbiddenDbRef, loadConfig, servedModelId } from "../config";
 import { decideRoute, isFlyMachineId } from "../routing";
 import { LeaseKeeper } from "../lease";
@@ -20,6 +22,14 @@ const baseEnv = {
   MUTINYBIM_SUPABASE_URL: `https://${REF}.supabase.co`,
   BIM_AUTHORITY_SERVED_MODELS: "demo-b,site-7301-b",
 };
+
+it("commits native saves individually while hosted stores can pipeline edits", () => {
+  const options = { modelId: "east-plant", owner: "authority", ownerMachine: null, leaseTtlMs: 10_000 };
+  const native = new PostgresCommitStore({} as Sql, { ...options, nativeSaveOrder: true });
+  const hosted = new PostgresCommitStore({} as Sql, options);
+  expect([native.allowsGroupCommit, isPipelinedStore(native)]).toEqual([false, false]);
+  expect([hosted.allowsGroupCommit, isPipelinedStore(hosted)]).toEqual([true, true]);
+});
 
 describe("configuration", () => {
   it("serves a native database explicitly with its own sessions", () => {

@@ -187,6 +187,12 @@ logs must exclude callbacks, cookies and result objects. The store itself
 does not log. Evidence fixtures report statuses, synthetic IDs, counts and
 nonsecret hashes rather than raw tokens, verifiers or nonce values.
 
+The authority logs a failed browser sign-in with its stage and a short reason.
+An origin mismatch also names the configured editor origin and the browser's
+origin. Open the configured address. For a discovery mismatch, compare the
+configured issuer with the provider's discovery document, including any
+trailing slash.
+
 This change does not schedule retention. An expired pending row can be
 deleted by the operator's retention job. Retiring a completed transaction
 and its session requires deleting both in one transaction because their
@@ -253,7 +259,9 @@ missing record keeps the save unconfirmed. An open tab retains its request
 through reconnect and authority restart. Reloading or closing the tab clears
 its in-memory requests.
 
-The existing receipt purge defaults to 24 hours when invoked. A committed
+Viewer refusals are stored in `bim.command_outcomes` with other save outcomes.
+The standalone stack leaves cleanup of outcomes, sign-in transactions and
+sessions to the operator. The existing receipt purge defaults to 24 hours when invoked. A committed
 changeset can still prove the original save after its receipt expires if the
 changeset is retained. A refusal can be recovered while its receipt remains.
 The editor treats a missing receipt and a matching element value as

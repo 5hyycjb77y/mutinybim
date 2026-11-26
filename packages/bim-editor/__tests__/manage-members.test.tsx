@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ManageMembersDialog } from '../src/editor/membership/ManageMembersDialog'
+import { readMembers, saveMember } from '../src/editor/membership/members'
 import { jsonAnswer } from '../src/host/local-data'
 
 const mara = { personId: '00000000-0000-0000-0000-000000000001', displayName: 'Mara', role: 'manager' }
@@ -17,6 +18,17 @@ function open(members: ReturnType<typeof port>, actorId = mara.personId) {
 }
 
 const button = (name: string) => screen.getByRole('button', { name })
+
+it('gives the operator a recovery action when a proxy returns an unreadable error page', async () => {
+  const members = port()
+  const gateway = { ok: false, status: 502, json: async () => { throw new SyntaxError('Unexpected HTML') } }
+  members.read.mockResolvedValue(gateway)
+  members.change.mockResolvedValue(gateway)
+  await expect(readMembers(members, model)).rejects.toThrow('Members could not be loaded.')
+  await expect(saveMember(members, model, { ...jules, role: 'viewer' }, 'editor'))
+    .rejects.toThrow('Review the current role before trying again.')
+})
+
 async function review(role: string) {
   fireEvent.click(await screen.findByRole('button', { name: 'Change role for Jules' }))
   fireEvent.change(screen.getByLabelText('New role'), { target: { value: role } })

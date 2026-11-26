@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, errors, jwtVerify } from "jose";
 import { z } from "zod";
-import { PgNativeSessionStore, type ClaimedSignIn, type SignInProvider } from "../native-session-store";
+import { NativeSessionStoreError, PgNativeSessionStore, type ClaimedSignIn, type SignInProvider } from "../native-session-store";
 import type { Sql } from "../pg-store";
 
 const callback = "/auth/native/callback";
@@ -12,11 +12,30 @@ const metadata = z.object({
   issuer: z.string(), authorization_endpoint: z.string(), token_endpoint: z.string(), jwks_uri: z.string(),
 });
 
+// Only locally authored messages are safe to log verbatim. Parser and provider errors can carry input.
+class SignInFailure extends Error {}
+
+function failureReason(error: unknown): string {
+  if (error instanceof SignInFailure) return error.message;
+  if (error instanceof errors.JOSEError || error instanceof NativeSessionStoreError) return error.code;
+  if (error instanceof z.ZodError) return "Invalid fields: " + error.issues.map(issue => issue.path.join(".") || "(root)").join(", ");
+  if (error instanceof SyntaxError) return "Invalid JSON";
+  if (error instanceof DOMException && error.name === "TimeoutError") return "Provider request timed out";
+  return "Request could not be processed";
+}
+
+function receivedOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  const url = URL.parse(value);
+  return url && (url.protocol === "http:" || url.protocol === "https:") && url.origin === value ? url.origin : "(invalid origin)";
+}
+
 function checkedUrl(value: string, local: boolean): URL {
-  const url = new URL(value);
+  const url = URL.parse(value);
+  if (!url) throw new SignInFailure("Invalid native sign-in URL");
   const loopback = local && url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
   if ((!loopback && url.protocol !== "https:") || url.username || url.password || url.hash) {
-    throw new Error("Invalid native sign-in URL. Use HTTPS or local-stack loopback.");
+    throw new SignInFailure("Invalid native sign-in URL. Use HTTPS or local-stack loopback.");
   }
   return url;
 }
@@ -25,9 +44,9 @@ async function discover(provider: SignInProvider, local: boolean) {
   const response = await fetch(provider.issuer.replace(/\/$/, "") + "/.well-known/openid-configuration", {
     redirect: "error", signal: AbortSignal.timeout(5000),
   });
-  if (!response.ok) throw new Error("Provider discovery failed");
+  if (!response.ok) throw new SignInFailure("Provider discovery failed (HTTP " + response.status + ")");
   const doc = metadata.parse(await response.json());
-  if (doc.issuer !== provider.issuer) throw new Error("The provider returned a different issuer");
+  if (doc.issuer !== provider.issuer) throw new SignInFailure("The discovery issuer differs from the configured issuer. Check the exact URL, including its trailing slash.");
   return { authorize: checkedUrl(doc.authorization_endpoint, local), token: checkedUrl(doc.token_endpoint, local),
     keys: createRemoteJWKSet(checkedUrl(doc.jwks_uri, local), { timeoutDuration: 5000 }) };
 }
@@ -42,15 +61,15 @@ async function exchange(claim: ClaimedSignIn, code: string, endpoints: Awaited<R
     headers.set("authorization", "Basic " + basic);
   } else body.set("client_id", claim.clientId);
   const response = await fetch(endpoints.token, { method: "POST", headers, body, redirect: "error", signal: AbortSignal.timeout(5000) });
-  if (!response.ok) throw new Error("Provider exchange failed");
+  if (!response.ok) throw new SignInFailure("Provider exchange failed (HTTP " + response.status + ")");
   const { id_token } = z.object({ id_token: z.string() }).parse(await response.json());
   const { payload } = await jwtVerify(id_token, endpoints.keys, { issuer: claim.issuer, audience: claim.clientId,
     algorithms: ["RS256", "ES256", "PS256"], requiredClaims: ["exp", "iat", "sub", "nonce"] });
   if (payload.nonce !== claim.nonce || !payload.sub || payload.sub.length > 255 ||
       ((Array.isArray(payload.aud) && payload.aud.length > 1) || payload.azp !== undefined) && payload.azp !== claim.clientId) {
-    throw new Error("Provider identity did not match this sign-in");
+    throw new SignInFailure("Provider identity did not match this sign-in");
   }
-  const name = typeof payload.name === "string" && payload.name.trim() ? payload.name : payload.sub;
+  const name = [payload.name, payload.preferred_username].find((value): value is string => typeof value === "string" && !!value.trim()) ?? payload.sub;
   return { issuer: claim.issuer, subject: payload.sub, displayName: [...name].slice(0, 200).join("") };
 }
 
@@ -84,21 +103,33 @@ export function nativeBrowserRoutes(sql: Sql, env: NodeJS.ProcessEnv, local: boo
       res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "referrer-policy": "no-referrer" });
       res.end(JSON.stringify(value));
     };
-    if (req.method !== "POST" || req.headers.origin !== origin || req.headers["content-type"] !== "application/json") {
-      return send(403, { error: "Open sign-in from the editor." });
+    let stage = "request";
+    const reject = (status: number, message: string, reason = message, origins?: { expected: string; received: string | null }) => {
+      console.warn("[bim-authority] native sign-in failed", JSON.stringify({ stage, reason, ...origins }));
+      send(status, { error: message });
+    };
+    if (req.headers.origin !== origin) {
+      stage = "origin";
+      return reject(403, `Open the editor at ${origin} to sign in.`, "Editor origin differs", { expected: origin, received: receivedOrigin(req.headers.origin) });
     }
+    if (req.method !== "POST" || req.headers["content-type"] !== "application/json") {
+      return reject(403, "Open sign-in from the editor.", "Expected a JSON POST");
+    }
+    let claimed: ClaimedSignIn | undefined;
     try {
       if (pathname === signOut) {
+        stage = "sign-out";
         const token = /^Bearer[ \t]+([A-Za-z0-9_-]{43})$/i.exec(req.headers.authorization ?? "")?.[1];
-        if (!token) return send(401, { error: "This sign-out needs the session from the editor." });
+        if (!token) return reject(401, "This sign-out needs the session from the editor.");
         const empty = await readBody(req).then(body => z.object({}).strict().safeParse(body).success, () => false);
-        if (!empty) return send(400, { error: "Send an empty object to sign out of this session." });
+        if (!empty) return reject(400, "Send an empty object to sign out of this session.");
         await sessions.revokeSession(token);
         res.writeHead(204, { "cache-control": "no-store", "referrer-policy": "no-referrer" });
         res.end();
         return;
       }
       if (pathname === "/auth/native/start") {
+        stage = "start";
         const discovered = await endpoints();
         const transaction = await sessions.startSignIn(provider);
         const authorize = new URL(discovered.authorize);
@@ -108,30 +139,40 @@ export function nativeBrowserRoutes(sql: Sql, env: NodeJS.ProcessEnv, local: boo
         res.setHeader("set-cookie", "bim_signin_" + transaction.transactionId + "=" + transaction.browserBinding + "; Max-Age=300" + suffix);
         return send(200, { transactionId: transaction.transactionId, authorizationUrl: authorize.href });
       }
-      if (pathname !== finish) return send(404, { error: "Unknown sign-in route." });
+      if (pathname !== finish) return reject(404, "Unknown sign-in route.");
+      stage = "claim";
       const fields = await readBody(req).then(body => responseFields.parse(body)).catch(() => null);
-      if (!fields) return send(400, { error: "Start a fresh sign-in from the model." });
+      if (!fields) return reject(400, "Start a fresh sign-in from the model.", "Invalid callback fields");
       const prefix = "bim_signin_" + fields.transactionId + "=";
       const bindings = (req.headers.cookie ?? "").split(";").map(c => c.trim()).filter(c => c.startsWith(prefix));
       const binding = bindings.length === 1 ? bindings[0]!.slice(prefix.length) : "";
       const claim = await sessions.claimSignIn({ state: fields.state, browserBinding: binding });
-      if (claim.status !== "claimed") return send(400, { error: "This sign-in expired or was already used. Open the model again." });
+      if (claim.status !== "claimed") return reject(400, "This sign-in expired or was already used. Open the model again.");
+      claimed = claim;
       res.setHeader("set-cookie", prefix + "; Max-Age=0" + suffix);
-      try {
-        if (claim.transactionId !== fields.transactionId || claim.issuer !== issuer || claim.clientId !== clientId || claim.redirectUri !== provider.redirectUri) {
-          throw new Error("The provider configuration changed");
-        }
-        const identity = await exchange(claim, fields.code, await endpoints(), env.MUTINYBIM_OIDC_CLIENT_SECRET);
-        const issued = await sessions.completeSignIn({ transactionId: claim.transactionId, claimToken: claim.claimToken, identity });
-        if (issued.status !== "issued") throw new Error("Sign-in expired");
-        return send(200, { transactionId: claim.transactionId, userId: issued.personId, displayName: identity.displayName,
-          token: issued.sessionToken, expiresAt: issued.expiresAt.toISOString() });
-      } catch {
-        await sessions.abandonSignIn(claim);
-        return send(401, { error: "Sign-in could not be completed. Open the model to sign in again." });
+      stage = "config";
+      if (claim.transactionId !== fields.transactionId || claim.issuer !== issuer || claim.clientId !== clientId || claim.redirectUri !== provider.redirectUri) {
+        throw new SignInFailure("The provider configuration changed");
       }
-    } catch {
-      return send(503, { error: pathname === signOut ? "Sign-out could not be confirmed. Try again." : "Sign-in is temporarily unavailable. Try again." });
+      const discovered = await endpoints();
+      stage = "exchange";
+      const identity = await exchange(claim, fields.code, discovered, env.MUTINYBIM_OIDC_CLIENT_SECRET);
+      stage = "complete";
+      const issued = await sessions.completeSignIn({ transactionId: claim.transactionId, claimToken: claim.claimToken, identity });
+      if (issued.status !== "issued") throw new SignInFailure("Sign-in expired");
+      return send(200, { transactionId: claim.transactionId, userId: issued.personId, displayName: identity.displayName,
+        token: issued.sessionToken, expiresAt: issued.expiresAt.toISOString() });
+    } catch (error) {
+      const reason = failureReason(error);
+      if (claimed) {
+        try {
+          await sessions.abandonSignIn(claimed);
+        } catch {
+          return reject(503, "Sign-in is temporarily unavailable. Try again.", reason + " (closing the transaction also failed)");
+        }
+        return reject(401, "Sign-in could not be completed. Open the model to sign in again.", reason);
+      }
+      return reject(503, pathname === signOut ? "Sign-out could not be confirmed. Try again." : "Sign-in is temporarily unavailable. Try again.", reason);
     }
   };
 }

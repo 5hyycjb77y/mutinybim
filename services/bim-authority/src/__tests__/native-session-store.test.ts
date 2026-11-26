@@ -58,6 +58,8 @@ function completedExistingPersonRows(issuer = provider.issuer): unknown[][] {
 }
 
 describe("native session request boundaries", () => {
+  const marker = "native-input-redaction-7d253f";
+  const invalidText = ["", ...["\0", "\ud800", "\udc00"].map(character => marker + character + "value")];
   const malformedTokens: unknown[] = [
     "", "A".repeat(42), "A".repeat(44), `${token}\n`, `${token}\r\n`,
     `${"A".repeat(42)}=`, `${"A".repeat(42)}+`, `${"A".repeat(42)}/`,
@@ -93,13 +95,13 @@ describe("native session request boundaries", () => {
 
   it.each(["issuer", "clientId", "redirectUri"] as const)(
     "rejects invalid provider %s without database IO or reflection", async (field) => {
-      for (const bad of ["", "private\0value", "private\ud800value", "private\udc00value"]) {
+      for (const bad of invalidText) {
         const db = scriptedDatabase();
         const store = new PgNativeSessionStore(db.sql);
         let caught: unknown;
         try { await store.startSignIn({ ...provider, [field]: bad }); } catch (error) { caught = error; }
         expect(caught).toBeInstanceOf(TypeError);
-        expect(inspect(caught)).not.toContain("private");
+        expect(inspect(caught)).not.toContain(marker);
         expect(db.begin).not.toHaveBeenCalled();
       }
     },
@@ -107,7 +109,7 @@ describe("native session request boundaries", () => {
 
   it.each(["issuer", "subject", "displayName"] as const)(
     "rejects invalid verified %s before database IO or reflection", async (field) => {
-      for (const bad of ["", "private\0value", "private\ud800value", "private\udc00value"]) {
+      for (const bad of invalidText) {
         const db = scriptedDatabase();
         const store = new PgNativeSessionStore(db.sql);
         let caught: unknown;
@@ -115,7 +117,7 @@ describe("native session request boundaries", () => {
           await store.completeSignIn({ transactionId, claimToken: token, identity: { ...identity, [field]: bad } });
         } catch (error) { caught = error; }
         expect(caught).toBeInstanceOf(TypeError);
-        expect(inspect(caught)).not.toContain("private");
+        expect(inspect(caught)).not.toContain(marker);
         expect(db.begin).not.toHaveBeenCalled();
       }
     },

@@ -11,7 +11,7 @@ const isMember = (value: unknown): value is Member => record(value) && typeof va
 
 export async function readMembers(port: EditorModelMembersPort, model: string, target?: string, signal?: AbortSignal): Promise<Roster> {
   const response = await port.read(model, target, signal)
-  const body: unknown = await response.json()
+  const body: unknown = await response.json().catch(() => null)
   if (!response.ok) throw new Error(record(body) && typeof body.error === 'string' ? body.error : 'Members could not be loaded.')
   if (!record(body) || typeof body.ownerId !== 'string' || !Array.isArray(body.members) || !body.members.every(isMember)) {
     throw new Error('The server returned an unreadable member list.')
@@ -21,7 +21,7 @@ export async function readMembers(port: EditorModelMembersPort, model: string, t
 
 export async function saveMember(port: EditorModelMembersPort, model: string, member: Member, next: Role): Promise<{ conflict: boolean; role: Role }> {
   const response = await port.change(model, { personId: member.personId, expectedRole: member.role, role: next })
-  const body: unknown = await response.json()
+  const body: unknown = await response.json().catch(() => null)
   if (record(body) && isRole(body.role)) {
     if (response.status === 409 && body.result === 'conflict') return { conflict: true, role: body.role }
     if (response.ok && (body.result === 'changed' || body.result === 'unchanged') && body.role === next) return { conflict: false, role: next }

@@ -292,6 +292,18 @@ async function run() {
     const { started, ...initial } = fresh;
     await record("installation", { ...initial, issuerMode: cfg.issuerMode, loopbackEndpoints: true });
     const mara = await open("mara", "light"), jules = await open("jules", "dark");
+    const root = await fetch(editor + "/", { redirect: "manual" });
+    assert.equal(root.status, 302);
+    const landing = "/m/" + modelId + "?view=plan";
+    assert.equal(root.headers.get("location"), landing);
+    const alias = new URL(landing, editor);
+    alias.hostname = alias.hostname === "localhost" ? "127.0.0.1" : "localhost";
+    await mara.page.goto(alias.href);
+    const alert = mara.page.getByRole("alert");
+    await alert.waitFor({ state: "visible", timeout: 75_000 });
+    assert.equal(await alert.textContent(), "Open the editor at " + editor + " to sign in.");
+    await capture(mara, "open-configured-origin");
+    await record("editorEntry", { landing, configuredOrigin: editor, alternateOrigin: alias.origin, correctionShown: true });
     const loginMara = () => signIn(mara, editor, issuer, cfg.credentials.mara);
     const loginJules = () => signIn(jules, editor, issuer, cfg.credentials.jules);
     const firstMara = await loginMara();

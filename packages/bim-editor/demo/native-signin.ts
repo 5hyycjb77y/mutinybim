@@ -8,8 +8,11 @@ const callbackPath = '/auth/native/callback'
 async function post(path: string, fields: object) {
   const response = await fetch('/auth/native/' + path, { method: 'POST', mode: 'same-origin', cache: 'no-store',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) })
-  if (!response.ok) throw new Error('Sign-in could not finish. Reopen the model to sign in again.')
-  return response.json()
+  const body = await response.json().catch(() => null)
+  if (!response.ok || !body || typeof body !== 'object') {
+    throw new Error(typeof body?.error === 'string' ? body.error : 'Sign-in could not finish. Reopen the model to sign in again.')
+  }
+  return body
 }
 
 function pending(): PendingSignIn | null {

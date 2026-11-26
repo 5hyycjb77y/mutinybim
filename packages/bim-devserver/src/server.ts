@@ -126,11 +126,21 @@ if (!["eager", "lazy", "off"].includes(editorMode)) {
   process.exit(1);
 }
 
+const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
+const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
+const nativeSignIn = process.env.BIM_DEV_NATIVE_SIGNIN === "1";
+if (nativeSignIn && (!externalAuthority || signInUrl)) throw new Error("Native sign-in needs BIM_DEV_AUTHORITY_URL and its own OIDC provider");
+if (externalAuthority && !signInUrl && !nativeSignIn) {
+  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
+  process.exit(1);
+}
+const landingModel = nativeSignIn && externalAuthority ? new URL(externalAuthority).searchParams.get("model") ?? mainModelId : mainModelId;
+
 const editor: EditorDemo | null =
   editorMode === "off"
     ? null
     : createEditorDemo({
-        mainModelId: async () => mainModelId,
+        mainModelId: async () => landingModel,
         authority: async (branch) => {
           const url = `ws://127.0.0.1:${port}/sync`;
           if (branch === null) return { url, modelId: mainModelId };
@@ -197,15 +207,6 @@ async function exportPdf(res: ServerResponse) {
     "x-snapshot-sha256": sha,
     "x-render-ms": String(ms),
   });
-}
-
-const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
-const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
-const nativeSignIn = process.env.BIM_DEV_NATIVE_SIGNIN === "1";
-if (nativeSignIn && (!externalAuthority || signInUrl)) throw new Error("Native sign-in needs BIM_DEV_AUTHORITY_URL and its own OIDC provider");
-if (externalAuthority && !signInUrl && !nativeSignIn) {
-  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
-  process.exit(1);
 }
 
 /** Which model server the editor page opens, and the sign-in it presents there. */
