@@ -22,6 +22,7 @@ export interface ProviderMetadata {
 export interface ProviderPerson {
   readonly subject: string;
   readonly email: string | null;
+  readonly emailVerified: boolean;
   readonly name: string | null;
 }
 
@@ -189,7 +190,8 @@ export async function finishSignIn(input: { provider: OAuthProviderConfig; redir
   if (!subject) throw new SignInError(`${input.provider.label} answered without saying who signed in. Try again.`);
   return {
     subject,
-    email: typeof info.email === "string" && info.email.includes("@") ? info.email.toLowerCase() : null,
+    email: typeof info.email === "string" && info.email.includes("@") ? info.email.trim().toLowerCase() : null,
+    emailVerified: info.email_verified === true,
     name: typeof info.name === "string" && info.name.trim() ? info.name.trim().slice(0, 120) : null,
   };
 }

@@ -1,6 +1,6 @@
 /**
  * Supabase / Postgres metadata store implementing `WebStore` over PostgREST
- * and the atomic RPCs defined in `db/migrations/20261124000000_mutinybim_web_initial.sql`.
+ * and the atomic RPCs defined in `db/migrations/`.
  *
  * Uses built-in fetch with zero extra dependencies, keeping the open-source
  * app self-contained while letting hosted deployments store accounts, sessions,
@@ -180,6 +180,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
         prefer: "resolution=ignore-duplicates",
         body: { provider, subject, user_id: userId, created_at: now() },
       });
+    },
+    async confirmIdentityEmail(provider, subject, userId, email) {
+      await rpc("web_confirm_oidc_email", { p_provider: provider, p_subject: subject, p_user_id: userId, p_email: email });
     },
     async identitySubject(userId, provider) {
       const row = await selectOne("identities", { select: "subject", user_id: eq(userId), provider: eq(provider) });

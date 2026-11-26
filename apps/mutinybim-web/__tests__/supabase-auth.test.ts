@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createApp, type App } from "../src/app";
 import type { WebConfig } from "../src/config";
 import { openSupabaseStore } from "../src/db-supabase";
@@ -304,7 +305,10 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
     refreshExpiresAt: new Date(),
   });
   expect(rotated).toEqual({ reused: true });
-  expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh"]);
+  expect(created.email_confirmed_at).toBeNull();
+  await store.confirmIdentityEmail("org", "sub-1", created.id, created.email);
+  expect(seen.at(-1)).toEqual({ method: "POST", path: "/rest/v1/rpc/web_confirm_oidc_email", body: { p_provider: "org", p_subject: "sub-1", p_user_id: "u-1", p_email: "sam@example.com" } });
+  expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh", "/rest/v1/rpc/web_confirm_oidc_email"]);
 });
 
 test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {
@@ -354,6 +358,40 @@ test("configured provider domains show a dismissible opt-in link prompt on My mo
   expect(dismiss.status).toBe(303);
   const afterDismiss = await (await fetch(`${base}/models`, { headers: { cookie: adaCookie } })).text();
   expect(afterDismiss).not.toContain('data-testid="link-prompt-acme"');
+});
+
+test("a populated SQLite upgrade preserves confirmation across a restart and clears it on an address change", async () => {
+  const file = path.join(dataDir, "legacy.sqlite");
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name TEXT NOT NULL, password_hash TEXT, created_at TEXT NOT NULL);
+    INSERT INTO users VALUES ('old', 'pat@example.com', 'Pat', NULL, '2026-01-01');`);
+  old.close();
+
+  const db = openDb(file);
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.linkIdentity("org", "pat", "old");
+  await db.confirmIdentityEmail("another", "pat", "old", "pat@example.com");
+  await db.confirmIdentityEmail("org", "different", "old", "pat@example.com");
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.confirmIdentityEmail("org", "pat", "old", "PAT@example.com");
+  const confirmedAt = (await db.userById("old"))?.email_confirmed_at;
+  expect(confirmedAt).toEqual(expect.any(String));
+  await db.close();
+
+  const reopened = openDb(file);
+  const writer = new DatabaseSync(file);
+  try {
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("PAT@EXAMPLE.COM");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("new@example.com");
+    await reopened.confirmIdentityEmail("org", "pat", "old", "pat@example.com");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBeNull();
+  } finally {
+    writer.close();
+    await reopened.close();
+  }
 });
 
 test("migrateSqliteToSupabase copies records and remaps foreign keys when an email already exists in Postgres", async () => {
@@ -443,6 +481,43 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   expect(identityPost?.body).toEqual([expect.objectContaining({ provider: "org", subject: "sub-1", user_id: existingPgId })]);
   const passwordPatch = posted.find((p) => p.path === "/rest/v1/users" && p.method === "PATCH");
   expect(passwordPatch?.body).toEqual({ password_hash: "scrypt$hash" });
+});
+
+test("the copier carries confirmation only for the original account and address", async () => {
+  const sqlitePath = path.join(dataDir, "copy.sqlite");
+  const sqlite = new DatabaseSync(sqlitePath);
+  sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL);
+    INSERT INTO users VALUES ('new', 'new@example.com'), ('same', 'same@example.com'), ('old-id', 'remap@example.com');`);
+  const stamp = "2026-11-01T12:00:00.000Z";
+  const patches: { filters: Record<string, string>; body: unknown }[] = [];
+  const inserts: unknown[] = [];
+  const fetchImpl: Fetch = async (input, init) => {
+    const url = new URL(input);
+    expect(url.pathname).toBe("/rest/v1/users");
+    if (init?.method === "GET") return Response.json([
+      { id: "same", email: "SAME@example.com" }, { id: "different-id", email: "remap@example.com" },
+    ]);
+    const body: unknown = JSON.parse(String(init?.body));
+    if (init?.method === "PATCH") patches.push({ filters: Object.fromEntries(url.searchParams), body });
+    else inserts.push(body);
+    return new Response(null, { status: 204 });
+  };
+  const copy = (dryRun = false) => migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl, dryRun });
+  try {
+    await copy();
+    expect(inserts[0]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: null })]);
+    expect(patches).toHaveLength(0);
+    sqlite.exec("ALTER TABLE users ADD COLUMN email_confirmed_at TEXT");
+    sqlite.prepare("UPDATE users SET email_confirmed_at = ?").run(stamp);
+    await copy(true);
+    expect(patches).toHaveLength(0);
+    expect(inserts).toHaveLength(1);
+    await copy();
+    expect(inserts[1]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: stamp })]);
+    expect(patches).toEqual([{ filters: { id: "eq.same", email: "eq.SAME@example.com", email_confirmed_at: "is.null" }, body: { email_confirmed_at: stamp } }]);
+  } finally {
+    sqlite.close();
+  }
 });
 
 

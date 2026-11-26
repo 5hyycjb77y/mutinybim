@@ -159,6 +159,9 @@ Set `MUTINYBIM_WEB_SUPABASE_URL` and `MUTINYBIM_WEB_SUPABASE_PUBLISHABLE_KEY` to
 3. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
 4. Optionally set `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` (as a secret on your deployment host) to store all app metadata tables in Supabase Postgres instead of local SQLite. If migrating an existing deployment off SQLite, copy existing rows first with `node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts` (supports `--dry-run`).
 
+Finish every copy pass before enabling writes on Postgres. Replaying an older
+SQLite snapshot can restore a share that someone removed on Postgres.
+
 ### Sign-in providers
 
 `MUTINYBIM_WEB_PROVIDERS` is a JSON array of OIDC providers. Each entry takes `id`, `label`, and `issuer`, plus optional `clientId`, `scope`, `clientName`, `domains` (e.g. `["example.com"]` to show a one-time dismissible *"Link your Example account?"* prompt on My models when someone signs in with a matching email domain), and `models` (for linked hosts).
@@ -178,6 +181,11 @@ one, as above.
 
 The provider's access token is used once, to ask UserInfo who signed in, and
 then dropped; it is never stored or logged.
+
+When a configured provider returns the JSON boolean `email_verified: true` in
+UserInfo, the app records confirmation for the matching account email at sign-in
+or when the person links that provider in Settings. Changing the account email
+clears its confirmation. Older accounts can gain confirmation on their next verified sign-in.
 
 ### Linked hosts
 

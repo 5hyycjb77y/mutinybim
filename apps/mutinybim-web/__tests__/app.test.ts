@@ -206,7 +206,7 @@ test("Log in with a provider: registers itself, signs in through UserInfo, and m
     }
     if (input === `${issuer}/userinfo`) {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer provider-token");
-      return Response.json({ sub: "person-1", email: "pat@example.com", name: "Pat Example" });
+      return Response.json({ sub: "person-1", email: "pat@example.com", name: "Pat Example", email_verified: true });
     }
     return new Response("not here", { status: 404 });
   };
@@ -228,10 +228,62 @@ test("Log in with a provider: registers itself, signs in through UserInfo, and m
   expect(back.headers.get("location")).toBe("/models");
   const cookie = sessionCookie(back);
   expect(await (await fetch(`${base}/models`, { headers: { cookie } })).text()).toContain("Pat Example");
+  expect((await app?.db.userByIdentity("example", "person-1"))?.email_confirmed_at).toEqual(expect.any(String));
 
   const replay = await fetch(`${base}/auth/example/callback?code=code-abc&state=${authorize.searchParams.get("state")}`, { redirect: "manual" });
   expect(replay.status).toBe(400);
   expect(calls.filter((c) => c.endsWith("/register"))).toHaveLength(1);
+});
+
+test("OIDC confirms only the linked identity's current email on sign-in or explicit linking", async () => {
+  const issuer = "https://accounts.example.test";
+  let userInfo: Record<string, unknown> = {};
+  await start({ providers: [{ id: "org", label: "Log in with Org", issuer, clientId: "test-client" }] }, async (input) => {
+    if (input === issuer + "/.well-known/oauth-authorization-server") {
+      return Response.json({ authorization_endpoint: issuer + "/authorize", token_endpoint: issuer + "/token", userinfo_endpoint: issuer + "/userinfo" });
+    }
+    if (input === issuer + "/token") return Response.json({ access_token: "test-token" });
+    if (input === issuer + "/userinfo") return Response.json(userInfo);
+    throw new Error(`Unexpected provider request: ${input}`);
+  });
+
+  async function signIn(claims: Record<string, unknown>, linkCookie = ""): Promise<Response> {
+    userInfo = claims;
+    const options = { redirect: "manual" as const, headers: { cookie: linkCookie } };
+    const begin = await fetch(`${base}/auth/org/start${linkCookie ? "?link=1" : ""}`, options);
+    expect(begin.status).toBe(303);
+    const state = new URL(begin.headers.get("location") ?? "").searchParams.get("state");
+    return fetch(`${base}/auth/org/callback?code=ok&state=${state}`, options);
+  }
+  const confirmation = async (email: string) => (await app?.db.userByEmail(email))?.email_confirmed_at;
+
+  const bea = { sub: "bea", email: "Bea@Example.com" };
+  for (const claim of [
+    {}, { email_verified: false }, { email_verified: "true" }, { email_verified: 1 },
+    { email: "other@example.com", email_verified: true }, { email: null, email_verified: true },
+  ]) {
+    expect((await signIn({ ...bea, ...claim })).status).toBe(303);
+    expect(await confirmation(bea.email)).toBeNull();
+  }
+  expect((await signIn({ ...bea, email_verified: true })).status).toBe(303);
+  const confirmedAt = await confirmation(bea.email);
+  expect(confirmedAt).toEqual(expect.any(String));
+  for (const claim of [{}, { email_verified: false }, { email_verified: true }]) {
+    expect((await signIn({ ...bea, ...claim })).status).toBe(303);
+    expect(await confirmation(bea.email)).toBe(confirmedAt);
+  }
+
+  const jules = { sub: "jules", email: "jules@example.com", email_verified: true };
+  const julesCookie = await signUp(jules.email);
+  expect((await signIn(jules)).status).toBe(409);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect(await app?.db.userByIdentity("org", jules.sub)).toBeNull();
+  expect((await signIn({ ...jules, sub: bea.sub }, julesCookie)).status).toBe(409);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect((await signIn({ ...jules, email: "other@example.com" }, julesCookie)).status).toBe(303);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect((await signIn(jules, julesCookie)).status).toBe(303);
+  expect(await confirmation(jules.email)).toEqual(expect.any(String));
 });
 
 async function agentEdit(key: string, modelId: string, levelId: string): Promise<unknown> {
