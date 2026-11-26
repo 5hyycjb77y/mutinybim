@@ -483,7 +483,10 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   /** Bumped by the ribbon's Edit type, so the part's properties open the type editor. */
   const [editTypeRequest, setEditTypeRequest] = useState(0)
   /** The part editor; `spot`: Model in place, whose first save also places the part there. */
-  const [partEditor, setPartEditor] = useState<{ definition: PartTypeDefinition | null; spot?: InPlaceSpot | null } | null>(null)
+  const [partEditor, setPartEditor] = useState<{ definition: PartTypeDefinition | null; projectDefinition?: PartTypeDefinition; spot?: InPlaceSpot | null } | null>(null)
+  const editProjectPart = (definition: PartTypeDefinition) => setPartEditor({
+    definition, projectDefinition: sessionRef.current?.partFamilyForEditing(definition) ?? definition,
+  })
   /** Model in place is waiting for the click that says where the part goes. */
   const [inPlacePick, setInPlacePick] = useState(false)
   const movingRef = useRef(false)
@@ -2724,7 +2727,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         ? 'This part comes from the starter catalog and has no drawn shape to edit. Use New part to draw one.'
         : null
   const editSelectedPart = () => {
-    if (editPartBlocked === null && selectedPartType) setPartEditor({ definition: selectedPartType })
+    if (editPartBlocked === null && selectedPartType) editProjectPart(selectedPartType)
   }
 
   /** Tag all untagged in the open plan or section: the same deterministic placement agents preview, as one undoable edit. */
@@ -3316,7 +3319,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
             firmLibrary: { status: firmLibrary.status, retry: () => void firmLibrary.retry() },
             onNewPart: canEdit ? () => setPartEditor({ definition: null }) : undefined,
             onUseArchitectLevels: canEdit ? () => setLevelRequest('architect') : undefined,
-            onEditPart: canEdit ? (entry) => setPartEditor({ definition: entry.definition }) : undefined,
+            onEditPart: canEdit ? (entry) => entry.inModel ? editProjectPart(entry.definition) : setPartEditor({ definition: entry.definition }) : undefined,
           }
         : null,
     route:
@@ -3947,7 +3950,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
                     saveMessage={save.message}
                     onDelete={requestDelete}
                     editTypeRequest={editTypeRequest}
-                    onEditDefinition={(definition) => setPartEditor({ definition })}
+                    onEditDefinition={editProjectPart}
                     onRouteLike={routeLike}
                   />
                   )}
@@ -4134,13 +4137,16 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       {partEditor && (
         <PartEditorWindow
           initial={partEditor.definition}
+          projectDefinition={partEditor.projectDefinition}
           canEdit={canEdit}
-          onSave={(definition) => {
+          onSave={(definition, baseline) => {
+            const session = sessionRef.current
+            if (!session) return "Live editing isn't connected."
             const spot = partEditor.spot
-            if (!spot) return sessionRef.current?.savePartDefinition(definition) ?? "Live editing isn't connected."
+            if (!spot) return session.savePartDefinition(definition, baseline)
             const command = modelInPlaceCommand(definition, spot, newId('part'))
             if (typeof command === 'string') return command
-            const refused = sessionRef.current?.submitCommand(command, command.type === 'batch_edits' ? command.label : undefined) ?? "Live editing isn't connected."
+            const refused = session.submitCommand(command, command.type === 'batch_edits' ? command.label : undefined)
             // Placed once: later saves in this window only update the type.
             if (!refused) setPartEditor({ definition, spot: null })
             return refused
@@ -4149,7 +4155,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           {...(partEditor.spot ? { newCategory: 'generic' as const } : {})}
           firmLibrary={
             firmLibrary.status.state === 'ready'
-              ? { canWrite: firmLibrary.canWrite, ...(firmLibrary.canWrite ? {} : { reason: 'Your role can place firm library parts but not add them' }), save: firmLibrary.save }
+              ? { canWrite: firmLibrary.canWrite, itemsById: firmLibrary.itemsById, ...(firmLibrary.canWrite ? {} : { reason: 'Your role can place firm library parts but not add them' }), save: firmLibrary.afterPublish }
               : undefined
           }
           onClose={() => setPartEditor(null)}

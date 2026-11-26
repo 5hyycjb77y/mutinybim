@@ -12,12 +12,10 @@ import type { FileLibraryProvider, LibraryQuery } from '@permitzip/bim-library'
 
 /**
  * The standalone app's server requests: what one computer can answer by
- * itself. The library browser reads the built-in catalog (and the add-ons'
- * rows); there is no firm library to save to, so saving says so. Layout,
- * schedule column widths, Route defaults and where each view was left are
- * kept for this visit. Every
- * other port is absent, so the editor says, in plain words, that it isn't
- * available here.
+ * itself. The library browser reads the built-in catalog and add-ons.
+ * A connected firm parts host supplies the editor's reusable part types.
+ * Layout, schedule column widths, route defaults and view positions last
+ * for this visit.
  */
 
 /** A host answer with a JSON body, the way a server would send it. */
@@ -54,7 +52,9 @@ function builtinLibrary(): () => Promise<FileLibraryProvider> {
   }
 }
 
-function localFirmLibrary(): EditorFirmLibraryPort {
+export type LocalFirmPartsPort = Required<Pick<EditorFirmLibraryPort, 'partTypes' | 'publishPartTypeAtRevision'>>
+
+function localFirmLibrary(parts?: LocalFirmPartsPort): EditorFirmLibraryPort {
   const library = builtinLibrary()
   const items = async (query: { readonly scope: string; readonly type?: string; readonly text?: string; readonly includeDeprecated?: boolean }): Promise<EditorDataAnswer> => {
     // The firm's and a project's scopes are empty here: only the built-in catalog exists on this computer.
@@ -76,10 +76,11 @@ function localFirmLibrary(): EditorFirmLibraryPort {
     search: (query) => items(query),
     publish: async () => refusal(NO_FIRM_LIBRARY),
     fields: async () => jsonAnswer({ fields: [], project: { allowed: false, reason: NO_FIRM_LIBRARY } }),
-    partTypes: async () => jsonAnswer({ canPublish: false, partTypes: [] }),
+    partTypes: parts ? () => parts.partTypes() : async () => jsonAnswer({ canPublish: false, partTypes: [] }),
+    ...(parts && { publishPartTypeAtRevision: (input) => parts.publishPartTypeAtRevision(input) }),
     publishPartType: async () => refusal(NO_FIRM_LIBRARY),
     importPartType: async () => refusal(NO_FIRM_LIBRARY),
-    // No firm part library on this computer: Place part offers the built-in and model parts only.
+    // Only older hosts have a separate catalog for Place part.
     firmParts: async () => refusal(NO_FIRM_LIBRARY),
     scheduleTemplates: async () => jsonAnswer({ canWrite: false, firm: [] }),
     saveScheduleTemplate: async () => refusal(NO_FIRM_LIBRARY),
@@ -172,9 +173,9 @@ function memoryViewPrefs(): EditorViewPrefsPort {
 }
 
 /** The standalone app's server requests: what one computer and the local model server can answer. */
-export function createLocalDataHost(): EditorDataHost {
+export function createLocalDataHost(parts?: LocalFirmPartsPort): EditorDataHost {
   return {
-    firmLibrary: localFirmLibrary(),
+    firmLibrary: localFirmLibrary(parts),
     titleBlocks: localTitleBlocks,
     layoutPrefs: memoryLayoutPrefs(),
     schedulePrefs: memorySchedulePrefs(),

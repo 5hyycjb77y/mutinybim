@@ -18,6 +18,7 @@ import { connectionProblem, editsPausedMessage, operatorMessage, problemForDenie
 import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, WALL_FACE_SNAP_MM, defaultHeightMm, describeElement, feetInches,  nearestLinkedWallFace,
   newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
 import { linkedSnapNear } from './linked-reference/linked-reference-store'
+import { projectFamilyTable, projectPartTypesToSave } from '../contracts/bim/firm-part-versions'
 import { isStarterLevelRace, starterLevelCommand } from './levels/starter-level'
 import { axisBadge, resolveRoutePoint, snapDrag, type AxisLock, type RouteAxis } from './route-axis'
 import { hostForPlacement, placementOnSurface, routeStartOnSurface, type RouteStart } from './surface-point'
@@ -4004,17 +4005,22 @@ export class ModelSession {
    * locally and is on its way, or the plain reason it was refused. Views and
    * sheets edits are remembered for undo.
    */
-  /** Save a part definition (every size in its types table) to the project library. */
-  savePartDefinition(definition: PartTypeDefinition): string | null {
+  partFamilyForEditing(definition: PartTypeDefinition): PartTypeDefinition {
+    return this.view ? projectFamilyTable(definition, this.view.elements) : definition
+  }
+
+  /** Save edited and new sizes together, preserving independent updates to existing sizes. */
+  savePartDefinition(definition: PartTypeDefinition, baseline: PartTypeDefinition | null = null): string | null {
     const kernel = this.kernel
     if (!kernel) return "The model isn't loaded yet."
     let types: ReturnType<KernelModule['definitionTypes']>
     try {
-      types = kernel.definitionTypes(definition)
+      types = projectPartTypesToSave(definition, baseline, this.view?.elements ?? {})
     } catch (err) {
       console.error('[model-session] part definition sizes', err)
       return err instanceof Error ? err.message : 'The sizes table can’t be saved'
     }
+    if (!types.length) return null
     return this.submitCommand({ type: 'save_part_types', label: `Save ${kernel.partGroupName(definition)}`, types }, `Save ${kernel.partGroupName(definition)}`)
   }
 

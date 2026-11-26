@@ -9,24 +9,27 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Spinner } from '../../ui/spinner'
 import { drawnPartItemId } from '../../contracts/bim/firm-part-versions'
 import { useEditorHost } from '@permitzip/bim-editor/host'
+import { newElementId } from '../placement'
 import { fetchLibraryPartTypesFrom, publishPartTypeFrom } from './part-type-library'
 
 type Stage =
   | { readonly kind: 'checking' }
-  | { readonly kind: 'ready'; readonly current: number | null }
-  | { readonly kind: 'saving'; readonly current: number | null }
-  | { readonly kind: 'failed'; readonly message: string; readonly current: number | null }
+  | { readonly kind: 'ready' | 'saving'; readonly current: number }
+  | { readonly kind: 'unconfirmed'; readonly request: { definition: PartTypeDefinition; baseRevision: number; requestId: string }; readonly message: string }
+  | { readonly kind: 'failed'; readonly message: string }
 
 interface Props {
   readonly open: boolean
   readonly onOpenChange: (open: boolean) => void
   readonly definition: PartTypeDefinition
+  /** The catalog revision seen by the editor when the draft was opened. */
+  readonly baseRevision?: number
   readonly partName: string
   readonly sizesText: string
-  /** Keeps Place part's firm list current (the older firm parts store); resolves to its refusal or null. */
+  /** Refreshes Place part after publication, including the copy required by older hosts. */
   readonly alsoSaveForPlacePart?: (definition: PartTypeDefinition) => Promise<string | null>
   /** The outcome in words, for the editor's status line. */
-  readonly onDone: (message: { readonly ok: boolean; readonly text: string }) => void
+  readonly onDone: (message: { readonly ok: boolean; readonly text: string; readonly revision: number }) => void
 }
 
 /**
@@ -35,7 +38,7 @@ interface Props {
  * "A newer version is in the library" › Review update in the projects that
  * use them. Esc or Cancel leaves everything as it was.
  */
-export function PublishPartDialog({ open, onOpenChange, definition, partName, sizesText, alsoSaveForPlacePart, onDone }: Props) {
+export function PublishPartDialog({ open, onOpenChange, definition, baseRevision, partName, sizesText, alsoSaveForPlacePart, onDone }: Props) {
   const library = useEditorHost().data.firmLibrary
   const [stage, setStage] = useState<Stage>({ kind: 'checking' })
   const modelId = definition.model?.id ?? null
@@ -43,65 +46,89 @@ export function PublishPartDialog({ open, onOpenChange, definition, partName, si
   useEffect(() => {
     if (!open) return
     let live = true
+    setStage({ kind: 'checking' })
     fetchLibraryPartTypesFrom(library)
-      .then(({ partTypes }) => {
+      .then(({ partTypes, canPublish }) => {
         if (!live) return
+        if (!canPublish) {
+          setStage({ kind: 'failed', message: 'This firm library is read-only.' })
+          return
+        }
         const found = modelId ? partTypes.find((p) => p.id === drawnPartItemId(modelId)) : undefined
-        setStage({ kind: 'ready', current: found?.revision ?? null })
+        const current = found?.revision ?? 0
+        if (library?.publishPartTypeAtRevision && baseRevision !== undefined && baseRevision !== current) {
+          const opened = baseRevision === 0 ? 'This draft started as a new library part.' : `You opened this part at revision ${baseRevision}.`
+          const reason = current === 0 ? 'The part is no longer in the library.' : `The library is now at revision ${current}.`
+          setStage({ kind: 'failed', message: `${opened} ${reason} Review the catalog before publishing again.` })
+          return
+        }
+        setStage({ kind: 'ready', current })
       })
       .catch((err: unknown) => {
         console.error('[part-editor] reading the firm library before publish failed', err)
-        if (live) setStage({ kind: 'failed', message: `The firm library didn't answer: ${err instanceof Error ? err.message : 'the connection dropped'}. Close and try again.`, current: null })
+        if (live) setStage({ kind: 'failed', message: `Couldn’t check the library revision. ${err instanceof Error ? err.message : 'Close and reopen Publish to try again.'}` })
       })
     return () => {
       live = false
     }
-  }, [library, open, modelId])
+  }, [library, open, modelId, baseRevision])
 
-  const current = stage.kind === 'checking' ? null : stage.current
+  const current = stage.kind === 'ready' || stage.kind === 'saving' ? stage.current : null
   const publish = async () => {
-    setStage({ kind: 'saving', current })
+    if (stage.kind !== 'ready' && stage.kind !== 'unconfirmed') return
+    const request = stage.kind === 'unconfirmed' ? stage.request : {
+      definition, baseRevision: stage.current, requestId: newElementId('publish'),
+    }
+    setStage({ kind: 'saving', current: request.baseRevision })
+    let answer
     try {
-      const answer = await publishPartTypeFrom(library, definition)
-      if (!answer.ok) {
-        setStage({ kind: 'failed', message: `Not published: ${answer.message}`, current })
-        return
-      }
-      const placeRefused = alsoSaveForPlacePart ? await alsoSaveForPlacePart(definition) : null
-      const text = answer.upToDate ? `${partName} is already revision ${answer.revision} in the firm library; nothing changed.` : `Published ${partName} as revision ${answer.revision} in the firm library (${sizesText}).`
-      onDone(placeRefused ? { ok: false, text: `${text} Place part's list wasn't updated: ${placeRefused}` } : { ok: true, text })
-      onOpenChange(false)
+      answer = await publishPartTypeFrom(library, request.definition, request.baseRevision, request.requestId)
     } catch (err) {
       console.error('[part-editor] publish failed', err)
-      setStage({ kind: 'failed', message: `Not published: ${err instanceof Error ? err.message : 'the connection dropped'}. Nothing changed; try again.`, current })
+      setStage(library?.publishPartTypeAtRevision
+        ? { kind: 'unconfirmed', request, message: `The library did not confirm the save. Retry this same publish to recover its receipt. ${err instanceof Error ? err.message : ''}`.trim() }
+        : { kind: 'failed', message: 'The library did not confirm the save. Close and reopen Publish to check the current revision.' })
+      return
     }
+    if (!answer.ok) {
+      setStage({ kind: 'failed', message: answer.message })
+      return
+    }
+    const text = answer.upToDate ? `${partName} is already revision ${answer.revision} in the firm library.` : `Published ${partName} as revision ${answer.revision} in the firm library (${sizesText}).`
+    let placeRefused
+    try {
+      placeRefused = await alsoSaveForPlacePart?.(request.definition)
+    } catch (err) {
+      placeRefused = err instanceof Error ? err.message : 'The library did not answer.'
+    }
+    onDone({ ok: !placeRefused, text: placeRefused ? `${text} Place part could not refresh its list. ${placeRefused}` : text, revision: answer.revision })
+    onOpenChange(false)
   }
 
-  const next = (current ?? 0) + 1
   return (
     <Dialog open={open} onOpenChange={(o) => stage.kind !== 'saving' && onOpenChange(o)}>
       <DialogContent data-testid="pe-publish-dialog">
         <DialogHeader>
           <DialogTitle>Publish {partName}</DialogTitle>
           <DialogDescription>
-            {stage.kind === 'checking' ? 'Checking the firm library…' : current === null ? `New in the firm library: revision 1 (${sizesText}).` : `Revision ${current} is in the firm library. This publishes revision ${next} (${sizesText}); projects with copies of revision ${current} are offered the update and choose for themselves.`}
+            {stage.kind === 'checking' ? 'Checking the firm library…' : stage.kind === 'unconfirmed' ? 'Your original edit and its publish ID are ready to retry.' : current === null ? 'Close this dialog to return to your part.' : current === 0 ? `Publish ${sizesText} as the first revision in the firm library.` : `The library has revision ${current}. Publish ${sizesText} as revision ${current + 1}. Projects using this part can review the update.`}
           </DialogDescription>
         </DialogHeader>
-        {stage.kind === 'failed' && (
+        {(stage.kind === 'failed' || stage.kind === 'unconfirmed') && (
           <Alert variant="destructive">
-            <AlertTitle>Not published</AlertTitle>
+            <AlertTitle>{stage.kind === 'unconfirmed' ? 'Publish unconfirmed' : 'Publish unavailable'}</AlertTitle>
             <AlertDescription>{stage.message}</AlertDescription>
           </Alert>
         )}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline" disabled={stage.kind === 'saving'}>
-              Cancel
+              {stage.kind === 'unconfirmed' ? 'Close' : 'Cancel'}
             </Button>
           </DialogClose>
-          <Button onClick={() => void publish()} disabled={stage.kind === 'checking' || stage.kind === 'saving'} data-testid="pe-publish-confirm">
+          <Button onClick={() => void publish()} disabled={stage.kind !== 'ready' && stage.kind !== 'unconfirmed'} data-testid="pe-publish-confirm">
             {stage.kind === 'saving' ? <Spinner data-icon="inline-start" /> : <Library data-icon="inline-start" />}
-            {stage.kind === 'saving' ? 'Saving…' : `Publish revision ${next}`}
+            {stage.kind === 'saving' ? 'Saving…' : stage.kind === 'unconfirmed' ? 'Retry publish' : current === null ? 'Publish' : `Publish revision ${current + 1}`}
           </Button>
         </DialogFooter>
       </DialogContent>

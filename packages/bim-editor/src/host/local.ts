@@ -8,13 +8,13 @@ import type {
   EditorRouter,
 } from '@permitzip/bim-editor-host'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
-import { createLocalDataHost } from './local-data'
+import { createLocalDataHost, type LocalFirmPartsPort } from './local-data'
 import { createLocalShellHost } from './local-shell'
 import { sonnerNotifier } from './sonner-notifier'
 
 // The standalone host's whole surface. It imports the kernel, so it is its own entry
 // (`@permitzip/bim-editor/host/local`), never part of `@permitzip/bim-editor/host`.
-export { createLocalDataHost, jsonAnswer } from './local-data'
+export { createLocalDataHost, jsonAnswer, type LocalFirmPartsPort } from './local-data'
 export { CONNECT_AGENT_DOC_HREF, MUTINYBIM_REPOSITORY_URL, createLocalShellHost, type LocalShellHostOptions } from './local-shell'
 export { sonnerNotifier }
 
@@ -30,6 +30,8 @@ export interface LocalEditorHostOptions {
   readonly displayName?: string
   /** What the local model server accepts; the in-process dev server accepts anything. */
   readonly token?: string | null
+  /** The local host's versioned parts catalog, when connected. */
+  readonly firmParts?: LocalFirmPartsPort
   /** Where this app tells people to connect storage or an AI, in words; null when it has no such place. */
   readonly connectHint?: string | null
 }
@@ -105,7 +107,7 @@ export function memoryPreferences(): EditorPreferences {
 export function createLocalEditorHost(options: LocalEditorHostOptions): EditorHost {
   const token = options.token === undefined ? 'local' : options.token
   return {
-    data: createLocalDataHost(),
+    data: createLocalDataHost(options.firmParts),
     shell: createLocalShellHost(),
     identity: { userId: options.userId ?? 'local-user', displayName: options.displayName ?? 'You' },
     session: {
