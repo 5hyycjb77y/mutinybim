@@ -149,6 +149,9 @@ All optional; read once at start.
 | `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` | none | Optional Supabase secret (`service_role`) key. When set, stores app records (users, sessions, model metadata, shares, assistant grants) in Supabase Postgres. Apply the SQL files in `db/migrations/` in filename order before starting the new version. |
 | `MUTINYBIM_WEB_SUPABASE_GOOGLE` | `1` | Set to `0` to hide the **Continue with Google** button when Supabase Auth is enabled. |
 | `MUTINYBIM_WEB_TRUST_PROXY` | auto (`1` when `FLY_APP_NAME` is set) | Trusts `Fly-Client-IP` / `X-Forwarded-For` for sign-in and OAuth registration rate limits behind a reverse proxy. |
+| `MUTINYBIM_WEB_MAIL` | `off` | `smtp` turns on the app's own email (password reset links in local-account mode). |
+| `MUTINYBIM_WEB_MAIL_URL` | none | The SMTP server, with its sign-in: `smtps://user:password@smtp.example.com:465`, or `smtp://…:587`, which must upgrade with STARTTLS unless the server is this computer. It holds a password, so set it as a secret (for example `fly secrets set`), never in a file. Required when mail is on. |
+| `MUTINYBIM_WEB_MAIL_FROM` | none | The sender, such as `MutinyBIM <no-reply@app.example.com>`. Required when mail is on. The startup log shows only its domain. |
 
 ### Supabase Auth & Google sign-in
 
@@ -243,13 +246,23 @@ recipient's share ends the offer.
 
 ## Getting back in
 
-The app sends no email, so it has no emailed reset link. Two ways back:
+With `MUTINYBIM_WEB_MAIL` off (the default), the app sends no email, so it
+has no emailed reset link. Two ways back:
 
 - **A linked sign-in.** Log in with the linked provider; for ten minutes after
   that, Settings → Password sets a new password without the old one.
 - **The operator.** On the server, `npm run web:reset-password -- person@example.com`
   prints a link that sets a new password once, within an hour (only its digest
   is stored). Using it signs the person out everywhere else.
+
+**With mail on** (`MUTINYBIM_WEB_MAIL=smtp`), Forgot password emails that same
+one-hour link to the account's address. The reply is the same whether or not
+an account uses the address, and the lookup and send happen after it. Each
+address gets at most three reset emails an hour; a request past that changes
+nothing, so the last link sent keeps working. Links and tokens are never
+logged. A send that fails or times out is logged by its error code only, and
+the reply doesn't change. The operator command keeps working. Supabase mode
+keeps sending its own reset emails.
 
 ## Deploying
 
@@ -315,6 +328,7 @@ Operator commands run as the app's user:
 | `src/server.ts` | Starts the app. |
 | `src/app.ts` | Routes, forms, sessions, sharing, the editor routes and the model server socket. |
 | `src/admin.ts` | Operator commands (`npm run web:reset-password`). |
+| `src/mailer.ts` | The `Mailer` interface, the fixed plain-text email templates and the SMTP transport (Nodemailer). |
 | `src/config.ts` | The settings above. |
 | `src/db.ts` | Accounts, sessions, models, shares, reset links, agent keys and assistant sign-ins (SQLite). |
 | `src/assistant-auth.ts` | The assistants' sign-in: metadata, registration, PKCE codes, tokens. |

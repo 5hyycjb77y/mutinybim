@@ -7,13 +7,13 @@
  * prints a one-time link that sets a new password for that account. It works
  * once, for an hour; only its digest is stored. Hand it to the person over a
  * channel you trust. This is the recovery path for accounts with no linked
- * sign-in, because the app sends no email.
+ * sign-in when the server sends no email, and it keeps working when it does.
  */
 import path from "node:path";
 import { readConfig } from "./config";
 import { openDb } from "./db";
 import { openSupabaseStore } from "./db-supabase";
-import { digest, randomToken, RESET_LINK_HOURS } from "./secrets";
+import { issuePasswordReset, RESET_LINK_HOURS } from "./secrets";
 
 async function main(argv: readonly string[]): Promise<number> {
   const [command, email] = argv;
@@ -29,8 +29,7 @@ async function main(argv: readonly string[]): Promise<number> {
       console.error(`No account uses ${email} in ${config.supabase?.secretKey ? "Supabase" : config.dataDir}. Check the address and configuration.`);
       return 1;
     }
-    const token = randomToken();
-    await db.createPasswordReset(digest(token), user.id, new Date(Date.now() + RESET_LINK_HOURS * 3_600_000));
+    const token = await issuePasswordReset(db.createPasswordReset, user.id);
     console.log(`Reset link for ${user.email} (works once, for ${RESET_LINK_HOURS} hour):\n${config.origin}/reset/${token}`);
     return 0;
   } finally {
