@@ -567,6 +567,8 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   };
 
   const grids: GridLine[] = [];
+  /** The hole each hosted record cuts through its host, as a box in that record's own frame; by its id. */
+  const voidBoxes = new Map<string, { readonly min: Vec3; readonly max: Vec3 }>();
 
   const partTypeOf = (part: PartInstance): PartTypeElement | null => {
     const t = els[part.typeId];
@@ -669,6 +671,16 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const angle = line ? (Math.atan2(line.end.y - line.start.y, line.end.x - line.start.x) * 180) / Math.PI : 0;
       const depth = line?.widthMm ?? 0;
       const placement = geo.placement(frame, geo.turned({ x: el.position.x, y: el.position.y, z: hostBase + sill }, angle));
+      // The hole it cuts: the void's own width and height, through the host's thickness, measured from this placement.
+      if (v && depth > 0) {
+        const along = v.profile.map((q) => q.x - el.offset);
+        const up = v.profile.map((q) => q.y - sill);
+        voidBoxes.set(el.id, { min: { x: Math.min(...along), y: -depth / 2, z: Math.min(...up) }, max: { x: Math.max(...along), y: depth / 2, z: Math.max(...up) } });
+      }
+      // An opening no class takes is a proxy, which the schema asks to be named: its kind in words ("Cased opening").
+      const mark = el.mark.trim() || null;
+      const kindWords = el.openingType.replace(/[_\s]+/g, " ").trim();
+      const openingName = mark ?? (cls.entity === PROXY && kindWords ? kindWords.charAt(0).toUpperCase() + kindWords.slice(1) : null);
       const body = el.width > 0 && el.height > 0 && depth > 0 ? geo.box({ x: -el.width / 2, y: -depth / 2, z: 0 }, { x: el.width / 2, y: depth / 2, z: el.height }) : null;
       const resolveIfcDoorOp = (): Readonly<Record<string, StepValue>> => {
         const stated = statedEnum("OperationType", elementTypeValue(els, el, "architecture.door_operation"));
@@ -683,7 +695,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
         ...(el.openingType === "door" ? resolveIfcDoorOp() : {}),
         ...(el.openingType === "window" ? statedEnum("PartitioningType", elementTypeValue(els, el, "architecture.window_partitioning")) : {}),
       };
-      product = writeElement(el, cls, el.mark.trim() || null, el.mark.trim() || null, placement, body, extraOpening);
+      product = writeElement(el, cls, openingName, mark, placement, body, extraOpening);
     } else if (el.kind === "run_segment") {
       const placement = geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 }));
       const s = el.size;
@@ -875,7 +887,12 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
           return a.startsWith("NumberOf") ? int(Math.round(v)) : real(v);
         });
         const placement = owner?.placement ? geo.placement(owner.placement, geo.axis({ x: 0, y: 0, z: 0 })) : null;
-        const ref = g.add(o.entity.toUpperCase(), [str(guid), $, opt(o.name), $, $, placement ?? $, $, $, ...tail]);
+        // An opening element is the hole itself: without a body a viewer leaves its host uncut.
+        const isVoid = o.entity === "IfcOpeningElement";
+        const voidBox = isVoid && placement ? voidBoxes.get(el.id) : undefined;
+        const body = voidBox ? geo.box(voidBox.min, voidBox.max) : null;
+        if (isVoid && !body) warn(`${el.id}: the model has no size for the hole it cuts, so its host is not cut there in the file. Check its width, its height and the thickness of what it is in, then export again`);
+        const ref = g.add(o.entity.toUpperCase(), [str(guid), $, opt(o.name), $, $, placement ?? $, body ?? $, $, ...tail]);
         synthetic.set(o.key, { ref, guid });
         byEntity[o.entity] = (byEntity[o.entity] ?? 0) + 1;
       }
