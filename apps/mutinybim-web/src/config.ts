@@ -23,6 +23,10 @@
  *   MUTINYBIM_WEB_SUPABASE_SECRET_KEY       optional Supabase secret (service_role) key; stores app records in Supabase Postgres instead of local SQLite
  *   MUTINYBIM_WEB_SUPABASE_GOOGLE "0"/"false" hides "Continue with Google" when Supabase Auth is on (default on)
  *   MUTINYBIM_WEB_TRUST_PROXY     "1"/"true" trusts Fly-Client-IP / X-Forwarded-For for rate limits (default on when FLY_APP_NAME is set)
+ *   MUTINYBIM_WEB_MAIL            "off" (default) or "smtp": the app's own email (password reset links)
+ *   MUTINYBIM_WEB_MAIL_URL        SMTP server, e.g. smtps://user:password@smtp.example.com:465 or smtp://…:587 (STARTTLS
+ *                                 is required unless the server is this computer); a secret, so set it as one
+ *   MUTINYBIM_WEB_MAIL_FROM       sender, e.g. "MutinyBIM <no-reply@app.example.com>"; required when mail is on
  *
  * Provider and quote settings are addresses and labels only. No secret is
  * read here: providers are public clients (authorization code with PKCE,
@@ -106,6 +110,17 @@ export interface WebConfig {
   readonly supabase?: SupabaseConfig | null;
   /** Trust reverse-proxy client IP headers (Fly-Client-IP / X-Forwarded-For) for sign-in rate limiting. */
   readonly trustProxy?: boolean;
+  /** Outgoing mail (MUTINYBIM_WEB_MAIL). Absent or null: the app sends no email. */
+  readonly mail?: MailConfig | null;
+}
+
+/** The app's own outgoing mail. Absent: the app sends no email. */
+export interface MailConfig {
+  readonly kind: "smtp";
+  /** smtp:// or smtps:// address, credentials included. Never logged. */
+  readonly url: string;
+  /** The From header: an address, optionally with a display name. */
+  readonly from: string;
 }
 
 export interface ScriptsConfig {
@@ -241,6 +256,34 @@ export function parseSupabase(env: NodeJS.ProcessEnv): SupabaseConfig | null {
   };
 }
 
+const SENDER = /^(?:[^<>\r\n]*<[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+)$/;
+
+/** Reads MUTINYBIM_WEB_MAIL*. Error messages name the setting, never its value: the URL carries a password. */
+export function parseMail(env: NodeJS.ProcessEnv): MailConfig | null {
+  const kind = (text(env.MUTINYBIM_WEB_MAIL) ?? "off").toLowerCase();
+  if (kind === "off") return null;
+  if (kind !== "smtp") throw new Error("[mutinybim-web] MUTINYBIM_WEB_MAIL must be off or smtp");
+  const url = text(env.MUTINYBIM_WEB_MAIL_URL);
+  const from = text(env.MUTINYBIM_WEB_MAIL_FROM);
+  if (!url || !from) throw new Error("[mutinybim-web] MUTINYBIM_WEB_MAIL=smtp needs MUTINYBIM_WEB_MAIL_URL and MUTINYBIM_WEB_MAIL_FROM");
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("[mutinybim-web] MUTINYBIM_WEB_MAIL_URL is not an smtp:// or smtps:// address");
+  }
+  if ((parsed.protocol !== "smtp:" && parsed.protocol !== "smtps:") || !parsed.hostname) {
+    throw new Error("[mutinybim-web] MUTINYBIM_WEB_MAIL_URL is not an smtp:// or smtps:// address");
+  }
+  if (!SENDER.test(from)) throw new Error("[mutinybim-web] MUTINYBIM_WEB_MAIL_FROM must be one address, like \"MutinyBIM <no-reply@example.com>\"");
+  return { kind: "smtp", url, from };
+}
+
+/** The sender's domain, which the startup log may show. */
+export function senderDomain(mail: MailConfig): string {
+  return mail.from.match(/@([^\s>]+)>?$/)?.[1] ?? "?";
+}
+
 function parseTrustProxy(env: NodeJS.ProcessEnv): boolean {
   const explicit = text(env.MUTINYBIM_WEB_TRUST_PROXY)?.toLowerCase();
   if (explicit === "1" || explicit === "true" || explicit === "yes") return true;
@@ -267,5 +310,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): WebConfig {
     scripts: parseScripts(env, origin),
     supabase: parseSupabase(env),
     trustProxy: parseTrustProxy(env),
+    mail: parseMail(env),
   };
 }

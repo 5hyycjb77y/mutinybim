@@ -33,7 +33,8 @@ import { ModelCreator } from "./model-creation";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
 import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
 import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
-import { digest, hashPassword, pkcePair, randomToken, verifyPassword } from "./secrets";
+import { EMAIL_SHAPE, resetMail, smtpMailer, type Mailer } from "./mailer";
+import { digest, hashPassword, issuePasswordReset, pkcePair, randomToken, verifyPassword } from "./secrets";
 import { exchangePkceCode, googleAuthorizeUrl, requestPasswordReset, signInWithPassword, signUpWithPassword, SupabaseAuthError, updatePassword, verifyTokenHash, type SupabaseUser } from "./supabase-auth";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,8 @@ export interface AppOptions {
   readonly scripts?: HostedScripts;
   /** The key linked-host passes are kept under (tests); default MUTINYBIM_WEB_LINK_KEY. null: linked hosts off. */
   readonly linkKeys?: LinkKeys | null;
+  /** Delivers the app's email (tests pass a recording mailer). Default: SMTP when MUTINYBIM_WEB_MAIL=smtp; null: none. */
+  readonly mailer?: Mailer | null;
 }
 
 /** The scripts setting as a runner: the sealed box (default), off, or this computer's own runner (loopback servers only). */
@@ -91,6 +94,8 @@ export interface App {
   readonly db: Db;
   readonly models: ModelStore;
   listen(): Promise<void>;
+  /** Waits for work the app finished after replying, such as sending email. */
+  settled(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -179,6 +184,20 @@ function safeReturn(value: string | null | undefined, fallback = "/models"): str
   return value;
 }
 
+/**
+ * For pages whose address holds a one-time token: the Referer header carries only
+ * this app's origin, never the path with the token, even to this site. Not
+ * "no-referrer", which makes browsers send `Origin: null` on the page's own form
+ * posts, so the same-site check would refuse them.
+ */
+const TOKEN_PAGE = { "referrer-policy": "strict-origin" } as const;
+
+/** An error's code or name, for logs that must not repeat its message. */
+function errorCode(err: unknown): string {
+  if (err instanceof Error) return "code" in err && (typeof err.code === "string" || typeof err.code === "number") ? String(err.code) : err.name;
+  return typeof err;
+}
+
 function baseModelOf(modelId: string): string {
   return parseBranchModelId(modelId)?.baseModelId ?? modelId;
 }
@@ -209,6 +228,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   });
   const creator = new ModelCreator(db, path.join(config.dataDir, "models"));
   const throttle = new Throttle(20, 10 * 60_000);
+  const mailer = options.mailer !== undefined ? options.mailer : config.mail ? smtpMailer(config.mail) : null;
+  // A few reset emails per address per hour, so nobody can flood an inbox or keep replacing its link.
+  const resetMailLimit = new Throttle(3, 60 * 60_000);
+  const afterReply = new Set<Promise<void>>();
   const ipOf = (req: IncomingMessage): string => clientIp(req, Boolean(config.trustProxy));
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
   const approvals = new ApprovalBook(db);
@@ -392,6 +415,39 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       db.modelsOf(user.id), db.sharedWith(user.id), linkedModelsView(user, fresh), db.pendingCreations(user.id), db.transfers.inbox(user.id),
     ]);
     return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked, pending, inbox) };
+  }
+
+  /** Runs work after the reply has gone; `settled()` and `close()` wait for it. */
+  function afterReplying(work: () => Promise<void>): void {
+    const running: Promise<void> = work()
+      .catch((err: unknown) => console.error("[mutinybim-web] work after a reply failed", { code: errorCode(err) }))
+      .finally(() => afterReply.delete(running));
+    afterReply.add(running);
+  }
+
+  /** Emails a reset link when an account uses this address and its hourly limit allows. Never logs the link. */
+  async function mailResetLink(email: string): Promise<void> {
+    const links = db.resetMail;
+    if (!mailer || !links) return;
+    const person = await db.userByEmail(email);
+    if (!person) return;
+    // Checked before a new link is made, so an over-limit request leaves the last emailed link working.
+    if (!resetMailLimit.allow(person.email)) {
+      console.log("[mutinybim-web] reset email skipped: hourly limit for this address", { userId: person.id });
+      return;
+    }
+    const token = await issuePasswordReset(links.stage, person.id);
+    const tokenHash = digest(token);
+    try {
+      await mailer.send(resetMail(config.origin, person.email, token));
+    } catch (err) {
+      links.discard(tokenHash);
+      // A transport's error can echo the message, so only its code is logged.
+      console.error("[mutinybim-web] reset email failed", { userId: person.id, code: errorCode(err) });
+      return;
+    }
+    links.delivered(tokenHash);
+    console.log("[mutinybim-web] reset email sent", { userId: person.id });
   }
 
   async function handleAuthCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: OAuthProviderConfig): Promise<void> {
@@ -594,12 +650,19 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     }
 
     if (pathname === "/forgot") {
-      if (method === "GET") return user ? redirect(res, "/settings#password") : html(res, 200, forgotPage(config));
-      if (method === "POST" && config.supabase) {
+      const mail = mailer !== null;
+      if (method === "GET") return user ? redirect(res, "/settings#password") : html(res, 200, forgotPage(config, { mail }));
+      if (method === "POST" && (config.supabase || mail)) {
         const form = await readForm(req);
         const email = (form.get("email") ?? "").trim().toLowerCase();
-        if (!throttle.allow(`forgot:${ipOf(req)}`)) return html(res, 429, forgotPage(config, { email, flash: { kind: "error", text: "Too many reset requests from here. Wait ten minutes, then try again." } }));
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return html(res, 400, forgotPage(config, { email, flash: { kind: "error", text: "Enter a full email address, like name@example.com." } }));
+        if (!throttle.allow(`forgot:${ipOf(req)}`)) return html(res, 429, forgotPage(config, { email, mail, flash: { kind: "error", text: "Too many reset requests from here. Wait ten minutes, then try again." } }));
+        if (!EMAIL_SHAPE.test(email)) return html(res, 400, forgotPage(config, { email, mail, flash: { kind: "error", text: "Enter a full email address, like name@example.com." } }));
+        const sent = `If an account uses ${email}, we sent a password reset link. Check your inbox.`;
+        if (!config.supabase) {
+          // Reply before the lookup, so the time it takes can't tell anyone whether the account exists.
+          html(res, 200, forgotPage(config, { email, mail, flash: { kind: "ok", text: sent } }));
+          return afterReplying(() => mailResetLink(email));
+        }
         const { verifier, challenge } = pkcePair();
         const state = randomToken();
         await db.saveOAuthState({ state, provider: "supabase-recovery", codeVerifier: verifier, returnTo: "/reset-password" });
@@ -607,11 +670,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           await requestPasswordReset(config.supabase, { email, redirectTo: supabaseCallbackUri(), codeChallenge: challenge }, options.fetchImpl);
         } catch (err) {
           if (err instanceof SupabaseAuthError && err.status === 429) {
-            return html(res, 429, forgotPage(config, { email, flash: { kind: "error", text: err.words } }));
+            return html(res, 429, forgotPage(config, { email, mail, flash: { kind: "error", text: err.words } }));
           }
           console.error("[mutinybim-web] supabase password reset request failed", { err });
         }
-        return html(res, 200, forgotPage(config, { email, flash: { kind: "ok", text: `If an account uses ${email}, we sent a password reset link. Check your inbox.` } }), {
+        return html(res, 200, forgotPage(config, { email, mail, flash: { kind: "ok", text: sent } }), {
           "set-cookie": makeCookie(SUPABASE_PKCE_COOKIE, state, 900, "/auth/supabase/callback"),
         });
       }
@@ -642,14 +705,14 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (reset?.[1]) {
       const tokenHash = digest(reset[1]);
       const person = await db.userByPasswordReset(tokenHash);
-      if (method === "GET") return html(res, person ? 200 : 410, resetPage({ token: reset[1], email: person?.email ?? null }));
+      if (method === "GET") return html(res, person ? 200 : 410, resetPage({ token: reset[1], email: person?.email ?? null }), TOKEN_PAGE);
       if (method === "POST") {
-        if (!person) return html(res, 410, resetPage({ token: reset[1], email: null }));
+        if (!person) return html(res, 410, resetPage({ token: reset[1], email: null }), TOKEN_PAGE);
         const password = (await readForm(req)).get("password") ?? "";
-        if (password.length < 8) return html(res, 400, resetPage({ token: reset[1], email: person.email, flash: { kind: "error", text: "Use a password of at least 8 characters." } }));
+        if (password.length < 8) return html(res, 400, resetPage({ token: reset[1], email: person.email, flash: { kind: "error", text: "Use a password of at least 8 characters." } }), TOKEN_PAGE);
         // The link is checked again where it is used up: of two uses at once, only one saves a password.
         const redeemed = await db.redeemPasswordReset(tokenHash, await hashPassword(password));
-        if (!redeemed) return html(res, 410, resetPage({ token: reset[1], email: null }));
+        if (!redeemed) return html(res, 410, resetPage({ token: reset[1], email: null }), TOKEN_PAGE);
         console.log("[mutinybim-web] password reset with a reset link", { userId: redeemed.id });
         return redirect(res, "/models?reset=1", { "set-cookie": await startSession(redeemed.id, "reset") });
       }
@@ -1334,6 +1397,9 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           resolve();
         });
       }),
+    async settled() {
+      while (afterReply.size > 0) await Promise.all(afterReply);
+    },
     async close() {
       for (const client of wss.clients) client.terminate();
       await assistantTools.close();
@@ -1341,6 +1407,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       // Long-lived assistant streams would hold the close open; they reconnect to the next server.
       server.closeAllConnections();
       await closed;
+      while (afterReply.size > 0) await Promise.all(afterReply);
       await models.flush();
       await db.close();
     },

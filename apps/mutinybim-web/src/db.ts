@@ -409,6 +409,12 @@ export interface WebStore {
   setPassword(userId: string, passwordHash: string): Promise<void>;
 
   createPasswordReset(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
+  /** Local accounts use the app's SMTP relay. Supabase Auth handles its own recovery email. */
+  readonly resetMail?: {
+    stage(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
+    delivered(tokenHash: string): void;
+    discard(tokenHash: string): void;
+  };
   userByPasswordReset(tokenHash: string): Promise<UserRow | null>;
   /**
    * In one database operation: uses up an unexpired reset link, saves the new
@@ -732,6 +738,10 @@ export function openDb(file: string): WebStore {
   }
   ensureEmailConfirmation(db);
 
+  function insertReset(tokenHash: string, userId: string, expiresAt: Date): void {
+    db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString());
+  }
+
   return {
     transfers: sqliteTransfers(db, writeTransaction),
     async close() {
@@ -811,8 +821,28 @@ export function openDb(file: string): WebStore {
     },
 
     async createPasswordReset(tokenHash, userId, expiresAt) {
-      db.prepare("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").run(userId, now());
-      db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString());
+      writeTransaction(() => {
+        db.prepare("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").run(userId, now());
+        insertReset(tokenHash, userId, expiresAt);
+      });
+    },
+    resetMail: {
+      async stage(tokenHash, userId, expiresAt) {
+        writeTransaction(() => {
+          db.prepare("DELETE FROM password_resets WHERE expires_at <= ?").run(now());
+          insertReset(tokenHash, userId, expiresAt);
+        });
+      },
+      delivered(tokenHash) {
+        // SMTP replies may arrive out of order. Retire only earlier links for
+        // this account while the delivered link is still present.
+        db.prepare(`DELETE FROM password_resets
+          WHERE user_id = (SELECT user_id FROM password_resets WHERE token_hash = ? AND expires_at > ?)
+            AND rowid < (SELECT rowid FROM password_resets WHERE token_hash = ?)`).run(tokenHash, now(), tokenHash);
+      },
+      discard(tokenHash) {
+        db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash);
+      },
     },
     async userByPasswordReset(tokenHash) {
       return toUser(db.prepare("SELECT u.* FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ? AND r.expires_at > ?").get(tokenHash, now()));
@@ -821,6 +851,8 @@ export function openDb(file: string): WebStore {
       return writeTransaction(() => {
         const link = db.prepare("DELETE FROM password_resets WHERE token_hash = ? AND expires_at > ? RETURNING user_id").get(tokenHash, now());
         if (!isRecord(link) || typeof link.user_id !== "string") return null;
+        // A replacement email can still be in flight when an earlier link is used.
+        db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(link.user_id);
         db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, link.user_id);
         db.prepare("DELETE FROM sessions WHERE user_id = ?").run(link.user_id);
         return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(link.user_id));

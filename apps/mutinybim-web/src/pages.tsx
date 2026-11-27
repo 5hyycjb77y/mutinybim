@@ -268,9 +268,9 @@ export function privacyPage(): string {
   ]);
 }
 
-/** Password recovery: sends a reset email when Supabase Auth is enabled, otherwise explains local recovery. */
-export function forgotPage(config: WebConfig, options: { email?: string; flash?: Flash } = {}): string {
-  if (config.supabase) {
+/** Password recovery: sends a reset email through Supabase Auth or the app's own mail, otherwise explains local recovery. */
+export function forgotPage(config: WebConfig, options: { email?: string; flash?: Flash; mail?: boolean } = {}): string {
+  if (config.supabase || options.mail) {
     return page(
       <Card>
         <CardHeader>
@@ -284,7 +284,7 @@ export function forgotPage(config: WebConfig, options: { email?: string; flash?:
               Send reset link
             </Button>
           </form>
-          {config.supabase.google ? (
+          {config.supabase?.google ? (
             <p className="text-xs text-(--mutiny-muted)">
               Signed up with Google? You don't need a password — use <strong>Continue with Google</strong> on the log-in page.
             </p>
