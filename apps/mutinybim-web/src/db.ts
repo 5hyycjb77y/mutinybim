@@ -275,6 +275,13 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS email_confirmations (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS assistant_clients (
   client_id TEXT PRIMARY KEY,
   client_name TEXT NOT NULL,
@@ -424,6 +431,17 @@ export interface WebStore {
    * null when the link is unknown, expired or already used (nothing changes then).
    */
   redeemPasswordReset(tokenHash: string, passwordHash: string): Promise<UserRow | null>;
+
+  /** Stages the digest before sending. Only a successful delivery retires earlier links. */
+  createEmailConfirmation(tokenHash: string, userId: string, email: string, expiresAt: Date): Promise<void>;
+  finishEmailConfirmationMail(tokenHash: string, delivered: boolean): Promise<void>;
+  /**
+   * In one database operation: uses up an unexpired confirmation link that
+   * belongs to this account, and confirms the account's address if it is still
+   * the address the link was sent to. True when the address is now confirmed.
+   * A link that belongs to another account is left as it was.
+   */
+  redeemEmailConfirmation(tokenHash: string, userId: string): Promise<boolean>;
 
   createModel(input: { id: string; ownerId: string; name: string }): Promise<ModelRow>;
   creationByKey(ownerId: string, key: string): Promise<ModelCreation | null>;
@@ -873,6 +891,31 @@ export function openDb(file: string): WebStore {
         db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, link.user_id);
         db.prepare("DELETE FROM sessions WHERE user_id = ?").run(link.user_id);
         return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(link.user_id));
+      });
+    },
+
+    async createEmailConfirmation(tokenHash, userId, email, expiresAt) {
+      writeTransaction(() => {
+        db.prepare("DELETE FROM email_confirmations WHERE expires_at <= ?").run(now());
+        db.prepare("INSERT INTO email_confirmations (token_hash, user_id, email, created_at, expires_at) VALUES (?, ?, ?, ?, ?)").run(tokenHash, userId, email, now(), expiresAt.toISOString());
+      });
+    },
+    async finishEmailConfirmationMail(tokenHash, delivered) {
+      if (delivered) {
+        db.prepare(`DELETE FROM email_confirmations
+          WHERE user_id = (SELECT user_id FROM email_confirmations WHERE token_hash = ? AND expires_at > ?)
+            AND rowid < (SELECT rowid FROM email_confirmations WHERE token_hash = ?)`).run(tokenHash, now(), tokenHash);
+      } else {
+        db.prepare("DELETE FROM email_confirmations WHERE token_hash = ?").run(tokenHash);
+      }
+    },
+    async redeemEmailConfirmation(tokenHash, userId) {
+      return writeTransaction(() => {
+        const link = db.prepare("DELETE FROM email_confirmations WHERE token_hash = ? AND user_id = ? AND expires_at > ? RETURNING email").get(tokenHash, userId, now());
+        if (!isRecord(link) || typeof link.email !== "string") return false;
+        const result = db.prepare("UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, ?) WHERE id = ? AND email = ? COLLATE NOCASE").run(now(), userId, link.email);
+        if (result.changes) db.prepare("DELETE FROM email_confirmations WHERE user_id = ?").run(userId);
+        return Number(result.changes) > 0;
       });
     },
 

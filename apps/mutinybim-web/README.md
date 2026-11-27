@@ -149,7 +149,7 @@ All optional; read once at start.
 | `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` | none | Optional Supabase secret (`service_role`) key. When set, stores app records (users, sessions, model metadata, shares, assistant grants) in Supabase Postgres. Apply the SQL files in `db/migrations/` in filename order before starting the new version. |
 | `MUTINYBIM_WEB_SUPABASE_GOOGLE` | `1` | Set to `0` to hide the **Continue with Google** button when Supabase Auth is enabled. |
 | `MUTINYBIM_WEB_TRUST_PROXY` | auto (`1` when `FLY_APP_NAME` is set) | Trusts `Fly-Client-IP` / `X-Forwarded-For` for sign-in and OAuth registration rate limits behind a reverse proxy. |
-| `MUTINYBIM_WEB_MAIL` | `off` | `smtp` turns on the app's own email (password reset links in local-account mode). |
+| `MUTINYBIM_WEB_MAIL` | `off` | `smtp` enables address confirmation emails and, in local-account mode, password reset emails. |
 | `MUTINYBIM_WEB_MAIL_URL` | none | The SMTP server, with its sign-in: `smtps://user:password@smtp.example.com:465`, or `smtp://…:587`, which must upgrade with STARTTLS unless the server is this computer. It holds a password, so set it as a secret (for example `fly secrets set`), never in a file. Required when mail is on. |
 | `MUTINYBIM_WEB_MAIL_FROM` | none | The sender, such as `MutinyBIM <no-reply@app.example.com>`. Required when mail is on. The startup log shows only its domain. |
 
@@ -279,6 +279,26 @@ logged. A send that fails or times out is logged by its error code only, and
 the reply doesn't change. The operator command keeps working. Supabase mode
 keeps sending its own reset emails.
 
+### Confirmed addresses
+
+Each account records when its email address was confirmed (`email_confirmed_at`).
+New invitations will need a confirmed address; shares that already exist keep
+working. An address is confirmed by:
+
+- a configured sign-in provider whose UserInfo returns `email_verified: true` for
+  that address (see Sign-in providers);
+- a Google sign-in through Supabase, when the Supabase user signs in only through
+  Google and Google reports that address verified;
+- a Supabase sign-up link opened in the same browser that signed up;
+- with mail on, **Settings → Send confirmation link**. The link works once, for
+  24 hours, and only while logged in to the account that asked for it. Only its
+  digest is stored. For a Supabase account with an unconfirmed address, log in
+  with the account password before using the mailed link.
+
+A Supabase password sign-up confirms nothing by itself: with "Confirm email" off,
+Supabase marks every address confirmed. Changing an account's address clears
+its confirmation.
+
 ## Deploying
 
 `Dockerfile` builds an image of this app from the repository root:
@@ -330,7 +350,7 @@ Operator commands run as the app's user:
 - The editor screens that need hosted storage (firm part libraries, stored
   drawings, linked models (IFC or Revit), code studies, file storage) say in words that
   they are not available here; the rest of the editor works.
-- Sign-up has no email confirmation (the app sends no email).
+- Local sign-up leaves the address unconfirmed. When SMTP is enabled, the account holder can request a confirmation link in Settings.
 - A tool call that was waiting for the person when the server restarted
   ends; the request stays on the approvals page and lands if approved.
 - Files the tool families write (printed sheets, issued sets) are kept under

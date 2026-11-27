@@ -244,6 +244,17 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       return typeof userId === "string" ? userById(userId) : null;
     },
 
+    async createEmailConfirmation(tokenHash, userId, email, expiresAt) {
+      await rpc("web_stage_email_confirmation", { p_token_hash: tokenHash, p_user_id: userId, p_email: email, p_expires_at: expiresAt.toISOString() });
+    },
+    async finishEmailConfirmationMail(tokenHash, delivered) {
+      if (delivered) await rpc("web_deliver_email_confirmation", { p_token_hash: tokenHash });
+      else await request(`/rest/v1/email_confirmations?${new URLSearchParams({ token_hash: eq(tokenHash) })}`, { method: "DELETE" });
+    },
+    async redeemEmailConfirmation(tokenHash, userId) {
+      return (await rpc("web_redeem_email_confirmation", { p_token_hash: tokenHash, p_user_id: userId })) === true;
+    },
+
     async createModel(input) {
       const at = now();
       const { data } = await request("/rest/v1/models", {
