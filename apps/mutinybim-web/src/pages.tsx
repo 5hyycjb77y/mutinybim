@@ -597,7 +597,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
                       {m.name}
                     </a>
                     <span className="text-xs text-(--mutiny-muted)">
-                      {m.owner_name}'s · changed {formatWhen(m.updated_at)}
+                      {m.owner_name}'s{m.team_names.length > 0 && ` · via ${m.team_names.join(", ")}`} · changed {formatWhen(m.updated_at)}
                     </span>
                   </div>
                   <Badge variant={m.role === "edit" ? "default" : "secondary"}>{m.role === "edit" ? "Can edit" : "View only"}</Badge>
@@ -675,7 +675,7 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
       <PageTitle lede="People you share with see it under “Shared with you” on their My models page. They need a MutinyBIM account on this server; this app sends no email, so tell them yourself.">Share “{model.name}”</PageTitle>
       <Card>
         <CardHeader>
-          <CardTitle>Who has it</CardTitle>
+          <CardTitle>Owner and personal shares</CardTitle>
         </CardHeader>
         <CardContent>
           <ul className="flex flex-col gap-2" data-testid="shares">
@@ -701,9 +701,9 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
                   </Button>
                 </form>
                 <ConfirmForm action={`/models/${model.id}/share/${s.user_id}/delete`}
-                  question={`Stop sharing “${model.name}” with ${s.display_name}? ` + (options.offer?.recipient_id === s.user_id
-                    ? "This disconnects them and ends their ownership offer."
-                    : "They are disconnected at once.")}>
+                  question={`Stop sharing “${model.name}” directly with ${s.display_name}? ` + (options.offer?.recipient_id === s.user_id
+                    ? "This ends their ownership offer. Any team access still applies."
+                    : "Any team access still applies.")}>
                   <Button type="submit" size="sm" variant="ghost" className="text-(--mutiny-danger)">
                     Remove
                   </Button>
@@ -711,13 +711,13 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
               </li>
             ))}
           </ul>
-          {shares.length === 0 ? <p className="text-(--mutiny-muted)">Only you have this model so far.</p> : null}
+          {shares.length === 0 ? <p className="text-(--mutiny-muted)">No personal shares yet.</p> : null}
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
           <CardTitle>Add someone</CardTitle>
-          <CardDescription>“Can edit” lets them change the model, make branches and save versions. “View only” lets them look and nothing else.</CardDescription>
+          <CardDescription>“Can edit” lets them change the model, make branches and save versions. A personal “View only” share can coexist with edit access through a team.</CardDescription>
         </CardHeader>
         <form method="post" action={`/models/${model.id}/share`} className="flex flex-wrap items-end gap-2">
           <Field className="min-w-60 flex-1">

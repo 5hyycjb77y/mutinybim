@@ -1015,11 +1015,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         const person = email ? await db.userByEmail(email) : null;
         if (!person) return fail(404, `No MutinyBIM account here uses ${email || "that email"}. Ask them to sign up first (this app sends no invitations), then share again.`);
         if (person.id === user.id) return fail(400, "That's you; you already own this model.");
-        const before = (await db.sharesOf(model.id)).find((s) => s.user_id === person.id);
         if (!(await db.share({ modelId: model.id, userId: person.id, role, invitedBy: user.id }))) throw new Refusal(404, NOT_YOURS);
-        if (before && before.role !== role) disconnect(model.id, person.id);
+        await refreshMemberAccess(model.id, person.id);
         console.log("[mutinybim-web] model shared", { modelId: model.id, ownerId: user.id, userId: person.id, role });
-        const words = before ? `${person.display_name} can now ${role === "edit" ? "edit" : "only view"} it.` : `Shared with ${person.display_name}. They see it under “Shared with you” on My models.`;
+        const words = `Saved ${person.display_name}’s personal share as ${role === "edit" ? "Can edit" : "View only"}.`;
         return html(res, 200, await renderShare({ flash: { kind: "ok", text: words } }));
       }
     }
@@ -1028,10 +1027,12 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       const model = await ownModel(user, unshareRoute[1]);
       const removed = (await db.sharesOf(model.id)).find((s) => s.user_id === unshareRoute[2]);
       if (!(await db.unshare(model.id, unshareRoute[2], user.id))) throw new Refusal(404, NOT_YOURS);
-      disconnect(model.id, unshareRoute[2]);
+      const access = await refreshMemberAccess(model.id, unshareRoute[2]);
       console.log("[mutinybim-web] model unshared", { modelId: model.id, ownerId: user.id, userId: unshareRoute[2] });
+      const remaining = access === "edit" ? "They can still edit it." : access === "view" ? "They can still view it."
+        : access === "owner" ? "They now own it." : "They no longer have access.";
       return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { offer: await db.transfers.outgoing(model.id),
-        flash: { kind: "ok", text: removed ? `${removed.display_name} no longer has “${model.name}”.` : "They already didn't have it." } }));
+        flash: { kind: "ok", text: removed ? `Removed ${removed.display_name}’s personal share. ${remaining}` : "There was no personal share to remove." } }));
     }
 
     if (user && pathname === "/settings" && method === "GET") {
@@ -1290,6 +1291,19 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   function disconnect(baseModelId: string, userId: string | null): void {
     for (const entry of live.get(baseModelId) ?? []) {
       if (userId === null || entry.userId === userId) closeChanged(entry);
+    }
+  }
+
+  async function refreshMemberAccess(modelId: string, userId: string): Promise<ModelAccess | null> {
+    try {
+      const access = (await db.accessTo(userId, modelId))?.access ?? null;
+      for (const entry of live.get(modelId) ?? []) {
+        if (entry.userId === userId && entry.access !== access) closeChanged(entry);
+      }
+      return access;
+    } catch (error) {
+      disconnect(modelId, userId);
+      throw error;
     }
   }
 

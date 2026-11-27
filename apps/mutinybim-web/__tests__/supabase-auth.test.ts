@@ -15,6 +15,7 @@ import type { WebConfig } from "../src/config";
 import { openSupabaseStore } from "../src/db-supabase";
 import { openDb } from "../src/db";
 import { migrateSqliteToSupabase } from "../src/migrate-sqlite";
+import { seedTeamShare } from "../__fixtures__/team-share";
 import type { Fetch } from "../src/oauth";
 import { hashPassword } from "../src/secrets";
 
@@ -343,25 +344,20 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
 
 test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {
   const model = { id: "plant", name: "East plant", owner_id: "alex", created_at: "2026-11-26", updated_at: "2026-11-26" };
-  const reads: URL[] = [];
-  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl: async (input) => {
+  let reads = 0;
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl: async (input, init) => {
     const url = new URL(String(input));
-    reads.push(url);
+    reads++;
     // Acceptance commits immediately after the first model read, consuming Bea's direct share.
-    if (url.pathname === "/rest/v1/model_shares") return Response.json([]);
-    expect(url.pathname).toBe("/rest/v1/models");
-    expect(url.searchParams.get("id")).toBe("eq.plant");
-    const snapshot = { ...model, model_shares: model.owner_id === "alex" ? [{ role: "view" }] : [] };
+    expect(url.pathname).toBe("/rest/v1/rpc/web_access_to");
+    expect(JSON.parse(String(init?.body))).toEqual({ p_model: "plant", p_user: "bea" });
+    const snapshot = { ...model, role: model.owner_id === "alex" ? "view" : null };
     model.owner_id = "bea";
-    return Response.json([snapshot]);
+    return Response.json(snapshot);
   } });
   expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "alex" }, access: "view" });
   expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "bea" }, access: "owner" });
-  expect(reads).toHaveLength(2);
-  for (const url of reads) {
-    expect(url.searchParams.get("select")).toContain("model_shares(role)");
-    expect(url.searchParams.get("model_shares.user_id")).toBe("eq.bea");
-  }
+  expect(reads).toBe(2);
 });
 
 test("configured provider domains show a dismissible opt-in link prompt on My models only for matching unlinked users", async () => {
@@ -435,6 +431,7 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   });
   await sqlite.createModel({ id: "mdl-1", ownerId: legacyUser.id, name: "Studio" });
   const peer = await sqlite.createUser({ id: "peer", email: "peer@example.test", displayName: "Peer", passwordHash: null });
+  seedTeamShare(sqlitePath, { id: "old-team", name: "Studio team", ownerId: legacyUser.id, memberId: peer.id, modelId: "mdl-1", role: "edit" });
   await sqlite.share({ modelId: "mdl-1", userId: peer.id, role: "view", invitedBy: legacyUser.id });
   const offer = await sqlite.transfers.offer("offer-1", "mdl-1", legacyUser.id, peer.id, "edit");
   if (typeof offer === "string") throw new Error("Missing test offer");
@@ -478,6 +475,15 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
 
   const summary = await migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   expect(summary.remappedUsers).toBe(1);
+  expect(posted.find((p) => p.path === "/rest/v1/teams")?.body).toEqual([
+    expect.objectContaining({ id: "old-team", owner_id: existingPgId, created_by: existingPgId }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/team_members")?.body).toEqual([
+    expect.objectContaining({ team_id: "old-team", user_id: peer.id, role: "member", added_by: existingPgId }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/team_shares")?.body).toEqual([
+    expect.objectContaining({ model_id: "mdl-1", team_id: "old-team", role: "edit", shared_by: existingPgId }),
+  ]);
   expect(summary.tables.models).toBe(1);
   expect(summary.tables.model_creations).toBe(1);
   expect(summary.tables.model_shares).toBe(1);

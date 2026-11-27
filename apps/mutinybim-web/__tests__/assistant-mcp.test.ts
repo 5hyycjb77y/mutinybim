@@ -22,6 +22,8 @@ import { checkAuthorize, redirectUriMatches } from "../src/assistant-auth";
 import { HOSTED_PROJECT_ID } from "../src/assistant-tools";
 import type { WebConfig } from "../src/config";
 import { openDb } from "../src/db";
+import { DatabaseSync } from "node:sqlite";
+import { seedTeamShare } from "../__fixtures__/team-share";
 
 let dataDir = "";
 let app: App | null = null;
@@ -73,13 +75,14 @@ function pkce(): { verifier: string; challenge: string } {
 }
 
 /** The whole sign-in an assistant does: register, the person allows, the code for tokens. */
-async function signInAssistant(cookie: string, resource = `${base}/mcp`): Promise<{ clientId: string; access: string; refresh: string }> {
+async function signInAssistant(cookie: string, resource = `${base}/mcp`): Promise<{ clientId: string; access: string; refresh: string; consentHtml: string }> {
   const registered = (await (await register()).json()) as { client_id: string };
   const { verifier, challenge } = pkce();
   const params = new URLSearchParams({ response_type: "code", client_id: registered.client_id, redirect_uri: REDIRECT, code_challenge: challenge, code_challenge_method: "S256", state: "s-1", scope: "models", resource });
   const consent = await fetch(`${base}/oauth/authorize?${params}`, { headers: { cookie } });
   expect(consent.status).toBe(200);
-  expect(await consent.text()).toContain("Let “Test Assistant” use your models?");
+  const consentHtml = await consent.text();
+  expect(consentHtml).toContain("Let “Test Assistant” use your models?");
   // The browser checks form-action on every redirect after Allow, and an assistant's callback can go on to its app scheme.
   expect(consent.headers.get("content-security-policy")).not.toContain("form-action");
   const allowed = await post("/oauth/authorize", { request: params.toString(), decision: "allow" }, cookie);
@@ -104,7 +107,7 @@ async function signInAssistant(cookie: string, resource = `${base}/mcp`): Promis
   expect(tokens.expires_in).toBe(3600);
   const reused = await fetch(`${base}/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", code: code2, redirect_uri: REDIRECT, client_id: registered.client_id, code_verifier: verifier }).toString() });
   expect(reused.status).toBe(400);
-  return { clientId: registered.client_id, access: tokens.access_token, refresh: tokens.refresh_token };
+  return { clientId: registered.client_id, access: tokens.access_token, refresh: tokens.refresh_token, consentHtml };
 }
 
 async function connect(access: string, pathname = "/mcp", elicit?: (message: string) => "accept" | "decline" | Promise<"accept" | "decline">): Promise<Client> {
@@ -363,6 +366,34 @@ test("an approval's title names the model and what changes, never the model's id
   expect(approvalTitle({ summary: `make the edit "create_level" in model ${modelId}`, modelId, modelName: "Sample Project" })).toBe("Make the edit \"create_level\" in “Sample Project”");
   expect(approvalTitle({ summary: "save 2 part types (Fan, Coil) and the script version to the library", modelId: "", modelName: "your script library" })).toBe("Save 2 part types (Fan, Coil) and the script version to the library");
 });
+
+test("an assistant lists East plant once and reads its new role in the same session", async () => {
+  const alex = await signUp("alex@example.test", "Alex");
+  const bea = await signUp("bea@example.test", "Bea");
+  const modelId = await makeModel(alex, "East plant");
+  const alexId = (await app?.db.userByEmail("alex@example.test"))?.id;
+  const beaId = (await app?.db.userByEmail("bea@example.test"))?.id;
+  if (!alexId || !beaId || !app) throw new Error("Missing fixture accounts");
+  const sqlitePath = path.join(dataDir, "accounts.sqlite");
+  seedTeamShare(sqlitePath, { id: "mech", name: "Mechanical", ownerId: alexId, memberId: beaId, modelId, role: "edit" });
+  expect((await post(`/models/${modelId}/share`, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+  await app.db.transfers.offer("open-offer", modelId, alexId, beaId, "none");
+  const { access, consentHtml } = await signInAssistant(bea);
+  expect(consentHtml).toContain("and the 1 shared with you");
+  const client = await connect(access);
+  try {
+    const listing = () => client.callTool({ name: "bim_model_summary", arguments: { model_id: "list" } }).then(textOf);
+    expect(client.getInstructions()).toContain("you can edit, shared by Alex, via Mechanical");
+    expect((await listing()).match(/East plant/g)).toHaveLength(1);
+    const db = new DatabaseSync(sqlitePath);
+    try { db.prepare("DELETE FROM team_shares WHERE team_id = ? AND model_id = ?").run("mech", modelId); }
+    finally { db.close(); }
+    const changed = await listing();
+    expect(changed).toContain(`East plant (model_id ${modelId}, view only, shared by Alex)`);
+    expect(changed).not.toContain("Mechanical");
+    expect(await app.db.transfers.respond("open-offer", beaId, "accept", 5)).toMatchObject({ state: "accepted" });
+  } finally { await client.close(); }
+}, 30_000);
 
 test("a model shared view-only: the assistant reads it but can't change it, and is never asked to approve", async () => {
   const sam = await signUp("sam@example.com", "Sam Example");

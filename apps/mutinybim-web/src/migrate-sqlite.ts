@@ -231,6 +231,16 @@ export async function migrateSqliteToSupabase(options: MigrateOptions): Promise<
       ...r, sender_id: remap(userIdMap, r.sender_id), recipient_id: remap(userIdMap, r.recipient_id),
     })));
 
+    counts.teams = await upsertBatch("teams", "id", readTable(sqlite, "teams").map((r) => ({
+      ...r, owner_id: remap(userIdMap, r.owner_id), created_by: remap(userIdMap, r.created_by),
+    })));
+    counts.team_members = await upsertBatch("team_members", "team_id,user_id", readTable(sqlite, "team_members").map((r) => ({
+      ...r, user_id: remap(userIdMap, r.user_id), added_by: remap(userIdMap, r.added_by),
+    })));
+    counts.team_shares = await upsertBatch("team_shares", "model_id,team_id", readTable(sqlite, "team_shares").map((r) => ({
+      ...r, shared_by: remap(userIdMap, r.shared_by),
+    })));
+
     // 6. Dynamically registered OAuth clients
     counts.oauth_clients = await upsertBatch(
       "oauth_clients",

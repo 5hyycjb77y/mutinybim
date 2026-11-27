@@ -16,12 +16,13 @@ import {
   toLinkedGrant,
   toLinkedModel,
   toModel,
+  toModelAccess,
   toModelCreation,
+  toSharedModel,
   toUser,
   type AssistantCodeRow,
   type OAuthClientRow,
   type OAuthStateRow,
-  type SharedModelRow,
   type ShareRow,
   type WebStore,
 } from "./db";
@@ -293,31 +294,12 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
     },
 
     async accessTo(userId, modelId) {
-      // Acceptance changes the owner and consumes the recipient's share in one commit.
-      const row = await selectOne("models", {
-        select: "*,model_shares(role)", id: eq(modelId), "model_shares.user_id": eq(userId),
-      });
-      const model = toModel(row);
-      if (!model || !isRecord(row)) return null;
-      if (model.owner_id === userId) return { model, access: "owner" };
-      const share = Array.isArray(row.model_shares) ? row.model_shares[0] : null;
-      return isRecord(share) ? { model, access: shareRole(share.role) } : null;
+      return toModelAccess(await rpc("web_access_to", { p_user: userId, p_model: modelId }), userId);
     },
     async sharedWith(userId) {
-      const rows = await selectRows("model_shares", {
-        select: "role,models!inner(id,owner_id,name,created_at,updated_at,users!models_owner_id_fkey(display_name))",
-        user_id: eq(userId),
-      });
-      const out: SharedModelRow[] = [];
-      for (const r of rows) {
-        if (!isRecord(r) || !isRecord(r.models)) continue;
-        const model = toModel(r.models);
-        const owner = isRecord(r.models.users) ? r.models.users : null;
-        if (!model || !owner || typeof owner.display_name !== "string") continue;
-        out.push({ ...model, role: shareRole(r.role), owner_name: owner.display_name });
-      }
-      out.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
-      return out;
+      const rows = await rpc("web_shared_with", { p_user: userId });
+      if (!Array.isArray(rows)) throw new Error("[mutinybim-web supabase-db] expected a shared model list");
+      return rows.flatMap((r) => toSharedModel(r) ?? []);
     },
     async sharesOf(modelId) {
       const rows = await selectRows("model_shares", {
