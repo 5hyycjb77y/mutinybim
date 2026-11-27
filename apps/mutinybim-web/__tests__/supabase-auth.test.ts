@@ -272,6 +272,23 @@ test("Supabase Auth: email signup confirmation, duplicate detection, login, lega
   expect((await fetch(`${base}/models`, { headers: { cookie: `mutinybim_session=${firstSession}` }, redirect: "manual" })).status).toBe(303);
 });
 
+test("the Supabase store confirms the specified OIDC identity and address in one authenticated call", async () => {
+  const fetchImpl = jest.fn<ReturnType<Fetch>, Parameters<Fetch>>(async (input, init) => {
+    expect(String(input)).toBe(`${SUPABASE_URL}/rest/v1/rpc/web_confirm_oidc_email`);
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("apikey")).toBe(SECRET_KEY);
+    expect(headers.get("authorization")).toBe(`Bearer ${SECRET_KEY}`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      p_provider: "org", p_subject: "sub-1", p_user_id: "u-1", p_email: "sam@example.com",
+    });
+    return new Response(null, { status: 204 });
+  });
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
+  await store.confirmIdentityEmail("org", "sub-1", "u-1", "sam@example.com");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
 test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", async () => {
   const seen: { method: string; path: string; body: unknown }[] = [];
   const fetchImpl: Fetch = async (input, init) => {
@@ -296,6 +313,7 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
   const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   const created = await store.createUser({ id: "u-1", email: "SAM@example.com", displayName: "Sam", passwordHash: null });
   expect(created.email).toBe("sam@example.com");
+  expect(created.email_confirmed_at).toBeNull();
   const state = await store.takeOAuthState("st-1");
   expect(state).toMatchObject({ state: "st-1", provider: "supabase-google", code_verifier: "ver-1" });
   const rotated = await store.rotateAssistantRefresh("old-hash", "client-1", {
@@ -305,10 +323,7 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
     refreshExpiresAt: new Date(),
   });
   expect(rotated).toEqual({ reused: true });
-  expect(created.email_confirmed_at).toBeNull();
-  await store.confirmIdentityEmail("org", "sub-1", created.id, created.email);
-  expect(seen.at(-1)).toEqual({ method: "POST", path: "/rest/v1/rpc/web_confirm_oidc_email", body: { p_provider: "org", p_subject: "sub-1", p_user_id: "u-1", p_email: "sam@example.com" } });
-  expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh", "/rest/v1/rpc/web_confirm_oidc_email"]);
+  expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh"]);
 });
 
 test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {
