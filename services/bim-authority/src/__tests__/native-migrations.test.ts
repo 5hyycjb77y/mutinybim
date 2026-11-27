@@ -58,9 +58,10 @@ describe("native installation configuration", () => {
   });
 
   it("honors the existing forbidden-ref list, including trimmed entries", () => {
+    const project = "abcdefghijklmnopqrst";
     expect(() => nativeMigrationConfig({
-      MUTINYBIM_DB_URL: "postgresql://installer@db.abcdefghijklmnopqrst.supabase.co/native",
-      MUTINYBIM_FORBIDDEN_DB_REFS: " other-ref, abcdefghijklmnopqrst , ",
+      MUTINYBIM_DB_URL: `postgresql://installer@db.${project}.supabase.co/native`,
+      MUTINYBIM_FORBIDDEN_DB_REFS: ` other-ref, ${project} , `,
     })).toThrow(/refusing a forbidden database/);
   });
 
