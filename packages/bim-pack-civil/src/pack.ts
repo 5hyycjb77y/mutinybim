@@ -1,6 +1,8 @@
 import { qty, to } from "@permitzip/bim-units";
-import { CALC_POINT, CLASS_POINT, LINT_RULE_POINT, NETWORK_ADAPTER_POINT, PARAMETER_SET_POINT, SERVICE_POINT, contribute, defineCalc, definePack, type BimElement, type Pack, type RuleContext, type RuleDef } from "@permitzip/bim-pack/runtime";
+import { CALC_POINT, CLASS_POINT, COMMAND_POINT, ELEMENT_KIND_POINT, LINT_RULE_POINT, NETWORK_ADAPTER_POINT, PARAMETER_SET_POINT, SERVICE_POINT, contribute, defineCalc, definePack, type BimElement, type Pack, type RuleContext, type RuleDef } from "@permitzip/bim-pack/runtime";
 import { PIPE_MATERIAL_POINT } from "@permitzip/bim-kernel";
+import { IMPORT_LANDXML_SURFACES_COMMAND, SURFACE_CUT_FILL_CALC } from "./grading-command";
+import { GRADING_SURFACE_KIND_ROW } from "./surfaces";
 import { MANNING_CAPACITY_EXAMPLE, manningCapacityInput, RATIONAL_RUNOFF_EXAMPLE, rationalRunoffInput, runManningCapacity, runRationalRunoff } from "./calcs";
 import { inletOverloadFindings, INLET_OVERLOADED_RULE, slopeFindings, SLOPE_BELOW_MINIMUM_RULE, type CivilFinding } from "./checks";
 import { CIVIL_CLASSES, CIVIL_PIPE_MATERIALS, CIVIL_STORM_SERVICE_ROW } from "./classes";
@@ -117,16 +119,19 @@ export const CIVIL_PACK: Pack = definePack(
     id: CIVIL_PACK_ID,
     name: "Civil",
     version: "0.1.0",
-    kernel: "^1.1.0",
-    description: "Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff carried down a gravity network; inlet and slope checks.",
+    // Element-kind shapes (the grading TIN) arrived in contract 1.8.0.
+    kernel: "^1.8.0",
+    description: "Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff on a gravity network; existing and proposed TIN surfaces from LandXML with prismoidal cut and fill.",
   },
   [
     contribute(CLASS_POINT, CIVIL_CLASSES),
+    contribute(ELEMENT_KIND_POINT, [GRADING_SURFACE_KIND_ROW]),
     contribute(SERVICE_POINT, [CIVIL_STORM_SERVICE_ROW]),
     contribute(NETWORK_ADAPTER_POINT, [CIVIL_STORM_NETWORK]),
     contribute(PARAMETER_SET_POINT, CIVIL_PARAMETER_SETS),
     contribute(PIPE_MATERIAL_POINT, CIVIL_PIPE_MATERIALS),
     contribute(LINT_RULE_POINT, [INLET_OVERLOADED, SLOPE_BELOW_MINIMUM]),
-    contribute(CALC_POINT, [RATIONAL_RUNOFF_CALC, MANNING_CAPACITY_CALC]),
+    contribute(CALC_POINT, [RATIONAL_RUNOFF_CALC, MANNING_CAPACITY_CALC, SURFACE_CUT_FILL_CALC]),
+    contribute(COMMAND_POINT, [IMPORT_LANDXML_SURFACES_COMMAND]),
   ],
 );

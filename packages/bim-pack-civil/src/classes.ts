@@ -13,7 +13,8 @@ import { CIVIL_CLASS, CIVIL_RCP, CIVIL_RUNOFF, CIVIL_STORM_ADAPTER, CIVIL_STORM_
  * - outfall: IfcDistributionChamberElement USERDEFINED "OUTFALL" (?) (IFC has no outfall type);
  * - storm pipe: IfcPipeSegment RIGIDSEGMENT;
  * - alignment: IfcAlignment (4.3), no PredefinedType;
- * - catchment: IfcSpatialZone USERDEFINED "CATCHMENT".
+ * - catchment: IfcSpatialZone USERDEFINED "CATCHMENT";
+ * - grading surface: IfcGeographicElement TERRAIN (?) (the TIN is the record's shape; IFC has no TIN entity).
  *
  * Structures are parts, catchments outlined zones and the storm network a
  * system; each carries its class explicitly (`set_element_class`), and the
@@ -32,6 +33,14 @@ export const CIVIL_CLASSES: readonly PackClass[] = [
   { id: CIVIL_CLASS.stormSystem, label: "Storm system", discipline: "civil", ifc: { entity: "IfcDistributionSystem", predefinedType: "STORMWATER" }, recognize: byClassId("mep_system", CIVIL_CLASS.stormSystem), description: "A site storm network: its design storm and minimum slope" },
   { id: CIVIL_CLASS.alignment, label: "Alignment", discipline: "civil", ifc: { entity: "IfcAlignment" }, recognize: byClassId("component", CIVIL_CLASS.alignment), description: "A stationed centreline with a vertical profile (a road, a swale, a utility run)" },
   { id: CIVIL_CLASS.catchment, label: "Catchment", discipline: "civil", ifc: { entity: "IfcSpatialZone", predefinedType: "USERDEFINED", objectType: "CATCHMENT" }, recognize: byClassId("zone", CIVIL_CLASS.catchment), description: "An outlined area whose runoff drains to one inlet" },
+  {
+    id: CIVIL_CLASS.gradingSurface,
+    label: "Grading surface",
+    discipline: "civil",
+    ifc: { entity: "IfcGeographicElement", predefinedType: "TERRAIN" },
+    recognize: { elementKinds: [CIVIL_CLASS.gradingSurface], where: [{ path: "classId", op: "equals", value: CIVIL_CLASS.gradingSurface }] },
+    description: "A TIN of existing or proposed ground, imported from LandXML 1.2 (points and faces)",
+  },
 ];
 
 export const CIVIL_STORM_SERVICE_ROW: ServiceRow = {

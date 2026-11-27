@@ -10,4 +10,8 @@ export * from "./calcs";
 export * from "./classes";
 export * from "./structures";
 export * from "./parameters";
+export * from "./surfaces";
+export * from "./landxml";
+export * from "./tin-volume";
+export * from "./grading-command";
 export * from "./pack";

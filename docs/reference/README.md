@@ -7,7 +7,7 @@ Generated from the code on every change, for people and for agents. For guides a
 ## Writing scripts
 
 - [Example scripts](examples.md): 5 whole scripts to copy
-- [Recipes](recipes.md): 34 worked tasks
+- [Recipes](recipes.md): 35 worked tasks
 - Script kit: 200 functions
   - [ctx: the script context](script-kit/ctx.md): 16 functions
   - [units](script-kit/units.md): 6 functions

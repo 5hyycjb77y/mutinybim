@@ -203,14 +203,16 @@ Steel beams, columns and pad footings, a wide-flange catalogue, live load by use
 
 ### Civil
 
-Id `civil`, version 0.1.0, written for kernel contract ^1.1.0.
+Id `civil`, version 0.1.0, written for kernel contract ^1.8.0.
 
-Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff carried down a gravity network; inlet and slope checks.
+Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff on a gravity network; existing and proposed TIN surfaces from LandXML with prismoidal cut and fill.
 
 | What it contributes | Items |
 | --- | --- |
-| Calculations | 2 |
-| Element classes | 7 |
+| Calculations | 3 |
+| Commands | 1 |
+| Element classes | 8 |
+| Element kinds | 1 |
 | Lint rules | 2 |
 | Network adapters | 1 |
 | Parameter sets | 4 |

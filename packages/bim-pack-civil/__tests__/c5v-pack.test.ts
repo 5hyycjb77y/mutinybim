@@ -48,7 +48,7 @@ describe("civil pack contract", () => {
     expect(inside.network).toEqual(["civil.runoff"]);
     expect(inside.rcp).toBe("pe");
     expect(inside.rules).toEqual(["civil.inlet_overloaded", "civil.slope_below_minimum"]);
-    expect(inside.calcs).toEqual(["civil.rational_runoff", "civil.manning_full_capacity"]);
+    expect(inside.calcs).toEqual(["civil.rational_runoff", "civil.manning_full_capacity", "civil.surface_cut_fill"]);
 
     expect(activeClassRegistry().getClass("civil.manhole")).toBeUndefined();
     expect(serviceById("civil.storm")).toBeNull();
@@ -61,7 +61,7 @@ describe("civil pack contract", () => {
       { packId: "electrical", packName: "Electrical", version: "1.0.0", count: 2 },
       { packId: "architecture", packName: "Architecture", version: "1.0.0", count: 10 },
       { packId: "struct", packName: "Structural", version: "0.1.0", count: 9 },
-      { packId: "civil", packName: "Civil", version: "0.1.0", count: 7 },
+      { packId: "civil", packName: "Civil", version: "0.1.0", count: 8 },
     ]);
   });
 

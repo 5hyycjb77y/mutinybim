@@ -365,3 +365,15 @@ Find every sheet with human felt-tip marker redlines, render the sheet PNG image
 3. Inspect the returned PNG images directly, model the requested revisions (routes, equipment, tags), and yellow-line the handled strokes with markups.markAddressed(ctx, ids, { note }).
 
 Uses: `markups.sheetsWithMarkups`, `markups.list`, `markups.renderSheet`, `markups.renderAllMarkedSheets`, `markups.markAddressed`
+
+## Civil LandXML grading and cut/fill
+
+Task: civil grading
+
+Import existing and proposed LandXML 1.2 TIN surfaces into a civil-enabled model and compute prismoidal cut, fill, net earthwork, and overlap area in cubic yards and cubic metres.
+
+1. Send `civil.import_landxml_surfaces` through `ctx.edit` with the LandXML 1.2 XML string (and optional `roles` map by surface name); each TIN lands as a `civil.grading_surface` element (`gs-<slug>`).
+2. Call `ctx.calc({ calc: "civil.surface_cut_fill", inputs: { existingId, proposedId } })` to compute prismoidal cut, fill, net (`fill - cut`), and overlap area in `yd3`/`m3` and `ft2`/`m2`.
+3. Report the earthwork quantities and any review/overlap issues with `ctx.report`.
+
+Uses: `ctx.edit`, `ctx.calc`, `ctx.report`

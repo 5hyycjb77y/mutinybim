@@ -52,6 +52,26 @@ export const MANNING_N_TABLE: CivilCitation = {
   text: "Manning's n by pipe material, FHWA HEC-22 (2009) Table 6-1 (?)",
 };
 
+/**
+ * Prismoidal volume on the composite of two TINs. Stated here in our own
+ * words: where both surfaces are planes over one plan triangle, the signed
+ * volume is the plan area times the mean of the three corner height
+ * differences, V = A·(Δz₁+Δz₂+Δz₃)/3. That is the prismoidal formula once
+ * the height varies linearly (it is exact for a plane; a grid only approaches
+ * it). A sign change inside the triangle is split on the zero contour so cut
+ * and fill are not netted in one prism. The triangles are the plan overlay
+ * of the two triangulations, so each facet lies in one triangle of each
+ * surface. Not a code minimum. A licensed civil engineer has not reviewed it.
+ */
+export const TIN_PRISMOIDAL_VOLUME: CivilCitation = {
+  source: "method",
+  code: "Prismoidal TIN volume",
+  edition: null,
+  clause: "composite overlay, V = A·(Δz1+Δz2+Δz3)/3",
+  detail: "Plan area of each overlay triangle times the mean of the three corner differences (proposed minus existing). Sign changes are split on the zero contour. Exact for planar TIN facets; only the plan overlap is counted.",
+  text: "Prismoidal volume on the composite TIN: plan area times the mean corner height difference",
+};
+
 export const MIN_SLOPE_CRITERION: CivilCitation = {
   source: "design_criteria",
   code: "Civil pack design criteria",

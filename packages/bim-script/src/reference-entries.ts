@@ -1824,4 +1824,18 @@ export const KIT_RECIPES: readonly KitRecipe[] = [
     topics: ["sheet markups", "redlines", "yellow lines", "marker", "review markups", "handwritten notes", "render sheet image"],
     example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    const id = markups.add(ctx, sh, { points: [{ x: 140, y: 150 }, { x: 280, y: 150 }], color: "#dc2626" });\n    const { sheets } = markups.renderAllMarkedSheets(ctx);\n    ctx.report("Open markups", { sheets, detail: markups.list(ctx, sh) });\n    markups.markAddressed(ctx, [id], { note: "Routed duct per redline" });`, '{ levels: true, kinds: ["sheet", "viewport", "view", "drawing_item"] }'),
   },
+  {
+    name: "Civil LandXML grading and cut/fill",
+    task: "civil grading",
+    summary: "Import existing and proposed LandXML 1.2 TIN surfaces into a civil-enabled model and compute prismoidal cut, fill, net earthwork, and overlap area in cubic yards and cubic metres.",
+    steps: [
+      "Send `civil.import_landxml_surfaces` through `ctx.edit` with the LandXML 1.2 XML string (and optional `roles` map by surface name); each TIN lands as a `civil.grading_surface` element (`gs-<slug>`).",
+      "Call `ctx.calc({ calc: \"civil.surface_cut_fill\", inputs: { existingId, proposedId } })` to compute prismoidal cut, fill, net (`fill - cut`), and overlap area in `yd3`/`m3` and `ft2`/`m2`.",
+      "Report the earthwork quantities and any review/overlap issues with `ctx.report`.",
+    ],
+    uses: ["ctx.edit", "ctx.calc", "ctx.report"],
+    topics: ["civil", "grading", "landxml", "tin", "earthwork", "cut and fill", "cut fill", "terrain", "topography", "site grading"],
+    needsModelContent: true,
+    example: layout(`    const landXml = \`<?xml version="1.0"?><LandXML version="1.2"><Units><Imperial linearUnit="foot"/></Units><Surfaces><Surface name="Existing"><Definition surfType="TIN"><Pnts><P id="1">0 0 100</P><P id="2">0 80 100</P><P id="3">50 80 100</P><P id="4">50 0 100</P></Pnts><Faces><F>1 2 3</F><F>1 3 4</F></Faces></Definition></Surface><Surface name="Proposed"><Definition surfType="TIN"><Pnts><P id="1">0 0 101.25</P><P id="2">0 80 101.25</P><P id="3">50 80 101.25</P><P id="4">50 0 101.25</P></Pnts><Faces><F>1 2 3</F><F>1 3 4</F></Faces></Definition></Surface></Surfaces></LandXML>\`;\n    ctx.edit({ type: "civil.import_landxml_surfaces", landXml });\n    const earthwork = ctx.calc({ calc: "civil.surface_cut_fill", inputs: { existingId: "gs-existing", proposedId: "gs-proposed" } });\n    ctx.report("Cut and fill", earthwork);\n    ctx.label("Import LandXML surfaces and report earthwork cut and fill");`),
+  },
 ];
