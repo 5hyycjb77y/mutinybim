@@ -38,7 +38,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
   const [mode, setMode] = useState<Mode>('walk')
   const [running, setRunning] = useState(false)
   const [status, setStatus] = useState('')
-  const panel = useRef<HTMLDivElement>(null)
+  const root = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
   const stopRef = useRef<((reason?: string) => void) | null>(null)
   const keys = useRef(new Set<string>())
@@ -91,7 +91,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
       motion.release()
       setRunning(false)
       setStatus(reason)
-      if (panel.current?.contains(document.activeElement)) canvasRef.current?.focus({ preventScroll: true })
+      if (root.current?.contains(document.activeElement)) canvasRef.current?.focus({ preventScroll: true })
     }
     const key = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -102,7 +102,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
       else if (e.key === 'Escape') stop()
       else keys.current.add(e.code)
     }
-    const outside = (e: Event) => { if (e.target instanceof Node && !panel.current?.contains(e.target)) stop() }
+    const outside = (e: Event) => { if (e.target instanceof Node && !root.current?.contains(e.target)) stop() }
     const blur = () => stop()
     const visibility = () => { if (document.hidden) stop() }
     const draw = (now: number) => {
@@ -178,7 +178,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
   const canStart = mode === 'walk' ? !!level : mode === 'route' ? !!route?.length : validFlight(shots)
 
   return (
-    <div ref={panel} className="pointer-events-none absolute inset-y-0 left-0 z-20" style={{ right: rightInset }}>
+    <div ref={root} className="pointer-events-none absolute inset-y-0 left-0 z-20" style={{ right: rightInset }}>
       {running && <div ref={viewport} tabIndex={-1} aria-label="Camera playback" className="pointer-events-auto absolute inset-0 touch-none outline-none"
         onPointerDown={e => {
           if (mode !== 'walk' || e.button !== 0) return
@@ -189,7 +189,10 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
         onContextMenu={e => e.preventDefault()} />}
       <Card aria-label="Camera tools" className="pointer-events-auto absolute left-3 top-3 max-h-[calc(100%-1.5rem)] w-72 max-w-[calc(100%-1.5rem)] gap-3 overflow-y-auto p-3 shadow-md"
         onKeyDown={e => {
+          if (e.metaKey || e.ctrlKey || e.altKey) return
+          // Stop native propagation too so single-key shortcuts (W, Esc, O, F) inside the card do not reach BuildingModelSurface's window listener.
           e.stopPropagation()
+          e.nativeEvent.stopPropagation()
           if (e.key === 'Escape') { e.preventDefault(); onClose() }
         }}>
         <header className="flex items-center justify-between gap-2">

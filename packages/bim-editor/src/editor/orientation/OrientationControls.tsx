@@ -127,7 +127,8 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
   return (
     <div
       // Only the ball and the toolbar take the pointer; the space around them is the canvas.
-      className="pointer-events-none absolute top-3 flex flex-col items-center gap-1.5 *:pointer-events-auto"
+      // Sit above the CameraTools playback overlay (z-20) so clicking Walk/Home/Ortho hands off cleanly.
+      className="pointer-events-none absolute top-3 z-30 flex flex-col items-center gap-1.5 *:pointer-events-auto"
       style={{ right: rightInset + 12 }}
       data-testid="orientation-controls"
       data-square-on={squareOn ?? ''}
@@ -138,7 +139,7 @@ export function OrientationControls({ viewer, rightInset, canCreateViews, blocke
       <div className="flex items-center gap-1 rounded-md border bg-background/95 p-0.5 shadow-sm" role="toolbar" aria-label="View orientation">
         {onCameraTools && <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label="Camera tools" aria-expanded={cameraToolsOpen} onClick={onCameraTools}><Camera /></Button>
+            <Button variant={cameraToolsOpen ? 'secondary' : 'ghost'} size="icon-sm" aria-label="Camera tools" aria-expanded={cameraToolsOpen} onClick={onCameraTools}><Camera /></Button>
           </TooltipTrigger>
           <TooltipContent>Camera tools</TooltipContent>
         </Tooltip>}

@@ -7,6 +7,8 @@ import type { CameraPose } from './camera-paths'
 const RADIUS = 200
 const CELL = 4000
 const EYE_HEIGHT = 1600
+const WALKER_FOOT_Z = 50
+const WALKER_HEAD_Z = 1750
 
 export interface Walker extends Vec2 {
   readonly yaw: number
@@ -24,7 +26,7 @@ function wallOutline(wall: Wall): Vec2[] {
 }
 
 function touches(block: HostBlock, p: Vec2): boolean {
-  if (tiltedZ(block.z0, block.tilt0, p) >= 1750 || tiltedZ(block.z1, block.tilt1, p) <= 50) return false
+  if (tiltedZ(block.z0, block.tilt0, p) >= WALKER_HEAD_Z || tiltedZ(block.z1, block.tilt1, p) <= WALKER_FOOT_Z) return false
   const outline = block.outline
   if (pointInPolygon(p, outline)) return true
   return outline.some((a, i) => {
@@ -35,16 +37,28 @@ function touches(block: HostBlock, p: Vec2): boolean {
   })
 }
 
-/** Index the selected floor once. A step only queries the cell the walker enters. */
+/** Index the selected floor once, including walls from other levels whose bodies overlap the walker. A step only queries the cell the walker enters. */
 export function walkFloor(model: ModelState, level: Level) {
   const cells = new Map<string, HostBlock[]>()
   const large: HostBlock[] = []
-  const walls = elementsOfKind(model.elements, 'wall').filter(w => levelOf(model.elements, w)?.id === level.id)
-  for (const wall of walls) {
-    const blocks = hostSolidBlocks(model.elements, wall, wall.height, wallBodyProfile(wall))
+  const walls: Wall[] = []
+  const levelWalls: Wall[] = []
+  for (const wall of elementsOfKind(model.elements, 'wall')) {
+    const wallLevel = levelOf(model.elements, wall)
+    if (!wallLevel) continue
+    const dz = wallLevel.elevationMm - level.elevationMm
+    const profile = wallBodyProfile(wall)
+    const minZ = profile && profile.length >= 2 ? Math.min(...profile.map(p => p.baseMm)) + dz : dz
+    const maxZ = profile && profile.length >= 2 ? Math.max(...profile.map(p => p.topMm)) + dz : dz + wall.height
+    if (minZ >= WALKER_HEAD_Z || maxZ <= WALKER_FOOT_Z) continue
+    walls.push(wall)
+    if (wallLevel.id === level.id) levelWalls.push(wall)
+    const blocks = hostSolidBlocks(model.elements, wall, wall.height, profile)
       ?? [{ outline: lineJoinsOf(model.elements, wall.id)?.outline ?? wallOutline(wall), z0: 0, z1: wall.height }]
-    for (const block of blocks) {
-      if (!block.outline.length) continue
+    for (const rawBlock of blocks) {
+      if (!rawBlock.outline.length) continue
+      const block: HostBlock = dz === 0 ? rawBlock : { ...rawBlock, z0: rawBlock.z0 + dz, z1: rawBlock.z1 + dz }
+      if (!block.tilt0 && !block.tilt1 && (block.z0 >= WALKER_HEAD_Z || block.z1 <= WALKER_FOOT_Z)) continue
       const xs = block.outline.map(p => p.x), ys = block.outline.map(p => p.y)
       const x0 = Math.floor((Math.min(...xs) - RADIUS) / CELL), x1 = Math.floor((Math.max(...xs) + RADIUS) / CELL)
       const y0 = Math.floor((Math.min(...ys) - RADIUS) / CELL), y1 = Math.floor((Math.max(...ys) + RADIUS) / CELL)
@@ -82,7 +96,7 @@ export function walkFloor(model: ModelState, level: Level) {
     for (const p of [camera.target, camera.eye]) {
       if (clear(p)) return { x: p.x, y: p.y, yaw, pitch: 0 }
     }
-    for (const w of walls) {
+    for (const w of levelWalls.length ? levelWalls : walls) {
       const angle = Math.atan2(w.end.y - w.start.y, w.end.x - w.start.x)
       const offset = w.thickness / 2 + 1000
       const p = { x: (w.start.x + w.end.x) / 2 - Math.sin(angle) * offset, y: (w.start.y + w.end.y) / 2 + Math.cos(angle) * offset }

@@ -1,4 +1,4 @@
-import { flexPoints, type ModelState, type Point3, type PortRef, type RunFitting, type RunSegment, type View3dCamera } from '@permitzip/bim-kernel'
+import { fittingBody, flexPoints, type ModelState, type Point3, type PortRef, type RunFitting, type RunSegment, type View3dCamera } from '@permitzip/bim-kernel'
 
 export type CameraPose = Pick<View3dCamera, 'eye' | 'target'>
 export type Waypoint = CameraPose & { readonly seconds: number }
@@ -29,6 +29,29 @@ export function pointAlong(path: MeasuredPath, at: number): Point3 {
   return mix(points[lo]!, points[hi]!, t)
 }
 
+function fittingCenterline(
+  elements: ModelState['elements'],
+  fitting: RunFitting,
+  incoming: RunFitting['ports'][number],
+  outgoing: RunFitting['ports'][number],
+): { readonly cutIn: number; readonly cutOut: number; readonly points: readonly Point3[] } | null {
+  const body = fittingBody(elements, fitting)
+  const tube = body.tubes[0]
+  const inFace = body.faces[incoming.id]?.center
+  const outFace = body.faces[outgoing.id]?.center
+  if (!tube || tube.rings.length < 2 || !inFace || !outFace) return null
+  const first = tube.rings[0]!.center
+  const last = tube.rings[tube.rings.length - 1]!.center
+  const forward = distance(first, inFace) + distance(last, outFace) <= distance(last, inFace) + distance(first, outFace)
+  const ordered = forward ? tube.rings : [...tube.rings].reverse()
+  if (distance(ordered[0]!.center, inFace) > 1 || distance(ordered[ordered.length - 1]!.center, outFace) > 1) return null
+  return {
+    cutIn: Math.max(0, body.takeoffs[incoming.id] ?? 0),
+    cutOut: Math.max(0, body.takeoffs[outgoing.id] ?? 0),
+    points: ordered.map(r => r.center),
+  }
+}
+
 /** Follow only mutually connected ports on this system. A branch is a choice for the operator. */
 export function traceCameraRoute(model: ModelState, first: RunSegment, entry: RunEnd) {
   const points: Point3[] = []
@@ -46,13 +69,24 @@ export function traceCameraRoute(model: ModelState, first: RunSegment, entry: Ru
   const onSystem = (el: RunSegment | RunFitting) => el.systemId === first.systemId && el.domain === first.domain
   const matches = (link: PortRef | undefined, from: PortRef) => link?.elementId === from.elementId && link.port === from.port
   const junction = (f: RunFitting) => f.fittingType === 'tee' || f.fittingType === 'tap' || f.fittingType === 'wye'
+  const appendSlice = (path: MeasuredPath, fromAt: number, toAt: number, reverse: boolean) => {
+    append(pointAlong(path, fromAt))
+    for (let i = 0; i < path.points.length; i++) {
+      const index = reverse ? path.points.length - 1 - i : i
+      const s = path.stations[index]!
+      if (reverse ? (s < fromAt && s > toAt) : (s > fromAt && s < toAt)) append(path.points[index]!)
+    }
+    append(pointAlong(path, toAt))
+  }
   let segment = first
+  let entryCut = 0
   for (;;) {
     if (visited.has(segment.id)) return finish('Loop')
     visited.add(segment.id)
     const path = measured(flexPoints(segment).map(p => world(segment, p)))
     const reverse = entry === 'end'
     const start = reverse ? path.length : 0
+    const fromAt = segment.flex ? start : Math.max(0, Math.min(path.length, reverse ? path.length - entryCut : entryCut))
     let nearest: { at: number; type: string } | undefined
     for (const id of segment.branches) {
       const f = model.elements[id]
@@ -60,41 +94,70 @@ export function traceCameraRoute(model: ModelState, first: RunSegment, entry: Ru
       const at = Math.max(0, Math.min(path.length, f.host.s))
       if (!nearest || Math.abs(at - start) < Math.abs(nearest.at - start)) nearest = { at, type: f.fittingType }
     }
-    for (let i = 0; i < path.points.length; i++) {
-      const index = reverse ? path.points.length - 1 - i : i
-      if (nearest && (reverse ? path.stations[index]! < nearest.at : path.stations[index]! > nearest.at)) break
-      append(path.points[index]!)
-    }
     if (nearest) {
-      append(pointAlong(path, nearest.at))
+      const toAt = reverse ? Math.min(fromAt, nearest.at) : Math.max(fromAt, nearest.at)
+      appendSlice(path, fromAt, toAt, reverse)
       return finish(`First ${nearest.type}`)
     }
 
     const exit: RunEnd = reverse ? 'start' : 'end'
     let from: PortRef = { elementId: segment.id, port: exit }
     let link = segment.links[exit]
+    let anchor = world(segment, segment[exit])
+    let next = link ? model.elements[link.elementId] : undefined
+    let curve: ReturnType<typeof fittingCenterline> = null
+    let fitting: RunFitting | null = null
+    let incoming: RunFitting['ports'][number] | undefined
+    let outgoing: RunFitting['ports'][number] | undefined
+    if (link && next?.kind === 'run_fitting' && onSystem(next)) {
+      const candidate = next
+      const inPort = candidate.ports.find(p => p.id === link?.port)
+      if (inPort && matches(inPort.link, from) && distance(anchor, world(candidate, inPort.position)) <= tolerance) {
+        fitting = candidate
+        incoming = inPort
+        if (!junction(candidate) && candidate.ports.length === 2) {
+          outgoing = candidate.ports.find(p => p !== inPort)
+          if (outgoing) curve = fittingCenterline(model.elements, candidate, inPort, outgoing)
+        }
+      }
+    }
+
+    const exitCut = !segment.flex && curve ? curve.cutIn : 0
+    const endAt = reverse ? Math.min(fromAt, Math.max(0, exitCut)) : Math.max(fromAt, Math.min(path.length, path.length - exitCut))
+    appendSlice(path, fromAt, endAt, reverse)
+
     if (!link) return finish('Open end')
-    let next = model.elements[link.elementId]
     if (next?.kind === 'run_fitting' && onSystem(next)) {
-      const fitting = next
-      const incoming = fitting.ports.find(p => p.id === link?.port)
-      if (!incoming || !matches(incoming.link, from) || distance(points[points.length - 1]!, world(fitting, incoming.position)) > tolerance) return finish('End of connected run')
-      append(world(fitting, incoming.position))
-      append(world(fitting, fitting.position))
-      if (junction(fitting)) return finish(`First ${fitting.fittingType}`)
-      if (fitting.ports.length !== 2) return finish(fitting.label || 'End fitting')
-      const outgoing = fitting.ports.find(p => p !== incoming)!
-      append(world(fitting, outgoing.position))
+      if (!fitting || !incoming) return finish('End of connected run')
+      if (junction(fitting)) {
+        append(world(fitting, incoming.position))
+        append(world(fitting, fitting.position))
+        return finish(`First ${fitting.fittingType}`)
+      }
+      if (!outgoing) {
+        append(world(fitting, incoming.position))
+        append(world(fitting, fitting.position))
+        return finish(fitting.label || 'End fitting')
+      }
+      if (curve) {
+        for (const pt of curve.points) append(world(fitting, pt))
+      } else {
+        append(world(fitting, incoming.position))
+        append(world(fitting, fitting.position))
+        append(world(fitting, outgoing.position))
+      }
+      anchor = world(fitting, outgoing.position)
       from = { elementId: fitting.id, port: outgoing.id }
       link = outgoing.link
       if (!link) return finish('Open end')
       next = model.elements[link.elementId]
     }
     if (next?.kind !== 'run_segment' || !onSystem(next) || (link.port !== 'start' && link.port !== 'end')
-      || !matches(next.links[link.port], from) || distance(points[points.length - 1]!, world(next, next[link.port])) > tolerance) {
+      || !matches(next.links[link.port], from) || distance(anchor, world(next, next[link.port])) > tolerance) {
       return finish('End of connected run')
     }
     entry = link.port
+    entryCut = curve ? curve.cutOut : 0
     segment = next
   }
 }
