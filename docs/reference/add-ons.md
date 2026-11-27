@@ -63,13 +63,13 @@ Water, drainage, vent and fuel gas networks; fixture units; plumbing and gas siz
 | Add-on library rows | 4 |
 | Agent tools | 3 |
 | Block tables | 1 |
-| Built-in part types | 39 |
+| Built-in part types | 41 |
 | Calculation sheets | 3 |
 | Calculations | 14 |
 | Catalog record types | 2 |
 | Commands | 4 |
 | Connection quantity checks | 1 |
-| Connector end types | 10 |
+| Connector end types | 11 |
 | Design limit defaults | 9 |
 | Design limit measures | 1 |
 | Diagram graphs | 2 |
@@ -109,9 +109,10 @@ Air and hydronic networks served by equipment; ventilation and pressurization.
 | --- | --- |
 | Add-on library rows | 3 |
 | Block tables | 2 |
+| Built-in part types | 9 |
 | Calculations | 5 |
 | Commands | 6 |
-| Connector end types | 3 |
+| Connector end types | 4 |
 | Connector faces | 1 |
 | Design limit defaults | 1 |
 | Diagram graphs | 1 |
@@ -159,9 +160,9 @@ Grids, walls, doors, windows, openings, floors, ceilings, roofs, columns and sta
 | --- | --- |
 | Add-on library rows | 4 |
 | Assembly rating kinds | 2 |
-| Bodies by class | 2 |
-| Element classes | 9 |
-| Element kinds | 2 |
+| Bodies by class | 3 |
+| Element classes | 10 |
+| Element kinds | 3 |
 | Field providers | 1 |
 | IFC import rules | 2 |
 | IFC relationships | 3 |
@@ -169,7 +170,7 @@ Grids, walls, doors, windows, openings, floors, ceilings, roofs, columns and sta
 | Materials | 32 |
 | Parameter sets | 1 |
 | Plan graphics by class | 2 |
-| Starter element types | 4 |
+| Starter element types | 7 |
 | Surface faces | 1 |
 | Tag style presets | 2 |
 
@@ -199,23 +200,28 @@ Steel beams, columns and pad footings, a wide-flange catalogue, live load by use
 | Space-use rates | 1 |
 | Zone purposes | 1 |
 
-## Other add-ons
-
 ### Civil
 
-Id `civil`, version 0.1.0, written for kernel contract ^1.1.0.
+Id `civil`, version 0.1.0, written for kernel contract ^1.13.0.
 
-Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff carried down a gravity network; inlet and slope checks.
+Storm catchments, inlets, manholes, outfalls and alignments; rational-method runoff on a gravity network; existing and proposed TIN surfaces from LandXML with prismoidal cut and fill.
 
 | What it contributes | Items |
 | --- | --- |
-| Calculations | 2 |
-| Element classes | 7 |
+| Add-on library rows | 4 |
+| Calculations | 3 |
+| Commands | 1 |
+| Element classes | 8 |
+| Element kinds | 1 |
+| Field providers | 1 |
 | Lint rules | 2 |
 | Network adapters | 1 |
+| Pack reads | 2 |
 | Parameter sets | 4 |
 | Pipe materials | 1 |
 | Services | 1 |
+
+## Other add-ons
 
 ### Site
 

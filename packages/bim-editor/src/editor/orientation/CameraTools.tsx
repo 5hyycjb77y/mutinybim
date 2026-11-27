@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { Camera, Play, Square, X } from 'lucide-react'
 import { elementsOfKind, isBuildingStoryLevel, modelLevels, runLabel, type ModelState } from '@permitzip/bim-kernel'
 import { Button, Card, Input, Label, NativeSelect } from '@permitzip/bim-ui'
@@ -26,19 +26,19 @@ function readFlight(key: string, camera: CameraPose | null): Waypoint[] {
   return camera ? defaultFlight(camera) : []
 }
 
-export default function CameraTools({ viewer, model, initialLevel, selectedId, rightInset, onClose }: {
+export default function CameraTools({ viewer, model, initialLevel, selectedId, rightInset, canvasRef, onClose }: {
   viewer: Viewer
   model: ModelState
   initialLevel: string | null
   selectedId: string | null
   rightInset: number
+  canvasRef: RefObject<HTMLDivElement | null>
   onClose: () => void
 }) {
   const [mode, setMode] = useState<Mode>('walk')
   const [running, setRunning] = useState(false)
   const [status, setStatus] = useState('')
   const panel = useRef<HTMLDivElement>(null)
-  const heading = useRef<HTMLHeadingElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
   const stopRef = useRef<((reason?: string) => void) | null>(null)
   const keys = useRef(new Set<string>())
@@ -71,7 +71,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
   }, [running])
 
   const play = useCallback((tick: Tick, guide?: readonly CameraPose['target'][]) => {
-    const motion = viewer.beginCameraMotion(guide)
+    const motion = viewer.beginCameraMotion(guide, () => stopRef.current?.())
     if (!motion) { setStatus('Finish the current edit to use the camera.'); return }
     keys.current.clear()
     look.current = { dx: 0, dy: 0 }
@@ -91,7 +91,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
       motion.release()
       setRunning(false)
       setStatus(reason)
-      if (panel.current?.contains(document.activeElement)) heading.current?.focus({ preventScroll: true })
+      if (panel.current?.contains(document.activeElement)) canvasRef.current?.focus({ preventScroll: true })
     }
     const key = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -124,7 +124,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
     document.addEventListener('visibilitychange', visibility)
     setRunning(true)
     draw(performance.now())
-  }, [viewer])
+  }, [viewer, canvasRef])
 
   const start = () => {
     const camera = viewer.camera3dState()
@@ -193,7 +193,7 @@ export default function CameraTools({ viewer, model, initialLevel, selectedId, r
           if (e.key === 'Escape') { e.preventDefault(); onClose() }
         }}>
         <header className="flex items-center justify-between gap-2">
-          <h2 ref={heading} tabIndex={-1} className="flex items-center gap-2 text-sm font-semibold outline-none"><Camera className="size-4" />{running ? modes.find(m => m.id === mode)?.title : 'Camera tools'}</h2>
+          <h2 className="flex items-center gap-2 text-sm font-semibold"><Camera className="size-4" />{running ? modes.find(m => m.id === mode)?.title : 'Camera tools'}</h2>
           <Button variant="ghost" size="icon-sm" aria-label="Close camera tools" onClick={onClose}><X /></Button>
         </header>
         {!running && <Label className="grid gap-1 text-xs">Camera mode

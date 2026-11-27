@@ -27,19 +27,49 @@ export interface StepEntity {
   readonly attrs: readonly StepValue[];
 }
 
+/**
+ * A value that can't be written in a STEP file: a number that isn't finite, a text that isn't a string, an
+ * enumeration that isn't upper case. Thrown where the value is made, not when the file is serialized, so the writer
+ * of one record can catch it and leave that record out; by then the serializer could only stop the whole file.
+ */
+export class StepValueError extends Error {
+  constructor(
+    readonly wanted: "text" | "enum" | "real" | "int",
+    message: string,
+  ) {
+    super(message);
+    this.name = "StepValueError";
+  }
+}
+
+const ENUM = /^[A-Z][A-Z0-9_]*$/;
+
 export const $ = null;
-export const str = (s: string): StepValue => ({ str: s });
-export const en = (e: string): StepValue => ({ enum: e });
-export const real = (n: number): StepValue => ({ real: n });
-export const int = (n: number): StepValue => ({ int: n });
+export const str = (s: string): StepValue => {
+  if (typeof s !== "string") throw new StepValueError("text", `STEP string must be text, got ${typeof s}`);
+  return { str: s };
+};
+export const en = (e: string): StepValue => {
+  if (typeof e !== "string" || !ENUM.test(e)) throw new StepValueError("enum", `STEP enumeration ".${String(e)}." must be upper case`);
+  return { enum: e };
+};
+export const real = (n: number): StepValue => {
+  if (typeof n !== "number" || !Number.isFinite(n)) throw new StepValueError("real", `STEP real must be finite, got ${String(n)}`);
+  return { real: n };
+};
+export const int = (n: number): StepValue => {
+  if (!Number.isInteger(n)) throw new StepValueError("int", `STEP integer must be whole, got ${String(n)}`);
+  return { int: n };
+};
 export const bool = (b: boolean): StepValue => ({ bool: b });
 export const list = (items: readonly StepValue[]): StepValue => ({ list: items });
 export const typed = (type: string, value: StepValue): StepValue => ({ typed: type, value });
-export const opt = (s: string | null | undefined): StepValue => (s === null || s === undefined || s === "" ? null : { str: s });
+export const opt = (s: string | null | undefined): StepValue => (s === null || s === undefined || s === "" ? null : str(s));
 
 /** An entity graph under construction. Handles are 1-based and never reused. */
 export class StepGraph {
-  private readonly entities: StepEntity[] = [];
+  /** By handle, less one. Null: dropped (`dropFrom`). */
+  private readonly entities: (StepEntity | null)[] = [];
 
   add(type: string, attrs: readonly StepValue[]): StepRef {
     if (!/^[A-Z][A-Z0-9_]*$/.test(type)) throw new Error(`STEP entity type "${type}" must be upper case`);
@@ -59,12 +89,45 @@ export class StepGraph {
     this.entities[handle.ref - 1] = { type, attrs };
   }
 
+  /** How many handles have been given out. Read before a record is written, it is the mark `dropFrom` takes. */
   get size(): number {
     return this.entities.length;
   }
 
+  /**
+   * Take back every entity added since the graph had `size` handles: a record's writer failed part way, and what it
+   * had added must not be in the file. Their handles are not given out again, so anything still pointing at one shows
+   * up as a missing reference (`missingReferences`) instead of quietly pointing at a later entity.
+   */
+  dropFrom(size: number): void {
+    for (let i = Math.max(0, size); i < this.entities.length; i++) this.entities[i] = null;
+  }
+
+  /** The entities in the file, in handle order. */
   all(): readonly StepEntity[] {
-    return this.entities;
+    return this.entities.filter((e): e is StepEntity => e !== null);
+  }
+
+  /** Each entity in the file with its handle, in handle order. */
+  each(visit: (entity: StepEntity, handle: number) => void): void {
+    for (let i = 0; i < this.entities.length; i++) {
+      const e = this.entities[i];
+      if (e) visit(e, i + 1);
+    }
+  }
+
+  /** Handles that something in the file points at but that are not in it (dropped), in order. Empty in a sound graph. */
+  missingReferences(): number[] {
+    const missing = new Set<number>();
+    const walk = (v: StepValue): void => {
+      if (v === null) return;
+      if ("ref" in v) {
+        if (!this.entities[v.ref - 1]) missing.add(v.ref);
+      } else if ("list" in v) v.list.forEach(walk);
+      else if ("typed" in v) walk(v.value);
+    };
+    for (const e of this.entities) if (e) e.attrs.forEach(walk);
+    return [...missing].sort((a, b) => a - b);
   }
 }
 
@@ -156,9 +219,9 @@ export function serializeStep(header: StepHeader, graph: StepGraph): string {
     "ENDSEC;",
     "DATA;",
   ];
-  graph.all().forEach((e, i) => {
-    if (!e.type) throw new Error(`STEP handle #${i + 1} was reserved and never written`);
-    lines.push(`#${i + 1}=${e.type}(${e.attrs.map(stepValue).join(",")});`);
+  graph.each((e, handle) => {
+    if (!e.type) throw new Error(`STEP handle #${handle} was reserved and never written`);
+    lines.push(`#${handle}=${e.type}(${e.attrs.map(stepValue).join(",")});`);
   });
   lines.push("ENDSEC;", "END-ISO-10303-21;", "");
   return lines.join("\n");

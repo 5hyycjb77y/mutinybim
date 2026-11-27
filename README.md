@@ -57,6 +57,9 @@ This is the engine, not yet the full product.
 - A one-command local stack: `docker compose up` starts Postgres, the model
   server on its real Postgres store, a local sign-in and the editor pointed
   at that server.
+- A standalone model server can use browser OpenID Connect sign-in and store
+  owner, manager, editor and viewer permissions in its own Postgres database.
+  See [standalone setup](#standalone-model-server-with-browser-sign-in).
 - The performance gate: measured budgets for 250,000-element models, run on
   every pull request that touches the kernel, sync, viewers, editor or model
   server ([docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
@@ -67,9 +70,6 @@ This is the engine, not yet the full product.
   firm's part libraries, design limits, stored drawings, linked Revit models,
   code studies, file storage and a built-in agent). In the local demo they say
   "not available here"; the rest of the editor works.
-- Model server sign-in for any provider, with built-in member roles. Today it
-  verifies tokens from one configured sign-in service; the local stack brings
-  its own, for one computer.
 
 See [ROADMAP.md](ROADMAP.md).
 
@@ -117,6 +117,45 @@ start it again, and the model is still there. Open a second window with
 Priya and Sam (a local sign-in for one computer; never expose it).
 `docker compose down -v` deletes the model. What each service does:
 [docker-compose.yml](docker-compose.yml).
+
+### Standalone model server with browser sign-in
+
+Use Docker with the Compose plugin. The standalone stack has its own project and
+database volume. An existing project-backed installation can continue using
+the command above with its original volume and project permissions. Both
+stacks use the same loopback ports, so stop the running stack before switching.
+
+```bash
+docker compose -f compose.native.yml up --build -d
+```
+
+1. Open `http://127.0.0.1:3095/m/east-plant?view=plan`. Use the exact host in
+   this address. The local development accounts are `mara` and `jules`, with
+   the demo password `east-plant-local-demo`. An operator may set
+   `MUTINYBIM_DEMO_PASSWORD` to a replacement of at least 16 characters.
+2. Sign in as Mara. Open **Manage → Manage members** and copy **Your person ID**.
+   A first sign-in creates a person. The operator then designates the first
+   owner. Substitute Mara’s copied ID for `PERSON_UUID` in this command.
+
+   ```bash
+   docker compose -f compose.native.yml exec authority node --import tsx src/create-native-model.ts east-plant --owner PERSON_UUID
+   ```
+
+3. Reload the model and sign in again. In a second browser profile sign in as
+   Jules and copy Jules’s person ID. From Mara’s **Manage members**, look up
+   that ID, choose a role and confirm. Jules can now reopen East plant with
+   those permissions. **Manage → Sign out** ends the current tab’s session.
+4. To stop and resume with the saved model and roles, run
+   `docker compose -f compose.native.yml down`, then
+   `docker compose -f compose.native.yml up -d`. Keep the named volume.
+
+For another provider, register `http://127.0.0.1:3095/auth/native/callback`
+for local testing, set `MUTINYBIM_OIDC_ISSUER` and `MUTINYBIM_OIDC_CLIENT_ID`
+and, for a confidential client, `MUTINYBIM_OIDC_CLIENT_SECRET`. Recreate
+the authority with the new configuration. The bundled development provider still
+listens on `127.0.0.1:9999`. The authority accepts sign-in from its configured
+issuer. An identity at a different issuer
+is a separate person. [Native session and role guide](services/bim-authority/NATIVE-SESSIONS.md)
 
 Other root commands:
 

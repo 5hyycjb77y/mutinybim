@@ -3,13 +3,12 @@ import {
   PartGeometryUnavailableError,
   PartModelError,
   executeCommand,
-  partImportReport,
+  partTypeImportReport,
   partTypeIssues,
   partViewLinework,
   partViewSvg,
   previewEdit,
   withUpgradePolicy,
-  resolveConnectors,
   type ModelState,
   type PartTypeDefinition,
   type PartView,
@@ -58,7 +57,10 @@ export interface BatchCheck {
 
 export interface PartCheck {
   readonly typeId: string;
+  /** Blocking structural or schema problems (`partTypeIssues`): a type with problems cannot be saved. */
   readonly problems: readonly string[];
+  /** Advisory connector-report warnings (`partTypeImportReport`): surfaced in checks and approvals; saving is still allowed. */
+  readonly warnings: readonly string[];
   readonly pictures: Readonly<Partial<Record<PartView, string>>>;
   readonly notes: readonly string[];
 }
@@ -109,8 +111,8 @@ function checkIn(model: ModelState, raw: unknown, options: CheckOptions): Output
 
 function checkPart(typeId: string, def: PartTypeDefinition, pictures: boolean): PartCheck {
   const problems = partTypeIssues(def).map((i) => `${i.field}: ${i.message}`);
-  const report = partImportReport(def, resolveConnectors(def, def.typeValues));
-  for (const p of report.problems) problems.push(`${p.connectorLabel}: ${p.message} (${p.nextStep}).`);
+  const report = partTypeImportReport(def);
+  const warnings = report.problems.map((p) => `${p.connectorLabel}: ${p.message} (${p.nextStep}).`);
   const drawn: Partial<Record<PartView, string>> = {};
   const notes: string[] = [];
   // The view pictures draw the part's solid (kit bodies are all solid features); a hand-written definition of primitives only has none.
@@ -131,5 +133,5 @@ function checkPart(typeId: string, def: PartTypeDefinition, pictures: boolean): 
       }
     }
   }
-  return { typeId, problems, pictures: drawn, notes };
+  return { typeId, problems, warnings, pictures: drawn, notes };
 }

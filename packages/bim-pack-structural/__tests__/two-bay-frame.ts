@@ -144,7 +144,8 @@ export function twoBayFrame(opts: FrameOptions = {}): ModelState {
  * per bay per column line, a column and footing at every grid point, one
  * roof deck over all of it and one rooftop unit per bay.
  */
-export function gridFrame(bays: number): ModelState {
+export function gridFrame(bays: number, opts?: { readonly elasticModulusKsi?: number }): ModelState {
+  const beamValues: Record<string, string | number> = opts?.elasticModulusKsi !== undefined ? { "struct.section": "W16X26", "struct.elastic_modulus": opts.elasticModulusKsi } : { "struct.section": "W16X26" };
   const elements: BimElement[] = [
     { ...base(GROUND), kind: "level", name: "Ground", elevationMm: 0 },
     { ...base(ROOF), kind: "level", name: "Roof", elevationMm: ROOF_HEIGHT_FT * FT },
@@ -157,7 +158,7 @@ export function gridFrame(bays: number): ModelState {
       elements.push({ ...base(cid), kind: "column", material: "steel", position: ft(x, y), size: { x: 203, y: 203 }, classId: "struct.column_steel", values: { "struct.section": "W8X31" }, placement: { kind: "line", levelId: GROUND, start: ft(x, y), end: ft(x, y), startOffsetMm: 0, endOffsetMm: ROOF_HEIGHT_FT * FT, lateral: "center", vertical: "bottom", topLevelId: ROOF } });
       elements.push({ ...base(`F${i}-${j}`), kind: "component", category: "footing", typeName: "Pad", position: ft(x, y), size: { x: 5 * FT, y: 5 * FT }, rotationDeg: 0, classId: "struct.footing_pad", placement: { kind: "point", levelId: GROUND, position: ft(x, y), offsetMm: 0, rotationDeg: 0 } });
       if (i === bays) continue;
-      elements.push({ ...base(`B${i}-${j}`), kind: "beam", sectionName: "W16X26", start: ft(x, y), end: ft(x + 30, y), classId: "struct.beam_steel", values: { "struct.section": "W16X26" }, placement: { kind: "line", levelId: ROOF, start: ft(x, y), end: ft(x + 30, y), startOffsetMm: 0, endOffsetMm: 0, lateral: "center", vertical: "top" } });
+      elements.push({ ...base(`B${i}-${j}`), kind: "beam", sectionName: "W16X26", start: ft(x, y), end: ft(x + 30, y), classId: "struct.beam_steel", values: beamValues, placement: { kind: "line", levelId: ROOF, start: ft(x, y), end: ft(x + 30, y), startOffsetMm: 0, endOffsetMm: 0, lateral: "center", vertical: "top" } });
     }
   }
   const outline = [ft(0, 0), ft(bays * 30, 0), ft(bays * 30, bays * 25), ft(0, bays * 25)];

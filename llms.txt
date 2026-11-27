@@ -22,6 +22,7 @@ The tool server lists at most 10 core tools by default (168 in all, opt-in by fa
 - [parts](docs/reference/script-kit/parts.md): Making part types: a part's bodies, connectors and parameters.
 - [PartBuilder](docs/reference/script-kit/part-builder.md): The builder `parts.part()` returns: boxes, extrusions, sweeps, connectors and parameters on one part type.
 - [documents](docs/reference/script-kit/documents.md): Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set.
+- [markups](docs/reference/script-kit/markups.md): Sheet review markups: list marked sheets, render full sheets or tight markup crops with vivid redlines over monochrome linework, add strokes, and yellow-line (mark addressed), resolve or clear review markups.
 - [drafting](docs/reference/script-kit/drafting.md): Full CAD drafting-view authoring: detail views, linework, curves, hatched/halftone/screened/masking regions, 2D components, repeating details, batt insulation, masked notes with filled NCS leaders, margin-aligned callout stacks, dimensions, modify operations, auto-crop, and layout QA.
 - [checks](docs/reference/script-kit/checks.md): Checks a script runs on its own output before a person sees it.
 - [electrical](docs/reference/script-kit/electrical.md): IES LM-63 photometrics, normal illuminance, NFPA 101 / IBC emergency egress checks, and 2D plan overlays.

@@ -1,4 +1,4 @@
-import { Building, Columns3, DoorOpen, Footprints, Frame, Grid3x3, House, Layers, Minus, PanelTop, RectangleHorizontal, Ruler, Square, SquareDashed, Triangle } from 'lucide-react'
+import { Building, Columns3, DoorOpen, Fence, Footprints, Frame, Grid3x3, House, Layers, Minus, PanelTop, RectangleHorizontal, Ruler, Square, SquareDashed, Triangle } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { RibbonCommand, RibbonGroup, RibbonTab } from '../ribbon/types'
 import { tradeTab } from '../ribbon/trade-tab'
@@ -45,6 +45,7 @@ const ICONS: Readonly<Record<ArchitectureToolId, ComponentType>> = {
   roof: Triangle,
   column: Columns3,
   stair: Footprints,
+  railing: Fence,
 }
 
 function toolCommand(r: ArchitectureRibbon, t: ArchitectureTool): RibbonCommand {

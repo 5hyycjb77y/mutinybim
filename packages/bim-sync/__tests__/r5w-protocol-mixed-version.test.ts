@@ -48,8 +48,9 @@ function asOldServer(msg: Json): Json {
 }
 
 /** A page on an in-memory link; `oldClient` / `oldServer` reproduce the round 4 wire on that side. */
-function attach(hub: SyncHub, actor: Actor, id: string, opts: { oldClient?: boolean; oldServer?: boolean } = {}) {
+function attach(hub: SyncHub, actor: Actor, id: string, opts: { oldClient?: boolean; oldServer?: boolean; reportAccess?: boolean } = {}) {
   const outcomes: CommitOutcome[] = [];
+  const grants: (boolean | undefined)[] = [];
   const received: Json[] = [];
   const conn = {
     id,
@@ -71,13 +72,13 @@ function attach(hub: SyncHub, actor: Actor, id: string, opts: { oldClient?: bool
   const client: SyncClient = new SyncClient(
     { send: (data) => void hub.handle(conn, toServer(data)), close: () => hub.leave(conn) },
     actor,
-    { onOutcome: (_req, outcome) => outcomes.push(outcome) },
+    { onOutcome: (_req, outcome) => outcomes.push(outcome), onWriteAccess: (grant) => grants.push(grant) },
     60_000,
     { clientSessionId: `${id}-session`, meter: null },
   );
-  hub.join(conn, { actorId: actor.id, canWrite: true });
+  hub.join(conn, { actorId: actor.id, canWrite: true, reportWriteAccess: opts.reportAccess });
   client.opened();
-  return { client, outcomes, received, conn };
+  return { client, outcomes, received, conn, grants };
 }
 
 async function startHub() {
@@ -150,6 +151,23 @@ describe("protocol version and features on hello / welcome", () => {
     attach(hub, avery, "a");
     await settle();
     expect(hub.everyoneReads("schema:part@2")).toBe(false);
+  });
+
+  it("sends initial and changed write grants only to a page that reads them", async () => {
+    const { hub } = await startHub();
+    const current = attach(hub, priya, "current", { reportAccess: true });
+    const old = attach(hub, avery, "old", { oldClient: true, reportAccess: true });
+    await settle();
+    expect(current.grants).toEqual([true]);
+    expect(old.received.find(m => m.type === "welcome")).not.toHaveProperty("canWrite");
+    for (const canWrite of [false, false, true]) {
+      hub.setPrincipal("current", { actorId: priya.id, canWrite, reportWriteAccess: true });
+      hub.setPrincipal("old", { actorId: avery.id, canWrite, reportWriteAccess: true });
+    }
+    expect(current.grants).toEqual([true, false, true]);
+    expect(old.received.filter(m => m.type === "model_access")).toEqual([]);
+    current.client.closed();
+    old.client.closed();
   });
 });
 

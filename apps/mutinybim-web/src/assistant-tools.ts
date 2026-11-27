@@ -395,7 +395,10 @@ export function createAssistantTools(options: AssistantToolsOptions): AssistantT
   async function modelsLine(person: UserRow): Promise<string> {
     const [ownRows, sharedRows] = await Promise.all([db.modelsOf(person.id), db.sharedWith(person.id)]);
     const own = ownRows.map((m) => `${m.name} (model_id ${m.id}, yours)`);
-    const shared = sharedRows.map((m) => `${m.name} (model_id ${m.id}, ${m.role === "view" ? "view only" : "you can edit"}, shared by ${m.owner_name})`);
+    const shared = sharedRows.map((m) => {
+      const via = m.team_names.length > 0 ? `, via ${m.team_names.join(", ")}` : "";
+      return `${m.name} (model_id ${m.id}, ${m.role === "view" ? "view only" : "you can edit"}, shared by ${m.owner_name}${via})`;
+    });
     const all = [...own, ...shared];
     return all.length > 0 ? `${person.display_name}'s models: ${all.slice(0, 40).join("; ")}.` : `${person.display_name} has no models yet; they make one under My models at ${origin}/models.`;
   }

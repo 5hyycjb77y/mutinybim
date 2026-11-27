@@ -163,6 +163,8 @@ export interface EditorAgentHost {
 
 /** What this host can do, for the editor's "connect …" messages. */
 export interface EditorHostCapabilities {
+  /** Enable editing only after this connection receives the model server's explicit write grant. */
+  readonly requireWriteGrant?: boolean;
   /** Plain name of the host, in messages ("this computer", the embedding app's name). */
   readonly hostName: string;
   /** Where a person connects storage or an AI, in words ("Settings › Integrations"); null when the host has no such place. */

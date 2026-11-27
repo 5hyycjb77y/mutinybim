@@ -58,6 +58,11 @@ import { recordedSchemaVersion } from "./pg-migration-session";
 import { LeaseKeeper, type LeaseLossReason } from "./lease";
 import { LoginVerifier, type LoginIssuer, type VerifiedLogin } from "./auth/verify";
 import { TestProjectAuthorizer } from "./auth/test-authorizer";
+import { nativeSocketAccess, readNativeSaveReceipt } from "./auth/native-socket";
+import { nativeBrowserRoutes } from "./auth/native-browser";
+import { PgNativeModelMembers } from "./native-model-members";
+import { nativeMembershipRequest } from "./native-members-http";
+import { installedMode } from "./native-migrations";
 import { PERMISSION_CHECK_FAILED } from "./host/contract";
 import { createHost, loadModelServerHostModule } from "./host/load";
 import { hostProjectResolver, hostedModelProvisioner } from "./host/hosted-models";
@@ -66,10 +71,20 @@ import { logMergeReply } from "./merge";
 import { handleQuantityDeltaMessage } from "./delta";
 import { ImportService, PgImportRuns, convertInThread, proposalOwnerCanWrite } from "./import";
 
-/** The host plug-in (host/contract.ts): who may sign in and what they may do. Null: test logins only. */
-const hostModule = await loadModelServerHostModule(process.env.MUTINYBIM_AUTHORIZER_MODULE);
+/** The optional plug-in supplies sign-in and permissions for a hosted installation. */
+const hostModule = process.env.MUTINYBIM_AUTH_MODE === "native" ? null : await loadModelServerHostModule(process.env.MUTINYBIM_AUTHORIZER_MODULE);
 const config = loadConfig(process.env, { forbiddenDbRefDigests: hostModule?.forbiddenDbRefDigests ?? [] });
 const sql = connect(config.dbUrl, 8);
+const nativeBrowser = config.authMode === "native" ? nativeBrowserRoutes(sql, process.env, config.local) : null;
+const nativeMembers = config.authMode === "native" ? new PgNativeModelMembers(sql) : null;
+const storageMode = (await installedMode(sql)) ?? "hosted";
+if (storageMode !== config.authMode) {
+  throw new Error(`[config] the database uses ${storageMode} storage. Check MUTINYBIM_AUTH_MODE and MUTINYBIM_DB_URL.`);
+}
+if (config.authMode === "native") {
+  const [storage] = await sql`select to_regclass('bim.native_sessions') is not null as ready`;
+  if (!storage?.ready) throw new Error("[config] run the native migrations before serving native sessions");
+}
 const host =
   hostModule && config.hostModule
     ? await createHost(hostModule, { env: process.env, local: config.local, sql, hostProjects: hostProjectResolver(sql), provisioner: hostedModelProvisioner(sql), fetch }, config.hostModule)
@@ -118,10 +133,11 @@ interface LiveConn {
   readonly socket: WebSocket;
   readonly modelId: string;
   readonly userId: string;
-  readonly issuer: LoginIssuer;
+  readonly issuer: LoginIssuer | "native";
   readonly token: string;
   readonly expiresAt: number | null;
-  readonly actorId: string;
+  readonly actor: Actor;
+  readonly leave: () => void;
   canWrite: boolean;
   checkFailingSince: number | null;
 }
@@ -342,6 +358,7 @@ async function createRuntime(modelId: string): Promise<ModelRuntime> {
   let branchService: BranchService | null = null;
   const store = new PostgresCommitStore(sql, {
     modelId,
+    nativeSaveOrder: config.authMode === "native",
     owner: config.owner,
     ownerMachine: config.machineId,
     leaseTtlMs: config.leaseTtlMs,
@@ -450,6 +467,12 @@ async function createRuntime(modelId: string): Promise<ModelRuntime> {
     );
   }
   const hub = new SyncHub(sequencer, {
+    ...(config.authMode === "native" ? {
+      readSaveReceipt: async (connectionId: string, key: string, digest: string) => {
+        const conn = conns.get(connectionId);
+        return conn?.issuer === "native" ? readNativeSaveReceipt(sql, conn.token, modelId, conn.actor, key, digest) : null;
+      },
+    } : {}),
     branches: service,
     lineages,
     ...(merge ? { merge } : {}),
@@ -517,12 +540,12 @@ function retire(modelId: string, reason: LeaseLossReason | "stale_lease_on_write
 // ----------------------------------------------------------------- sign-in
 
 interface Admission {
-  readonly login: VerifiedLogin;
+  readonly login: VerifiedLogin | { issuer: "native"; userId: string; expiresAt: number };
   readonly modelId: string;
   readonly principal: ConnectionPrincipal;
 }
 
-type AdmissionResult = { readonly ok: true; readonly admission: Admission } | { readonly ok: false; readonly reason: string };
+type AdmissionResult = { readonly ok: true; readonly admission: Admission } | { readonly ok: false; readonly reason: string; readonly unavailable?: boolean };
 
 /** Sign-in and authorization, done before this process leases, loads or warms anything. */
 async function admit(
@@ -535,6 +558,12 @@ async function admit(
   const modelId = servedModelId(served, hello.modelId);
   if (!modelId) return { ok: false, reason: NO_MODEL_ACCESS };
   if (urlModel !== null && servedModelId(served, urlModel) !== modelId) return { ok: false, reason: WRONG_MODEL };
+  if (config.authMode === "native") {
+    const access = await nativeSocketAccess(sql, hello.token, modelId, hello.actor);
+    if (!access.ok) return { ok: false, reason: access.reason, unavailable: access.kind === "unavailable" };
+    return { ok: true, admission: { modelId, principal: access.principal,
+      login: { issuer: "native", userId: access.personId, expiresAt: access.expiresAt } } };
+  }
   const t0 = performance.now();
   let login: VerifiedLogin;
   try {
@@ -590,11 +619,18 @@ function onConnection(socket: WebSocket, req: IncomingMessage, urlModel: string 
     },
   };
   let queue: Promise<void> = Promise.resolve();
+  function leave(): void {
+    if (!live) return;
+    live.runtime.conns.delete(id);
+    live.runtime.hub.leave(hubConn);
+    live = null;
+  }
   socket.on("message", (data) => {
     const raw = data.toString();
     // One message at a time per connection, so hello is fully handled before anything after it.
     queue = queue
       .then(async () => {
+        if (socket.readyState !== socket.OPEN) return;
         if (live) {
           // A paused or partitioned process finds out here before acting: no renewal for too long = not ours.
           if (!live.runtime.keeper.fresh()) {
@@ -611,7 +647,13 @@ function onConnection(socket: WebSocket, req: IncomingMessage, urlModel: string 
         }
         helloAt = performance.now();
         const admitted = await admit(msg, urlModel, urlProject);
+        if (socket.readyState !== socket.OPEN) return;
         if (!admitted.ok) {
+          if (admitted.unavailable) {
+            socket.send(JSON.stringify({ type: "unavailable", message: admitted.reason }));
+            socket.close(4002, "access check unavailable");
+            return;
+          }
           if (admitted.reason === NO_SUCH_MODEL) console.log("[bim-authority] no live model yet for a reader", { id, model: urlModel });
           else console.error("[bim-authority] connection refused", { id, reason: admitted.reason });
           deny(socket, admitted.reason);
@@ -648,7 +690,8 @@ function onConnection(socket: WebSocket, req: IncomingMessage, urlModel: string 
           issuer: admission.login.issuer,
           token: msg.token ?? "",
           expiresAt: admission.login.expiresAt,
-          actorId: admission.principal.actorId,
+          actor: msg.actor,
+          leave,
           canWrite: admission.principal.canWrite,
           checkFailingSince: null,
         };
@@ -659,21 +702,41 @@ function onConnection(socket: WebSocket, req: IncomingMessage, urlModel: string 
       })
       .catch((err) => console.error("[bim-authority] message failed", { id, err }));
   });
-  socket.on("close", () => {
-    if (!live) return;
-    live.runtime.conns.delete(id);
-    live.runtime.hub.leave(hubConn);
-  });
+  socket.on("close", leave);
   socket.on("error", (err) => console.error("[bim-authority] socket error", { id, err }));
 }
 
 // ----------------------------------------------------------------- live access re-check
+
+async function recheckNative(runtime: ModelRuntime, conn: LiveConn): Promise<void> {
+  const access = await nativeSocketAccess(sql, conn.token, conn.modelId, conn.actor);
+  if (models.get(conn.modelId) !== runtime || runtime.conns.get(conn.id) !== conn || conn.socket.readyState !== conn.socket.OPEN) return;
+  if (access.ok) {
+    if (conn.canWrite && !access.principal.canWrite) counters.downgraded += 1;
+    conn.canWrite = access.principal.canWrite;
+    runtime.hub.setPrincipal(conn.id, access.principal);
+    return;
+  }
+  if (access.kind === "unavailable") {
+    conn.socket.send(JSON.stringify({ type: "unavailable", message: access.reason }));
+  } else {
+    counters.revoked += 1;
+    runtime.hub.revoke(conn.id, access.reason);
+  }
+  conn.leave();
+  conn.socket.close(access.kind === "unavailable" ? 4002 : 4003, "access check ended");
+}
 
 /** Access can be removed mid-session: re-check every live connection and act on the answer. */
 async function recheckAccess(): Promise<void> {
   const nowS = Date.now() / 1000;
   for (const runtime of models.values()) {
     for (const conn of [...runtime.conns.values()]) {
+      if (conn.issuer === "native") {
+        // Fixed native credentials stay usable up to their stored expiry. Only JWTs refresh early.
+        await recheckNative(runtime, conn);
+        continue;
+      }
       if (conn.expiresAt !== null && nowS > conn.expiresAt - 30) {
         // The token is about to expire; the client reconnects and signs in with a fresh one.
         counters.refreshed += 1;
@@ -727,7 +790,7 @@ async function recheckAccess(): Promise<void> {
         conn.canWrite = canWrite;
         if (!canWrite) counters.downgraded += 1;
       }
-      runtime.hub.setPrincipal(conn.id, { actorId: conn.actorId, canWrite, lineage: copy.lineage });
+      runtime.hub.setPrincipal(conn.id, { actorId: conn.actor.id, canWrite, lineage: copy.lineage });
     }
   }
 }
@@ -869,6 +932,7 @@ const server = createServer((req, res) => {
 
 async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
+  if (nativeBrowser && url.pathname.startsWith("/auth/native/")) return nativeBrowser(req, res, url.pathname);
   if (req.method === "OPTIONS") {
     res.writeHead(204, { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "POST, GET, OPTIONS" });
     res.end();
@@ -881,6 +945,11 @@ async function handleHttp(req: IncomingMessage, res: ServerResponse): Promise<vo
   if (req.method === "GET" && url.pathname === "/metrics") {
     json(res, 200, metrics());
     return;
+  }
+  const memberRoute = url.pathname.match(/^\/models\/([^/]+)\/members$/);
+  if (nativeMembers && memberRoute?.[1]) {
+    const reply = await nativeMembershipRequest(req, memberRoute[1], served, nativeMembers, url.searchParams.get("personId"));
+    return json(res, reply.status, reply.body, { "cache-control": "no-store", ...reply.headers });
   }
   // Load and warm a model before anyone waits on it (perf gate: cold vs warm). Editors only.
   const prepare = url.pathname.match(/^\/models\/([^/]+)\/prepare$/);
@@ -947,7 +1016,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 ensureFirstPartyAddOns();
-server.listen(config.port, () => {
+server.listen({ port: config.port, host: config.bindHost }, () => {
   console.log(`[bim-authority] listening on :${config.port} (machine ${config.machineId ?? "local"}, region ${config.region ?? "local"}, commit ${config.commit ?? "unknown"}, lease ${config.leaseTtlMs}/${config.leaseRenewMs} ms)`);
 });
 

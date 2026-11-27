@@ -6,15 +6,20 @@
  * server with an agent key (as the tool server does), find edits, branches
  * and saved versions after a restart, and get back in with a reset link.
  */
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { promisify } from "node:util";
 import { AgentSession, agentActor, builtinWebSocketFactory } from "@permitzip/bim-sync";
-import { createApp, type App } from "../src/app";
+import { createApp, type App, type AppOptions } from "../src/app";
+import type { Mail, Mailer } from "../src/mailer";
 import { ModelStore, starterModel } from "../src/models";
 import { digest, randomToken } from "../src/secrets";
 import type { WebConfig } from "../src/config";
 import type { Fetch } from "../src/oauth";
+import { seedTeamShare } from "../__fixtures__/team-share";
 
 let dataDir = "";
 let app: App | null = null;
@@ -24,13 +29,13 @@ function config(port: number, extra: Partial<WebConfig> = {}): WebConfig {
   return { port, host: "127.0.0.1", origin: `http://127.0.0.1:${port}`, dataDir, modelLimit: 3, signupOpen: true, providers: [], quote: null, secure: false, ...extra };
 }
 
-async function start(extra: Partial<WebConfig> = {}, fetchImpl?: Fetch): Promise<void> {
+async function start(extra: Partial<WebConfig> = {}, fetchImpl?: Fetch, more: AppOptions = {}): Promise<void> {
   const probe = createApp(config(0, extra), { editor: false, ...(fetchImpl ? { fetchImpl } : {}) });
   await new Promise<void>((resolve) => probe.server.listen(0, "127.0.0.1", resolve));
   const address = probe.server.address();
   if (!address || typeof address === "string") throw new Error("no port");
   await probe.close();
-  app = createApp(config(address.port, extra), { editor: false, ...(fetchImpl ? { fetchImpl } : {}) });
+  app = createApp(config(address.port, extra), { editor: false, ...(fetchImpl ? { fetchImpl } : {}), ...more });
   await app.listen();
   base = `http://127.0.0.1:${address.port}`;
 }
@@ -206,7 +211,7 @@ test("Log in with a provider: registers itself, signs in through UserInfo, and m
     }
     if (input === `${issuer}/userinfo`) {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer provider-token");
-      return Response.json({ sub: "person-1", email: "pat@example.com", name: "Pat Example" });
+      return Response.json({ sub: "person-1", email: "pat@example.com", name: "Pat Example", email_verified: true });
     }
     return new Response("not here", { status: 404 });
   };
@@ -228,10 +233,62 @@ test("Log in with a provider: registers itself, signs in through UserInfo, and m
   expect(back.headers.get("location")).toBe("/models");
   const cookie = sessionCookie(back);
   expect(await (await fetch(`${base}/models`, { headers: { cookie } })).text()).toContain("Pat Example");
+  expect((await app?.db.userByIdentity("example", "person-1"))?.email_confirmed_at).toEqual(expect.any(String));
 
   const replay = await fetch(`${base}/auth/example/callback?code=code-abc&state=${authorize.searchParams.get("state")}`, { redirect: "manual" });
   expect(replay.status).toBe(400);
   expect(calls.filter((c) => c.endsWith("/register"))).toHaveLength(1);
+});
+
+test("OIDC confirms only the linked identity's current email on sign-in or explicit linking", async () => {
+  const issuer = "https://accounts.example.test";
+  let userInfo: Record<string, unknown> = {};
+  await start({ providers: [{ id: "org", label: "Log in with Org", issuer, clientId: "test-client" }] }, async (input) => {
+    if (input === issuer + "/.well-known/oauth-authorization-server") {
+      return Response.json({ authorization_endpoint: issuer + "/authorize", token_endpoint: issuer + "/token", userinfo_endpoint: issuer + "/userinfo" });
+    }
+    if (input === issuer + "/token") return Response.json({ access_token: "test-token" });
+    if (input === issuer + "/userinfo") return Response.json(userInfo);
+    throw new Error(`Unexpected provider request: ${input}`);
+  });
+
+  async function signIn(claims: Record<string, unknown>, linkCookie = ""): Promise<Response> {
+    userInfo = claims;
+    const options = { redirect: "manual" as const, headers: { cookie: linkCookie } };
+    const begin = await fetch(`${base}/auth/org/start${linkCookie ? "?link=1" : ""}`, options);
+    expect(begin.status).toBe(303);
+    const state = new URL(begin.headers.get("location") ?? "").searchParams.get("state");
+    return fetch(`${base}/auth/org/callback?code=ok&state=${state}`, options);
+  }
+  const confirmation = async (email: string) => (await app?.db.userByEmail(email))?.email_confirmed_at;
+
+  const bea = { sub: "bea", email: "Bea@Example.com" };
+  for (const claim of [
+    {}, { email_verified: false }, { email_verified: "true" }, { email_verified: 1 },
+    { email: "other@example.com", email_verified: true }, { email: null, email_verified: true },
+  ]) {
+    expect((await signIn({ ...bea, ...claim })).status).toBe(303);
+    expect(await confirmation(bea.email)).toBeNull();
+  }
+  expect((await signIn({ ...bea, email_verified: true })).status).toBe(303);
+  const confirmedAt = await confirmation(bea.email);
+  expect(confirmedAt).toEqual(expect.any(String));
+  for (const claim of [{}, { email_verified: false }, { email_verified: true }]) {
+    expect((await signIn({ ...bea, ...claim })).status).toBe(303);
+    expect(await confirmation(bea.email)).toBe(confirmedAt);
+  }
+
+  const jules = { sub: "jules", email: "jules@example.com", email_verified: true };
+  const julesCookie = await signUp(jules.email);
+  expect((await signIn(jules)).status).toBe(409);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect(await app?.db.userByIdentity("org", jules.sub)).toBeNull();
+  expect((await signIn({ ...jules, sub: bea.sub }, julesCookie)).status).toBe(409);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect((await signIn({ ...jules, email: "other@example.com" }, julesCookie)).status).toBe(303);
+  expect(await confirmation(jules.email)).toBeNull();
+  expect((await signIn(jules, julesCookie)).status).toBe(303);
+  expect(await confirmation(jules.email)).toEqual(expect.any(String));
 });
 
 async function agentEdit(key: string, modelId: string, levelId: string): Promise<unknown> {
@@ -275,6 +332,59 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   expect((await fetch(`${base}/m/${id}`, { headers: { cookie: guest } })).status).toBe(404);
   expect(await (await fetch(`${base}/models`, { headers: { cookie: guest } })).text()).not.toContain("Shared warehouse");
 });
+
+test("East plant team edit survives personal unsharing, while the original handover offer ends", async () => {
+  await start({ modelLimit: 1 });
+  const alex = await signUp("alex@example.test", "Alex");
+  const bea = await signUp("bea@example.test", "Bea");
+  const id = await makeModel(alex, "East plant room");
+  const alexId = (await app?.db.userByEmail("alex@example.test"))?.id;
+  const beaId = (await app?.db.userByEmail("bea@example.test"))?.id;
+  if (!alexId || !beaId || !app) throw new Error("Missing fixture accounts");
+  seedTeamShare(path.join(dataDir, "accounts.sqlite"), {
+    id: "hvac", name: "Mechanical", ownerId: alexId, memberId: beaId, modelId: id, role: "edit",
+  });
+  const share = `/models/${id}/share`;
+  const offer = `/models/${id}/transfer`;
+  const terms = { recipient: beaId, retained: "none" };
+  const list = await (await fetch(base + "/models", { headers: { cookie: bea } })).text();
+  expect(list.match(/East plant room/g)).toHaveLength(1);
+  expect(list).toContain("Can edit");
+  expect(list).toContain("via Mechanical");
+  expect((await fetch(base + share, { headers: { cookie: bea } })).status).toBe(403);
+  expect(await app.db.sharesOf(id)).toEqual([]);
+  const directPage = await (await fetch(base + share, { headers: { cookie: alex } })).text();
+  expect(directPage).toContain("No personal shares yet.");
+  expect(directPage).not.toContain("Transfer ownership");
+  expect((await post(offer, terms, alex)).status).toBe(409);
+  // Being a team editor takes none of Bea's one personal model slot.
+  const own = await makeModel(bea, "Bea's first model");
+  expect((await post(`/models/${own}/delete`, {}, bea)).status).toBe(303);
+  const key = await makeAgentKey(bea);
+  const session = await AgentSession.open({ url: `${base.replace(/^http/, "ws")}/sync?key=${key}`, token: "local",
+    modelId: id, actor: agentActor("bea", "team-edit", "Bea"), socketFactory: builtinWebSocketFactory() });
+  try {
+    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    expect((await post(offer, terms, alex)).status).toBe(303);
+    const [first] = await app.db.transfers.inbox(beaId);
+    if (!first) throw new Error("Missing direct-share offer");
+    const removed = await post(`${share}/${beaId}/delete`, {}, alex);
+    expect(await removed.text()).toContain("They can still edit it.");
+    expect(await session.edit({ type: "create_level", levelId: "mezz", name: "Mezzanine", elevationMm: 4000 },
+      { idempotencyKey: "existing-team-editor" })).toMatchObject({ status: "saved" });
+    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    expect((await post(`/transfers/${first.id}/accept`, {}, bea)).status).toBe(409);
+  } finally { session.close(); }
+  expect((await post(offer, terms, alex)).status).toBe(303);
+  const [second] = await app.db.transfers.inbox(beaId);
+  if (!second) throw new Error("Missing replacement offer");
+  expect((await post(`/transfers/${second.id}/accept`, {}, bea)).status).toBe(303);
+  expect(await app.db.accessTo(alexId, id)).toMatchObject({ access: "edit" });
+  expect(await app.db.sharesOf(id)).toEqual([]);
+  expect(await app.db.sharedWith(beaId)).toEqual([]);
+  expect((await fetch(base + share, { headers: { cookie: alex } })).status).toBe(403);
+  expect((await fetch(base + share, { headers: { cookie: bea } })).status).toBe(200);
+}, 30_000);
 
 test("removing the recipient's share explains how to recover an ended offer", async () => {
   await start();
@@ -429,6 +539,281 @@ test("password recovery: a reset link works once, signs out everywhere, and chan
   const forgot = await (await fetch(`${base}/forgot`)).text();
   expect(forgot).toContain("npm run web:reset-password");
 });
+
+test("two uses of one reset link at once: exactly one password is saved, and only its session survives", async () => {
+  await start();
+  const earlier = await signUp("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
+  if (!user || !app) throw new Error("no account");
+  const token = randomToken();
+  await app.db.createPasswordReset(digest(token), user.id, new Date(Date.now() + 3_600_000));
+  const signedIn = async (cookie: string) => (await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status === 200;
+
+  const attempts = await Promise.all(["password-from-a", "password-from-b"].map(async (password) => ({ password, response: await post(`/reset/${token}`, { password }) })));
+  expect(attempts.map((a) => a.response.status).sort()).toEqual([303, 410]);
+  const won = attempts.find((a) => a.response.status === 303);
+  const lost = attempts.find((a) => a.response.status === 410);
+  if (!won || !lost) throw new Error("expected one winner and one refusal");
+  expect(lost.response.headers.get("set-cookie")).toBeNull();
+  expect(await signedIn(sessionCookie(won.response))).toBe(true);
+  expect(await signedIn(earlier)).toBe(false);
+  expect((await post("/login", { email: "sam@example.com", password: won.password })).status).toBe(303);
+  expect((await post("/login", { email: "sam@example.com", password: lost.password })).status).toBe(401);
+  expect(await app.db.userByPasswordReset(digest(token))).toBeNull();
+});
+
+test("redeeming a reset link refuses an expired or used link and then changes nothing", async () => {
+  await start();
+  const cookie = await signUp("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
+  if (!user || !app) throw new Error("no account");
+  const before = user.password_hash;
+  const stale = randomToken();
+  await app.db.createPasswordReset(digest(stale), user.id, new Date(Date.now() - 1_000));
+  expect(await app.db.redeemPasswordReset(digest(stale), "scrypt$not-used")).toBeNull();
+  expect((await app.db.userById(user.id))?.password_hash).toBe(before);
+  expect((await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status).toBe(200);
+
+  const live = randomToken();
+  await app.db.createPasswordReset(digest(live), user.id, new Date(Date.now() + 3_600_000));
+  expect((await app.db.redeemPasswordReset(digest(live), "scrypt$first"))?.id).toBe(user.id);
+  expect(await app.db.redeemPasswordReset(digest(live), "scrypt$second")).toBeNull();
+  expect((await app.db.userById(user.id))?.password_hash).toBe("scrypt$first");
+  expect((await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status).toBe(303);
+});
+
+/** An in-memory mailer: keeps every message so tests can read the links. */
+function recordingMailer(): Mailer & { readonly sent: Mail[] } {
+  const sent: Mail[] = [];
+  return {
+    sent,
+    async send(mail) {
+      sent.push(mail);
+    },
+  };
+}
+
+function resetToken(mail: Mail | undefined): string {
+  const token = mail?.text.match(new RegExp(`^${base.replace(/\./g, "\\.")}/reset/([A-Za-z0-9_-]{20,80})$`, "m"))?.[1];
+  if (!token) throw new Error("the email held no reset link for this server");
+  return token;
+}
+
+async function forgot(email: string): Promise<{ status: number; body: string; cookie: string | null }> {
+  const response = await post("/forgot", { email });
+  const body = await response.text();
+  await app?.settled();
+  return { status: response.status, body, cookie: response.headers.get("set-cookie") };
+}
+
+async function signedIn(cookie: string): Promise<boolean> {
+  const response = await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" });
+  return response.status === 200;
+}
+
+function resetRows(): { token_hash: string; created_at: string; expires_at: string }[] {
+  const sqlite = new DatabaseSync(path.join(dataDir, "accounts.sqlite"), { readOnly: true });
+  try {
+    return sqlite.prepare("SELECT token_hash, created_at, expires_at FROM password_resets").all() as { token_hash: string; created_at: string; expires_at: string }[];
+  } finally {
+    sqlite.close();
+  }
+}
+
+/** Freezes the clock the app reads (Date only; timers and I/O run normally). */
+function freezeClock(): (minutes: number) => void {
+  const start = Date.now();
+  jest.useFakeTimers({ now: start, doNotFake: ["hrtime", "nextTick", "performance", "queueMicrotask", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+  return (minutes) => jest.setSystemTime(start + minutes * 60_000);
+}
+
+test("Forgot password with mail on: one reply for an unknown and a known address, and only the account gets a link that works once", async () => {
+  const mailer = recordingMailer();
+  const logs = [jest.spyOn(console, "log"), jest.spyOn(console, "error")];
+  await start({}, undefined, { mailer });
+  const page = await (await fetch(`${base}/forgot`)).text();
+  expect(page).toContain("Send reset link");
+  expect(page).not.toContain("This server sends no email");
+
+  // Before the account exists.
+  const before = await forgot(" Bea@Example.com ");
+  expect(mailer.sent).toHaveLength(0);
+
+  const first = await signUp("bea@example.com", "Bea Example");
+  const second = sessionCookie(await post("/login", { email: "bea@example.com", password: "correct-horse" }));
+  expect(await signedIn(first)).toBe(true);
+  expect(await signedIn(second)).toBe(true);
+
+  // After: the same status and the same page, and now one email.
+  const after = await forgot("bea@example.com");
+  expect(before.status).toBe(200);
+  expect(after.status).toBe(before.status);
+  expect(after.body).toBe(before.body);
+  expect(after.body).toContain("If an account uses bea@example.com, we sent a password reset link.");
+  expect([before.cookie, after.cookie]).toEqual([null, null]);
+  expect(mailer.sent).toEqual([{ to: "bea@example.com", purpose: "reset", subject: "Reset your MutinyBIM password", text: expect.stringContaining("within 1 hour") }]);
+  const token = resetToken(mailer.sent[0]);
+
+  // The existing one-hour, digest-only link: the database holds no copy of the token.
+  const rows = resetRows();
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.token_hash).toBe(digest(token));
+  expect(JSON.stringify(rows)).not.toContain(token);
+  expect(Date.parse(rows[0]?.expires_at ?? "") - Date.parse(rows[0]?.created_at ?? "")).toBeGreaterThanOrEqual(3_599_000);
+  expect(Date.parse(rows[0]?.expires_at ?? "") - Date.parse(rows[0]?.created_at ?? "")).toBeLessThanOrEqual(3_601_000);
+
+  const open = await fetch(`${base}/reset/${token}`);
+  expect(open.status).toBe(200);
+  expect(open.headers.get("referrer-policy")).toBe("strict-origin");
+  expect(await open.text()).toContain("For bea@example.com.");
+  const done = await post(`/reset/${token}`, { password: "new-password-2" });
+  expect(done.status).toBe(303);
+  expect(done.headers.get("location")).toBe("/models?reset=1");
+  expect(await signedIn(sessionCookie(done))).toBe(true);
+
+  // Spent, and every older session is signed out.
+  expect(await signedIn(first)).toBe(false);
+  expect(await signedIn(second)).toBe(false);
+  expect((await fetch(`${base}/reset/${token}`)).status).toBe(410);
+  expect((await post(`/reset/${token}`, { password: "new-password-3" })).status).toBe(410);
+  expect(resetRows()).toHaveLength(0);
+  expect((await post("/login", { email: "bea@example.com", password: "correct-horse" })).status).toBe(401);
+  expect((await post("/login", { email: "bea@example.com", password: "new-password-2" })).status).toBe(303);
+
+  const logged = logs.flatMap((spy) => spy.mock.calls).map((call) => JSON.stringify(call)).join("\n");
+  expect(logged).not.toContain(token);
+  expect(logged).not.toContain("/reset/");
+});
+
+test("an emailed reset link stops working after an hour, and a new request sends a fresh one", async () => {
+  const mailer = recordingMailer();
+  await start({}, undefined, { mailer });
+  const cookie = await signUp("sam@example.com");
+  const at = freezeClock();
+
+  await forgot("sam@example.com");
+  const stale = resetToken(mailer.sent[0]);
+  at(59);
+  expect((await fetch(`${base}/reset/${stale}`)).status).toBe(200);
+  at(61);
+  expect((await fetch(`${base}/reset/${stale}`)).status).toBe(410);
+  expect((await post(`/reset/${stale}`, { password: "new-password-2" })).status).toBe(410);
+  expect((await post("/login", { email: "sam@example.com", password: "correct-horse" })).status).toBe(303);
+  expect(await signedIn(cookie)).toBe(true);
+
+  await forgot("sam@example.com");
+  expect(mailer.sent).toHaveLength(2);
+  const fresh = resetToken(mailer.sent[1]);
+  expect((await post(`/reset/${fresh}`, { password: "new-password-2" })).status).toBe(303);
+  expect(await signedIn(cookie)).toBe(false);
+});
+
+test("reset emails to one address stop at three an hour; replies never change and the last link keeps working", async () => {
+  const mailer = recordingMailer();
+  await start({}, undefined, { mailer });
+  await signUp("sam@example.com");
+  await signUp("pat@example.com", "Pat Example");
+  const at = freezeClock();
+
+  const replies = [];
+  for (let i = 0; i < 5; i += 1) replies.push(await forgot("sam@example.com"));
+  expect(new Set(replies.map((r) => `${r.status} ${r.body}`)).size).toBe(1);
+  expect(replies[0]?.status).toBe(200);
+  expect(mailer.sent.map((m) => m.to)).toEqual(["sam@example.com", "sam@example.com", "sam@example.com"]);
+
+  // Each email replaced the one before; the skipped requests made no new link.
+  const tokens = mailer.sent.map(resetToken);
+  expect((await fetch(`${base}/reset/${tokens[0]}`)).status).toBe(410);
+  expect((await fetch(`${base}/reset/${tokens[1]}`)).status).toBe(410);
+  expect((await fetch(`${base}/reset/${tokens[2]}`)).status).toBe(200);
+
+  // Another address has its own limit.
+  await forgot("pat@example.com");
+  expect(mailer.sent.at(-1)?.to).toBe("pat@example.com");
+
+  // The next hour allows another email.
+  at(61);
+  await forgot("sam@example.com");
+  expect(mailer.sent.filter((m) => m.to === "sam@example.com")).toHaveLength(4);
+});
+
+test("a failed send preserves the previous reset link, gives the same reply, and logs no link", async () => {
+  const attempts: Mail[] = [];
+  const failing: Mailer = {
+    async send(mail) {
+      attempts.push(mail);
+      throw Object.assign(new Error(`relay refused: ${mail.text}`), { code: "EENVELOPE" });
+    },
+  };
+  const errors = jest.spyOn(console, "error");
+  await start({}, undefined, { mailer: failing });
+  const unknown = await forgot("sam@example.com");
+  await signUp("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
+  if (!app || !user) throw new Error("no account");
+  const previous = randomToken();
+  await app.db.createPasswordReset(digest(previous), user.id, new Date(Date.now() + 3_600_000));
+  const known = await forgot("sam@example.com");
+  expect(known.status).toBe(unknown.status);
+  expect(known.body).toBe(unknown.body);
+  expect(attempts).toHaveLength(1);
+  expect((await fetch(`${base}/reset/${previous}`)).status).toBe(200);
+  expect((await fetch(`${base}/reset/${resetToken(attempts[0])}`)).status).toBe(410);
+  const logged = JSON.stringify(errors.mock.calls);
+  expect(logged).toContain("EENVELOPE");
+  expect(logged).not.toContain(resetToken(attempts[0]));
+});
+
+test("late SMTP replies preserve the newest delivered link and cannot revive a spent reset", async () => {
+  await start();
+  await signUp("sam@example.com");
+  const db = app?.db;
+  const user = await db?.userByEmail("sam@example.com");
+  if (!db?.resetMail || !user) throw new Error("no local reset store");
+  const expires = new Date(Date.now() + 3_600_000);
+  const first = digest(randomToken());
+  const second = digest(randomToken());
+  await db.resetMail.stage(first, user.id, expires);
+  await db.resetMail.stage(second, user.id, expires);
+  db.resetMail.delivered(second);
+  db.resetMail.delivered(first);
+  expect(await db.userByPasswordReset(first)).toBeNull();
+  expect((await db.userByPasswordReset(second))?.id).toBe(user.id);
+
+  const pending = digest(randomToken());
+  await db.resetMail.stage(pending, user.id, expires);
+  expect((await db.redeemPasswordReset(second, "scrypt$recovered"))?.id).toBe(user.id);
+  db.resetMail.delivered(pending);
+  expect(await db.userByPasswordReset(pending)).toBeNull();
+});
+
+test("with mail off, Forgot password explains the two ways back and the operator's link still works", async () => {
+  await start({}, undefined, { mailer: null });
+  const cookie = await signUp("sam@example.com");
+  const page = await (await fetch(`${base}/forgot`)).text();
+  expect(page).toContain("This server sends no email");
+  expect(page).toContain("npm run web:reset-password");
+  expect(page).not.toContain("Send reset link");
+  const posted = await post("/forgot", { email: "sam@example.com" });
+  expect(await posted.text()).not.toContain("we sent a password reset link");
+  expect(resetRows()).toHaveLength(0);
+
+  // The real operator command, against this server's data folder.
+  const root = path.resolve(__dirname, "../../..");
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("MUTINYBIM_")));
+  const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "apps/mutinybim-web/src/admin.ts", "reset-password", "Sam@Example.com"], {
+    cwd: root,
+    env: { ...env, TSX_TSCONFIG_PATH: "apps/mutinybim-web/tsconfig.runtime.json", MUTINYBIM_WEB_DATA: dataDir, MUTINYBIM_WEB_ORIGIN: base },
+  });
+  expect(stdout).toContain("works once, for 1 hour");
+  const token = stdout.match(new RegExp(`${base.replace(/\./g, "\\.")}/reset/([A-Za-z0-9_-]{20,80})`))?.[1];
+  if (!token) throw new Error(`the operator command printed no link: ${stdout}`);
+  expect(resetRows().map((r) => r.token_hash)).toEqual([digest(token)]);
+  const done = await post(`/reset/${token}`, { password: "new-password-2" });
+  expect(done.status).toBe(303);
+  expect(await signedIn(cookie)).toBe(false);
+  expect((await post(`/reset/${token}`, { password: "new-password-3" })).status).toBe(410);
+}, 60_000);
 
 test("the theme choice is kept in the account and drawn on every page", async () => {
   await start();

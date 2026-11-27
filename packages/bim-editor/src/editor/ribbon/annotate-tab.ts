@@ -1,4 +1,4 @@
-import { Check, Circle, Cloud, Eraser, FileText, Hexagon, KeyRound, Minus, MoveHorizontal, PaintBucket, Palette, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, SquareRoundCorner, Tag, Tags, Type, Waves, Waypoints } from 'lucide-react'
+import { Check, Circle, Cloud, Eraser, FileText, Hexagon, KeyRound, Minus, MoveHorizontal, PaintBucket, Palette, PenTool, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, SquareRoundCorner, Tag, Tags, Type, Waves, Waypoints } from 'lucide-react'
 import { DIMENSION_KINDS, detailComponents, type DimensionKind } from '@permitzip/bim-kernel'
 import { STANDARD_NOTE_SETS } from '@permitzip/bim-library'
 import type { RibbonCommand, RibbonGroup, RibbonTab } from './types'
@@ -30,16 +30,18 @@ export function drawingReason(ctx: BuildingModelRibbonContext, tool: DrawingTool
   if (tool === 'dimension') return 'Dimensions measure a view. Open a plan, section or detail view, or double-click one on the sheet.'
   if (tool === 'tag') return 'Tags label the model. Open a plan or a section, or double-click one on the sheet.'
   if (tool === 'keynote') return 'Keynotes go on elements in a view. Open a plan or a section, or double-click one on the sheet.'
+  if (tool === 'markup') return 'Marker sketches review markups directly on sheets. Open a sheet (or exit in-place view editing) to redline it.'
   return 'A 3D view or schedule takes no annotation. Draw on the sheet, or in a plan, section or detail view.'
 }
 
-export function drawingCommand(ctx: BuildingModelRibbonContext, tool: DrawingTool, label: string, icon: RibbonCommand['icon'], description: string, keywords: readonly string[]): RibbonCommand {
+export function drawingCommand(ctx: BuildingModelRibbonContext, tool: DrawingTool, label: string, icon: RibbonCommand['icon'], description: string, keywords: readonly string[], shortcut?: string): RibbonCommand {
   return {
     id: `draw-${tool}`,
     label,
     icon,
     description,
     keywords,
+    ...(shortcut ? { shortcut } : {}),
     disabledReason: drawingReason(ctx, tool),
     pressed: ctx.drawingOpen !== null && ctx.drawingTool === tool,
     run: () => ctx.setDrawingTool(tool),
@@ -239,6 +241,21 @@ export function annotateTab(ctx: BuildingModelRibbonContext, leading: RibbonGrou
           },
         ]
       : []),
+    {
+      id: 'review',
+      label: 'Review',
+      commands: [
+        drawingCommand(
+          ctx,
+          'markup',
+          'Marker',
+          PenTool,
+          'Sketch freehand felt-tip redlines or highlighter strokes directly on the sheet for an agent to inspect (non-printing by default)',
+          ['markup', 'redline', 'pen', 'marker', 'highlighter', 'sketch', 'review', 'stylus'],
+          'M',
+        ),
+      ],
+    },
   ]
   return { id: 'annotate', label: 'Annotate', groups }
 }

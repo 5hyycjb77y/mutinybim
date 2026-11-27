@@ -58,8 +58,8 @@ describe("c5p kernel points outside any scope: what they answered before packs",
     expect(tradeAdapter("plumbing")).toBe(plumbingAdapter);
     expect(tradeAdapter("mechanical")).toBe(mechanicalAdapter);
     expect(adapterForService("sanitary")).toBe(plumbingAdapter);
-    // Round 14: Structural is first-party, so its load path follows the three trades.
-    expect(activePackSet().items(NETWORK_ADAPTER_POINT).map((a) => a.id)).toEqual(["electrical", "plumbing", "mechanical", "struct.load_path"]);
+    // Round 14: Structural is first-party, and Civil follows with its storm adapter.
+    expect(activePackSet().items(NETWORK_ADAPTER_POINT).map((a) => a.id)).toEqual(["electrical", "plumbing", "mechanical", "struct.load_path", "civil.storm_network"]);
     expect(NETWORK_ADAPTER_POINT.builtins).toBeUndefined();
     expect(tradeAdapter("zz.slurry_flow")).toBeNull();
   });
@@ -71,7 +71,7 @@ describe("c5p kernel points outside any scope: what they answered before packs",
     for (const [id, row] of BUILTIN_SERVICE_REGISTRY.byId) expect(services.byId.get(id)).toBe(row);
     expect([...BUILTIN_SERVICE_REGISTRY.byId.keys()]).toEqual(["other"]);
     for (const pack of FIRST_PARTY_PACKS) for (const c of pack.contributions) if (c.pointId === SERVICE_POINT.id) for (const row of c.items as readonly ServiceRow[]) expect(services.byId.get(row.id)).toBe(row);
-    expect([...services.byId.keys()].filter((id) => /[.:]/.test(id))).toEqual(["struct.gravity_load"]);
+    expect([...services.byId.keys()].filter((id) => /[.:]/.test(id))).toEqual(["struct.gravity_load", "civil.storm"]);
     expect(activeFacetRegistry()).toBe(BUILTIN_FACET_REGISTRY);
     expect(BUILTIN_SYMBOL_REGISTRY.rows).toEqual([]);
     expect(activeSymbolRegistry().rows.map((r) => r.id)).toEqual([
@@ -108,6 +108,8 @@ describe("c5p kernel points outside any scope: what they answered before packs",
       ["architecture", true, false],
       // Round 14: Structural, first-party, with its load path.
       ["struct", true, true],
+      // Civil, first-party, with its storm drainage network.
+      ["civil", true, true],
     ]);
     expect(networkAdapterOwner({ id: "electrical" })).toBe("electrical");
     expect(networkAdapterOwner({ id: "plumbing" })).toBe("plumbing_gas");

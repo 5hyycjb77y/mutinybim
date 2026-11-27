@@ -20,10 +20,12 @@
     "@permitzip/bim-kernel": "*",
     "@permitzip/bim-calc": "*",
     "@permitzip/bim-library": "*",
+    "@permitzip/bim-units": "*",
     "@permitzip/bim-pack-electrical": "*",
     "@permitzip/bim-pack-plumbing": "*",
     "@permitzip/bim-pack-mechanical": "*",
     "@permitzip/bim-pack-architecture": "*",
-    "@permitzip/bim-pack-structural": "*"
+    "@permitzip/bim-pack-structural": "*",
+    "@permitzip/bim-pack-civil": "*"
   }
 }

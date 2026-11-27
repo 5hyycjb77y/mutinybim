@@ -11,9 +11,10 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.floor`](#buildingfloor): A floor or structural deck slab with this outline (and optional stairwell/atrium `holes`, one-way `spanDirectionDeg`, live-load `occupancy`, `classId`, and `material`); returns its id.
 - [`building.roof`](#buildingroof): A flat, single-slope shed, two-slope gable, or four-slope hip roof (`architecture.roof`) with optional `form`, `slopeRise`, `slopeDirectionDeg`, `baseOffset`, and `material`; returns its id.
 - [`building.stair`](#buildingstair): A stair (`architecture.stair`) supporting straight runs, 90° L-shape, and 180° U-shape switchbacks with landings; returns its id.
+- [`building.railing`](#buildingrailing): A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42" IBC commercial height); returns its id.
 - [`building.grid`](#buildinggrid): A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.
 - [`building.column`](#buildingcolumn): A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`, optional `baseOffset`, `rotationDeg`, AISC `section`, `grade`, and `mark`; returns its id.
-- [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+- [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.
 - [`building.footing`](#buildingfooting): A concrete pad footing (`struct.footing_pad`) centered at `at` below `level` with `width`, `depth`, `thickness`, and `mark`; returns its id.
 - [`building.curtainWall`](#buildingcurtainwall): A glazed architectural storefront / curtain wall from `from` to `to` with automatic 3D/plan mullions and optional `mullionMaterial`; returns its id.
 - [`building.moveWall`](#buildingmovewall): Move a wall by a plan delta, carrying joined walls and collinear slab/ceiling/roof edges unless `disjoin: true`.
@@ -52,7 +53,7 @@ Topics: wall, walls, architecture, room, building outline, wall top, top level, 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -84,7 +85,7 @@ Topics: wall, partition, one wall, top, structure above, ceiling, roof
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -111,7 +112,7 @@ Topics: floor, slab, roof deck, floor deck, span direction, holes, stairwell, ma
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -137,7 +138,7 @@ Topics: roof, gable, hip, shed, slope, metal roof, architecture, material
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -163,13 +164,39 @@ Topics: stair, stairs, circulation, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
   parameters: {},
   run(ctx) {
     building.stair(ctx, { level: "L1", topLevel: "L2", form: "u_shape", turn: "right", from: { x: units.ft(4), y: units.ft(4) }, to: { x: units.ft(14), y: units.ft(4) }, width: units.in(44), landingDepth: units.ft(4) });
+  },
+});
+```
+
+</details>
+
+## building.railing
+
+A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42" IBC commercial height); returns its id.
+
+```ts
+railing(ctx: ScriptContext, spec: { readonly level: string; readonly from?: PlanPoint; readonly to?: PlanPoint; readonly points?: readonly PlanPoint[]; readonly height?: Measure; readonly style?: 'glass' | 'picket' | 'cable' | 'horizontal_bar' | 'solid'; readonly postSpacing?: Measure; readonly balusterSpacing?: Measure; readonly handrail?: boolean; readonly baseOffset?: Measure; readonly material?: string; readonly id?: string }): string
+```
+
+Topics: railing, guardrail, handrail, balcony, stairwell, architecture, safety
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    building.railing(ctx, { level: "L2", style: "glass", height: units.in(42), points: [{ x: units.ft(26.7), y: units.ft(27.4) }, { x: units.ft(26.7), y: units.ft(15.2) }, { x: units.ft(33.5), y: units.ft(15.2) }] });
   },
 });
 ```
@@ -189,7 +216,7 @@ Topics: grid, datum, structure, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -215,7 +242,7 @@ Topics: column, structure, architecture, height, top level, top offset, steel
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -230,24 +257,24 @@ export default defineScript({
 
 ## building.beam
 
-A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.
 
 ```ts
-beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
+beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly elasticModulus?: Measure; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
 ```
 
-Topics: beam, framing, steel, wide flange, structure
+Topics: beam, framing, steel, wide flange, structure, deflection, elastic modulus
 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", mark: "B1" });
+    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", elasticModulus: units.of("stress", 29000, "ksi"), mark: "B1" });
   },
 });
 ```
@@ -267,7 +294,7 @@ Topics: footing, foundation, pad footing, concrete, structure
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -293,7 +320,7 @@ Topics: curtain wall, storefront, glazing, facade, mullion, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -319,7 +346,7 @@ Topics: wall, move, join, disjoin, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -346,7 +373,7 @@ Topics: door, window, opening, move, slide, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -374,7 +401,7 @@ Topics: wall, stretch, endpoint, corner, join, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -401,7 +428,7 @@ Topics: material, color, texture, poche, thermal, envelope, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -429,7 +456,7 @@ Topics: envelope, thermal, r-value, u-value, insulation, energy, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -457,7 +484,7 @@ Topics: material, color, texture, poche, wall, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -484,7 +511,7 @@ Topics: lock, pin, selection, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -511,7 +538,7 @@ Topics: unlock, unpin, selection, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -539,7 +566,7 @@ Topics: lock, category, freeze, protect
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -565,7 +592,7 @@ Topics: elements, kind, linear
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -591,7 +618,7 @@ Topics: door, opening, architecture, swing, handing, operation, double door, sli
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -619,7 +646,7 @@ Topics: door, flip, swing, hinge, handing, architecture
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -647,7 +674,7 @@ Topics: window, opening, glazing, architecture, sill, sill height, partitioning
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -674,7 +701,7 @@ Topics: room, space, number, occupancy
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -700,7 +727,7 @@ Topics: level, levels, storey, floor level, roof level
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -726,7 +753,7 @@ Topics: rooms from walls, find rooms, room, space, trace rooms, enclosure
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -753,7 +780,7 @@ Topics: ceiling, ceilings, ceiling height, ceiling grid, ceiling tile, 2x4, 2x2,
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -783,7 +810,7 @@ Topics: ceiling grid, ceiling tile, snap to tile, troffer, diffuser, register, 2
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -813,7 +840,7 @@ Topics: room, rooms, room outline, room number
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -839,7 +866,7 @@ Topics: surfaces, ceiling height, floor under, slab, roof over, structure above,
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -867,7 +894,7 @@ Topics: linked levels, sync levels, storeys, architect's model, levels from link
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -896,7 +923,7 @@ Topics: sync levels, linked levels, storeys
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },

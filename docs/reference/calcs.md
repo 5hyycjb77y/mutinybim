@@ -2,10 +2,13 @@
 
 # Calcs (ctx.calc)
 
-The calculations a script runs with `ctx.calc({ calc: "<id>", inputs })`: 30 calcs. Each returns its values with their units. `ctx.calcs()` lists them from inside a script.
+The calculations a script runs with `ctx.calc({ calc: "<id>", inputs })`: 33 calcs. Each returns its values with their units. `ctx.calcs()` lists them from inside a script.
 
 | Calc | Title | Domain | What it does |
 | --- | --- | --- | --- |
+| `civil.manning_full_capacity` | Storm pipe capacity flowing full (Manning) | civil | Capacity and velocity of a round pipe flowing full from its diameter (in), slope (%) and Manning's n or material; optionally compares a flow in cfs. |
+| `civil.rational_runoff` | Rational-method peak runoff | civil | Peak runoff Q = C·i·A in cfs from an area (acres or ft²), a runoff coefficient or surface type, and a design intensity in in/h. No time of concentration: the intensity is the one given. |
+| `civil.surface_cut_fill` | TIN cut and fill | civil | Cut, fill and net between an existing TIN and a proposed TIN over the ground both cover. Prismoidal volume on the composite triangles: plan area times the mean of the three corner height differences. Reports cubic yards and cubic metres. |
 | `electrical.photometrics_egress` | Emergency / egress lighting compliance (NFPA 101 §7.9.2.1 / IBC §1008.3.5) | electrical | Evaluates emergency/egress floor-plane (Z = 0" AFF) illuminance using strictly emergency-backed luminaires (battery pack, generator circuit, inverter, or emergency circuit) along corridors, stairs, exit discharge pads, and explicit egress paths against NFPA 101 §7.9.2.1 & IBC §1008.3.5 initial (≥1.0 fc avg, ≥0.1 fc min, ≤40:1) and 90-minute end-of-discharge (≥0.6 fc avg, ≥0.06 fc min, ≤40:1) criteria. |
 | `electrical.photometrics_normal` | Normal room illuminance & LPD photometrics (IES LM-63 / ASHRAE 90.1) | electrical | Point-by-point IES LM-63 photometric illuminance calculation across active spaces/rooms (or custom zones) on a configurable grid with luminaire rotation/aim, 3D wall/slab/column occlusion ray-casting, optional 80/50/20 zonal-cavity diffuse inter-reflectance, uniformity checks, and ASHRAE 90.1 Space-by-Space LPD verification. |
 | `mech.duct_friction` | Duct friction rate and velocity | mechanical | Velocity, velocity pressure and friction rate (in. w.c. per 100 ft) for an airflow in a round or rectangular duct: Darcy–Weisbach with Colebrook (or Altshul–Tsal), the material's roughness, and air density and viscosity at the altitude and temperature. The same engine as the duct pressure report. |

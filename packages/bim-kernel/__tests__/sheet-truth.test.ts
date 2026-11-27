@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { BUILTIN_PART_TYPES, builtinFormTemplate, buildSheetSceneFor, buildViewScene, evaluateDiagram, evaluateFormSchedule, evaluateSchedule, formTable, scheduleHeadingsCut, scheduleTable, sceneToSvg, type Primitive, type ScheduleDefinition, type ViewElement } from "../src";
+import { builtinPartTypes, builtinFormTemplate, buildSheetSceneFor, buildViewScene, evaluateDiagram, evaluateFormSchedule, evaluateSchedule, formTable, scheduleHeadingsCut, scheduleTable, sceneToSvg, type Primitive, type ScheduleDefinition, type ViewElement } from "../src";
 import { CONNECTED_LOAD_ONLY, ElectricalLoadEngine, type FeederTypeEntry } from "@permitzip/bim-pack-electrical";
 import { Building, referenceDistribution } from "./fixtures/electrical-building";
 
@@ -83,7 +83,7 @@ describe("title block (#1)", () => {
 
 /** Built-in parts placed the way the ribbon places them. */
 function placeBuiltin(b: Building, id: string, libId: string, values: Record<string, string | number> = {}, x = 0): void {
-  const entry = BUILTIN_PART_TYPES.find((e) => e.id === libId);
+  const entry = builtinPartTypes().find((e) => e.id === libId);
   if (!entry) throw new Error(`no ${libId}`);
   const typeId = `type-${libId}`;
   b.ok({ type: "place_part", partId: id, typeId, ...(b.head.elements[typeId] ? {} : { partType: entry.definition }), levelId: "lvl-1", position: { x, y: 0 }, mark: id.toUpperCase(), values });

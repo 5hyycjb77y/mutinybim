@@ -31,6 +31,7 @@ export * from "./calc/mechanical/pressurization";
 export * from "./calc/ventilation";
 export * from "./lint/balance";
 export { MECHANICAL_END_TYPES } from "./connections/end-types";
+export { mechanicalStarterTypes, supersededMechanicalStarterTypes } from "./library/mechanical";
 // Plain data for host screens (tab ids, labels, slots); a host imports `ADDON_UI` under its own name.
 export { ADDON_UI } from "./ui";
 export * from "./kind-shapes";

@@ -89,8 +89,8 @@ describe("PackSet", () => {
 
   it("refuses a broken set with every problem listed", () => {
     const wrongContract = pack("old", [], { kernel: "^0.1.0" });
-    // Civil: an add-on this set doesn't use (Structural, used here before round 14, is first-party now).
-    const needsMissing = pack("needy", [], { requires: [{ id: "civil", range: "^2.0.0" }] });
+    // zz: an add-on this set doesn't use (Structural and Civil are first-party now).
+    const needsMissing = pack("needy", [], { requires: [{ id: "zz", range: "^2.0.0" }] });
     const dupA = pack("dup", [{ id: "dup.x", size: 1 }]);
     const dupB = pack("dup", [{ id: "dup.x", size: 1 }]);
     let caught: unknown;
@@ -102,7 +102,7 @@ describe("PackSet", () => {
     expect(caught).toBeInstanceOf(PackSetError);
     const problems = (caught as PackSetError).problems.join("\n");
     expect(problems).toMatch(/pack old 1.0.0 was written for contract \^0.1.0/);
-    expect(problems).toMatch(/needy needs pack civil \^2.0.0/);
+    expect(problems).toMatch(/needy needs pack zz \^2.0.0/);
     expect(problems).toMatch(/two packs use the namespace "dup"/);
     expect(problems).toMatch(/"dup.x" comes from both dup and dup/);
   });
@@ -130,15 +130,15 @@ describe("PackSet", () => {
 
   it("resolves stored pins and reports the missing ones", () => {
     const zz = pack("zz", []);
-    const { set, missing } = resolvePackPins([zz], [{ id: "zz", version: "1.0.0" }, { id: "civil", version: "1.0.0" }, { id: "zz", version: "9.9.9" }]);
+    const { set, missing } = resolvePackPins([zz], [{ id: "zz", version: "1.0.0" }, { id: "yy", version: "1.0.0" }, { id: "zz", version: "9.9.9" }]);
     expect(set.pins()).toEqual([{ id: "zz", version: "1.0.0" }]);
-    expect(missing).toEqual([{ id: "civil", version: "1.0.0" }, { id: "zz", version: "9.9.9" }]);
+    expect(missing).toEqual([{ id: "yy", version: "1.0.0" }, { id: "zz", version: "9.9.9" }]);
   });
 
   it("a pin for an installed first-party add-on is satisfied by the base, whatever version it names (round 14)", () => {
-    const { set, missing } = resolvePackPins([], [{ id: "struct", version: "0.1.0" }, { id: "electrical", version: "9.9.9" }, { id: "civil", version: "1.0.0" }]);
+    const { set, missing } = resolvePackPins([], [{ id: "struct", version: "0.1.0" }, { id: "electrical", version: "9.9.9" }, { id: "civil", version: "0.1.0" }, { id: "yy", version: "1.0.0" }]);
     expect(set.pins()).toEqual([]);
-    expect(missing).toEqual([{ id: "civil", version: "1.0.0" }]);
+    expect(missing).toEqual([{ id: "yy", version: "1.0.0" }]);
   });
 });
 

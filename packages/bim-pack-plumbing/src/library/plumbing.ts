@@ -67,17 +67,21 @@ export const PLUMBING_STARTER_CONNECTION_TYPES: readonly ConnectionTypeEntry[] =
 
 type Port = "cw" | "hw" | "hwr" | "w" | "v" | "g" | "in" | "out" | "power";
 
-const PORTS: Readonly<Record<Port, { readonly label: string; readonly kind: SystemKind; readonly x: number; readonly z: number }>> = {
-  cw: { label: "Cold water", kind: "domestic_cold_water", x: 100, z: 450 },
-  hw: { label: "Hot water", kind: "domestic_hot_water", x: -100, z: 450 },
-  hwr: { label: "Hot water return", kind: "domestic_hot_water_return", x: -200, z: 300 },
-  w: { label: "Waste", kind: "sanitary", x: 0, z: 0 },
-  v: { label: "Vent", kind: "vent", x: 0, z: 900 },
-  g: { label: "Gas", kind: "natural_gas", x: 200, z: 300 },
-  in: { label: "Inlet", kind: "domestic_cold_water", x: -150, z: 0 },
-  out: { label: "Outlet", kind: "domestic_cold_water", x: 150, z: 0 },
-  power: { label: "Power", kind: "power", x: 0, z: 600 },
+const PORTS: Readonly<Record<Port, { readonly label: string; readonly kind: SystemKind; readonly x: number; readonly xScale: number; readonly z: number }>> = {
+  cw: { label: "Cold water", kind: "domestic_cold_water", x: 100, xScale: 0.2, z: 450 },
+  hw: { label: "Hot water", kind: "domestic_hot_water", x: -100, xScale: -0.2, z: 450 },
+  hwr: { label: "Hot water return", kind: "domestic_hot_water_return", x: -200, xScale: -0.3, z: 300 },
+  w: { label: "Waste", kind: "sanitary", x: 0, xScale: 0, z: 0 },
+  v: { label: "Vent", kind: "vent", x: 0, xScale: 0, z: 900 },
+  g: { label: "Gas", kind: "natural_gas", x: 200, xScale: 0.3, z: 300 },
+  in: { label: "Inlet", kind: "domestic_cold_water", x: -150, xScale: -0.5, z: 0 },
+  out: { label: "Outlet", kind: "domestic_cold_water", x: 150, xScale: 0.5, z: 0 },
+  power: { label: "Power", kind: "power", x: 0, xScale: 0, z: 600 },
 };
+
+function pipeEndTypeFor(kind: SystemKind): string {
+  return kind === "sanitary" || kind === "vent" ? "plumbing_gas.no_hub" : "plumbing_gas.threaded";
+}
 
 const p = (name: string): Dim => ({ param: name });
 const half = (name: string): Dim => ({ param: name, scale: 0.5 });
@@ -126,17 +130,27 @@ export function nominalInches(text: string): number | null {
 function connector(port: Port, spec: FixtureSpec, sized: ReadonlySet<Port> = new Set()): PartConnector {
   const d = PORTS[port];
   const kind = (port === "in" || port === "out") && spec.inlineKind ? spec.inlineKind : d.kind;
-  if (port === "power") return { id: "power", label: d.label, domain: "electrical", systemKind: "power", position: [0, 0, d.z], direction: [0, 0, 1], shape: "none" };
+  if (port === "power") return { id: "power", label: d.label, domain: "electrical", systemKind: "power", position: [0, 0, p("height")], direction: [0, 0, 1], shape: "none" };
   const inline = port === "in" || port === "out";
+  const sideX: Dim = Math.abs(d.x) <= (spec.size[0] * IN) / 2 ? d.x : { param: "width", scale: d.xScale };
+  const sideZ: Dim = spec.size[2] * IN >= d.z ? d.z : half("height");
+  const position: PartConnector["position"] = inline
+    ? [port === "in" ? neg("width") : half("width"), 0, 0]
+    : port === "w"
+      ? [0, 0, 0]
+      : port === "v"
+        ? [0, 0, p("height")]
+        : [sideX, half("depth"), sideZ];
   return {
     id: port,
     label: d.label,
     domain: "pipe",
     systemKind: kind,
-    position: [inline ? (port === "in" ? neg("width") : half("width")) : d.x, 0, d.z],
+    position,
     direction: inline ? [port === "in" ? -1 : 1, 0, 0] : port === "w" ? [0, 0, -1] : port === "v" ? [0, 0, 1] : [0, 1, 0],
     shape: "round",
     diameter: p(sized.has(port) ? (PORT_SIZE[port]?.param ?? "connection_size") : "connection_size"),
+    endType: pipeEndTypeFor(kind),
     ...(inline ? { flowDirection: port === "in" ? ("in" as const) : ("out" as const) } : {}),
   };
 }
@@ -165,9 +179,9 @@ function customPartGeometry(spec: FixtureSpec): { readonly geometry: readonly Ge
         geometry: [
           // Main horizontal bronze meter barrel spanning inlet to outlet along X
           { kind: "cylinder", center: [0, 0, 0], radius: 2.25 * IN, height: p("width"), axis: "x" },
-          // Flanged inlet & outlet pipe spuds
-          { kind: "cylinder", center: [neg("width"), 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
-          { kind: "cylinder", center: [half("width"), 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
+          // Flanged inlet & outlet pipe spuds (outer faces sit flush at ±width/2 laying length)
+          { kind: "cylinder", center: [{ param: "width", scale: -0.5, add: 11 }, 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
+          { kind: "cylinder", center: [{ param: "width", scale: 0.5, add: -11 }, 0, 0], radius: 3.0 * IN, height: 22, axis: "x" },
           // Measuring chamber dome
           { kind: "cylinder", center: [0, 0, 2.0 * IN], radius: 2.6 * IN, height: 3.0 * IN, axis: "z" },
           // Raised circular bronze register dial bonnet + flip lid
@@ -254,7 +268,10 @@ function fixture(spec: FixtureSpec, version: string): LibraryEntry {
   const connectors = spec.ports.map((port) => {
     const c = connector(port, spec, sized);
     if (custom?.wasteAtRiserBottom && port === "w") {
-      return { ...c, position: [0, 0, { param: "riser_height", scale: -1 }] as PartConnector["position"] };
+      return { ...c, position: [0, 0, { param: "riser_height", scale: -1, add: -30 }] as PartConnector["position"] };
+    }
+    if (spec.slug === "expansion-tank" && port === "cw") {
+      return { ...c, position: [0, 0, { param: "height", add: 60 }] as PartConnector["position"], direction: [0, 0, 1] as PartConnector["direction"] };
     }
     if (spec.slug === "vtr" && port === "v") {
       return { ...c, position: [0, 0, 0] as PartConnector["position"], direction: [0, 0, -1] as PartConnector["direction"] };
@@ -404,6 +421,59 @@ function drainagePart(spec: DrainageSpec, version: string): LibraryEntry {
   return { id: `builtin:plumbing-${spec.slug}@1`, definition };
 }
 
+function legacyPlumbingStarterTypes(version: string): readonly LibraryEntry[] {
+  const src: PartTypeDefinition["source"] = { kind: "builtin", libraryVersion: version };
+  const wc: LibraryEntry = {
+    id: "builtin:water-closet-floor@1",
+    definition: {
+      familyName: "Water closet, floor mounted",
+      typeName: "Flush valve, 1.28 gpf",
+      category: "plumbing_fixture",
+      typeParams: [num("fixture_units", "Drainage fixture units", "count"), num("flush_gpf", "Flush volume (gal/flush)", "none"), len("waste_size", "Waste connection"), len("cw_size", "Cold water connection")],
+      typeValues: { fixture_units: 4, flush_gpf: 1.28, waste_size: 3 * IN, cw_size: 1 * IN },
+      instanceParams: [{ name: "accessible", label: "Accessible (ADA)", kind: "boolean", default: false }],
+      connectors: [
+        { id: "waste", label: "Waste", domain: "pipe", systemKind: "sanitary", position: [-150, 0, 0], direction: [0, 0, -1], shape: "round", diameter: p("waste_size"), endType: "plumbing_gas.no_hub" },
+        { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", position: [-370, 0, 300], direction: [-1, 0, 0], shape: "round", diameter: p("cw_size"), endType: "plumbing_gas.threaded" },
+      ],
+      geometry: [
+        { kind: "box", center: [-280, 0, 380], size: [180, 500, 760] },
+        { kind: "extrusion", profile: [[-190, -180], [150, -180], [400, -100], [430, 0], [400, 100], [150, 180], [-190, 180]], z: 0, height: 400 },
+      ],
+      symbol: [
+        { kind: "rect", center: [-280, 0], size: [180, 500] },
+        { kind: "polyline", points: [[-190, -180], [150, -180], [400, -100], [430, 0], [400, 100], [150, 180], [-190, 180]], closed: true },
+      ],
+      tagFields: ["mark"],
+      source: src,
+    },
+  };
+  const lav: LibraryEntry = {
+    id: "builtin:lavatory-wall@1",
+    definition: {
+      familyName: "Lavatory, wall hung",
+      typeName: '20" x 18"',
+      category: "plumbing_fixture",
+      typeParams: [len("width", "Width"), len("depth", "Depth"), num("fixture_units", "Drainage fixture units", "count"), len("waste_size", "Waste connection"), len("supply_size", "Water connections")],
+      typeValues: { width: 20 * IN, depth: 18 * IN, fixture_units: 1, waste_size: 1.25 * IN, supply_size: 0.5 * IN },
+      instanceParams: [{ name: "accessible", label: "Accessible (ADA)", kind: "boolean", default: false }, { ...len("rim_height", "Rim height"), default: 34 * IN, max: 1200 }],
+      connectors: [
+        { id: "waste", label: "Waste", domain: "pipe", systemKind: "sanitary", position: [0, 0, { param: "rim_height", add: -250 }], direction: [0, 1, 0], shape: "round", diameter: p("waste_size"), endType: "plumbing_gas.solvent_weld" },
+        { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", position: [100, 0, { param: "rim_height", add: -150 }], direction: [0, 1, 0], shape: "round", diameter: p("supply_size"), endType: "plumbing_gas.threaded" },
+        { id: "hw", label: "Hot water", domain: "pipe", systemKind: "domestic_hot_water", position: [-100, 0, { param: "rim_height", add: -150 }], direction: [0, 1, 0], shape: "round", diameter: p("supply_size"), endType: "plumbing_gas.threaded" },
+      ],
+      geometry: [
+        { kind: "box", center: [0, neg("depth"), { param: "rim_height", add: -100 }], size: [p("width"), p("depth"), 200] },
+        { kind: "box", center: [0, -100, { param: "rim_height", add: -240 }], size: [120, 200, 120] },
+      ],
+      symbol: [{ kind: "rect", center: [0, neg("depth")], size: [p("width"), p("depth")] }, { kind: "circle", center: [0, { param: "depth", scale: -0.55 }], radius: { param: "width", scale: 0.3 } }],
+      tagFields: ["mark"],
+      source: src,
+    },
+  };
+  return [wc, lav];
+}
+
 export function plumbingStarterTypes(version: string): LibraryEntry[] {
-  return [...FIXTURES.map((spec) => fixture(spec, version)), ...DRAINAGE.map((spec) => drainagePart(spec, version))];
+  return [...FIXTURES.map((spec) => fixture(spec, version)), ...DRAINAGE.map((spec) => drainagePart(spec, version)), ...legacyPlumbingStarterTypes(version)];
 }

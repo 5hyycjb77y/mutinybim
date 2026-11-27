@@ -70,9 +70,10 @@ describe("synthetic storm site", () => {
     expect(at("OF1")).toBeCloseTo((4 * 48612) / 43200, 5);
   });
 
-  it("isn't a network the kernel can total outside the pack's set", () => {
-    const outside = serviceNetworkTotals(model, CIVIL_STORM_SERVICE);
-    expect(outside.ok ? "" : outside.reason).toBe('"civil.storm" isn\'t a service this model knows');
+  it("totals through the kernel's network walk by default now that Civil is first-party", () => {
+    const totals = serviceNetworkTotals(model, CIVIL_STORM_SERVICE);
+    expect(totals.ok).toBe(true);
+    if (totals.ok) expect(cfsOf(totals.totals.get("OF1")?.[CIVIL_RUNOFF])).toBeCloseTo((4 * 48612) / 43200, 5);
   });
 
   it("gives each catchment and pipe its share, oriented by the network not the drawing", () => {

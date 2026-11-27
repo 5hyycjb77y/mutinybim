@@ -16,18 +16,18 @@ afterEach(() => {
   unbindModelPacks("m-plain");
 });
 
-it("ships Civil (round 8, Preview); a model that doesn't switch it on is served without it, with Structural first-party (round 14)", () => {
-  expect(INSTALLED_PACKS.map((p) => p.manifest.id)).toEqual(["civil"]);
+it("ships Structural (round 14) and Civil as first-party add-ons active on every served model", () => {
+  expect(INSTALLED_PACKS.map((p) => p.manifest.id)).toEqual([]);
   bindServedModelPacks("m-plain", DEFAULT_SETTINGS);
-  expect(withModelPacks("m-plain", () => [activePackSet().has("civil"), activePackSet().packItems(CLASS_POINT).some((c) => c.id.startsWith("civil.")), activePackSet().packItems(CLASS_POINT).some((c) => c.id === "struct.beam_steel")])).toEqual([false, false, true]);
+  expect(withModelPacks("m-plain", () => [activePackSet().has("civil"), activePackSet().packItems(CLASS_POINT).some((c) => c.id.startsWith("civil.")), activePackSet().packItems(CLASS_POINT).some((c) => c.id === "struct.beam_steel")])).toEqual([true, true, true]);
 });
 
 it("binds the pinned add-ons the server has and reports the rest", () => {
   const spy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-  bindServedModelPacks("m-pins", { ...DEFAULT_SETTINGS, packs: [{ id: "zz", version: "1.0.0" }, { id: "civil", version: "0.1.0" }, { id: "struct", version: "0.1.0" }] }, [zz]);
+  bindServedModelPacks("m-pins", { ...DEFAULT_SETTINGS, packs: [{ id: "zz", version: "1.0.0" }, { id: "site", version: "0.1.0" }, { id: "civil", version: "0.1.0" }, { id: "struct", version: "0.1.0" }] }, [zz]);
   bindServedModelPacks("m-plain", DEFAULT_SETTINGS, [zz]);
   expect(withModelPacks("m-pins", () => activePackSet().pins())).toEqual([{ id: "zz", version: "1.0.0" }]);
   expect(withModelPacks("m-plain", () => activePackSet().pins())).toEqual([]);
-  // Structural's stored pin is first-party now, so only Civil is reported.
-  expect(spy).toHaveBeenCalledWith(expect.stringContaining("add-ons this server doesn't have"), { modelId: "m-pins", missing: [{ id: "civil", version: "0.1.0" }] });
+  // Structural and Civil are first-party now, so only the unshipped non-first-party pin ("site") is reported.
+  expect(spy).toHaveBeenCalledWith(expect.stringContaining("add-ons this server doesn't have"), { modelId: "m-pins", missing: [{ id: "site", version: "0.1.0" }] });
 });

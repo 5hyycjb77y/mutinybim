@@ -128,16 +128,27 @@ script". The other examples build a rooftop unit with its ducts, a plumbing
 riser and an electrical room; see the
 [examples list](../../packages/bim-script/examples/README.md).
 
-## Tool families
+## Tool families (legacy MCP packs)
 
-When an assistant connects to `/mcp`, it starts with the core tools, ten at
-most. Their main job is writing, checking, previewing and landing scripts,
-plus a few reads to look at the model first. Most work is done by scripts.
+When an assistant connects to `/mcp`, it starts with the core tools — **ten at
+most**. Their main job is writing, checking, previewing and landing scripts
+with `@permitzip/bim-script`, plus four reads to look at the model first.
 
-Other tools come in families. An assistant turns one on when a job needs
-it; you can ask it to ("turn on the electrical tools"). Or connect a family
-directly at its own address, `https://app.mutinybim.com/packs/<family>/mcp`,
-for example `https://app.mutinybim.com/packs/electrical/mcp`.
+**`@permitzip/bim-script` is the primary AI capability layer.** The legacy
+single-purpose MCP tool packs are being retired in favor of the scripting API,
+no new single-purpose MCP tools will be added, and the daily-driver surface at
+`/mcp` stays at ten tools at most. Of the 159 pack tools, **138** are already
+covered by scripts (see [Scripting coverage](../SCRIPTING-COVERAGE.md)); only
+**21** remain genuine host steps (rendering images, printing PDFs, issuing
+sets, firm/schedule libraries, Autodesk Docs, lint settings, and AI
+cut-sheet/picture reads).
+
+Turn on a family with `bim_enable_pack` only when you genuinely need one of
+those 21 host-step tools. Clients that do not dynamically refresh tool lists
+(such as Claude remote connectors) can connect a family directly at
+`https://app.mutinybim.com/packs/<family>/mcp` — for example
+`https://app.mutinybim.com/packs/model/mcp` for rendering and printing — only
+when they need a host-step tool in that family.
 
 The families are `model`, `drafting`, `ducts-pipes`, `electrical`,
 `plumbing`, `views-sheets`, `coordination`, `groups-phases`, `parts`,

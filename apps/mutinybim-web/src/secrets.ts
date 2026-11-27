@@ -4,6 +4,7 @@
  * is kept, so a copy of the database signs no one in.
  */
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import type { WebStore } from "./db";
 
 const SCRYPT_N = 16384;
 const SCRYPT_R = 8;
@@ -32,8 +33,19 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return timingSafeEqual(key, expected);
 }
 
-/** How long an operator-made password reset link works. */
+/** How long a password reset link works. */
 export const RESET_LINK_HOURS = 1;
+
+/**
+ * Makes a one-time password reset link for an account and returns its token.
+ * Only the token's digest is stored. The caller chooses when earlier links
+ * expire so an SMTP delivery failure can preserve a link already received.
+ */
+export async function issuePasswordReset(save: WebStore["createPasswordReset"], userId: string): Promise<string> {
+  const token = randomToken();
+  await save(digest(token), userId, new Date(Date.now() + RESET_LINK_HOURS * 3_600_000));
+  return token;
+}
 
 /** A URL-safe random token with the given prefix (e.g. `mbk_` for agent keys). */
 export function randomToken(prefix = ""): string {

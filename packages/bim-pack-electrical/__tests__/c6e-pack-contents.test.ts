@@ -92,24 +92,15 @@ describe("c6e: the Electrical add-on's contents", () => {
     const at = offered.indexOf(starters[0] as string);
     expect(at).toBeGreaterThan(0);
     expect(offered.slice(at, at + starters.length)).toEqual(starters);
-    // The kernel's own rows come first (the generic diffusers through the lavatory), exactly as the library listed them before.
+    // The kernel's own rows come first (the four starter electrical fixtures/panels); mechanical and plumbing starter types now ship from their own add-ons.
     expect(offered.slice(0, at)).toEqual([
-      "builtin:supply-diffuser-24@1",
-      "builtin:return-grille-24@1",
-      "builtin:exhaust-grille-12@1",
-      "builtin:rtu-5-ton@2",
-      "builtin:inline-fan-10@1",
-      "builtin:inline-fan-oa-10@1",
-      "builtin:vav-8@2",
       "builtin:duplex-receptacle@1",
       "builtin:junction-box-4sq@1",
       "builtin:panelboard-225@1",
       "builtin:troffer-2x4-led@1",
-      "builtin:water-closet-floor@1",
-      "builtin:lavatory-wall@1",
     ]);
     const superseded = supersededBuiltinPartTypes().map((t) => t.id);
-    expect(superseded).toEqual(["builtin:rtu-5-ton@1", "builtin:vav-8@1", ...supersededElectricalStarterTypes("v").map((t) => t.id)]);
+    expect(superseded).toEqual([...supersededElectricalStarterTypes("v").map((t) => t.id), "builtin:rtu-5-ton@1", "builtin:vav-8@1"]);
     for (const id of [...starters, ...superseded]) expect(builtinPartType(id)?.id).toBe(id);
   });
 });

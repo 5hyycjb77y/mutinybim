@@ -4,7 +4,7 @@
  *   node --import tsx apps/mutinybim-web/src/server.ts      # http://127.0.0.1:3100
  */
 import { createApp } from "./app";
-import { readConfig } from "./config";
+import { readConfig, senderDomain } from "./config";
 
 const config = readConfig();
 const app = createApp(config);
@@ -37,6 +37,7 @@ app
       quote: config.quote ? config.quote.provider : "off",
       signup: config.signupOpen ? "open" : "closed",
       scripts: config.scripts?.mode ?? "sealed",
+      mail: config.mail ? { kind: config.mail.kind, from: senderDomain(config.mail) } : "off",
     });
   })
   .catch((err: unknown) => {

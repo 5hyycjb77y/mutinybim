@@ -9,11 +9,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createApp, type App } from "../src/app";
 import type { WebConfig } from "../src/config";
 import { openSupabaseStore } from "../src/db-supabase";
 import { openDb } from "../src/db";
 import { migrateSqliteToSupabase } from "../src/migrate-sqlite";
+import { seedTeamShare } from "../__fixtures__/team-share";
 import type { Fetch } from "../src/oauth";
 import { hashPassword } from "../src/secrets";
 
@@ -271,6 +273,23 @@ test("Supabase Auth: email signup confirmation, duplicate detection, login, lega
   expect((await fetch(`${base}/models`, { headers: { cookie: `mutinybim_session=${firstSession}` }, redirect: "manual" })).status).toBe(303);
 });
 
+test("the Supabase store confirms the specified OIDC identity and address in one authenticated call", async () => {
+  const fetchImpl = jest.fn<ReturnType<Fetch>, Parameters<Fetch>>(async (input, init) => {
+    expect(String(input)).toBe(`${SUPABASE_URL}/rest/v1/rpc/web_confirm_oidc_email`);
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("apikey")).toBe(SECRET_KEY);
+    expect(headers.get("authorization")).toBe(`Bearer ${SECRET_KEY}`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      p_provider: "org", p_subject: "sub-1", p_user_id: "u-1", p_email: "sam@example.com",
+    });
+    return new Response(null, { status: 204 });
+  });
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
+  await store.confirmIdentityEmail("org", "sub-1", "u-1", "sam@example.com");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
 test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", async () => {
   const seen: { method: string; path: string; body: unknown }[] = [];
   const fetchImpl: Fetch = async (input, init) => {
@@ -289,12 +308,19 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
     if (url.pathname === "/rest/v1/rpc/web_rotate_assistant_refresh") {
       return Response.json({ status: "reused" });
     }
+    if (url.pathname === "/rest/v1/rpc/web_redeem_password_reset") {
+      return Response.json(body?.p_token_hash === "live-hash" ? "u-1" : null);
+    }
+    if (url.pathname === "/rest/v1/users" && url.searchParams.get("id") === "eq.u-1") {
+      return Response.json([{ id: "u-1", email: "sam@example.com", display_name: "Sam", password_hash: "scrypt$new", color_scheme: "system", created_at: "2026-11-24T00:00:00Z" }]);
+    }
     return Response.json([]);
   };
 
   const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   const created = await store.createUser({ id: "u-1", email: "SAM@example.com", displayName: "Sam", passwordHash: null });
   expect(created.email).toBe("sam@example.com");
+  expect(created.email_confirmed_at).toBeNull();
   const state = await store.takeOAuthState("st-1");
   expect(state).toMatchObject({ state: "st-1", provider: "supabase-google", code_verifier: "ver-1" });
   const rotated = await store.rotateAssistantRefresh("old-hash", "client-1", {
@@ -305,29 +331,33 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
   });
   expect(rotated).toEqual({ reused: true });
   expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh"]);
+
+  // Redeeming a reset link is one RPC: no separate password write or session delete.
+  seen.length = 0;
+  expect((await store.redeemPasswordReset("live-hash", "scrypt$new"))?.id).toBe("u-1");
+  expect(await store.redeemPasswordReset("spent-hash", "scrypt$other")).toBeNull();
+  expect(seen.filter((s) => s.method !== "GET")).toEqual([
+    { method: "POST", path: "/rest/v1/rpc/web_redeem_password_reset", body: { p_token_hash: "live-hash", p_password_hash: "scrypt$new" } },
+    { method: "POST", path: "/rest/v1/rpc/web_redeem_password_reset", body: { p_token_hash: "spent-hash", p_password_hash: "scrypt$other" } },
+  ]);
 });
 
 test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {
   const model = { id: "plant", name: "East plant", owner_id: "alex", created_at: "2026-11-26", updated_at: "2026-11-26" };
-  const reads: URL[] = [];
-  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl: async (input) => {
+  let reads = 0;
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl: async (input, init) => {
     const url = new URL(String(input));
-    reads.push(url);
+    reads++;
     // Acceptance commits immediately after the first model read, consuming Bea's direct share.
-    if (url.pathname === "/rest/v1/model_shares") return Response.json([]);
-    expect(url.pathname).toBe("/rest/v1/models");
-    expect(url.searchParams.get("id")).toBe("eq.plant");
-    const snapshot = { ...model, model_shares: model.owner_id === "alex" ? [{ role: "view" }] : [] };
+    expect(url.pathname).toBe("/rest/v1/rpc/web_access_to");
+    expect(JSON.parse(String(init?.body))).toEqual({ p_model: "plant", p_user: "bea" });
+    const snapshot = { ...model, role: model.owner_id === "alex" ? "view" : null };
     model.owner_id = "bea";
-    return Response.json([snapshot]);
+    return Response.json(snapshot);
   } });
   expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "alex" }, access: "view" });
   expect(await store.accessTo("bea", "plant")).toMatchObject({ model: { owner_id: "bea" }, access: "owner" });
-  expect(reads).toHaveLength(2);
-  for (const url of reads) {
-    expect(url.searchParams.get("select")).toContain("model_shares(role)");
-    expect(url.searchParams.get("model_shares.user_id")).toBe("eq.bea");
-  }
+  expect(reads).toBe(2);
 });
 
 test("configured provider domains show a dismissible opt-in link prompt on My models only for matching unlinked users", async () => {
@@ -356,6 +386,40 @@ test("configured provider domains show a dismissible opt-in link prompt on My mo
   expect(afterDismiss).not.toContain('data-testid="link-prompt-acme"');
 });
 
+test("a populated SQLite upgrade preserves confirmation across a restart and clears it on an address change", async () => {
+  const file = path.join(dataDir, "legacy.sqlite");
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name TEXT NOT NULL, password_hash TEXT, created_at TEXT NOT NULL);
+    INSERT INTO users VALUES ('old', 'pat@example.com', 'Pat', NULL, '2026-01-01');`);
+  old.close();
+
+  const db = openDb(file);
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.linkIdentity("org", "pat", "old");
+  await db.confirmIdentityEmail("another", "pat", "old", "pat@example.com");
+  await db.confirmIdentityEmail("org", "different", "old", "pat@example.com");
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.confirmIdentityEmail("org", "pat", "old", "PAT@example.com");
+  const confirmedAt = (await db.userById("old"))?.email_confirmed_at;
+  expect(confirmedAt).toEqual(expect.any(String));
+  await db.close();
+
+  const reopened = openDb(file);
+  const writer = new DatabaseSync(file);
+  try {
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("PAT@EXAMPLE.COM");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("new@example.com");
+    await reopened.confirmIdentityEmail("org", "pat", "old", "pat@example.com");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBeNull();
+  } finally {
+    writer.close();
+    await reopened.close();
+  }
+});
+
 test("migrateSqliteToSupabase copies records and remaps foreign keys when an email already exists in Postgres", async () => {
   const sqlitePath = path.join(dataDir, "accounts.sqlite");
   const sqlite = openDb(sqlitePath);
@@ -367,6 +431,7 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   });
   await sqlite.createModel({ id: "mdl-1", ownerId: legacyUser.id, name: "Studio" });
   const peer = await sqlite.createUser({ id: "peer", email: "peer@example.test", displayName: "Peer", passwordHash: null });
+  seedTeamShare(sqlitePath, { id: "old-team", name: "Studio team", ownerId: legacyUser.id, memberId: peer.id, modelId: "mdl-1", role: "edit" });
   await sqlite.share({ modelId: "mdl-1", userId: peer.id, role: "view", invitedBy: legacyUser.id });
   const offer = await sqlite.transfers.offer("offer-1", "mdl-1", legacyUser.id, peer.id, "edit");
   if (typeof offer === "string") throw new Error("Missing test offer");
@@ -410,6 +475,15 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
 
   const summary = await migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   expect(summary.remappedUsers).toBe(1);
+  expect(posted.find((p) => p.path === "/rest/v1/teams")?.body).toEqual([
+    expect.objectContaining({ id: "old-team", owner_id: existingPgId, created_by: existingPgId }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/team_members")?.body).toEqual([
+    expect.objectContaining({ team_id: "old-team", user_id: peer.id, role: "member", added_by: existingPgId }),
+  ]);
+  expect(posted.find((p) => p.path === "/rest/v1/team_shares")?.body).toEqual([
+    expect.objectContaining({ model_id: "mdl-1", team_id: "old-team", role: "edit", shared_by: existingPgId }),
+  ]);
   expect(summary.tables.models).toBe(1);
   expect(summary.tables.model_creations).toBe(1);
   expect(summary.tables.model_shares).toBe(1);
@@ -443,6 +517,43 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   expect(identityPost?.body).toEqual([expect.objectContaining({ provider: "org", subject: "sub-1", user_id: existingPgId })]);
   const passwordPatch = posted.find((p) => p.path === "/rest/v1/users" && p.method === "PATCH");
   expect(passwordPatch?.body).toEqual({ password_hash: "scrypt$hash" });
+});
+
+test("the copier carries confirmation only for the original account and address", async () => {
+  const sqlitePath = path.join(dataDir, "copy.sqlite");
+  const sqlite = new DatabaseSync(sqlitePath);
+  sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL);
+    INSERT INTO users VALUES ('new', 'new@example.com'), ('same', 'same@example.com'), ('old-id', 'remap@example.com');`);
+  const stamp = "2026-11-01T12:00:00.000Z";
+  const patches: { filters: Record<string, string>; body: unknown }[] = [];
+  const inserts: unknown[] = [];
+  const fetchImpl: Fetch = async (input, init) => {
+    const url = new URL(input);
+    expect(url.pathname).toBe("/rest/v1/users");
+    if (init?.method === "GET") return Response.json([
+      { id: "same", email: "SAME@example.com" }, { id: "different-id", email: "remap@example.com" },
+    ]);
+    const body: unknown = JSON.parse(String(init?.body));
+    if (init?.method === "PATCH") patches.push({ filters: Object.fromEntries(url.searchParams), body });
+    else inserts.push(body);
+    return new Response(null, { status: 204 });
+  };
+  const copy = (dryRun = false) => migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl, dryRun });
+  try {
+    await copy();
+    expect(inserts[0]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: null })]);
+    expect(patches).toHaveLength(0);
+    sqlite.exec("ALTER TABLE users ADD COLUMN email_confirmed_at TEXT");
+    sqlite.prepare("UPDATE users SET email_confirmed_at = ?").run(stamp);
+    await copy(true);
+    expect(patches).toHaveLength(0);
+    expect(inserts).toHaveLength(1);
+    await copy();
+    expect(inserts[1]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: stamp })]);
+    expect(patches).toEqual([{ filters: { id: "eq.same", email: "eq.SAME@example.com", email_confirmed_at: "is.null" }, body: { email_confirmed_at: stamp } }]);
+  } finally {
+    sqlite.close();
+  }
 });
 
 

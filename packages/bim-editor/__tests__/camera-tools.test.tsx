@@ -72,11 +72,16 @@ it('honours waypoint times, captured aim and end positions', () => {
 it('releases the camera on Escape and on unmount, and reopens edited waypoint times in this tab', () => {
   const release = jest.fn()
   const viewer = { camera3dState: () => camera, beginCameraMotion: () => ({ look: () => true, release }), setCamera3d: async () => {} }
-  const props = { viewer, model: modelWith(), initialLevel: floor.id, selectedId: null, rightInset: 0, onClose: jest.fn() }
+  const canvas = document.createElement('div')
+  canvas.tabIndex = -1
+  document.body.appendChild(canvas)
+  const props = { viewer, model: modelWith(), initialLevel: floor.id, selectedId: null, rightInset: 0, canvasRef: { current: canvas }, onClose: jest.fn() }
   const first = render(<CameraTools {...props} />)
   fireEvent.click(screen.getByRole('button', { name: 'Start floor walk' }))
   fireEvent.keyDown(window, { key: 'Escape' })
   expect(release).toHaveBeenCalledTimes(1)
+  expect(canvas).toHaveFocus()
+  canvas.remove()
   fireEvent.change(screen.getByLabelText('Camera mode'), { target: { value: 'flight' } })
   fireEvent.change(screen.getByLabelText('Waypoint'), { target: { value: '2' } })
   fireEvent.change(screen.getByLabelText('Seconds'), { target: { value: '6' } })

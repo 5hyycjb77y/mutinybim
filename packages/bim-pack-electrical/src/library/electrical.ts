@@ -27,6 +27,14 @@ function power(id: string, z: Dim, voltage: Dim, poles: number, load: Dim): Part
   return { id, label: id === "power" ? "Power" : id === "primary" ? "Primary" : "Feeder", domain: "electrical", systemKind: "power", position: [0, 0, z], direction: [0, 0, 1], shape: "none", voltage, poles, flow: load };
 }
 
+function wallBoxPower(voltage: Dim, poles: number, load: Dim): PartConnector {
+  return { id: "power", label: "Power", domain: "electrical", systemKind: "power", position: [0, -20, 60], direction: [0, -1, 0], shape: "none", voltage, poles, flow: load };
+}
+
+function floorBoxPower(voltage: Dim, poles: number, load: Dim): PartConnector {
+  return { id: "power", label: "Power", domain: "electrical", systemKind: "power", position: [0, 0, -80], direction: [0, 0, -1], shape: "none", voltage, poles, flow: load };
+}
+
 /** NEMA enclosure types offered for distribution equipment (V3: exterior panels go NEMA 3R). */
 export const ENCLOSURES = ["NEMA 1", "NEMA 3R", "NEMA 4X", "NEMA 12"];
 
@@ -77,7 +85,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("device_role", "Device role")],
       typeValues: { voltage: 120, rating: 20, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("line_voltage")],
-      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      connectors: [wallBoxPower(p("voltage"), 1, 0)],
       geometry: [
       { kind: "box", center: [0, -10, 60], size: [55, 20, 95] },
       { kind: "box", center: [0, 3, 60], size: [70, 6, 115] },
@@ -98,7 +106,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("device_role", "Device role")],
       typeValues: { voltage: 120, rating: 20, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("line_voltage")],
-      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      connectors: [wallBoxPower(p("voltage"), 1, 0)],
       geometry: [
       { kind: "box", center: [0, -10, 60], size: [55, 20, 95] },
       { kind: "box", center: [0, 3, 60], size: [70, 6, 115] },
@@ -119,7 +127,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("device_role", "Device role")],
       typeValues: { voltage: 120, rating: 20, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("line_voltage")],
-      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      connectors: [wallBoxPower(p("voltage"), 1, 0)],
       geometry: [
       { kind: "box", center: [0, -10, 60], size: [55, 20, 95] },
       { kind: "box", center: [0, 3, 60], size: [70, 6, 115] },
@@ -140,7 +148,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("device_role", "Device role")],
       typeValues: { voltage: 120, rating: 20, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("0-10v")],
-      connectors: [power("power", 50, p("voltage"), 1, 0)],
+      connectors: [wallBoxPower(p("voltage"), 1, 0)],
       geometry: [
       { kind: "box", center: [0, -10, 60], size: [55, 20, 95] },
       { kind: "box", center: [0, 3, 60], size: [70, 6, 115] },
@@ -161,7 +169,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), text("device_role", "Device role")],
       typeValues: { voltage: 120, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("low_voltage")],
-      connectors: [power("power", 0, p("voltage"), 1, 0)],
+      connectors: [power("power", 40, p("voltage"), 1, 0)],
       geometry: [{ kind: "cylinder", center: [0, 0, 20], radius: 55, height: 40, axis: "z" }],
       symbol: [
         { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
@@ -182,7 +190,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), text("device_role", "Device role")],
       typeValues: { voltage: 24, device_role: "lighting_control" },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Controls"), controlTypeParam("0-10v")],
-      connectors: [power("power", 0, p("voltage"), 1, 0)],
+      connectors: [power("power", 37.5, p("voltage"), 1, 0)],
       geometry: [{ kind: "cylinder", center: [0, 0, 20], radius: 45, height: 35, axis: "z" }],
       symbol: [
         { kind: "circle", center: [0, 0], radius: 1.8, fill: "mask", pen: "medium", units: "paper" },
@@ -203,7 +211,7 @@ export function electricalStarterTypes(version: string): LibraryEntry[] {
       typeParams: [length("size", "Size")],
       typeValues: { size: 4 * IN },
       instanceParams: [num("voltage", "Voltage", "v", voltage), num("load", "Load", "va", va), num("mocp", "Maximum overcurrent protection", "a"), text("serves", "Serves"), text("circuit", "Circuit")],
-      connectors: [power("power", 0, p("voltage"), poles, p("load"))],
+      connectors: [power("power", p("size"), p("voltage"), poles, p("load"))],
       geometry: [{ kind: "box", center: [0, 0, half("size")], size: [p("size"), p("size"), p("size")] }],
       symbol: [
         { kind: "circle", center: [0, 0], radius: 1.6, fill: "mask", pen: "medium", units: "paper" },
@@ -294,7 +302,7 @@ function makeupAirUnitV1(version: string): LibraryEntry {
       typeValues: { length: 2000, width: 1200, height: 1100, supply_cfm: 3000, voltage: 480, load_va: 10000, mca: 16, mocp: 20 },
       instanceParams: [text("serves", "Serves")],
       connectors: [
-        { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", position: [-600, 0, 0], direction: [0, 0, -1], shape: "rect", width: 24 * IN, height: 12 * IN, flow: p("supply_cfm") },
+        { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", position: [-600, 0, 0], direction: [0, 0, -1], shape: "rect", width: 24 * IN, height: 12 * IN, endType: "mechanical.flanged", flow: p("supply_cfm") },
         power("power", p("height"), p("voltage"), 3, p("load_va")),
       ],
       geometry: [{ kind: "box", center: [0, 0, half("height")], size: [p("length"), p("width"), p("height")] }],
@@ -316,7 +324,7 @@ function makeupAirUnit(version: string): LibraryEntry {
       typeValues: { ...v1.typeValues, outdoor_cfm: 3000 },
       connectors: [
         ...v1.connectors,
-        { id: "outdoor_air", label: "Outdoor air", domain: "duct", systemKind: "outside_air", position: [half("length"), 0, half("height")], direction: [1, 0, 0], shape: "rect", width: 30 * IN, height: 18 * IN, flow: p("outdoor_cfm"), flowDirection: "in", intake: "hood" },
+        { id: "outdoor_air", label: "Outdoor air", domain: "duct", systemKind: "outside_air", position: [half("length"), 0, half("height")], direction: [1, 0, 0], shape: "rect", width: 30 * IN, height: 18 * IN, endType: "mechanical.flanged", flow: p("outdoor_cfm"), flowDirection: "in", intake: "hood" },
       ],
     },
   };
@@ -504,7 +512,7 @@ function distributionTypes(version: string): LibraryEntry[] {
       typeParams: [length("width", "Width"), length("height", "Height"), length("depth", "Depth"), num("bus_rating", "Switch rating", "a"), num("voltage", "System voltage", "v"), choice("phases", "Phases", ["1", "3"]), choice("enclosure", "Enclosure", ["NEMA 1", "NEMA 3R", "NEMA 4X"]), ...(fused ? [num("fuse_rating", "Fuses", "a")] : [])],
       typeValues: { width: 8 * IN, height: 14 * IN, depth: 5 * IN, bus_rating: amps, voltage: 480, phases: "3", enclosure, ...(fused && fuseA !== null ? { fuse_rating: fuseA } : {}) },
       instanceParams: [text("panel_name", "Name"), text("serves", "Serves")],
-      connectors: [{ ...power("line", p("height"), p("voltage"), 3, 0), label: "Line" }],
+      connectors: [{ ...power("line", { param: "height", add: 300 }, p("voltage"), 3, 0), label: "Line", position: [0, half("depth"), { param: "height", add: 300 }] }],
       geometry: CABINET.geometry,
       symbol: disconnectSymbol(fused),
       tagFields: ["panel_name"],
@@ -565,7 +573,7 @@ function deviceTypes(version: string): LibraryEntry[] {
       typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("nema", "NEMA configuration"), text("mounting", "Mounting")],
       typeValues: { voltage: 120, rating: 20, nema: "5-20R", mounting },
       instanceParams: [text("circuit", "Circuit"), text("switch_leg", "Switch leg"), num("load", "Load", "va", load), yesNo("gfci", "GFCI", gfci), CONNECTION_TYPE],
-      connectors: [{ ...power("power", 50, p("voltage"), 1, p("load")), loadClass: "receptacle" }],
+      connectors: [{ ...(mounting === "Floor" ? floorBoxPower(p("voltage"), 1, p("load")) : wallBoxPower(p("voltage"), 1, p("load"))), loadClass: "receptacle" }],
       geometry: opts?.geometry ?? (mounting === "Floor" ? FLOOR_BOX_GEOMETRY : WALL_BOX_GEOMETRY),
       symbol,
       tagFields: ["circuit"],
@@ -590,7 +598,7 @@ function deviceTypes(version: string): LibraryEntry[] {
         text("type_mark", "Fixture type"),
         CONNECTION_TYPE,
       ],
-      connectors: [{ ...power("power", 100, p("voltage"), 1, p("watts")), loadClass: "lighting", continuous: true }],
+      connectors: [{ ...power("power", 120, p("voltage"), 1, p("watts")), loadClass: "lighting", continuous: true }],
       geometry: [{ kind: "box", center: [0, 0, 60], size: [p("length"), p("width"), 120] }],
       symbol,
       tagFields: ["type_mark", "circuit"],
@@ -649,7 +657,7 @@ function deviceTypes(version: string): LibraryEntry[] {
         typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("nema", "NEMA configuration"), text("mounting", "Mounting")],
         typeValues: { voltage: 208, rating: 20, nema: "6-20R", mounting: "Wall" },
         instanceParams: [text("circuit", "Circuit"), num("load", "Load", "va", 1500), yesNo("gfci", "GFCI", false), CONNECTION_TYPE],
-        connectors: [{ ...power("power", 50, p("voltage"), 2, p("load")), loadClass: "receptacle" }],
+        connectors: [{ ...wallBoxPower(p("voltage"), 2, p("load")), loadClass: "receptacle" }],
         geometry: WALL_BOX_GEOMETRY,
         symbol: [
           { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
@@ -672,7 +680,7 @@ function deviceTypes(version: string): LibraryEntry[] {
         typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("nema", "NEMA configuration"), text("mounting", "Mounting")],
         typeValues: { voltage: 208, rating: 20, nema: "L6-20R", mounting: "Wall" },
         instanceParams: [text("circuit", "Circuit"), num("load", "Load", "va", 1500), yesNo("gfci", "GFCI", false), CONNECTION_TYPE],
-        connectors: [{ ...power("power", 50, p("voltage"), 2, p("load")), loadClass: "receptacle" }],
+        connectors: [{ ...wallBoxPower(p("voltage"), 2, p("load")), loadClass: "receptacle" }],
         geometry: WALL_BOX_GEOMETRY,
         symbol: [
           { kind: "circle", center: [0, 2.0], radius: 1.5, fill: "mask", pen: "medium", units: "paper" },
@@ -695,7 +703,7 @@ function deviceTypes(version: string): LibraryEntry[] {
         typeParams: [num("voltage", "Voltage", "v"), num("rating", "Rating", "a"), text("mounting", "Mounting")],
         typeValues: { voltage: 208, rating: 20, mounting: "Wall" },
         instanceParams: [text("circuit", "Circuit"), num("load", "Load", "va", 1800), CONNECTION_TYPE],
-        connectors: [{ ...power("power", 50, p("voltage"), 2, p("load")), loadClass: "equipment" }],
+        connectors: [{ ...wallBoxPower(p("voltage"), 2, p("load")), loadClass: "equipment" }],
         geometry: WALL_BOX_GEOMETRY,
         symbol: [
           { kind: "circle", center: [0, 1.6], radius: 1.4, fill: "mask", pen: "medium", units: "paper" },

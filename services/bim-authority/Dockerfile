@@ -34,6 +34,7 @@ COPY services/bim-authority/tsconfig.json /app/services/bim-authority/
 COPY services/bim-authority/src /app/services/bim-authority/src
 # Applied by the deploy's release step (fly.toml release_command → src/migrate.ts).
 COPY services/bim-authority/db/migrations /app/services/bim-authority/db/migrations
+COPY services/bim-authority/db/native /app/services/bim-authority/db/native
 
 ARG BIM_AUTHORITY_COMMIT=unknown
 ENV BIM_AUTHORITY_COMMIT=${BIM_AUTHORITY_COMMIT}

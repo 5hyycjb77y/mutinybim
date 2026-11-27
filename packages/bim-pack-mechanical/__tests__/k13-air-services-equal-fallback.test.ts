@@ -31,7 +31,8 @@ describe("k13-air-services-equal-fallback", () => {
     expect(systemKindIds(base)).not.toContain("supply_air");
     installFirstPartyPacks([MECHANICAL_PACK]);
     const reg = withPackServices(base, activePackSet());
-    expect(systemKindIds(reg)).toEqual(systemKindIds(ROUND13_REGISTRY));
+    // Civil is also first-party and adds `civil.storm`; compare all pre-Civil built-in services against Round 13.
+    expect(systemKindIds(reg).filter((id) => !id.startsWith("civil."))).toEqual(systemKindIds(ROUND13_REGISTRY));
     expect(loadServiceIds(reg)).toEqual(loadServiceIds(ROUND13_REGISTRY));
     for (const id of OURS) expect(JSON.stringify(reg.byId.get(id))).toBe(JSON.stringify(ROUND13_REGISTRY.byId.get(id)));
   });

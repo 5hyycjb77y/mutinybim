@@ -1,6 +1,6 @@
 import { columnVerticalSpan, DEFAULT_SETTINGS, type BimElement, type FieldProvider, type FieldWriter, type ModelState, type Vec2 } from "@permitzip/bim-kernel";
 import { elementTypeValue } from "@permitzip/bim-pack/runtime";
-import { to } from "@permitzip/bim-units";
+import { to, type Quantity } from "@permitzip/bim-units";
 import { STRUCT_KEYS } from "./frame";
 import { structuralLoadPath, type BeamLoadResult, type ColumnLoadResult, type FootingLoadResult } from "./load-path";
 import { sectionById } from "./sections";
@@ -19,6 +19,13 @@ const locked = (reason: string): FieldWriter => ({ kind: "none", reason });
 const finite = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const textOrNull = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
 const dist = (a: Vec2, b: Vec2): number => Math.hypot(b.x - a.x, b.y - a.y);
+const deflectionRatio = (span: Quantity<"length">, deflection: Quantity<"length">): string => {
+  const magnitude = Math.abs(deflection);
+  if (!(magnitude > 1e-9)) return "—";
+  const ratio = Math.round(span / magnitude);
+  if (!Number.isFinite(ratio) || ratio <= 0) return "—";
+  return ratio > 9999 ? ">L/9999" : `L/${ratio}`;
+};
 
 const READS_TYPE = { elementKinds: ["element_type"] } as const;
 const READS_FRAME = { elementKinds: ["level", "column", "beam", "slab", "component", "part", "part_type", "element_type"] } as const;
@@ -152,7 +159,7 @@ export const STRUCTURAL_FIELD_PROVIDER: FieldProvider = {
     }),
     {
       path: "max_deflection",
-      label: "Max deflection",
+      label: "Total-load max deflection",
       classes: ["struct.beam"],
       valueType: "quantity",
       kind: "length",
@@ -167,7 +174,7 @@ export const STRUCTURAL_FIELD_PROVIDER: FieldProvider = {
     },
     {
       path: "deflection_ratio",
-      label: "Deflection ratio (L/Δ)",
+      label: "Total-load deflection ratio (L/Δ)",
       classes: ["struct.beam"],
       valueType: "text",
       writer: locked("Computed by the gravity load path when E and section Ix are set."),
@@ -176,11 +183,35 @@ export const STRUCTURAL_FIELD_PROVIDER: FieldProvider = {
       read: (el, ctx) => {
         const b = loadPathFor(ctx.elements).beams.get(el.id);
         if (b?.maxDeflection === undefined) return null;
-        const mag = Math.abs(b.maxDeflection);
-        if (!(mag > 1e-9)) return "—";
-        const ratio = Math.round(b.span / mag);
-        if (!Number.isFinite(ratio) || ratio <= 0) return "—";
-        return ratio > 9999 ? ">L/9999" : `L/${ratio}`;
+        return deflectionRatio(b.span, b.maxDeflection);
+      },
+    },
+    {
+      path: "max_live_deflection",
+      label: "Live-load max deflection",
+      classes: ["struct.beam"],
+      valueType: "quantity",
+      kind: "length",
+      unit: "in",
+      writer: locked("Computed by the gravity load path when E and section Ix are set."),
+      group: "Loads",
+      deps: READS_FRAME,
+      read: (el, ctx) => {
+        const b = loadPathFor(ctx.elements).beams.get(el.id);
+        return b?.maxLiveDeflection !== undefined ? finite(to(b.maxLiveDeflection, "in")) : null;
+      },
+    },
+    {
+      path: "live_deflection_ratio",
+      label: "Live-load deflection ratio (L/Δ)",
+      classes: ["struct.beam"],
+      valueType: "text",
+      writer: locked("Computed by the gravity load path when E and section Ix are set."),
+      group: "Loads",
+      deps: READS_FRAME,
+      read: (el, ctx) => {
+        const b = loadPathFor(ctx.elements).beams.get(el.id);
+        return b?.maxLiveDeflection === undefined ? null : deflectionRatio(b.span, b.maxLiveDeflection);
       },
     },
 

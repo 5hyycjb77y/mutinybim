@@ -22,13 +22,13 @@ import {
 } from "@permitzip/bim-kernel";
 import { activePackSet, modelPackSet, withPackSet, type PackSet } from "@permitzip/bim-kernel/packs";
 import { messageErrorReply, readClientMessage, type ClientMessage, type Presence, type ServerMessage, type SessionReport } from "./protocol";
-import { peerHas, peerProtocol, serverProtocol, type Protocol } from "./protocol-version";
+import { peerHas, peerProtocol, PROTOCOL_FEATURES, serverProtocol, type Protocol } from "./protocol-version";
 import { CellHoldBoard } from "./schedules/cell-holds";
 import type { ScheduleEvaluator } from "./schedules/evaluator";
 import { actorColor, type ActorRef, type ScheduleServerMessage } from "./schedules/protocol";
 import { ScheduleSubscriptions, type ScheduleMetrics } from "./schedules/subscriptions";
 import type { Sequencer } from "./sequencer";
-import { StaleLeaseError } from "./store";
+import { StaleLeaseError, type CommitOutcome } from "./store";
 import { BRANCHES_SESSIONS_FEATURE, BRANCHES_STATE_BROADCAST_FEATURE, BRANCHES_UNAVAILABLE, HISTORY_REVISION_READS_FEATURE, isBranchClientMessage } from "./branches/protocol";
 import type { PrincipalLineage } from "./authorization";
 import { isLineageClientMessage, LINEAGE_OLDER_SERVER_WORDS, LINEAGES_ROLES_FEATURE } from "./lineages/protocol";
@@ -76,6 +76,8 @@ const JOIN_HISTORY = 50;
 export interface ConnectionPrincipal {
   readonly actorId: string;
   readonly canWrite: boolean;
+  /** Tell the editor its effective write permission for this copy. */
+  readonly reportWriteAccess?: boolean;
   /** Round 11 (W11): what the person holds on the copy this hub serves and every copy above it. Absent: a host that decides per model only. */
   readonly lineage?: PrincipalLineage;
 }
@@ -85,6 +87,8 @@ export type AuthorizeHello = (hello: Extract<ClientMessage, { type: "hello" }>) 
 >;
 
 export interface HubOptions {
+  /** Only a durable authority that orders edits with membership changes supplies this reader. */
+  readonly readSaveReceipt?: (connectionId: string, key: string, digest: string) => Promise<CommitOutcome | null>;
   /** When set, every connection must pass this check before it can read or write. */
   readonly authorize?: AuthorizeHello;
   /** Another process took the model's lease: this hub must stop serving it. */
@@ -168,6 +172,7 @@ export class SyncHub {
     const base = options.protocol ?? serverProtocol();
     // Each feature is advertised only by a hub that serves it.
     const served = [
+      ...(options.readSaveReceipt ? [PROTOCOL_FEATURES.saveReceipts] : []),
       ...(options.branches ? [BRANCHES_SESSIONS_FEATURE, HISTORY_REVISION_READS_FEATURE, BRANCHES_STATE_BROADCAST_FEATURE] : []),
       ...(options.branches?.servesCoverage() ? [HISTORY_COVERAGE_READ_FEATURE] : []),
       ...(options.merge ? [MERGE_FEATURE] : []),
@@ -238,7 +243,13 @@ export class SyncHub {
 
   /** The person's access changed mid-session (for example edit removed, view kept). */
   setPrincipal(connectionId: string, principal: ConnectionPrincipal): void {
-    if (this.connections.has(connectionId)) this.principals.set(connectionId, principal);
+    const conn = this.connections.get(connectionId);
+    if (!conn) return;
+    const before = this.principals.get(connectionId);
+    this.principals.set(connectionId, principal);
+    if (principal.reportWriteAccess && before?.canWrite !== principal.canWrite && peerHas(this.peers.get(connectionId), PROTOCOL_FEATURES.modelWriteAccess)) {
+      this.sendTo(conn, { type: "model_access", canWrite: principal.canWrite });
+    }
   }
 
   /** Access removed: say so plainly and stop serving this connection. The host closes the socket. */
@@ -354,12 +365,25 @@ export class SyncHub {
         for (const hold of this.holds.current(Date.now())) if (hold.connectionId !== conn.id) this.sendTo(conn, hold);
         return;
       }
+      case "read_save_receipt": {
+        if (!this.options.readSaveReceipt) {
+          this.sendTo(conn, messageErrorReply({ ok: false, code: "unknown_message", messageType: msg.type }));
+          return;
+        }
+        const outcome = await this.options.readSaveReceipt(conn.id, msg.idempotencyKey, msg.commandDigest);
+        if (this.principals.has(conn.id)) this.sendTo(conn, { type: "save_receipt", idempotencyKey: msg.idempotencyKey, outcome });
+        return;
+      }
       case "command": {
         if (isServerOnlyCommand(msg.request.command)) {
           this.sendTo(conn, { type: "outcome", idempotencyKey: msg.request.idempotencyKey, outcome: { status: "rejected", error: { code: "forbidden", message: serverOnlyCommandRefusal(msg.request.command.type), elementIds: [] } } });
           return;
         }
-        if (!principal.canWrite || (principal.actorId !== "*" && principal.actorId !== msg.request.actor.id)) {
+        const wrongActor = principal.actorId !== "*" && principal.actorId !== msg.request.actor.id;
+        const readOnlyReason = principal.canWrite ? undefined : principal.lineage
+          ? readOnlyWords(principal.lineage.rights, principal.lineage.lineageId)
+          : "You can view this model but not edit it. Ask a project admin for model editing access.";
+        if (wrongActor || (readOnlyReason && !this.options.readSaveReceipt)) {
           this.sendTo(conn, {
             type: "outcome",
             idempotencyKey: msg.request.idempotencyKey,
@@ -367,11 +391,7 @@ export class SyncHub {
               status: "rejected",
               error: {
                 code: "forbidden",
-                message: principal.canWrite
-                  ? "You can only edit as yourself"
-                  : principal.lineage
-                    ? readOnlyWords(principal.lineage.rights, principal.lineage.lineageId)
-                    : "You can view this model but not edit it. Ask a project admin for model editing access.",
+                message: wrongActor ? "You can only edit as yourself" : readOnlyReason!,
                 elementIds: [],
               },
             },
@@ -388,7 +408,9 @@ export class SyncHub {
         this.origin.set(key, conn.id);
         let outcome;
         try {
-          outcome = await this.sequencer.submit(msg.request);
+          outcome = readOnlyReason
+            ? await this.sequencer.submit(msg.request, { readOnlyReason })
+            : await this.sequencer.submit(msg.request);
         } catch (err) {
           if (this.origin.get(key) === conn.id) this.origin.delete(key);
           // Not decided, not saved: say so plainly and let the client retry with the same key.
@@ -498,7 +520,10 @@ export class SyncHub {
     const serializeStarted = performance.now();
     const durableRevision = this.sequencer.durableRevision(head.revision);
     const branch = this.options.branches?.current() ?? null;
-    const data = JSON.stringify({ type: "welcome", model, ...(interest ? { interest } : {}), durableRevision, protocol: this.protocol, ...(branch ? { branch } : {}) } satisfies ServerMessage);
+    const principal = this.principals.get(conn.id);
+    const data = JSON.stringify({ type: "welcome", model, ...(interest ? { interest } : {}), durableRevision, protocol: this.protocol,
+      ...(principal?.reportWriteAccess && peerHas(this.peers.get(conn.id), PROTOCOL_FEATURES.modelWriteAccess) ? { canWrite: principal.canWrite } : {}),
+      ...(branch ? { branch } : {}) } satisfies ServerMessage);
     const sent = performance.now();
     this.metrics.bytesOut += data.length;
     conn.send(data);

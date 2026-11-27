@@ -28,7 +28,7 @@ import {
 } from "@permitzip/bim-sync/lineages";
 import { randomUUID } from "node:crypto";
 import type { PgBranchRegistry } from "../pg-branches";
-import type { Sql } from "../pg-store";
+import type { QuerySql } from "../pg-store";
 
 /**
  * Copies with a purpose on the model server's database (round 11 W11):
@@ -84,7 +84,7 @@ export class PgLineageStore implements LineageStore, ChildLineageRegistry {
   private hasTable: Promise<boolean> | null = null;
 
   constructor(
-    private readonly sql: Sql,
+    private readonly sql: QuerySql,
     private readonly branches: PgBranchRegistry,
   ) {}
 

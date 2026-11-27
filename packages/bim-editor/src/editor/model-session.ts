@@ -14,7 +14,7 @@ import type { CategoryView, LoadedReference, ModelViewer3D, Pick, ReferenceItemP
 import type { EditorHostCapabilities, EditorReferencesPort } from '@permitzip/bim-editor-host'
 import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
 import type { RevitElementParameters, RevitParametersResponse, UnplacedElementsResponse, UnplacedElementView } from '../contracts/building-model/revit-parameters-contract'
-import { connectionProblem, editsPausedMessage, operatorMessage, problemForDenied, type ConnectionProblem } from './operator-messages'
+import { AWAITING_WRITE_ACCESS, MODEL_VIEW_ONLY, connectionProblem, editsPausedMessage, operatorMessage, problemForDenied, type ConnectionProblem } from './operator-messages'
 import { ALIGN_SNAP_MM, GRID_MM, MM_PER_FT, MM_PER_IN, POINT_SNAP_MM, WALL_FACE_SNAP_MM, defaultHeightMm, describeElement, feetInches,  nearestLinkedWallFace,
   newElementId, partLabel, snapHint, snapPoint, snapTargets, type SnapTarget } from './placement'
 import { linkedSnapNear } from './linked-reference/linked-reference-store'
@@ -518,6 +518,7 @@ export class ModelSession {
   private connectTimer: ReturnType<typeof setTimeout> | null = null
   private authority: { readonly url: string; readonly modelId: string } | null = null
   private status: ConnectionStatus = 'connecting'
+  private copyCanWrite?: boolean
   /**
    * When the oldest question still waiting for any answer went out on the current socket (Date.now ms),
    * null once the server has said anything since. Judged from what we asked, not from wall-clock quiet:
@@ -910,6 +911,7 @@ export class ModelSession {
   }
 
   private connect(sync: SyncModule, authority: { url: string; modelId: string }) {
+    this.copyCanWrite = undefined
     this.authority = authority
     const client = new sync.SyncClient(
       {
@@ -924,6 +926,10 @@ export class ModelSession {
       },
       this.actor,
       {
+        onWriteAccess: (canWrite) => {
+          this.copyCanWrite = canWrite
+          this.events.onStatus(this.status)
+        },
         onView: (view) => {
           this.view = view
           this.accepted = client.confirmedModel()
@@ -932,6 +938,12 @@ export class ModelSession {
         },
         onStatus: (status) => {
           this.status = status
+          if (status === 'offline') {
+            this.copyCanWrite = undefined
+            // Presence is keyed by server connection ID. A fresh socket receives a fresh roster.
+            this.people.clear()
+            this.events.onPresence(new Map())
+          }
           if (status === 'live') {
             this.deviceOffline = false
             this.clearConnectTimer()
@@ -947,7 +959,7 @@ export class ModelSession {
           this.events.onPresence(new Map(this.people))
         },
         onRemoteChange: (revision, actor) => this.events.onActivity(`${actor.name} saved revision ${revision}`),
-        onOutcome: (request, outcome) => this.settleOutcome(request, outcome),
+        onOutcome: (request, outcome, recovered) => this.settleOutcome(request, outcome, recovered),
         onModelReset: (info) => {
           // The client dropped every unsaved edit without answering them one by one.
           this.predictedIds.clear()
@@ -984,6 +996,10 @@ export class ModelSession {
 
   /** Why Move, Place, Route, Split, drags and nudges are off right now; null while the line is up (or before the model first arrives, which `canEdit` covers). */
   editPausedReason(): string | null {
+    if (this.capabilities?.requireWriteGrant) {
+      if (this.copyCanWrite === false) return MODEL_VIEW_ONLY
+      if (!this.copyCanWrite || !this.accepted || (this.status !== 'live' && this.status !== 'degraded')) return AWAITING_WRITE_ACCESS
+    }
     const client = this.client
     if (!client || this.halted || !this.accepted) return null
     if (!this.deviceOffline && (this.status === 'live' || this.status === 'degraded')) return null
@@ -1133,7 +1149,7 @@ export class ModelSession {
     const client = this.client
     const authority = this.authority
     if (this.disposed || this.halted || !client || !authority) return
-    this.attempts += 1
+    const attempt = ++this.attempts
     let token: string | null
     try {
       token = await this.getToken()
@@ -1141,7 +1157,7 @@ export class ModelSession {
       console.error('[building-model] reading the host session failed', { modelId: authority.modelId, err })
       token = null
     }
-    if (this.disposed || this.halted) return
+    if (this.disposed || this.halted || this.client !== client || this.authority !== authority || this.attempts !== attempt) return
     if (!token) {
       console.error('[building-model] no host session; not connecting live editing', { modelId: authority.modelId })
       this.events.onProblem(connectionProblem('signed_out'))
@@ -1277,6 +1293,10 @@ export class ModelSession {
    * when they can't be known (onModel then reports null until the edit is answered).
    */
   private sendToClient(client: SyncClient, command: Command, changed?: readonly ElementId[] | null): ReturnType<SyncClient['submit']> {
+    if (this.capabilities?.requireWriteGrant) {
+      const reason = this.editPausedReason()
+      if (reason) return { ok: false, error: { code: 'forbidden', message: reason, elementIds: [] } }
+    }
     let ids = changed
     if (ids === undefined) {
       // `view` is the client's view as of its last view event (never a drag preview).
@@ -2237,8 +2257,9 @@ export class ModelSession {
     if (refused !== null) console.error('[model-session] starter Level 1 was not added', { refused })
   }
 
-  private settleOutcome(request: CommandRequest, outcome: CommitOutcome) {
+  private settleOutcome(request: CommandRequest, outcome: CommitOutcome, recovered = false) {
     const mine = request.actor.id === this.actor.id && request.clientSessionId === this.client?.clientSessionId
+    const copyName = this.client?.branch()?.name ?? 'Main'
     const undo = this.undoing.get(request.idempotencyKey)
     this.undoing.delete(request.idempotencyKey)
     if (this.predictedIds.has(request.idempotencyKey)) {
@@ -2262,12 +2283,13 @@ export class ModelSession {
         outcome.error.code === 'locked' ||
         (outcome.error.code === 'invalid_value' && outcome.error.message.trim().length > 0)
       const message = notUnderstood || kernelWords ? outcome.error.message : operatorMessage(outcome.error.code)
-      this.events.onActivity(notUnderstood ? message : `Your change wasn't saved. ${message}`)
+      this.events.onActivity(recovered ? `Your change wasn’t saved to ${copyName}.` : notUnderstood ? message : `Your change wasn't saved. ${message}`)
       this.events.onRefused?.(message)
       this.emitUndoState()
       return
     }
     if (!mine) return
+    if (recovered) this.events.onActivity(`Saved to ${copyName} at revision ${outcome.revision}.`)
     // Views/sheets edits are on the document undo stack already (taken when sent).
     if (this.kernel && isDocumentCommand(this.kernel, request.command)) return
     if (undo?.direction === 'undo') this.redoStack.push({ revision: outcome.revision, label: undo.label, seq: ++this.undoSeq })
@@ -4161,17 +4183,11 @@ export class ModelSession {
   }
 
   dispose() {
+    if (this.disposed) return
     this.disposed = true
     this.clickHandler = null
     this.container.classList.remove(CLICK_TAKEN_CLASS)
-    this.clearConnectTimer()
-    if (this.livenessTimer) clearInterval(this.livenessTimer)
-    this.livenessTimer = null
-    this.unbindNetworkEvents?.()
-    this.unbindNetworkEvents = null
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    this.socket?.close()
-    this.client?.dispose()
+    this.closeLine()
     this.viewer?.dispose()
   }
 }

@@ -7,9 +7,9 @@ import { toast } from 'sonner'
 import { RefreshCw, Wind, X, ArrowLeft } from 'lucide-react'
 import { AUTO_TAG_CATEGORIES, ORGANIZATION_ZONE, elementsOfKind, lockOf, planAutoTags, runLabel, type RunFitting, type RunSegment, SYSTEM_KINDS, displayContextOf, documentIndex, viewCamera3d, type Aabb3, normalizeLevelName, organizationOf, sheetDependsOn, sheetViewports, type Actor, type DisplayContext, type GroupVisibility, type ModelState, type PartInstance, type PartTypeDefinition, type SectionCut, type Sheet, type Vec2, type ViewElement, originPointPosition, viewFloorMm, viewModelLevel, canonicalViewLevel, modelLevels, viewRotationDeg, type OriginPoint, diagramKindLabel, type StoredDiagramKind, type ScheduleCategory, type ElementId, type WorkFrame, asElementId, type AuthorRef, type BranchRef, parseBranchModelId, type SubmittalCommand, matchingPlanCrop, projectParametersOf } from '@permitzip/bim-kernel'
 import type { ConnectionStatus, Presence, SaveState } from '@permitzip/bim-sync'
-import { type ConnectionProblem } from './operator-messages'
+import { AWAITING_WRITE_ACCESS, type ConnectionProblem } from './operator-messages'
 import { SHEET_FIRM_NAME, type SheetTitle } from '../contracts/building-model/sheet-title'
-import { panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
+import { BUTTONS_RIGHT, panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
 import type { LoadedReference, ModelViewer3D, Pick as ViewerPick, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import { elevationCut, kernelToScene, livePlanCutMm, liveView, type Projection } from '@permitzip/bim-viewer-3d/light'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
@@ -70,6 +70,7 @@ const AddonsPreview = dynamic(() => import('./settings/AddonsPreview').then((m) 
 const TagStylesDialog = dynamic(() => import('./organization/TagStylesDialog').then((m) => m.TagStylesDialog), { ssr: false })
 const TextStylesDialog = dynamic(() => import('./organization/TextStylesDialog').then((m) => m.TextStylesDialog), { ssr: false })
 const ManageGroupsDialog = dynamic(() => import('./organization/ManageGroupsDialog').then((m) => m.ManageGroupsDialog), { ssr: false })
+const ManageMembersDialog = dynamic(() => import('./membership/ManageMembersDialog').then((m) => m.ManageMembersDialog), { ssr: false })
 const NewListScheduleDialog = dynamic(() => import('./schedules/NewListScheduleDialog').then((m) => m.NewScheduleWindow), { ssr: false })
 const SheetFigureDialog = dynamic(() => import('./views-sheets/SheetFigureDialog').then((m) => m.SheetFigureDialog), { ssr: false })
 const InsertCalculationDialog = dynamic(() => import('./calc-sheets/InsertCalculationDialog').then((m) => m.InsertCalculationDialog), { ssr: false })
@@ -165,6 +166,7 @@ import { buildingModelQuickCommands, buildingModelRibbon, PROJECTION_SHORTCUT, t
 import { OrientationControls } from './orientation/OrientationControls'
 import { OrbitPointMarker } from './orientation/OrbitPointMarker'
 import { OrbitPointClicks } from './orbit-point'
+import { walkKeyAction, WALKING_HINT } from './walk-keys'
 import { PlusHandles, plusHandlesViewFor, type FaceHandle } from './PlusHandles'
 import { useCopyChord } from './copy-chord'
 import { PROPERTIES_DEFAULT_WIDTH_PX, PROPERTIES_SURFACE, ResizableSideRail } from './layout/ResizableSideRail'
@@ -235,6 +237,8 @@ interface Props {
   userName: string
   userId: string
   initialView: BuildingModelView
+  /** The standalone native host can end the current tab's session. */
+  onSignOut?: () => void
   /** Open this view (a schedule from the project tree) as soon as the model shows it; a new id opens that one. */
   openViewId?: string
   /** Optional single-key shortcuts for collapsing the left/right sidebars (defaults: `[` and `]`, avoiding host Cmd+B / Cmd+Shift+K / Cmd+J). Pass `null` to disable either side. */
@@ -298,7 +302,7 @@ function RibbonTrailing({ targetId, children }: { targetId: string; children: Re
 /** The project's black-only printing choice (Sheets › Black only), re-read only when the model changes. */
 const printBlackOnlySelector: ModelSelector<boolean> = (snapshot) => (snapshot.model ? organizationOf(snapshot.model).printBlackOnly : false)
 
-export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId, sidebarShortcuts }: Props) {
+export function BuildingModelSurface({ projectId, projectName, projectNumber, userName, userId, initialView, openViewId, sidebarShortcuts, onSignOut }: Props) {
   const host = useEditorHost()
   const { openConfig: openModelConfig, getAccessToken } = host.session
   const referencesPort = host.data.references
@@ -306,6 +310,8 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   const linkedModelsPort = host.data.linkedModels
   const linkSources = useMemo(() => linkSourcesOf(linkedModelsPort), [linkedModelsPort])
   const firmLibraryPort = host.data.firmLibrary
+  const [membersOpen, setMembersOpen] = useState(false)
+  const membersModelId = parseBranchModelId(projectId)?.baseModelId ?? projectId
   const sheetTitle = useMemo<SheetTitle>(() => ({ projectName, projectNumber: projectNumber ?? '', firmName: SHEET_FIRM_NAME }), [projectName, projectNumber])
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const sessionRef = useRef<ModelSession | null>(null)
@@ -842,6 +848,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     })
   }, [viewer, cameraRememberKey, cameraMemory.loaded, rememberCamera])
 
+  // A walk shows its keys while it holds, however it started (the toolbar's Walk button or W); they leave with it.
+  useEffect(() => {
+    if (!viewer) return
+    return viewer.onWalkChange((walking) => setToolHint((hint) => (walking ? WALKING_HINT : hint === WALKING_HINT ? null : hint)))
+  }, [viewer])
+
   // An open plan or 3D view shows the live model in the visual style it sets; otherwise shaded with edges, as before.
   const liveStyle = openView && !showDrawing ? openView.props?.visualStyle ?? 'shaded_edges' : 'shaded_edges'
   useEffect(() => {
@@ -905,13 +917,14 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
   }, [referenceLevels, ownLevelNames])
 
   const status: ConnectionStatus | 'read_only' = config && !config.authority ? 'read_only' : connection
-  const canEdit = status !== 'read_only' && model !== null && problem?.kind !== 'no_access' && status !== 'denied'
+  const nativeBlocked = hostCapabilities.requireWriteGrant ? (live ? sessionChrome.editPaused : AWAITING_WRITE_ACCESS) : null
+  const canEdit = status !== 'read_only' && model !== null && problem?.kind !== 'no_access' && status !== 'denied' && !nativeBlocked
   const blockedReason =
     status === 'read_only' || problem?.kind === 'no_model'
       ? "Live editing isn't connected for this project, so views and sheets can't be made here yet."
       : problem?.kind === 'no_access' || status === 'denied'
         ? "You can look, but you don't have editing access to this model. Ask a project lead."
-        : 'Connecting to the model server…'
+        : nativeBlocked ?? 'Connecting to the model server…'
 
   // Branches, versions, responsibilities, merges and change orders (round 8b) ride the same model socket.
   const syncChannel = sessionChrome.channel
@@ -2084,6 +2097,29 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else requestDelete(toDelete.id)
         return
       }
+      // Drawings and open schedule grids handle their own keyboard navigation and Escape.
+      if (showDrawing || scheduleGridOpen) return
+      // Walking the 3D view with W A S D, E and Q (`walk-keys.ts`): the camera has those keys, and Esc leaves the walk before anything else.
+      const walker = session?.viewer
+      if (walker) {
+        const walk = walkKeyAction(e, walker.walking())
+        if (walk === 'start') {
+          if (live3dOpen && projection === 'perspective') {
+            e.preventDefault()
+            walker.setWalk(true)
+            walker.walkKey(e.code, true)
+            return
+          }
+        } else if (walk === 'move') {
+          e.preventDefault()
+          walker.walkKey(e.code, true)
+          return
+        } else if (walk === 'stop') {
+          e.preventDefault()
+          walker.setWalk(false)
+          return
+        }
+      }
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
         if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
@@ -2092,8 +2128,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           return
         }
       }
-      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
-      if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if ((e.key === 'a' || e.key === 'A') && canEdit && selection?.kind === 'authored' && (selection.element.kind === 'run_segment' || selection.element.kind === 'run_fitting')) {
           e.preventDefault()
@@ -2219,6 +2253,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       else void session?.clearSelection()
     }
     const onKeyUp = (e: KeyboardEvent) => {
+      // A walk key came up wherever the focus is by then (a field too): the camera must not keep walking.
+      const walker = sessionRef.current?.viewer
+      if (walker?.walking()) walker.walkKey(e.code, false)
       if (e.key === 'Shift') sessionRef.current?.setShiftHeld(false)
       const before = altLockRef.current
       if (e.key === 'Alt' && before !== null) {
@@ -2237,7 +2274,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
+  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, scheduleGridOpen, live3dOpen, projection, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
   const createView = useCallback(
     async (viewType: Exclude<CreatableViewType, 'section'>, input: { name: string; level: string | null; scale: number }): Promise<string | null> => {
       const viewer = sessionRef.current?.viewer
@@ -2876,6 +2913,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
     }
   }, [tool, spacesDrawing, ceilingTool.active, drawingTool, stopSpacesTool, stopCeilingTool, openKey])
   const ribbonInput: Parameters<typeof buildingModelRibbon>[0] = {
+    openManageMembers: host.data.modelMembers ? () => setMembersOpen(true) : undefined,
+    signOut: onSignOut ? () => {
+      sessionRef.current?.dispose()
+      sessionRef.current = null
+      onSignOut()
+    } : undefined,
     addons,
     ceiling: ceilingTool.ribbon,
     clipboard: { copyBlocked, copy: copyParts, pasteBlocked: partPasteBlocked, paste: pasteParts },
@@ -3435,6 +3478,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         <div className="relative min-w-0 flex-1 bg-muted/40">
           <div
             ref={canvasRef}
+            tabIndex={-1}
             data-testid="building-model-canvas"
             data-camera={cameraStill ? 'still' : 'moving'}
             className={showDrawing ? 'hidden' : 'absolute inset-0 touch-none'}
@@ -3470,6 +3514,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               const at = { x: e.clientX - rect.left, y: e.clientY - rect.top }
               if (selection) setContextMenu(at)
               else void sessionRef.current?.selectAt(e.clientX, e.clientY).then(() => setContextMenu(at))
+            }}
+            onWheelCapture={(e) => {
+              // Right-button + scroll adjusts walk speed while walking: release must not open the right-click menu.
+              if (rightDownAt.current && (e.buttons & BUTTONS_RIGHT) !== 0 && sessionRef.current?.viewer?.walking()) {
+                rightDownAt.current = null
+              }
             }}
             onContextMenu={(e) => e.preventDefault()}
             onDoubleClick={(e) => void orbitClicks.doubleClicked(sessionRef.current?.viewer, e.clientX, e.clientY, { tool, planOpen })}
@@ -3612,7 +3662,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           {viewer && live3dOpen && !scheduleGridOpen && !loadError && cameraToolsView === cameraToolsKey && (
             <ModelFromStore store={modelStore}>{shown => shown && (
               <CameraTools key={cameraToolsKey} viewer={viewer} model={shown} initialLevel={activeLevel} selectedId={selectedId}
-                rightInset={propertiesOpen ? propertiesWidth : 0} onClose={() => setCameraToolsView(null)} />
+                rightInset={propertiesOpen ? propertiesWidth : 0} canvasRef={canvasRef} onClose={() => setCameraToolsView(null)} />
             )}</ModelFromStore>
           )}
           {showDrawing && open.kind === 'sheet' && openSheet && (
@@ -4114,6 +4164,10 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           />
         )}
       </div>
+      {membersOpen && host.data.modelMembers && (
+        <ManageMembersDialog key={JSON.stringify([membersModelId, userId])} port={host.data.modelMembers} modelId={membersModelId}
+          actorId={userId} onClose={() => setMembersOpen(false)} />
+      )}
       {organizationDialog !== null && (
         <ModelFromStore store={modelStore}>
           {(shown) =>

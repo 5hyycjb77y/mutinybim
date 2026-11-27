@@ -23,7 +23,8 @@ import {
 } from "@permitzip/bim-kernel";
 import { PointReadsBuilder } from "./point-reads-idle";
 import type { ClientMessage, Presence, ServerMessage } from "./protocol";
-import { clientProtocol, peerHas, type Protocol } from "./protocol-version";
+import { clientProtocol, peerHas, PROTOCOL_FEATURES, type Protocol } from "./protocol-version";
+import { commandDigest } from "./command-digest";
 import { decideWithUpgrades } from "./upgrade-policy";
 import { SCHEDULE_SERVER_TYPES, type ScheduleClientMessage, type ScheduleServerMessage } from "./schedules/protocol";
 import { BRANCH_SERVER_TYPES, BRANCHES_SESSIONS_FEATURE, type BranchClientMessage, type BranchServerMessage } from "./branches/protocol";
@@ -119,6 +120,8 @@ export type ConnectionStatus = "connecting" | "live" | "catching_up" | "offline"
  * answered committed, which it does after the edit is durable in its database.
  */
 export interface SaveState {
+  /** A native save is waiting for a durable answer. Keep the original tab open. */
+  readonly unconfirmed?: true;
   /** Edits sent and not yet answered (shown as "saving…"). */
   readonly pending: number;
   /** Edits the server said were NOT saved yet; they are being sent again. */
@@ -128,9 +131,10 @@ export interface SaveState {
 }
 
 export interface SyncClientEvents {
+  onWriteAccess?(canWrite: boolean | undefined): void;
   /** Fired whenever the view changes: confirmed head + local predictions. */
   onView?(view: ModelState, info: { confirmedRevision: number; pending: number }): void;
-  onOutcome?(request: CommandRequest, outcome: CommitOutcome): void;
+  onOutcome?(request: CommandRequest, outcome: CommitOutcome, recovered?: boolean): void;
   onPresence?(connectionId: string, presence: Presence | null): void;
   onStatus?(status: ConnectionStatus): void;
   onRemoteChange?(revision: number, actor: Actor): void;
@@ -176,7 +180,7 @@ export interface SubmitOptions {
 const MERGE_SERVER_TYPES: readonly MergeServerMessage["type"][] = ["merge_preview_result", "merge_apply_result", "merge_refused"];
 const QUANTITY_DELTA_SERVER_TYPES: readonly QuantityDeltaServerMessage["type"][] = ["quantity_delta_result", "quantity_delta_refused"];
 
-const SERVER_TYPES = new Set<string>(["welcome", "changeset", "outcome", "head", "advance", "area", "presence", "left", "error", "denied", "unsaved", "unavailable", "branch_state", ...SCHEDULE_SERVER_TYPES, ...BRANCH_SERVER_TYPES, ...MERGE_SERVER_TYPES, ...QUANTITY_DELTA_SERVER_TYPES, ...LINEAGE_SERVER_TYPES]);
+const SERVER_TYPES = new Set<string>(["welcome", "model_access", "changeset", "outcome", "save_receipt", "head", "advance", "area", "presence", "left", "error", "denied", "unsaved", "unavailable", "branch_state", ...SCHEDULE_SERVER_TYPES, ...BRANCH_SERVER_TYPES, ...MERGE_SERVER_TYPES, ...QUANTITY_DELTA_SERVER_TYPES, ...LINEAGE_SERVER_TYPES]);
 
 /** Every answer that carries the requestId of the request it answers. */
 type RequestAnswer = BranchServerMessage | MergeServerMessage | QuantityDeltaServerMessage | LineageServerMessage;
@@ -280,6 +284,8 @@ export class SyncClient implements SyncAdapter {
   private pending: CommandRequest[] = [];
   /** Requests awaiting an outcome, independent of whether their changeset already arrived. */
   private readonly submitted = new Map<string, CommandRequest>();
+  /** After losing write access, earlier edits can only ask for their own receipt, even on a later promotion. */
+  private readonly receiptOnly = new Set<string>();
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   /** Confirmed revision at each unanswered head check: an answer may be older than newer live updates. */
   private headCheckBases: number[] = [];
@@ -410,6 +416,7 @@ export class SyncClient implements SyncAdapter {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.setStatus("offline");
+    this.emitSaveState();
     this.failRequests("Lost the connection to the model server before it answered. Try again once it reconnects.");
   }
 
@@ -530,6 +537,7 @@ export class SyncClient implements SyncAdapter {
           return;
         }
         this.branchRef = msg.branch ?? null;
+        this.events.onWriteAccess?.(msg.canWrite);
         const heldRevision = this.confirmed?.revision;
         const welcomeRevision = msg.model.revision;
         if (heldRevision !== undefined && welcomeRevision < heldRevision && welcomeRevision >= this.durableRevision) {
@@ -539,6 +547,7 @@ export class SyncClient implements SyncAdapter {
         }
         this.durableRevision = msg.durableRevision ?? welcomeRevision;
         this.serverProtocol = msg.protocol;
+        this.markReceiptOnly(msg.canWrite);
         this.confirmed = sliceModel(withReadableSettings(msg.model), this.interest);
         // A fresh copy: earlier changesets stay true unless the model went backwards.
         this.history = this.history.filter((cs) => cs.revision <= msg.model.revision);
@@ -556,17 +565,27 @@ export class SyncClient implements SyncAdapter {
         if (this.pending.length > 0) this.resendPending();
         // Edits already seen committed whose answer was lost with the old connection: ask again.
         for (const request of this.submitted.values()) {
-          if (!this.pending.includes(request)) this.send({ type: "command", request });
+          if (this.receiptOnly.has(request.idempotencyKey)) this.readReceipt(request);
+          else if (!this.pending.includes(request)) this.send({ type: "command", request });
         }
         if (this.helloAt !== null) this.meter?.recordJoin(now() - this.helloAt, this.welcomed);
         this.helloAt = null;
         this.welcomed = true;
         this.emitView();
+        this.emitSaveState();
         // An early clock sample, so remote-visibility numbers start with the session.
         if (this.meter) this.checkHead();
         for (const channel of this.scheduleChannels) channel.welcomed();
         return;
       }
+      case "model_access":
+        this.events.onWriteAccess?.(msg.canWrite);
+        if (this.markReceiptOnly(msg.canWrite)) {
+          for (const key of this.receiptOnly) this.readReceipt(this.submitted.get(key)!);
+          this.emitView();
+          this.emitSaveState();
+        }
+        return;
       case "changeset": {
         if (msg.durable !== undefined) this.durableRevision = Math.max(this.durableRevision, msg.durable);
         if (!this.confirmed) return;
@@ -630,16 +649,26 @@ export class SyncClient implements SyncAdapter {
         this.emitView();
         return;
       }
+      case "save_receipt":
       case "outcome": {
         const req = this.submitted.get(msg.idempotencyKey);
+        if (msg.type === "save_receipt") {
+          if (!req || !this.receiptOnly.has(msg.idempotencyKey)) return;
+          if (!msg.outcome) {
+            this.emitSaveState();
+            return;
+          }
+        }
+        const outcome = msg.outcome;
+        if (!outcome) return;
+        const recovering = this.receiptOnly.delete(msg.idempotencyKey);
         this.submitted.delete(msg.idempotencyKey);
         this.stopRetry(msg.idempotencyKey);
         const firstSent = this.sentAt.get(msg.idempotencyKey);
         this.sentAt.delete(msg.idempotencyKey);
-        if (firstSent !== undefined && msg.outcome.status === "committed") this.meter?.recordCommit(now() - firstSent);
+        if (firstSent !== undefined && outcome.status === "committed") this.meter?.recordCommit(now() - firstSent);
         if (this.retrying.size === 0) this.storageMessage = null;
         if (this.status === "degraded" && this.retrying.size === 0) this.setStatus("live");
-        const outcome = msg.outcome;
         if (outcome.status === "rejected") {
           this.pending = this.pending.filter((p) => p.idempotencyKey !== msg.idempotencyKey);
           this.emitView();
@@ -652,7 +681,8 @@ export class SyncClient implements SyncAdapter {
           this.emitView();
         }
         if (req) {
-          this.events.onOutcome?.(req, outcome);
+          if (recovering) this.events.onOutcome?.(req, outcome, true);
+          else this.events.onOutcome?.(req, outcome);
           for (const channel of this.scheduleChannels) channel.outcome(req, outcome);
         }
         // "Base is ahead of the model": the server's model went backwards under us.
@@ -812,12 +842,17 @@ export class SyncClient implements SyncAdapter {
   }
 
   pendingCount(): number {
-    return this.pending.length;
+    return this.pending.length + this.receiptOnly.size;
   }
 
   saveState(): SaveState {
     const waiting = this.retrying.size > 0 || this.status === "degraded";
-    return { pending: this.pending.length, retrying: this.retrying.size, message: waiting ? this.storageMessage : null };
+    const nativeReceipts = peerHas(this.serverProtocol, PROTOCOL_FEATURES.saveReceipts);
+    const pending = nativeReceipts ? Math.max(this.pendingCount(), this.submitted.size) : this.pendingCount();
+    const offline = this.status === "offline" && pending > 0 && nativeReceipts;
+    const message = offline ? "Connection lost. Your save is unconfirmed. Keep this tab open."
+      : this.receiptOnly.size > 0 ? "Checking your earlier save. Keep this tab open." : waiting ? this.storageMessage : null;
+    return { pending, retrying: this.retrying.size, message, ...(offline || this.receiptOnly.size ? { unconfirmed: true } : {}) };
   }
 
   submit(command: Command, opts: SubmitOptions = {}): { ok: true; request: CommandRequest } | { ok: false; error: CommandError } {
@@ -877,6 +912,24 @@ export class SyncClient implements SyncAdapter {
     for (const request of this.pending) this.send({ type: "command", request });
   }
 
+  private markReceiptOnly(canWrite: boolean | undefined): boolean {
+    if (canWrite !== false || !peerHas(this.serverProtocol, PROTOCOL_FEATURES.saveReceipts)) return false;
+    const previous = this.receiptOnly.size;
+    for (const key of this.submitted.keys()) this.receiptOnly.add(key);
+    if (previous === this.receiptOnly.size) return false;
+    // A read-only tab shows the confirmed model while its original save is being checked.
+    this.pending = this.pending.filter(request => !this.receiptOnly.has(request.idempotencyKey));
+    return true;
+  }
+
+  private readReceipt(request: CommandRequest): void {
+    if (this.status !== "offline" && peerHas(this.serverProtocol, PROTOCOL_FEATURES.saveReceipts)) {
+      // The receipt reply itself can be lost. Retry only this read while the decision is outstanding.
+      this.scheduleRetry(request.idempotencyKey);
+      this.send({ type: "read_save_receipt", idempotencyKey: request.idempotencyKey, commandDigest: commandDigest(request.command) });
+    }
+  }
+
   publishPresence(activity: Presence["activity"]): void {
     this.send({ type: "presence", presence: { actor: this.actor, activity } });
   }
@@ -894,7 +947,7 @@ export class SyncClient implements SyncAdapter {
 
   private settleCommitted(key: string, revision: number, rebased: boolean): void {
     const req = this.submitted.get(key);
-    if (!req) return;
+    if (!req || this.receiptOnly.has(key)) return;
     this.submitted.delete(key);
     this.stopRetry(key);
     if (this.retrying.size === 0) this.storageMessage = null;
@@ -913,8 +966,9 @@ export class SyncClient implements SyncAdapter {
     entry.attempts += 1;
     entry.timer = setTimeout(() => {
       entry.timer = null;
-      const request = this.pending.find((p) => p.idempotencyKey === key);
-      if (request) this.send({ type: "command", request });
+      const request = this.submitted.get(key);
+      if (request && this.receiptOnly.has(key)) this.readReceipt(request);
+      else if (request && this.pending.includes(request)) this.send({ type: "command", request });
     }, delay);
     this.retrying.set(key, entry);
   }
@@ -957,6 +1011,7 @@ export class SyncClient implements SyncAdapter {
     this.retrying.clear();
     this.pendingArea = null;
     this.submitted.clear();
+    this.receiptOnly.clear();
     this.sentAt.clear();
     this.setStatus("catching_up");
     this.send({ type: "hello", actor: this.actor, lastRevision: -1, token: this.token, modelId: this.auth.modelId, interest: this.interest, protocol: clientProtocol() });

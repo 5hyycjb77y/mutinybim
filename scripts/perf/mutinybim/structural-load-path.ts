@@ -37,9 +37,12 @@ function edit(model: ModelState, n: number): ModelState {
   return { ...model, elements: { ...model.elements, "RTU-0-0": { ...rtu, values: { weight: 1500 + n } } } };
 }
 
-let model = gridFrame(BAYS);
+let model = gridFrame(BAYS, { elasticModulusKsi: 29_000 });
 const first = withPackSet(SET, () => structuralLoadPath(model));
 if (first.problems.length > 0) throw new Error(`load path problems: ${JSON.stringify(first.problems)}`);
+if (first.beams.some((b) => b.maxLiveDeflection === undefined || b.maxDeflection === undefined)) {
+  throw new Error("grid beams are missing elastic deflections");
+}
 const total = first.footings.reduce((a, f) => a + to(f.load.equipment, "lbf"), 0);
 if (Math.abs(total - 400 * 1500) > 1e-3) throw new Error(`footings carry ${total} lbf of equipment, expected ${400 * 1500}`);
 

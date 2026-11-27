@@ -67,7 +67,7 @@ describe("the three flow lists are views of one registry", () => {
     expect(LEGACY_SYSTEM_KIND_IDS).toEqual(OLD_SYSTEM_KINDS);
     expect(SYSTEM_KINDS.slice(0, OLD_SYSTEM_KINDS.length)).toEqual(OLD_SYSTEM_KINDS);
     expect(SYSTEM_KINDS.slice(OLD_SYSTEM_KINDS.length)).toEqual(["grease_waste", "indirect_waste", "fire_protection_wet", "fire_protection_dry", "chilled_water_supply", "chilled_water_return", "heating_water_supply", "heating_water_return"]);
-    expect([...systemKindIds()]).toEqual([...SYSTEM_KINDS]);
+    expect([...systemKindIds()]).toEqual([...SYSTEM_KINDS, "civil.storm"]);
   });
 
   it("load services and connector domains: the same strings in the same order", () => {
@@ -166,7 +166,7 @@ describe("per-kind tables reproduce from the rows for every round-4 kind (equiva
 
   it("the plumbing adapter's piped set, the drain sets and the source roles", () => {
     expect([...systemKindsWithAdapter("plumbing")].sort()).toEqual([...OLD_PIPED].sort());
-    expect([...drainSystemKinds()].sort()).toEqual([...OLD_DRAIN].sort());
+    expect([...drainSystemKinds()].sort()).toEqual([...OLD_DRAIN, "civil.storm"].sort());
     for (const [role, kinds] of Object.entries(OLD_ROLE_SERVES)) {
       const now = systemKindsServedBy(role);
       // The one change: a grease interceptor now also serves grease waste, which is a real system kind.

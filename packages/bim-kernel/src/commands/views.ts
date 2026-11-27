@@ -4,12 +4,13 @@ import { z } from "zod";
 import { convert } from "@permitzip/bim-units";
 import { canonicalJson } from "../canonical";
 import { sheetFigureSchema } from "../annotation/figures";
+import { sheetMarkupSpecSchema } from "../annotation/markups";
 import { recomputeDerivedAfter } from "../derived";
 import { peerReads } from "../elements/feature";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { ANNOTATION_LINKED_ANCHORS_FEATURE } from "../reference-geometry/linked-anchors";
 import { TAGS_MASK_LEADER_FEATURE } from "../organization/model";
-import { DIAGRAM_FAULT_CURRENT_FEATURE, DIAGRAM_FILTERS_FEATURE } from "../diagrams/definition";
+import { DIAGRAM_FAULT_CURRENT_FEATURE, DIAGRAM_FILTERS_FEATURE, DIAGRAM_LINK_LOADS_FEATURE } from "../diagrams/definition";
 import { viewGraphicsHintsRefusal, viewGraphicsRowByKey, type ViewGraphicsHints } from "../layout/view-graphics-point";
 import {
   CUT_PATTERNS,
@@ -343,7 +344,7 @@ const crop = z.object({ min: vec2, max: vec2 });
 
 const fields = z.record(z.string().min(1).max(40), z.string().max(200));
 
-const drawingShape = z.enum(["text", "line", "rect", "cloud", "dimension", "tag", "arc", "circle", "polyline", "spline", "region", "component", "repeat", "batt", "callout", "figure", "field_block"]);
+const drawingShape = z.enum(["text", "line", "rect", "cloud", "dimension", "tag", "arc", "circle", "polyline", "spline", "region", "component", "repeat", "batt", "callout", "figure", "field_block", "markup"]);
 
 /** What `restore_document_elements` may write back: the four document kinds, as committed. */
 // Restore puts back a record as stored, so it reads any stored discipline; the partition write gate refuses a new one the server can't store.
@@ -401,6 +402,7 @@ const documentRecord = z.discriminatedUnion("kind", [
     pinned: z.boolean().optional(),
     figure: sheetFigureSchema.optional(),
     block: fieldBlockSpecSchema.optional(),
+    markup: sheetMarkupSpecSchema.optional(),
   }),
 ]);
 type DocumentRecord = z.infer<typeof documentRecord>;
@@ -611,6 +613,8 @@ export interface DocumentIndex {
   readonly viewportsBySheet: ReadonlyMap<string, readonly Viewport[]>;
   readonly viewportByView: ReadonlyMap<string, Viewport>;
   readonly itemsByOwner: ReadonlyMap<string, readonly DrawingItem[]>;
+  /** Non-printing review markups (`shape === "markup"`) grouped by sheet id, separate from CAD drawing items. */
+  readonly markupsBySheet: ReadonlyMap<string, readonly DrawingItem[]>;
 }
 
 const indexes = new WeakMap<object, DocumentIndex>();
@@ -629,6 +633,7 @@ export function documentIndex(model: Pick<ModelState, "elements" | "connections"
   const viewportsBySheet = new Map<string, Viewport[]>();
   const viewportByView = new Map<string, Viewport>();
   const itemsByOwner = new Map<string, DrawingItem[]>();
+  const markupsBySheet = new Map<string, DrawingItem[]>();
   for (const el of partitionMembers(model, (p) => p.zone === DOCUMENT_ZONE)) {
     switch (el.kind) {
       case "view":
@@ -646,13 +651,16 @@ export function documentIndex(model: Pick<ModelState, "elements" | "connections"
         viewportByView.set(el.viewId, el);
         break;
       case "drawing_item":
-        if (!el.deleted) pushTo(itemsByOwner, el.ownerId, el);
+        if (!el.deleted) {
+          if (el.shape === "markup") pushTo(markupsBySheet, el.ownerId, el);
+          else pushTo(itemsByOwner, el.ownerId, el);
+        }
         break;
       default:
         break;
     }
   }
-  const built: DocumentIndex = { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner };
+  const built: DocumentIndex = { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner, markupsBySheet };
   indexes.set(model.elements, built);
   return built;
 }
@@ -717,6 +725,7 @@ function shareDocumentIndex(from: Readonly<Record<string, BimElement>>, to: Pick
   const viewportsBySheet = new Map(prev.viewportsBySheet);
   const viewportByView = new Map(prev.viewportByView);
   const itemsByOwner = new Map(prev.itemsByOwner);
+  const markupsBySheet = new Map(prev.markupsBySheet);
   for (const elementId of changedIds) {
     const before = from[elementId];
     const after = to.elements[elementId];
@@ -785,21 +794,22 @@ function shareDocumentIndex(from: Readonly<Record<string, BimElement>>, to: Pick
     }
     const b = before?.kind === "drawing_item" ? before : undefined;
     const a = after?.kind === "drawing_item" ? after : undefined;
-    if (b && a && b.ownerId !== a.ownerId) return;
+    if (b && a && (b.ownerId !== a.ownerId || (b.shape === "markup") !== (a.shape === "markup"))) return;
     const ownerId = (a ?? b)?.ownerId;
     if (!ownerId) return;
-    const list = itemsByOwner.get(ownerId) ?? [];
+    const bucket = (a ?? b)?.shape === "markup" ? markupsBySheet : itemsByOwner;
+    const list = bucket.get(ownerId) ?? [];
     if (beforeLive && afterLive && a) {
       const next = replaced(list, a);
       if (!next) return;
-      itemsByOwner.set(ownerId, next);
-    } else if (beforeLive) setOrDrop(itemsByOwner, ownerId, withoutId(list, elementId));
+      bucket.set(ownerId, next);
+    } else if (beforeLive) setOrDrop(bucket, ownerId, withoutId(list, elementId));
     else if (afterLive && a) {
       if (b) return;
-      itemsByOwner.set(ownerId, [...list, a]);
+      bucket.set(ownerId, [...list, a]);
     }
   }
-  indexes.set(to.elements, { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner });
+  indexes.set(to.elements, { views, viewTemplates, sheets, viewportsBySheet, viewportByView, itemsByOwner, markupsBySheet });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -938,6 +948,7 @@ function checkProps(viewType: ViewElement["viewType"], props: ViewProps, viewId:
   if (viewType !== "section" && viewType !== "elevation" && props.section) fail("Only section and elevation views have a cut line.", [viewId]);
   const isPlan = viewType === "floor_plan" || viewType === "ceiling_plan";
   if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
+  if (props.diagram?.hints?.showLinkLoads !== undefined && !peerReads(DIAGRAM_LINK_LOADS_FEATURE)) fail("Show link loads can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
   if (
     (props.diagram?.hints?.minLoadRatingA !== undefined ||
       props.diagram?.hints?.phaseScope !== undefined ||
@@ -1659,6 +1670,10 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
           reader.find(item.id);
           write({ ...item, deleted: true });
         }
+        for (const item of docs().markupsBySheet.get(sheet.id) ?? []) {
+          reader.find(item.id);
+          write({ ...item, deleted: true });
+        }
         write({ ...sheet, viewIds: [], deleted: true });
         authored.push({ elementId: sheet.id, field: F.deleted, value: "true" });
         break;
@@ -1814,6 +1829,7 @@ export function executeViewCommand(model: ModelState, command: ViewCommand): Exe
         if (command.shape === "figure" && (!onSheet || !command.figure)) fail(onSheet ? "A figure needs its chart or picture." : "Charts and pictures go on a sheet.", [command.ownerId], onSheet ? "invalid_value" : "wrong_kind");
         if (command.figure && command.shape !== "figure") fail("Only a figure takes a chart or picture.", [command.itemId]);
         if (command.shape === "field_block") fail("Place a live field block with add_field_block; it checks the template.", [command.itemId]);
+        if (command.shape === "markup") fail("Add a sheet review markup with add_sheet_markup.", [command.itemId]);
         if (command.shape === "callout" && !(owner.kind === "view" && (owner.viewType === "floor_plan" || owner.viewType === "ceiling_plan" || owner.viewType === "section" || owner.viewType === "elevation"))) fail("Callouts mark part of a plan, section or elevation, so they go in one.", [command.ownerId], "wrong_kind");
         const points = command.points.map(roundVec);
         checkPoints(command.shape, points, command.text, command.itemId, command.dim, command.tag);

@@ -35,6 +35,32 @@ const csv = (value: string | undefined): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+/** Installation and serving use the same database-target checks for standalone PostgreSQL. */
+export function nativeDatabaseUrl(env: NodeJS.ProcessEnv): string {
+  const dbUrl = env.MUTINYBIM_DB_URL;
+  if (!dbUrl) throw new Error("[config] native storage requires MUTINYBIM_DB_URL");
+  let url: URL;
+  try { url = new URL(dbUrl); } catch { throw new Error("[config] MUTINYBIM_DB_URL must be a PostgreSQL URL"); }
+  if (!["postgres:", "postgresql:"].includes(url.protocol) || !url.hostname) {
+    throw new Error("[config] MUTINYBIM_DB_URL must be a PostgreSQL URL with a host");
+  }
+  if (url.port === "6543") throw new Error("[config] native storage needs a direct or session-pooled connection, not transaction-pooler port 6543");
+  if (isForbiddenDbRef({ dbUrl, projectRef: env.MUTINYBIM_DISPOSABLE_PROJECT_REF }, csv(env.MUTINYBIM_FORBIDDEN_DB_REFS))) {
+    throw new Error("[config] refusing a forbidden database as the authority's database");
+  }
+  if (env.MUTINYBIM_DISPOSABLE_PROJECT_REF && !dbUrl.includes(env.MUTINYBIM_DISPOSABLE_PROJECT_REF)) {
+    throw new Error("[config] MUTINYBIM_DB_URL is not on the configured disposable project");
+  }
+  if (env.MUTINYBIM_LOCAL_STACK !== undefined && !["0", "1"].includes(env.MUTINYBIM_LOCAL_STACK)) {
+    throw new Error("[config] MUTINYBIM_LOCAL_STACK must be 0 or 1");
+  }
+  if (env.MUTINYBIM_LOCAL_STACK === "1" &&
+      (env.FLY_APP_NAME || !["127.0.0.1", "localhost"].includes(url.hostname))) {
+    throw new Error("[config] MUTINYBIM_LOCAL_STACK requires a local database and is refused on Fly");
+  }
+  return dbUrl;
+}
+
 const intFrom = (name: string, fallback: number, min: number, max: number) =>
   z
     .string()
@@ -51,6 +77,8 @@ const intFrom = (name: string, fallback: number, min: number, max: number) =>
 
 const envSchema = z.object({
   PORT: intFrom("PORT", 8080, 1, 65535),
+  BIM_AUTHORITY_BIND_HOST: z.string().min(1).optional(),
+  MUTINYBIM_AUTH_MODE: z.enum(["hosted", "native"]).default("hosted"),
   MUTINYBIM_DB_URL: z.string().min(1, "MUTINYBIM_DB_URL is required: the authority's own Postgres"),
   /** Supabase project ref the database URL must belong to (guards against pointing at the wrong database). */
   MUTINYBIM_DISPOSABLE_PROJECT_REF: z.string().regex(/^[a-z0-9]{20}$/, "MUTINYBIM_DISPOSABLE_PROJECT_REF must be a 20-character Supabase project ref").optional(),
@@ -97,11 +125,13 @@ const envSchema = z.object({
 
 export interface AuthorityConfig {
   readonly port: number;
+  readonly bindHost?: string;
+  readonly authMode: "hosted" | "native";
   readonly dbUrl: string;
   readonly dbRef: string;
   /** MUTINYBIM_LOCAL_STACK=1. */
   readonly local: boolean;
-  /** The host plug-in to load (MUTINYBIM_AUTHORIZER_MODULE), or null: test logins only. */
+  /** The host plug-in to load for hosted sign-in and permissions, when configured. */
   readonly hostModule: string | null;
   /** The authority database's own Auth URL, accepted for seeded test logins only. */
   readonly testAuthUrl: string | null;
@@ -156,7 +186,13 @@ export function loadConfig(
     throw new Error("[config] refusing a forbidden database (a host's production) as the authority's database");
   }
   let dbRef: string;
-  if (local) {
+  if (e.MUTINYBIM_AUTH_MODE === "native") {
+    if (e.MUTINYBIM_AUTHORIZER_MODULE?.trim() || e.MUTINYBIM_SUPABASE_URL) {
+      throw new Error("[config] native sessions cannot be combined with a host plug-in or test sign-in source");
+    }
+    nativeDatabaseUrl(env);
+    dbRef = "native";
+  } else if (local) {
     if (!isLocalDbUrl(e.MUTINYBIM_DB_URL)) throw new Error("[config] with MUTINYBIM_LOCAL_STACK=1 the database must be on this machine (127.0.0.1)");
     dbRef = "local";
   } else {
@@ -173,7 +209,7 @@ export function loadConfig(
     // Test logins come only from the authority's own disposable project.
     if (!local && !testAuthUrl.includes(dbRef)) throw new Error(`[config] MUTINYBIM_SUPABASE_URL is not on project ${dbRef}`);
   }
-  if (!hostModule && !testAuthUrl) throw new Error("[config] no sign-in source: set MUTINYBIM_AUTHORIZER_MODULE (a host plug-in) and/or MUTINYBIM_SUPABASE_URL (test logins)");
+  if (e.MUTINYBIM_AUTH_MODE === "hosted" && !hostModule && !testAuthUrl) throw new Error("[config] no sign-in source: set MUTINYBIM_AUTHORIZER_MODULE (a host plug-in) and/or MUTINYBIM_SUPABASE_URL (test logins), or select MUTINYBIM_AUTH_MODE=native");
 
   const servedModels = new Set(csv(e.BIM_AUTHORITY_SERVED_MODELS));
   const aliases = new Map<string, string>();
@@ -192,6 +228,8 @@ export function loadConfig(
   const machineId = e.FLY_MACHINE_ID ?? null;
   return {
     port: e.PORT,
+    bindHost: e.BIM_AUTHORITY_BIND_HOST,
+    authMode: e.MUTINYBIM_AUTH_MODE,
     dbUrl: e.MUTINYBIM_DB_URL,
     dbRef,
     local,

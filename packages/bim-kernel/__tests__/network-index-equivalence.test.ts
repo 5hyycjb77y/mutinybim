@@ -17,7 +17,7 @@
  *   commit.
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   asConnectionId,
   asElementId,
   draftElements,
@@ -194,7 +194,7 @@ describe("slot topology index answers exactly like the map-based index", () => {
 
 /** XS with routed runs: a level, a diffuser and a run up out of its neck. */
 function withRoutedRun(): ModelState {
-  const diffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+  const diffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
   if (!diffuser) throw new Error("starter library has no air terminal");
   const commands: Command[] = [
     { type: "create_level", levelId: "rr-level", name: "RR", elevationMm: 0 },

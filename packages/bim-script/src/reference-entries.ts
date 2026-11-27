@@ -35,7 +35,7 @@ export interface KitRecipe {
   readonly needsModelContent?: boolean;
 }
 
-const KIT = 'import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";';
+const KIT = 'import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";';
 
 const layout = (body: string, reads = "{ levels: true }") => `${KIT}\nexport default defineScript({\n  kind: "layout",\n  reads: ${reads},\n  parameters: {},\n  run(ctx) {\n${body}\n  },\n});\n`;
 const route = (body: string) => `${KIT}\nexport default defineScript({\n  kind: "route",\n  reads: { levels: true },\n  parameters: {},\n  run(ctx) {\n${body}\n  },\n});\n`;
@@ -148,6 +148,13 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "report(label: string, value: unknown): void",
     example: layout(`    const levels = ctx.model.levels().map((l) => ({ id: l.id, name: l.name, elevationMm: l.elevationMm }));\n    ctx.report("Levels (use the id as a level argument)", levels);`),
     topics: ["report", "see values", "debug", "print", "inspect", "what is in the model", "level ids", "return data"],
+  },
+  {
+    name: "ctx.render",
+    summary: "Queues a sheet or view PNG image (up to 6 per run) to be rasterized by the host and attached directly to bim_run_script's response so a vision-capable agent can inspect rendered sheets and human markups. Prefer markups.renderSheet / markups.renderAllMarkedSheets or documents.renderSheet.",
+    signature: "render(request: ScriptRenderRequest): void",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    ctx.render({ kind: "sheet", targetId: sh, label: "M-101 overview", includeMarkups: true, monochromeSheet: true });`),
+    topics: ["render", "image", "png", "sheet image", "inspect", "markup", "vision", "screenshot"],
   },
   {
     name: "ctx.parts.define",
@@ -284,10 +291,11 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "PartBuilder.connector",
-    summary: "A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind and size. Faces are the first body's (envelope) or, with of \"body\", the box around everything built.",
+    summary:
+      'A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind, size, and `endType` (use exact add-on IDs for duct and pipe — e.g. `"mechanical.slip"`, `"mechanical.flanged"`, `"plumbing_gas.sweat"`, `"plumbing_gas.threaded"`, `"plumbing_gas.flare"`, `"mechanical.brazed"`; full live list via `bim_script_reference({ topic: "Connector end types" })`; omit `endType` for electrical `shape: "none"`). Faces are the first body\'s (envelope) or, with of "body", the box around everything built.',
     signature: "connector(face: Face, c: ConnectorSpec & { offset?: [Length, Length] }, of?: \"envelope\" | \"body\"): PartBuilder",
-    example: part(`${BOX}\n    b.connector("top", { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(12), height: units.in(8), endType: "mechanical.slip" });\n    b.connector("left", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none" });\n    ctx.parts.define("acme.box.24", b.build());`),
-    topics: ["connector", "duct connection", "pipe connection", "gas", "electrical connection", "power"],
+    example: part(`${BOX}\n    b.connector("top", { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(12), height: units.in(8), endType: "mechanical.slip" });\n    b.connector("front", { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", shape: "round", diameter: units.in(0.75), endType: "plumbing_gas.sweat" });\n    b.connector("back", { id: "ref", label: "Refrigerant", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.375), endType: "plumbing_gas.flare" });\n    b.connector("left", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none" });\n    ctx.parts.define("acme.box.24", b.build());`),
+    topics: ["connector", "endType", "end type", "duct connection", "duct connector", "pipe connection", "pipe connector", "gas", "refrigerant", "flare", "brazed", "electrical connection", "power"],
   },
   {
     name: "PartBuilder.build",
@@ -410,10 +418,11 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "PartBuilder.connectorAt",
-    summary: "A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood.",
+    summary:
+      'A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood. Pass an exact add-on `endType` ID for duct and pipe connectors (see `bim_script_reference({ topic: "Connector end types" })`).',
     signature: "connectorAt(c: ConnectorSpec & { at: [Length, Length, Length]; facing: Face }): PartBuilder",
-    example: part(`${BOX}\n    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "sanitary", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });\n    ctx.parts.define("acme.box.24", b.build());`),
-    topics: ["connector", "condensate", "drain connection", "exact position"],
+    example: part(`${BOX}\n    b.connectorAt({ id: "supply", label: "Supply air", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(10), height: units.in(6), at: [units.in(0), units.in(0), units.in(12)], facing: "top", endType: "mechanical.flanged" });\n    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "condensate", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });\n    b.connectorAt({ id: "line", label: "Refrigerant suction", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.5), at: [units.in(12), units.in(4), units.in(2)], facing: "front", endType: "plumbing_gas.flare" });\n    ctx.parts.define("acme.box.24", b.build());`),
+    topics: ["connector", "endType", "end type", "pipe connector", "duct connector", "condensate", "drain connection", "refrigerant", "flare", "brazed", "exact position"],
   },
   {
     name: "PartBuilder.instanceParam",
@@ -468,6 +477,13 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["stair", "stairs", "circulation", "architecture"],
   },
   {
+    name: "building.railing",
+    summary: "A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42\" IBC commercial height); returns its id.",
+    signature: "railing(ctx: ScriptContext, spec: { readonly level: string; readonly from?: PlanPoint; readonly to?: PlanPoint; readonly points?: readonly PlanPoint[]; readonly height?: Measure; readonly style?: 'glass' | 'picket' | 'cable' | 'horizontal_bar' | 'solid'; readonly postSpacing?: Measure; readonly balusterSpacing?: Measure; readonly handrail?: boolean; readonly baseOffset?: Measure; readonly material?: string; readonly id?: string }): string",
+    example: layout(`    building.railing(ctx, { level: "L2", style: "glass", height: units.in(42), points: [{ x: units.ft(26.7), y: units.ft(27.4) }, { x: units.ft(26.7), y: units.ft(15.2) }, { x: units.ft(33.5), y: units.ft(15.2) }] });`),
+    topics: ["railing", "guardrail", "handrail", "balcony", "stairwell", "architecture", "safety"],
+  },
+  {
     name: "building.grid",
     summary: "A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.",
     signature: "grid(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly label?: string; readonly id?: string }): string",
@@ -483,10 +499,10 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "building.beam",
-    summary: "A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.",
-    signature: "beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string",
-    example: layout(`    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", mark: "B1" });`),
-    topics: ["beam", "framing", "steel", "wide flange", "structure"],
+    summary: "A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.",
+    signature: "beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly elasticModulus?: Measure; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string",
+    example: layout(`    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", elasticModulus: units.of("stress", 29000, "ksi"), mark: "B1" });`),
+    topics: ["beam", "framing", "steel", "wide flange", "structure", "deflection", "elastic modulus"],
   },
   {
     name: "building.footing",
@@ -1012,6 +1028,83 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     signature: "placeStandardNotes(ctx: ScriptContext, ownerRef: string, setId: string, at: { x: Measure; y: Measure }, opts?: FormatStandardNoteOptions & { id?: string; width?: Measure }): string",
     example: layout(`    const sh = documents.sheet(ctx, { number: "E-001", name: "Electrical Notes" });\n    documents.placeStandardNotes(ctx, sh, "electrical-general", { x: units.mm(650), y: units.mm(500) }, { extraNotes: ["COORDINATE FLOOR BOXES WITH FURNITURE LAYOUT."] });`, "{ ids: [] }"),
     topics: ["general notes", "standard notes", "spec library", "sheet notes", "place notes"],
+  },
+  {
+    name: "documents.renderSheet",
+    summary: "Queues a PNG image of one sheet (by id or sheet number) to be rasterized by the host and returned directly in bim_run_script's answer.",
+    signature: "renderSheet(ctx: ScriptContext, sheetRef: string, opts?: { label?: string; regionMm?: { min: { x: number; y: number }; max: { x: number; y: number } }; includeMarkups?: boolean; includeResolvedMarkups?: boolean; monochromeSheet?: boolean; highlightIds?: readonly string[]; dpi?: number; maxPx?: number }): ScriptRenderRequest",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "A-101", name: "Floor Plan" });\n    documents.renderSheet(ctx, sh, { includeMarkups: true, monochromeSheet: true });`, "{ ids: [] }"),
+    topics: ["render sheet", "sheet image", "png", "visual check", "markup"],
+  },
+  {
+    name: "documents.renderView",
+    summary: "Queues a PNG image of one view (by id or exact name) to be rasterized by the host and returned directly in bim_run_script's answer.",
+    signature: "renderView(ctx: ScriptContext, viewRef: string, opts?: { label?: string; regionMm?: { min: { x: number; y: number }; max: { x: number; y: number } }; highlightIds?: readonly string[]; dpi?: number; maxPx?: number }): ScriptRenderRequest",
+    example: layout(`${PLAN}\n    documents.renderView(ctx, plan, { dpi: 150 });`),
+    topics: ["render view", "view image", "png", "visual check"],
+  },
+  {
+    name: "markups.sheetsWithMarkups",
+    summary: "Lists every sheet in the drawing set that carries review markups matching status (default \"open\"), with counts, paper bounds, and overlapped viewports.",
+    signature: "sheetsWithMarkups(ctx: ScriptContext, opts?: { status?: MarkupStatus | \"all\" }): readonly MarkedSheetSummary[]",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { points: [{ x: 120, y: 120 }, { x: 260, y: 120 }], color: "#dc2626" });\n    ctx.report("Marked sheets", markups.sheetsWithMarkups(ctx));`),
+    topics: ["markups", "redlines", "sheets with markups", "review", "marker"],
+  },
+  {
+    name: "markups.list",
+    summary: "Lists review markups on one sheet (by id or sheet number), including paper bounds and exact model coordinates (ft) for every viewport each stroke sits over.",
+    signature: "list(ctx: ScriptContext, sheetRef: string, opts?: { status?: MarkupStatus | \"all\" }): readonly SheetMarkupSummary[]",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { points: [{ x: 120, y: 120 }, { x: 240, y: 160 }] });\n    ctx.report("Markups on M-101", markups.list(ctx, "M-101"));`),
+    topics: ["markups", "redlines", "list markups", "model coordinates", "review"],
+  },
+  {
+    name: "markups.renderSheet",
+    summary: "Queues a sheet PNG image with human review markups drawn in vivid colour over crisp monochrome linework, optionally auto-cropped around specific markup ids or open markups.",
+    signature: "renderSheet(ctx: ScriptContext, sheetRef: string, opts?: RenderSheetMarkupOptions): ScriptRenderRequest",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { points: [{ x: 150, y: 140 }, { x: 300, y: 140 }] });\n    markups.renderSheet(ctx, "M-101", { focusStatus: "open" });`),
+    topics: ["markups", "redlines", "render sheet", "sheet image", "png", "vision", "inspect markups"],
+  },
+  {
+    name: "markups.renderAllMarkedSheets",
+    summary: "Finds every sheet with open review markups and queues full-sheet + zoomed-crop PNG images in one call (up to 6 images), returning the sheet summary.",
+    signature: "renderAllMarkedSheets(ctx: ScriptContext, opts?: RenderAllMarkedSheetsOptions): { readonly sheets: readonly MarkedSheetSummary[]; readonly queuedRenders: readonly ScriptRenderRequest[] }",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { points: [{ x: 140, y: 150 }, { x: 280, y: 150 }] });\n    const res = markups.renderAllMarkedSheets(ctx);\n    ctx.report("Marked sheets", res.sheets);`),
+    topics: ["markups", "redlines", "all marked sheets", "grab markups", "render images", "revision"],
+  },
+  {
+    name: "markups.add",
+    summary: "Adds a felt-tip marker or highlighter review markup stroke onto a sheet in paper coordinates (mm or units.*).",
+    signature: "add(ctx: ScriptContext, sheetRef: string, spec: AddSheetMarkupSpec): string",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { tool: "marker", color: "#dc2626", widthMm: 2.2, points: [{ x: 140, y: 140 }, { x: 280, y: 140 }] });`),
+    topics: ["markups", "add markup", "marker", "highlighter", "redline"],
+  },
+  {
+    name: "markups.markAddressed",
+    summary: "Yellow-lines one or more sheet review markups as addressed (backcheck style) with an optional note of what was revised.",
+    signature: "markAddressed(ctx: ScriptContext, markupIds: readonly string[], opts?: { note?: string; addressedBy?: string; highlightColor?: string }): void",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    const id = markups.add(ctx, sh, { points: [{ x: 140, y: 140 }, { x: 260, y: 140 }] });\n    markups.markAddressed(ctx, [id], { note: "Routed 14x10 supply duct along corridor" });`),
+    topics: ["markups", "yellow line", "addressed", "backcheck", "redline"],
+  },
+  {
+    name: "markups.resolve",
+    summary: "Marks one or more sheet review markups as resolved (hidden from active review views).",
+    signature: "resolve(ctx: ScriptContext, markupIds: readonly string[], opts?: { note?: string }): void",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    const id = markups.add(ctx, sh, { points: [{ x: 140, y: 140 }, { x: 260, y: 140 }] });\n    markups.resolve(ctx, [id]);`),
+    topics: ["markups", "resolve", "close markup", "redline"],
+  },
+  {
+    name: "markups.reopen",
+    summary: "Reopens addressed or resolved sheet review markups back to open redline status.",
+    signature: "reopen(ctx: ScriptContext, markupIds: readonly string[]): void",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    const id = markups.add(ctx, sh, { points: [{ x: 140, y: 140 }, { x: 260, y: 140 }], status: "addressed" });\n    markups.reopen(ctx, [id]);`),
+    topics: ["markups", "reopen", "redline"],
+  },
+  {
+    name: "markups.clear",
+    summary: "Deletes sheet review markups on a sheet (optionally only those matching status).",
+    signature: "clear(ctx: ScriptContext, sheetRef: string, opts?: { status?: MarkupStatus }): void",
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    markups.add(ctx, sh, { points: [{ x: 140, y: 140 }, { x: 260, y: 140 }] });\n    markups.clear(ctx, sh, { status: "open" });`),
+    topics: ["markups", "clear markups", "delete markups"],
   },
   {
     name: "ctx.editSteps",
@@ -1718,6 +1811,33 @@ export const KIT_RECIPES: readonly KitRecipe[] = [
       "documents.place",
     ],
     topics: ["detail view", "drafting", "cad detail", "mechanical detail", "roof curb", "exhaust fan", "callout", "leader", "hatch", "break line", "dimension"],
-    example: layout(`    const detail = drafting.view(ctx, { name: "M-501 Exhaust Fan Wall Detail", scale: 16, discipline: "mechanical" });\n    drafting.detailTitle(ctx, { view: detail, at: { x: units.in(-34), y: units.in(34) }, title: "TOILET EXHAUST FAN & HOODED WALL CAP", subtitle: "SCALE: 3/4\\" = 1'-0\\"" });\n    drafting.region(ctx, { view: detail, rect: { at: { x: units.in(32), y: units.in(-10) }, width: units.in(8), height: units.in(36) }, hatch: "masonry", tone: "halftone", lineStyle: "wide" });\n    drafting.breakLine(ctx, { view: detail, from: { x: units.in(31), y: units.in(26) }, to: { x: units.in(41), y: units.in(26) }, maskSide: "left" });\n    drafting.component(ctx, { view: detail, symbol: "mechanical.exhaust_fan_ceiling", at: { x: units.in(0), y: units.in(0) }, width: units.in(14), height: units.in(12) });\n    drafting.rect(ctx, { view: detail, at: { x: units.in(14), y: units.in(3) }, width: units.in(26), height: units.in(6), lineStyle: "wide" });\n    drafting.line(ctx, { view: detail, from: { x: units.in(14), y: units.in(6) }, to: { x: units.in(40), y: units.in(6) }, lineStyle: "center" });\n    drafting.component(ctx, { view: detail, symbol: "mechanical.hooded_louver", at: { x: units.in(40), y: units.in(1) }, width: units.in(10), height: units.in(10) });\n    drafting.dimension(ctx, { view: detail, from: { x: units.in(14), y: units.in(9) }, to: { x: units.in(14), y: units.in(3) }, offset: units.in(-0.35), suffix: " Ø DUCT" });\n    drafting.calloutStack(ctx, { view: detail, side: "right", x: units.in(56), topY: units.in(24), notes: [{ text: "EXTERIOR MASONRY WALL\\nSEAL PENETRATION W/ CAULK", to: { x: units.in(38), y: units.in(20) } }, { text: "6\\" Ø HOODED WALL CAP (LOUV-1A/1B)\\nW/ BDD & 1/4\\" BIRD SCREEN", to: { x: units.in(48), y: units.in(7) } }] });\n    drafting.calloutStack(ctx, { view: detail, side: "left", x: units.in(-8), topY: units.in(22), notes: [{ text: "CEILING EXHAUST FAN (EF-1A/1B)\\nGREENHECK SP-A50-QD (70 CFM)", to: { x: units.in(4), y: units.in(10) } }, { text: "6\\" Ø RIGID GALV. DUCT\\nSLOPE 1/4\\" PER FT TO EXTERIOR", to: { x: units.in(22), y: units.in(9) } }] });\n    drafting.fitCrop(ctx, detail);\n    const qa = drafting.check(ctx, detail);\n    ctx.report("Detail QA", qa);`),
+    example: layout(`    const detail = drafting.view(ctx, { name: "M-501 Exhaust Fan Wall Detail", scale: 16, discipline: "mechanical" });\n    drafting.detailTitle(ctx, { view: detail, at: { x: units.in(-34), y: units.in(34) }, title: "TOILET EXHAUST FAN & HOODED WALL CAP", subtitle: "SCALE: 3/4\\" = 1'-0\\"" });\n    drafting.region(ctx, { view: detail, rect: { at: { x: units.in(32), y: units.in(-10) }, width: units.in(8), height: units.in(36) }, hatch: "masonry", tone: "halftone", lineStyle: "wide" });\n    drafting.breakLine(ctx, { view: detail, from: { x: units.in(31), y: units.in(26) }, to: { x: units.in(41), y: units.in(26) }, maskSide: "left" });\n    drafting.component(ctx, { view: detail, symbol: "mechanical.exhaust_fan_ceiling", at: { x: units.in(0), y: units.in(0) }, width: units.in(14), height: units.in(12) });\n    drafting.rect(ctx, { view: detail, at: { x: units.in(14), y: units.in(3) }, width: units.in(26), height: units.in(6), lineStyle: "wide" });\n    drafting.line(ctx, { view: detail, from: { x: units.in(14), y: units.in(6) }, to: { x: units.in(40), y: units.in(6) }, lineStyle: "center" });\n    drafting.component(ctx, { view: detail, symbol: "mechanical.hooded_louver", at: { x: units.in(40), y: units.in(1) }, width: units.in(10), height: units.in(10) });\n    drafting.dimension(ctx, { view: detail, from: { x: units.in(14), y: units.in(9) }, to: { x: units.in(14), y: units.in(3) }, offset: units.in(-0.35), suffix: " Ø DUCT" });\n    drafting.calloutStack(ctx, { view: detail, side: "right", x: units.in(56), topY: units.in(24), notes: [{ text: "EXTERIOR MASONRY WALL\\nSEAL PENETRATION W/ CAULK", to: { x: units.in(38), y: units.in(20) } }, { text: "6\\" Ø HOODED WALL CAP (LOUV-1A/1B)\\nW/ BDD & 1/4\\" BIRD SCREEN", to: { x: units.in(48), y: units.in(7) } }] });\n    drafting.calloutStack(ctx, { view: detail, side: "left", x: units.in(-8), topY: units.in(22), notes: [{ text: "CEILING EXHAUST FAN (EF-1A/1B)\\nGREENHECK SP-A50-QD (70 CFM)", to: { x: units.in(6), y: units.in(8) } }, { text: "FLEX DUCT CONN. — MAX 2'-0\\"\\n(KEEP TAUGHT)", to: { x: units.in(16), y: units.in(6) } }] });\n    drafting.fitCrop(ctx, detail);\n    const qa = drafting.check(ctx, detail);\n    ctx.report("Detail QA", qa);`, "{ ids: [] }"),
+  },
+  {
+    name: "Sheet review markups",
+    task: "sheet markups",
+    summary: "Find every sheet with human felt-tip marker redlines, render the sheet PNG images (full sheet + zoomed crop) directly in bim_run_script, read exact model coordinates for every overlapped viewport, and yellow-line markups as addressed once modeled.",
+    steps: [
+      "Read sheets, viewports, views, and drawing_items (reads: { levels: true, kinds: [\"sheet\", \"viewport\", \"view\", \"drawing_item\"] }).",
+      "Call markups.renderAllMarkedSheets(ctx) to queue full-sheet and zoomed-crop PNG renders with vivid markups over crisp monochrome linework, and call markups.list(ctx, sheetId) for exact viewport model coordinates (ft).",
+      "Inspect the returned PNG images directly, model the requested revisions (routes, equipment, tags), and yellow-line the handled strokes with markups.markAddressed(ctx, ids, { note }).",
+    ],
+    uses: ["markups.sheetsWithMarkups", "markups.list", "markups.renderSheet", "markups.renderAllMarkedSheets", "markups.markAddressed"],
+    topics: ["sheet markups", "redlines", "yellow lines", "marker", "review markups", "handwritten notes", "render sheet image"],
+    example: layout(`    const sh = documents.sheet(ctx, { number: "M-101", name: "Mechanical Plan" });\n    const id = markups.add(ctx, sh, { points: [{ x: 140, y: 150 }, { x: 280, y: 150 }], color: "#dc2626" });\n    const { sheets } = markups.renderAllMarkedSheets(ctx);\n    ctx.report("Open markups", { sheets, detail: markups.list(ctx, sh) });\n    markups.markAddressed(ctx, [id], { note: "Routed duct per redline" });`, '{ levels: true, kinds: ["sheet", "viewport", "view", "drawing_item"] }'),
+  },
+  {
+    name: "Civil LandXML grading and cut/fill",
+    task: "civil grading",
+    summary: "Import existing and proposed LandXML 1.2 TIN surfaces into a civil-enabled model and compute prismoidal cut, fill, net earthwork, and overlap area in cubic yards and cubic metres.",
+    steps: [
+      "Send `civil.import_landxml_surfaces` through `ctx.edit` with the LandXML 1.2 XML string (and optional `roles` map by surface name); each TIN lands as a `civil.grading_surface` element (`gs-<slug>`).",
+      "Call `ctx.calc({ calc: \"civil.surface_cut_fill\", inputs: { existingId, proposedId } })` to compute prismoidal cut, fill, net (`fill - cut`), and overlap area in `yd3`/`m3` and `ft2`/`m2`.",
+      "Report the earthwork quantities and any review/overlap issues with `ctx.report`.",
+    ],
+    uses: ["ctx.edit", "ctx.calc", "ctx.report"],
+    topics: ["civil", "grading", "landxml", "tin", "earthwork", "cut and fill", "cut fill", "terrain", "topography", "site grading"],
+    needsModelContent: true,
+    example: layout(`    const landXml = \`<?xml version="1.0"?><LandXML version="1.2"><Units><Imperial linearUnit="foot"/></Units><Surfaces><Surface name="Existing"><Definition surfType="TIN"><Pnts><P id="1">0 0 100</P><P id="2">0 80 100</P><P id="3">50 80 100</P><P id="4">50 0 100</P></Pnts><Faces><F>1 2 3</F><F>1 3 4</F></Faces></Definition></Surface><Surface name="Proposed"><Definition surfType="TIN"><Pnts><P id="1">0 0 101.25</P><P id="2">0 80 101.25</P><P id="3">50 80 101.25</P><P id="4">50 0 101.25</P></Pnts><Faces><F>1 2 3</F><F>1 3 4</F></Faces></Definition></Surface></Surfaces></LandXML>\`;\n    ctx.edit({ type: "civil.import_landxml_surfaces", landXml });\n    const earthwork = ctx.calc({ calc: "civil.surface_cut_fill", inputs: { existingId: "gs-existing", proposedId: "gs-proposed" } });\n    ctx.report("Cut and fill", earthwork);\n    ctx.label("Import LandXML surfaces and report earthwork cut and fill");`),
   },
 ];

@@ -15,7 +15,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   GLOBAL_LEVEL,
   asElementId,
   computeSelectionScopes,
@@ -234,7 +234,7 @@ async function main(): Promise<void> {
   const tapId = `${p}-air-t1-s2-b1-tap`;
   const trunkId = `${p}-air-t2-s2`;
   const levelName = `L${String(topLevel).padStart(2, "0")}`;
-  const diffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+  const diffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
   if (!diffuser) throw new Error("starter library has no air terminal");
   const PERF_LEVEL = "perf-level";
   const ROUTE_ELEVATION = 11 * FT;

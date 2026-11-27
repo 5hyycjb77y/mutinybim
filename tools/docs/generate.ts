@@ -16,13 +16,12 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { FIRST_PARTY_ADDONS, installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { activePackSet, PACK_READ_POINT, type Pack } from "@permitzip/bim-kernel/packs";
 import { builtinCalcRegistry } from "@permitzip/bim-calc";
-import { KIT_ENTRIES, KIT_EXAMPLES, KIT_EXAMPLES_PATH, KIT_RECIPES, commandFields, kitDeclarations, scriptCommands, type KitEntry } from "@permitzip/bim-script";
+import { KIT_ENTRIES, KIT_EXAMPLES, KIT_EXAMPLES_PATH, KIT_RECIPES, commandFields, connectorEndTypesByDomain, connectorEndTypesRecipe, kitDeclarations, scriptCommands, type KitEntry } from "@permitzip/bim-script";
 import { BIM_TOOL_PACKS } from "@permitzip/bim-plugin";
 import { CORE_TOOL_BUDGET, LOCAL_SCHEMAS, createBimToolServer, toolFamily } from "@permitzip/bim-mcp";
 import { createLocalHost, startInMemoryModelServer, starterModel } from "@permitzip/bim-mcp/local";
 import { localToolPacks } from "@permitzip/bim-mcp-packs";
 import { slug } from "./slug";
-import { CIVIL_PACK } from "@permitzip/bim-pack-civil";
 import { SITE_PACK } from "@permitzip/bim-pack-site";
 import { DEVELOPMENT_PACK } from "@permitzip/bim-pack-development";
 
@@ -41,6 +40,7 @@ const KIT_PAGES: readonly { readonly ns: string; readonly file: string; readonly
   { ns: "parts", file: "parts", title: "parts", about: "Making part types: a part's bodies, connectors and parameters." },
   { ns: "PartBuilder", file: "part-builder", title: "PartBuilder", about: "The builder `parts.part()` returns: boxes, extrusions, sweeps, connectors and parameters on one part type." },
   { ns: "documents", file: "documents", title: "documents", about: "Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set." },
+  { ns: "markups", file: "markups", title: "markups", about: "Sheet review markups: list marked sheets, render full sheets or tight markup crops with vivid redlines over monochrome linework, add strokes, and yellow-line (mark addressed), resolve or clear review markups." },
   { ns: "drafting", file: "drafting", title: "drafting", about: "Full CAD drafting-view authoring: detail views, linework, curves, hatched/halftone/screened/masking regions, 2D components, repeating details, batt insulation, masked notes with filled NCS leaders, margin-aligned callout stacks, dimensions, modify operations, auto-crop, and layout QA." },
   { ns: "checks", file: "checks", title: "checks", about: "Checks a script runs on its own output before a person sees it." },
   { ns: "electrical", file: "electrical", title: "electrical", about: "IES LM-63 photometrics, normal illuminance, NFPA 101 / IBC emergency egress checks, and 2D plan overlays." },
@@ -95,7 +95,28 @@ function kitPages(files: Files): void {
       "</details>",
       "",
     ]);
-    files.set(`${REFERENCE_DIR}/script-kit/${p.file}.md`, page(p.title, `${p.about}\n\nEvery example below is a complete script that passes the kit's checks; the kit's tests run each one.`, [...toc, "", ...body]));
+    const extra: string[] = [];
+    if (p.file === "part-builder") {
+      const byDomain = connectorEndTypesByDomain();
+      if (byDomain.size > 0) {
+        extra.push(
+          "## Connector end types (`endType`)",
+          "",
+          "Exact `endType` IDs declared by the active first-party add-ons (read from `connectorEndTypeTable()`). Pass these on duct and pipe connectors; electrical connectors use `shape: \"none\"` with no `endType`.",
+          "",
+          "| Domain | `endType` ID | Label | Joins via |",
+          "| --- | --- | --- | --- |",
+        );
+        for (const [domain, rows] of byDomain) {
+          for (const r of rows) {
+            const via = r.joinsVia?.length ? r.joinsVia.map((v) => `\`${v.endType}\` (${v.fitting})`).join(", ") : "—";
+            extra.push(`| \`${domain}\` | \`${r.id}\` | ${cell(r.label)} | ${cell(via)} |`);
+          }
+        }
+        extra.push("");
+      }
+    }
+    files.set(`${REFERENCE_DIR}/script-kit/${p.file}.md`, page(p.title, `${p.about}\n\nEvery example below is a complete script that passes the kit's checks; the kit's tests run each one.`, [...toc, "", ...extra, ...body]));
   }
   const known = new Set(KIT_PAGES.map((p) => p.ns));
   const stray = [...new Set(KIT_ENTRIES.map(nsOf))].filter((ns) => !known.has(ns));
@@ -103,7 +124,7 @@ function kitPages(files: Files): void {
 }
 
 function recipesPage(): string {
-  const body = KIT_RECIPES.flatMap((r) => [
+  const body = [...KIT_RECIPES, connectorEndTypesRecipe()].flatMap((r) => [
     `## ${r.name}`,
     "",
     `Task: ${r.task}`,
@@ -194,7 +215,7 @@ function addOnsPage(): string {
       ...FIRST_PARTY_ADDONS.flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
       "## Other add-ons",
       "",
-      ...[CIVIL_PACK, SITE_PACK, DEVELOPMENT_PACK].flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
+      ...[SITE_PACK, DEVELOPMENT_PACK].flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
     ],
   );
 }

@@ -1,6 +1,7 @@
 import type { DimSpec, TagSpec } from "./annotation/annotations";
 import type { BattSpec, ComponentPlacement, DraftingCategory, LineStyle, RegionFill } from "./annotation/detailing";
 import type { SheetFigureSpec } from "./annotation/figures";
+import type { SheetMarkupSpec } from "./annotation/markups";
 import type { RichTextNote } from "./annotation/rich-text";
 import type { DiagramDefinition } from "./diagrams/definition";
 import type { FieldBlockSpec } from "./blocks/types";
@@ -493,7 +494,7 @@ export interface Viewport {
   readonly deleted?: boolean;
 }
 
-export type DrawingShape = "text" | "line" | "rect" | "cloud" | "dimension" | "tag" | "arc" | "circle" | "polyline" | "spline" | "region" | "component" | "repeat" | "batt" | "callout" | "figure" | "field_block";
+export type DrawingShape = "text" | "line" | "rect" | "cloud" | "dimension" | "tag" | "arc" | "circle" | "polyline" | "spline" | "region" | "component" | "repeat" | "batt" | "callout" | "figure" | "field_block" | "markup";
 
 /**
  * Drawing-only content: a note, line, rectangle or revision cloud on a sheet,
@@ -547,6 +548,8 @@ export interface DrawingItem {
   readonly figure?: SheetFigureSpec;
   /** Field blocks on a sheet (`blocks/`): live text read from the model; the point is the box's top-left, paper mm. `textSize` and `note.box.width` style it. */
   readonly block?: FieldBlockSpec;
+  /** Sheet review markups (`annotation/markups.ts`): non-printing felt-tip marker & highlighter ink on sheets (paper mm). */
+  readonly markup?: SheetMarkupSpec;
   readonly deleted?: boolean;
 }
 

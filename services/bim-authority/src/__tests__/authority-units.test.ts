@@ -8,6 +8,8 @@
  * drills/deployed.ts (see README.md, "Drills").
  */
 import { createHash } from "node:crypto";
+import { isPipelinedStore } from "@permitzip/bim-sync";
+import { PostgresCommitStore, type Sql } from "../pg-store";
 import { isForbiddenDbRef, loadConfig, servedModelId } from "../config";
 import { decideRoute, isFlyMachineId } from "../routing";
 import { LeaseKeeper } from "../lease";
@@ -21,7 +23,25 @@ const baseEnv = {
   BIM_AUTHORITY_SERVED_MODELS: "demo-b,site-7301-b",
 };
 
+it("commits native saves individually while hosted stores can pipeline edits", () => {
+  const options = { modelId: "east-plant", owner: "authority", ownerMachine: null, leaseTtlMs: 10_000 };
+  const native = new PostgresCommitStore({} as Sql, { ...options, nativeSaveOrder: true });
+  const hosted = new PostgresCommitStore({} as Sql, options);
+  expect([native.allowsGroupCommit, isPipelinedStore(native)]).toEqual([false, false]);
+  expect([hosted.allowsGroupCommit, isPipelinedStore(hosted)]).toEqual([true, true]);
+});
+
 describe("configuration", () => {
+  it("serves a native database explicitly with its own sessions", () => {
+    const native = { MUTINYBIM_AUTH_MODE: "native", MUTINYBIM_DB_URL: "postgresql://operator@db.invalid/plant",
+      BIM_AUTHORITY_SERVED_MODELS: "east-plant" };
+    expect(loadConfig(native)).toMatchObject({ authMode: "native", dbRef: "native", hostModule: null, testAuthUrl: null });
+    expect(loadConfig(baseEnv).authMode).toBe("hosted");
+    expect(() => loadConfig({ ...native, MUTINYBIM_AUTHORIZER_MODULE: "./host.ts" })).toThrow(/cannot be combined/);
+    expect(() => loadConfig({ ...native, MUTINYBIM_SUPABASE_URL: "http://localhost:5678" })).toThrow(/cannot be combined/);
+    expect(() => loadConfig({ ...native, MUTINYBIM_AUTH_MODE: "auto" })).toThrow(/MUTINYBIM_AUTH_MODE/);
+  });
+
   it("a laptop test authority takes a database and sign-ins on this machine only, and is refused on Fly", () => {
     const local = {
       NODE_ENV: "test" as const,

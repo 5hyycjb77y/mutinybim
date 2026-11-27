@@ -152,7 +152,7 @@ describe("c5p conformance", () => {
 
 describe("c5p listing for Settings › MutinyBIM library › Add-ons", () => {
   it("first-party packs first, with their built-in rows counted; a missing pin is listed", () => {
-    const rows = describePacks([ZZ_PACK], [{ id: "civil", version: "1.2.0" }]);
+    const rows = describePacks([ZZ_PACK], [{ id: "site", version: "1.2.0" }]);
     expect(rows.map((r) => [r.id, r.firstParty, r.missing])).toEqual([
       ["electrical", true, false],
       ["plumbing_gas", true, false],
@@ -160,12 +160,13 @@ describe("c5p listing for Settings › MutinyBIM library › Add-ons", () => {
       ["fire_protection", true, false],
       ["architecture", true, false],
       ["struct", true, false],
+      ["civil", true, false],
       ["zz", false, false],
-      ["civil", false, true],
+      ["site", false, true],
     ]);
     const electrical = rows[0];
     expect(electrical?.contributes.find((c) => c.pointId === "kernel.network_adapter")?.count).toBe(1);
     expect(electrical?.contributes.find((c) => c.pointId === "kernel.derived_zone_rule")?.count).toBe(1);
-    expect(rows[6]?.contributes.map((c) => c.pointId)).toEqual(expect.arrayContaining(["kernel.network_adapter", "lint.rule", "calc.calc"]));
+    expect(rows[7]?.contributes.map((c) => c.pointId)).toEqual(expect.arrayContaining(["kernel.network_adapter", "lint.rule", "calc.calc"]));
   });
 });

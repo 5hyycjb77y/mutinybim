@@ -149,15 +149,26 @@ All optional; read once at start.
 | `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` | none | Optional Supabase secret (`service_role`) key. When set, stores app records (users, sessions, model metadata, shares, assistant grants) in Supabase Postgres. Apply the SQL files in `db/migrations/` in filename order before starting the new version. |
 | `MUTINYBIM_WEB_SUPABASE_GOOGLE` | `1` | Set to `0` to hide the **Continue with Google** button when Supabase Auth is enabled. |
 | `MUTINYBIM_WEB_TRUST_PROXY` | auto (`1` when `FLY_APP_NAME` is set) | Trusts `Fly-Client-IP` / `X-Forwarded-For` for sign-in and OAuth registration rate limits behind a reverse proxy. |
+| `MUTINYBIM_WEB_MAIL` | `off` | `smtp` turns on the app's own email (password reset links in local-account mode). |
+| `MUTINYBIM_WEB_MAIL_URL` | none | The SMTP server, with its sign-in: `smtps://user:password@smtp.example.com:465`, or `smtp://…:587`, which must upgrade with STARTTLS unless the server is this computer. It holds a password, so set it as a secret (for example `fly secrets set`), never in a file. Required when mail is on. |
+| `MUTINYBIM_WEB_MAIL_FROM` | none | The sender, such as `MutinyBIM <no-reply@app.example.com>`. Required when mail is on. The startup log shows only its domain. |
 
 ### Supabase Auth & Google sign-in
 
 Set `MUTINYBIM_WEB_SUPABASE_URL` and `MUTINYBIM_WEB_SUPABASE_PUBLISHABLE_KEY` to delegate email/password sign-up, password-reset emails, and **Continue with Google** (OAuth 2.0 PKCE) to a Supabase project:
 
-1. Apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` to the Supabase Postgres database in filename order. The handover migration adds the shared quota check, creation reservations and ownership offers.
+1. If Postgres stores the app's accounts, apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` in filename order before updating the app.
+   The handover migration adds the shared quota check, creation reservations and ownership offers. The next migration, `20261126000000_team_model_access.sql`, adds team grants and the queries used to open and list models.
+   The sign-in code uses the account lookup and creation functions in `20261126040000_supabase_user_identity.sql`. SQLite handles the update automatically.
 2. In Supabase Auth → URL Configuration, add `<MUTINYBIM_WEB_ORIGIN>/auth/supabase/callback` to **Redirect URLs**.
-3. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
-4. Optionally set `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` (as a secret on your deployment host) to store all app metadata tables in Supabase Postgres instead of local SQLite. If migrating an existing deployment off SQLite, copy existing rows first with `node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts` (supports `--dry-run`).
+3. Keep **Confirm email** on (Supabase Auth → Sign In / Providers → Email). With it off, Supabase treats every address as confirmed at sign-up.
+4. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
+5. Optionally set `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` (as a secret on your deployment host) to store all app metadata tables in Supabase Postgres instead of local SQLite. If migrating an existing deployment off SQLite, copy existing rows first with `node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts` (supports `--dry-run`).
+
+A first Google sign-in can link an existing MutinyBIM account when Supabase confirms the address, Google verifies that same address, and Google is the only linked provider. If those details are missing, use the existing account's password. Later sign-ins use the saved account link.
+
+Finish every copy pass before enabling writes on Postgres. Replaying an older
+SQLite snapshot can restore a share that someone removed on Postgres.
 
 ### Sign-in providers
 
@@ -178,6 +189,11 @@ one, as above.
 
 The provider's access token is used once, to ask UserInfo who signed in, and
 then dropped; it is never stored or logged.
+
+When a configured provider returns the JSON boolean `email_verified: true` in
+UserInfo, the app records confirmation for the matching account email at sign-in
+or when the person links that provider in Settings. Changing the account email
+clears its confirmation. Older accounts can gain confirmation on their next verified sign-in.
 
 ### Linked hosts
 
@@ -220,8 +236,21 @@ services firm for quotes: `MUTINYBIM_WEB_QUOTE` takes a JSON object with
 The owner of a model shares it with another account on the same server by
 email: **Can edit** (edit, make branches, save versions) or **View only** (the
 model server refuses their edits). There are no invitations by email; the
-person needs an account first. Changing or removing someone's access
-disconnects them at once. Only the owner shares, renames or deletes.
+person needs an account first. When a personal share changes, the app
+rechecks that person's open editors and disconnects any whose role changed.
+Only the model owner shares, renames or deletes.
+
+The hosted stores resolve personal and team grants together. A person with
+personal view and team edit can edit. Shared models appear once in **My
+models** and the assistant's model list, with the names of the teams through
+which the person has access. Team owners, managers and ordinary members use
+the role granted to their team. Each model counts toward its individual
+owner's limit. The roster and team-sharing forms are a following feature.
+
+Run the access matrix with `npm test -- --runInBand --runTestsByPath apps/mutinybim-web/__tests__/team-access.test.ts`.
+To exercise the same cases on a migrated disposable PostgREST stack, set
+`MUTINYBIM_TEST_TEAM_SUPABASE_URL` and `MUTINYBIM_TEST_TEAM_SUPABASE_KEY`
+to its gateway URL and test service key. The fixture creates synthetic records.
 
 Under **Transfer ownership**, choose a direct viewer or editor and the access
 you want to keep. The recipient has 14 days to accept in **My models**.
@@ -232,13 +261,23 @@ recipient's share ends the offer.
 
 ## Getting back in
 
-The app sends no email, so it has no emailed reset link. Two ways back:
+With `MUTINYBIM_WEB_MAIL` off (the default), the app sends no email, so it
+has no emailed reset link. Two ways back:
 
 - **A linked sign-in.** Log in with the linked provider; for ten minutes after
   that, Settings → Password sets a new password without the old one.
 - **The operator.** On the server, `npm run web:reset-password -- person@example.com`
   prints a link that sets a new password once, within an hour (only its digest
   is stored). Using it signs the person out everywhere else.
+
+**With mail on** (`MUTINYBIM_WEB_MAIL=smtp`), Forgot password emails that same
+one-hour link to the account's address. The reply is the same whether or not
+an account uses the address, and the lookup and send happen after it. Each
+address gets at most three reset emails an hour; a request past that changes
+nothing, so the last link sent keeps working. Links and tokens are never
+logged. A send that fails or times out is logged by its error code only, and
+the reply doesn't change. The operator command keeps working. Supabase mode
+keeps sending its own reset emails.
 
 ## Deploying
 
@@ -304,6 +343,7 @@ Operator commands run as the app's user:
 | `src/server.ts` | Starts the app. |
 | `src/app.ts` | Routes, forms, sessions, sharing, the editor routes and the model server socket. |
 | `src/admin.ts` | Operator commands (`npm run web:reset-password`). |
+| `src/mailer.ts` | The `Mailer` interface, the fixed plain-text email templates and the SMTP transport (Nodemailer). |
 | `src/config.ts` | The settings above. |
 | `src/db.ts` | Accounts, sessions, models, shares, reset links, agent keys and assistant sign-ins (SQLite). |
 | `src/assistant-auth.ts` | The assistants' sign-in: metadata, registration, PKCE codes, tokens. |

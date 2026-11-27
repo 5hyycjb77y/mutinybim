@@ -27,6 +27,14 @@ function edit(model: ModelState, n: number): ModelState {
   return { ...model, elements: { ...model.elements, "RTU-0-0": { ...rtu, values: { weight: 1500 + n } } } };
 }
 
+function withExplicitBeamStiffness(model: ModelState): ModelState {
+  const elements = Object.fromEntries(Object.entries(model.elements).map(([id, element]) => {
+    if (element.kind !== "beam") return [id, element];
+    return [id, { ...element, values: { ...element.values, "struct.elastic_modulus": 29_000 } }];
+  }));
+  return { ...model, elements };
+}
+
 const equipmentLbf = (r: ReturnType<typeof structuralLoadPath>): number => r.footings.reduce((a, f) => a + to(f.load.equipment, "lbf"), 0);
 
 // The time budget is `struct.load_path.one_edit.grid_20x20` in the BIM perf gate (plain node, 100 ms p50, unscaled on CI).
@@ -44,6 +52,20 @@ describe("c5x load path on a 20 × 20 bay grid", () => {
       expect(r.problems).toEqual([]);
       expect(r.footings).toHaveLength(first.footings.length);
       // RTU-0-0 now weighs 1,500 + n lb; the other 399 units are unchanged.
+      expect(equipmentLbf(r)).toBeCloseTo(400 * 1500 + n, 3);
+    }
+  });
+
+  it("re-totals the same grid with explicit steel beam stiffness", () => {
+    let model = withExplicitBeamStiffness(gridFrame(20));
+    const first = withPackSet(SET, () => structuralLoadPath(model));
+    expect(first.problems).toEqual([]);
+    expect(equipmentLbf(first)).toBeCloseTo(400 * 1500, 3);
+    for (let n = 1; n <= 5; n++) {
+      model = edit(model, n);
+      const r = withPackSet(SET, () => structuralLoadPath(model));
+      expect(r.problems).toEqual([]);
+      expect(r.footings).toHaveLength(first.footings.length);
       expect(equipmentLbf(r)).toBeCloseTo(400 * 1500 + n, 3);
     }
   });

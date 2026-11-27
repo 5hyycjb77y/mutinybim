@@ -30,6 +30,12 @@ function viewerWith(fovDeg: number) {
     frame: async () => {},
     camera3dState: () => ({ eye: { x: 12000, y: 9000, z: 12000 }, target: { x: 0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 1 }, fovDeg, orthoHeightMm: 5000 }),
     setFovDeg: jest.fn(),
+    walking: () => false,
+    setWalk: jest.fn(),
+    onWalkChange: () => () => {},
+    walkSpeed: () => 1,
+    setWalkSpeed: jest.fn(),
+    onWalkSpeedChange: () => () => {},
   }
 }
 

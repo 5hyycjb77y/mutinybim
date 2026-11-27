@@ -36,6 +36,7 @@ import { executeLoadPointCommand, isLoadPointCommand, loadPointCommandSchemas } 
 import { executeSpatialCommand, isSpatialCommand, spatialCommandSchemas } from "./commands/spatial";
 import { executeSpaceCommand, isSpaceCommand, spaceCommandSchemas } from "./spaces/commands";
 import { blockCommandSchemas, executeBlockCommand, isBlockCommand } from "./blocks/commands";
+import { executeSheetMarkupCommand, isSheetMarkupCommand, sheetMarkupCommandSchemas } from "./annotation/markup-commands";
 import { executeQuestionCommand, isQuestionCommand, questionCommandSchemas } from "./questions/commands";
 import { executeSubmittalCommand, isSubmittalCommand, submittalCommandSchemas } from "./submittals/commands";
 import { executeGraphCommand, graphCommandSchemas, isGraphCommand } from "./graph/commands";
@@ -107,6 +108,7 @@ const editStepOptions = strictCommands([
   ...spatialCommandSchemas,
   ...spaceCommandSchemas,
   ...blockCommandSchemas,
+  ...sheetMarkupCommandSchemas,
   ...questionCommandSchemas,
   ...submittalCommandSchemas,
   ...graphCommandSchemas,
@@ -549,6 +551,7 @@ function executeCommandInScope(model: ModelState, command: KernelCommand, contex
   if (isSpatialCommand(command)) return executeSpatialCommand(model, command);
   if (isSpaceCommand(command)) return executeSpaceCommand(model, command);
   if (isBlockCommand(command)) return executeBlockCommand(model, command);
+  if (isSheetMarkupCommand(command)) return executeSheetMarkupCommand(model, command);
   if (isQuestionCommand(command)) return executeQuestionCommand(model, command, { actorId: context.actorId, actor: context.actor, at: context.at });
   if (isSubmittalCommand(command)) return executeSubmittalCommand(model, command, { actorId: context.actorId, actor: context.actor, at: context.at });
   if (isGraphCommand(command)) return executeGraphCommand(model, command);

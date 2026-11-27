@@ -41,8 +41,13 @@ describe("j9-pipe-end-types-out-of-core", () => {
     expect(CONNECTOR_END_TYPE_POINT.builtins).toBeUndefined();
     expect([...connectorEndTypeTable().ids].sort()).toEqual([...MECHANICAL_END_TYPES, ...PIPE_END_TYPES].map((r) => r.id).sort());
     expect(activePackSet().items(CONNECTOR_END_TYPE_POINT).length).toBe(MECHANICAL_END_TYPES.length + PIPE_END_TYPES.length);
-    expect(MECHANICAL_END_TYPES.every((r) => r.id.startsWith("mechanical.") && r.domains?.includes("duct"))).toBe(true);
+    expect(MECHANICAL_END_TYPES.every((r) => r.id.startsWith("mechanical.") && (r.domains?.includes("duct") || r.domains?.includes("pipe")))).toBe(true);
+    expect(MECHANICAL_END_TYPES.some((r) => r.domains?.includes("duct"))).toBe(true);
+    expect(MECHANICAL_END_TYPES.some((r) => r.domains?.includes("pipe"))).toBe(true);
     expect(PIPE_END_TYPES.every((r) => r.id.startsWith("plumbing_gas.") && r.domains?.includes("pipe"))).toBe(true);
+    expect(connectorEndTypeTable().row("plumbing_gas.flare")?.domains).toEqual(["pipe"]);
+    expect(connectorEndTypeTable().row("mechanical.brazed")?.domains).toEqual(["pipe"]);
+    expect(connectorEndTypeTable().join("mechanical.brazed", "plumbing_gas.flare")).toEqual({ kind: "via", fitting: "braze-to-flare adapter" });
   });
 
   it("every joint a routed pipe fitting stores reads as one of the Plumbing add-on's end types, with the same words", () => {

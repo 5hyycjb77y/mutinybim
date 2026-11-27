@@ -8,12 +8,13 @@ import type { ImportRunStore } from "./runs";
  * person who opened it through a finished import, when they can read the
  * base. Nobody else gains anything, and Main is never written by a branch.
  */
-export async function proposalOwnerCanWrite(runs: ImportRunStore, input: { readonly modelId: string; readonly userId: string; readonly canRead: boolean; readonly canWrite: boolean }): Promise<boolean> {
+export async function proposalOwnerCanWrite(runs: ImportRunStore, input: { readonly modelId: string; readonly userId: string; readonly canRead: boolean; readonly canWrite: boolean }, requireAnswer = false): Promise<boolean> {
   if (input.canWrite) return true;
   if (!input.canRead || !parseBranchModelId(input.modelId)) return false;
   try {
     return await runs.ownsProposal(input.modelId, input.userId);
   } catch (err) {
+    if (requireAnswer) throw new Error("Could not check who owns this proposal.");
     console.error("[bim-authority/import] checking who opened this proposal failed; read-only for now", { modelId: input.modelId, err });
     return false;
   }

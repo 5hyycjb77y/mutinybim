@@ -23,7 +23,7 @@ describe("the Plumbing and gas add-on", () => {
 
   it("is the pack every host installs", () => {
     expect(PLUMBING_GAS_ADDON).toBe(PLUMBING_GAS_PACK);
-    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct"]);
+    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct", "civil"]);
     expect(installedFirstPartyPacks()[1]).toBe(PLUMBING_GAS_PACK);
   });
 

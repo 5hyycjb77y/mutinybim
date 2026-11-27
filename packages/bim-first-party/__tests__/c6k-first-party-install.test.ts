@@ -15,13 +15,14 @@ import { ELECTRICAL_FIELD_PROVIDER, ELECTRICAL_PACK } from "@permitzip/bim-pack-
 import { ELECTRICAL_MANIFEST, PackDefinitionError, PackSet, PackSetError, activePackSet, contribute, defineExtensionPoint, definePack, installFirstPartyPacks, installedFirstPartyPacks, keepsBareIds, packNotLoadedMessage, withPackSet } from "@permitzip/bim-kernel/packs";
 import { FIRST_PARTY_ADDONS as FIRST_PARTY_PACKS } from "@permitzip/bim-first-party";
 import { ARCHITECTURE_FIELD_PROVIDER } from "@permitzip/bim-pack-architecture";
+import { CIVIL_FIELD_PROVIDER } from "@permitzip/bim-pack-civil";
 import { STRUCTURAL_FIELD_PROVIDER } from "@permitzip/bim-pack-structural";
 
 const WIDGET_POINT = defineExtensionPoint<{ readonly id: string }>({ id: "test.widget", version: 1, label: "Widgets", idOf: (w) => w.id });
 
 describe("c6k first-party add-ons are the base of every set", () => {
-  it("the kernel entry installs the six, in first-party order (Structural since round 14), and an explicit install of the same packs changes nothing", () => {
-    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct"]);
+  it("the kernel entry installs the seven first-party packs in order (Structural since round 14, Civil always installed), and an explicit install of the same packs changes nothing", () => {
+    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct", "civil"]);
     const before = installedFirstPartyPacks();
     installFirstPartyPacks([...FIRST_PARTY_PACKS].reverse());
     installFirstPartyPacks(FIRST_PARTY_PACKS);
@@ -40,11 +41,11 @@ describe("c6k first-party add-ons are the base of every set", () => {
   it("their rows reach every set, outside any scope and under a model's own packs, in today's order", () => {
     const zz = definePack({ id: "zz", name: "Zed", version: "1.0.0", kernel: "^1.3.0" }, [contribute(WIDGET_POINT, [{ id: "zz.one" }])]);
     const set = PackSet.create([zz]);
-    // Round 13: the Architecture add-on's building fields (rank 10) follow Electrical's; round 14: Structural's members (rank 10) follow them.
-    const order = [SPATIAL_FIELD_PROVIDER, ELECTRICAL_FIELD_PROVIDER, ARCHITECTURE_FIELD_PROVIDER, STRUCTURAL_FIELD_PROVIDER, PLUMBING_FIELD_PROVIDER, GAS_FIELD_PROVIDER, MECHANICAL_FIELD_PROVIDER, SERVES_PROVIDER, PLACEMENT_FIELD_PROVIDER, LOADS_FIELD_PROVIDER, qtoFieldProvider(), VENTILATION_FIELD_PROVIDER];
+    // Round 13: Architecture (rank 10) follows Electrical; round 14: Structural (rank 10) follows; Civil (rank 10) follows Structural.
+    const order = [SPATIAL_FIELD_PROVIDER, ELECTRICAL_FIELD_PROVIDER, ARCHITECTURE_FIELD_PROVIDER, STRUCTURAL_FIELD_PROVIDER, CIVIL_FIELD_PROVIDER, PLUMBING_FIELD_PROVIDER, GAS_FIELD_PROVIDER, MECHANICAL_FIELD_PROVIDER, SERVES_PROVIDER, PLACEMENT_FIELD_PROVIDER, LOADS_FIELD_PROVIDER, qtoFieldProvider(), VENTILATION_FIELD_PROVIDER];
     for (const where of [activePackSet(), set]) {
       withPackSet(where, () => {
-        expect(activePackSet().items(NETWORK_ADAPTER_POINT).map((i) => i.id)).toEqual(["electrical", "plumbing", "mechanical", "struct.load_path"]);
+        expect(activePackSet().items(NETWORK_ADAPTER_POINT).map((i) => i.id)).toEqual(["electrical", "plumbing", "mechanical", "struct.load_path", "civil.storm_network"]);
         expect(fieldProviders()).toEqual(order);
         expect(tradeAdapter("electrical")).not.toBeNull();
         expect(derivedZoneRule("dedicated")?.label).toBe("Dedicated equipment space");

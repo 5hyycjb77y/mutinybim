@@ -6,27 +6,28 @@ Generated from the code on every change, for people and for agents. For guides a
 
 ## Writing scripts
 
-- [Example scripts](examples.md): 5 whole scripts to copy
-- [Recipes](recipes.md): 33 worked tasks
-- Script kit: 187 functions
-  - [ctx: the script context](script-kit/ctx.md): 15 functions
+- [Example scripts](examples.md): 6 whole scripts to copy
+- [Recipes](recipes.md): 35 worked tasks
+- Script kit: 200 functions
+  - [ctx: the script context](script-kit/ctx.md): 16 functions
   - [units](script-kit/units.md): 6 functions
-  - [building](script-kit/building.md): 32 functions
+  - [building](script-kit/building.md): 33 functions
   - [routes](script-kit/routes.md): 12 functions
   - [equipment](script-kit/equipment.md): 3 functions
   - [parts](script-kit/parts.md): 8 functions
   - [PartBuilder](script-kit/part-builder.md): 22 functions
-  - [documents](script-kit/documents.md): 53 functions
+  - [documents](script-kit/documents.md): 55 functions
+  - [markups](script-kit/markups.md): 9 functions
   - [drafting](script-kit/drafting.md): 24 functions
   - [checks](script-kit/checks.md): 2 functions
   - [electrical](script-kit/electrical.md): 9 functions
   - [defineScript](script-kit/define-script.md): 1 functions
-- [Edit commands](commands.md): 209 commands `ctx.edit` takes
-- [Calcs](calcs.md): 30 calculations `ctx.calc` runs
-- [Pack reads](reads.md): 13 reads `ctx.read` runs
+- [Edit commands](commands.md): 213 commands `ctx.edit` takes
+- [Calcs](calcs.md): 33 calculations `ctx.calc` runs
+- [Pack reads](reads.md): 15 reads `ctx.read` runs
 - TypeScript declarations: the whole kit as one `script-kit.d.ts`, for an agent or editor that type-checks scripts. The docs site builds it; `kitDeclarations()` in `@permitzip/bim-script` returns it.
 
 ## The platform
 
-- [Add-ons](add-ons.md): 9 add-ons and what each contributes
+- [Add-ons](add-ons.md): 10 add-ons and what each contributes
 - [Tool server tools](mcp-tools.md): 168 MCP tools in 12 families

@@ -141,14 +141,18 @@ function recognizeElement(r: Recognizer, el: BimElement, type: PartTypeElement |
   return classes;
 }
 
+/** A stored part type that actually carries a definition object (guards against malformed stored records). */
+function partTypeWithDefinition(el: BimElement | undefined): PartTypeElement | undefined {
+  return el?.kind === "part_type" && typeof el.definition === "object" && el.definition !== null ? el : undefined;
+}
+
 /** The part type a part is recognized with, looked up once per type id per record. */
 function typeReader(elements: ModelState["elements"]): (el: BimElement) => PartTypeElement | undefined {
   const seen = new Map<string, PartTypeElement | undefined>();
   return (el) => {
     if (el.kind !== "part") return undefined;
     if (seen.has(el.typeId)) return seen.get(el.typeId);
-    const t = elements[el.typeId];
-    const type = t?.kind === "part_type" ? t : undefined;
+    const type = partTypeWithDefinition(elements[el.typeId]);
     seen.set(el.typeId, type);
     return type;
   };
@@ -293,8 +297,8 @@ function coldPass(recognizer: Recognizer, elements: ModelState["elements"]): Col
     system = recognizer.systemClasses.size > 0 ? systemIn(elements, el) : undefined;
     coreType = recognizer.paramClasses.size > 0 ? coreTypeIn(elements, el) : undefined;
     if (el.kind === "part") {
-      const t = elements[el.typeId];
-      if (t?.kind === "part_type") {
+      const t = partTypeWithDefinition(elements[el.typeId]);
+      if (t) {
         type = t;
         tryAll(recognizer.byCategory.get(t.definition.category), el, type, at);
       }
@@ -491,8 +495,7 @@ export function carryClassIndexes(from: ModelState["elements"], to: ModelState["
 export function recognizes(cls: ObjectClass, el: BimElement, elements: ModelState["elements"]): boolean {
   const rule = cls.recognize;
   if (!rule) return false;
-  const type = el.kind === "part" ? elements[el.typeId] : undefined;
-  const partType = type?.kind === "part_type" ? type : undefined;
+  const partType = el.kind === "part" ? partTypeWithDefinition(elements[el.typeId]) : undefined;
   const kinds = rule.elementKinds ?? [];
   const categories = rule.partCategories ?? [];
   const kindMatch = kinds.includes(el.kind) && !(el.kind === "part" && categories.length > 0);

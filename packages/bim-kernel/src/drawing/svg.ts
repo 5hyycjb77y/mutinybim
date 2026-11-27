@@ -1,3 +1,4 @@
+import { smoothStrokeSvgPath } from "../annotation/markups";
 import { textBlockToSvg } from "../annotation/text-note";
 import { TONE_GREY, fillGrey, lineWidthMm, type SheetScene, type Tone } from "./sheet";
 
@@ -37,6 +38,24 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
         `<text x="${(im.at.x + im.size.x / 2).toFixed(2)}" y="${(im.at.y + im.size.y / 2).toFixed(2)}" font-size="3" text-anchor="middle" fill="#6b7280">${esc(im.name)} (loading)</text>`,
       );
   }
+  const emitStroke = (p: Extract<SheetScene["primitives"][number], { kind: "stroke" }>) => {
+    const color = p.preserveColor ? (p.color ?? "#dc2626") : (ink(p.color) ?? "#000");
+    const opacity = p.opacity !== undefined && p.opacity < 1 ? ` stroke-opacity="${p.opacity.toFixed(2)}"` : "";
+    const fillOpacity = p.opacity !== undefined && p.opacity < 1 ? ` fill-opacity="${p.opacity.toFixed(2)}"` : "";
+    const tagAttr = p.markupId ? ` data-markup-id="${esc(p.markupId)}"` : "";
+    if (p.points.length === 1) {
+      const q = p.points[0];
+      if (q) parts.push(`<circle cx="${q.x.toFixed(2)}" cy="${q.y.toFixed(2)}" r="${(p.widthMm / 2).toFixed(2)}" fill="${color}"${fillOpacity} stroke="none"${tagAttr}/>`);
+    } else {
+      const d = p.sharp
+        ? `M${p.points.map((q) => `${q.x.toFixed(2)} ${q.y.toFixed(2)}`).join(" L")}${p.closed ? " Z" : ""}`
+        : smoothStrokeSvgPath(p.points, p.closed);
+      if (d) {
+        parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${p.widthMm.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${opacity}${tagAttr}/>`);
+      }
+    }
+  };
+  const overlayStrokes: Array<Extract<SheetScene["primitives"][number], { kind: "stroke" }>> = [];
   for (const p of scene.primitives) {
     if (p.noteId && opts.hideNoteIds?.has(p.noteId)) continue;
     if (p.kind === "line") {
@@ -57,6 +76,9 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
       parts.push(
         `<circle cx="${p.at.x.toFixed(2)}" cy="${p.at.y.toFixed(2)}" r="${p.r.toFixed(3)}" fill="none" stroke="${stroke(p.tone, ink(p.color))}" stroke-width="${lineWidthMm(p)}"${dash}/>`,
       );
+    } else if (p.kind === "stroke") {
+      if (p.markupId) overlayStrokes.push(p);
+      else emitStroke(p);
     } else {
       // SVG font-size is the em box; cap height is ~0.72 em for Helvetica (a scene font says its own).
       const face = p.font ? fonts.get(p.font) : undefined;
@@ -102,6 +124,8 @@ export function sceneToSvg(scene: SheetScene, opts: { readonly hideNoteIds?: Rea
       `<text x="${cx.toFixed(2)}" y="${(cy + 6).toFixed(2)}" font-size="3.2" text-anchor="middle" fill="#6b7280">vector detail embedded in the exported PDF · ${esc(d.sha256.slice(0, 12))}</text>`,
     );
   }
+  // Review markup strokes paint last so opaque text-block masks never hide human redlines.
+  for (const s of overlayStrokes) emitStroke(s);
   parts.push("</svg>");
   return parts.join("");
 }

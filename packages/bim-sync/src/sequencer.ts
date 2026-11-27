@@ -31,6 +31,8 @@ type Listener = (cs: Changeset) => void;
 type DurableListener = (durableRevision: number, committed: readonly Changeset[]) => void;
 /** Why edits are refused right now, or null when they are accepted. */
 export type WriteGate = () => string | null;
+/** A socket that already observed a downgrade can only recover an old decision or record a refusal. */
+type SubmissionContext = ServerCommandContext & { readonly readOnlyReason?: string };
 
 export interface GroupCommitOptions {
   /** Off: one durable write per commit, decided inside it (the store's `transact`). Default on when the store supports it. */
@@ -137,12 +139,12 @@ export class Sequencer {
   }
 
   /** `server`: what only the model server supplies to a server-only command (a merged part's records). */
-  submit(request: CommandRequest, server: ServerCommandContext = {}): Promise<CommitOutcome> {
+  submit(request: CommandRequest, server: SubmissionContext = {}): Promise<CommitOutcome> {
     const digest = commandDigest(request.command);
     return this.submitWithDigest(request, digest, server).then((outcome) => answerFor(request, digest, outcome));
   }
 
-  private submitWithDigest(request: CommandRequest, digest: string, server: ServerCommandContext): Promise<CommitOutcome> {
+  private submitWithDigest(request: CommandRequest, digest: string, server: SubmissionContext): Promise<CommitOutcome> {
     const group = this.group;
     if (!group) return this.submitSerial(request, digest, server);
     const repeat = this.inflight.get(request.idempotencyKey);
@@ -208,9 +210,9 @@ export class Sequencer {
     this.writeGate = gate;
   }
 
-  private plan(request: CommandRequest, earlier: readonly Changeset[] | null, server: ServerCommandContext) {
+  private plan(request: CommandRequest, earlier: readonly Changeset[] | null, server: SubmissionContext) {
     return (head: ModelState, sinceBase: readonly Changeset[]): CommitDecision => {
-      const refusal = this.writeGate();
+      const refusal = server.readOnlyReason ?? this.writeGate();
       if (refusal !== null) return { ok: false, error: { code: "forbidden", message: refusal, elementIds: [] } };
       return decideWithUpgrades(request.command, this.upgradePolicy, () =>
         planCommit(head, sinceBase, request, undefined, earlier ? mergeHistory(earlier, sinceBase) : sinceBase, server),
@@ -224,7 +226,7 @@ export class Sequencer {
     return command.type === "undo" ? this.store.changesSince(Math.max(0, command.revision - 1)) : Promise.resolve(null);
   }
 
-  private submitSerial(request: CommandRequest, digest: string, server: ServerCommandContext): Promise<CommitOutcome> {
+  private submitSerial(request: CommandRequest, digest: string, server: SubmissionContext): Promise<CommitOutcome> {
     const run = this.queue.then(async () => {
       const earlier = await this.earlierFor(request);
       const result = await this.store.transact(this.generation, request.idempotencyKey, request.baseRevision, this.plan(request, earlier, server), request.actor.id, digest);
@@ -242,7 +244,7 @@ export class Sequencer {
     if (durable) for (const listener of this.durableListeners) listener(cs.revision, [cs]);
   }
 
-  private async decide(store: PipelinedCommitStore, request: CommandRequest, history: readonly Changeset[], digest: string, server: ServerCommandContext): Promise<{ readonly durable: Promise<CommitOutcome> }> {
+  private async decide(store: PipelinedCommitStore, request: CommandRequest, history: readonly Changeset[], digest: string, server: SubmissionContext): Promise<{ readonly durable: Promise<CommitOutcome> }> {
     if (this.broken) throw this.broken;
     const key = request.idempotencyKey;
     const earlier = await this.earlierFor(request);

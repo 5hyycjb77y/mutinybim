@@ -1,6 +1,6 @@
 import type postgres from "postgres";
 import type { IfcImportReport } from "@permitzip/bim-kernel";
-import type { Sql } from "../pg-store";
+import type { QuerySql } from "../pg-store";
 import type { ImportRunRow, ImportRunStatus, ImportRunStore } from "./runs";
 
 function toJson(value: unknown): postgres.JSONValue {
@@ -45,7 +45,7 @@ function toRun(r: Row): ImportRunRow {
 export class PgImportRuns implements ImportRunStore {
   private readonly owners = new Map<string, { readonly at: number; readonly owns: boolean }>();
 
-  constructor(private readonly sql: Sql) {}
+  constructor(private readonly sql: QuerySql) {}
 
   async create(row: Omit<ImportRunRow, "branchModelId" | "total" | "landed" | "report" | "error">): Promise<void> {
     await this.sql`

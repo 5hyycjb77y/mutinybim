@@ -23,6 +23,7 @@ export const DOCUMENT_FIELDS = {
   tag: "doc.tag",
   callout: "doc.callout",
   figure: "doc.figure",
+  markup: "doc.markup",
   detail: "doc.detail",
   deleted: "doc.deleted",
   titleBlock: "doc.titleBlock",
@@ -83,6 +84,7 @@ export function documentFieldValue(el: BimElement, field: string): AuthoredValue
       if (key === "callout") return canonicalJson(el.callout ?? null);
       if (key === "figure") return canonicalJson(el.figure ?? null);
       if (key === "block") return canonicalJson(el.block ?? null);
+      if (key === "markup") return canonicalJson(el.markup ?? null);
       if (key === "detail") return canonicalJson({ lineStyle: el.lineStyle ?? null, closed: el.closed ?? null, ccw: el.ccw ?? null, fill: el.fill ?? null, component: el.component ?? null, batt: el.batt ?? null, category: el.category ?? null, detailGroup: el.detailGroup ?? null, ...(el.pinned ? { pinned: true } : {}) });
       return noteFieldValue(el, field);
     default:

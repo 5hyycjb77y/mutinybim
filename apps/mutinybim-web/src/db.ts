@@ -16,10 +16,12 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { occupiedSlots, sqliteTransfers, SQLITE_TRANSFER_SCHEMA, type Transfers } from "./model-transfers";
+import { SQLITE_MODEL_ACCESS, SQLITE_SHARED_MODELS, SQLITE_TEAM_SCHEMA } from "./team-access";
 
 export interface UserRow {
   readonly id: string;
   readonly email: string;
+  readonly email_confirmed_at: string | null;
   readonly display_name: string;
   readonly password_hash: string | null;
   readonly created_at: string;
@@ -59,6 +61,7 @@ export type ModelAccess = "owner" | ShareRole;
 export interface SharedModelRow extends ModelRow {
   readonly role: ShareRole;
   readonly owner_name: string;
+  readonly team_names: readonly string[];
 }
 
 export interface ShareRow {
@@ -387,6 +390,8 @@ export interface WebStore {
   close(): Promise<void>;
 
   createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): Promise<UserRow>;
+  /** Create a local account and its Supabase subject together. A conflict leaves both records as they were. */
+  createSupabaseUser(input: { id: string; email: string; displayName: string }): Promise<boolean>;
   userByEmail(email: string): Promise<UserRow | null>;
   userById(id: string): Promise<UserRow | null>;
   renameUser(id: string, displayName: string): Promise<void>;
@@ -394,6 +399,7 @@ export interface WebStore {
 
   userByIdentity(provider: string, subject: string): Promise<UserRow | null>;
   linkIdentity(provider: string, subject: string, userId: string): Promise<void>;
+  confirmIdentityEmail(provider: string, subject: string, userId: string, email: string): Promise<void>;
   identitySubject(userId: string, provider: string): Promise<string | null>;
   identitiesOf(userId: string): Promise<readonly string[]>;
 
@@ -405,8 +411,19 @@ export interface WebStore {
   setPassword(userId: string, passwordHash: string): Promise<void>;
 
   createPasswordReset(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
+  /** Local accounts use the app's SMTP relay. Supabase Auth handles its own recovery email. */
+  readonly resetMail?: {
+    stage(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
+    delivered(tokenHash: string): void;
+    discard(tokenHash: string): void;
+  };
   userByPasswordReset(tokenHash: string): Promise<UserRow | null>;
-  usePasswordReset(tokenHash: string): Promise<void>;
+  /**
+   * In one database operation: uses up an unexpired reset link, saves the new
+   * password and ends every session of its account. Returns that account, or
+   * null when the link is unknown, expired or already used (nothing changes then).
+   */
+  redeemPasswordReset(tokenHash: string, passwordHash: string): Promise<UserRow | null>;
 
   createModel(input: { id: string; ownerId: string; name: string }): Promise<ModelRow>;
   creationByKey(ownerId: string, key: string): Promise<ModelCreation | null>;
@@ -422,6 +439,7 @@ export interface WebStore {
 
   accessTo(userId: string, modelId: string): Promise<{ readonly model: ModelRow; readonly access: ModelAccess } | null>;
   sharedWith(userId: string): Promise<readonly SharedModelRow[]>;
+  /** Personal grants only. A model handover offer binds to one of these grants. */
   sharesOf(modelId: string): Promise<readonly ShareRow[]>;
   share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<boolean>;
   unshare(modelId: string, userId: string, ownerId: string): Promise<boolean>;
@@ -503,12 +521,25 @@ function strOrNull(row: Record<string, unknown>, key: string): string | null {
 export function toUser(row: unknown): UserRow | null {
   if (!isRecord(row)) return null;
   const scheme = row.color_scheme;
-  return { id: str(row, "id"), email: str(row, "email"), display_name: str(row, "display_name"), password_hash: strOrNull(row, "password_hash"), created_at: str(row, "created_at"), color_scheme: isColorScheme(scheme) ? scheme : "system" };
+  return { id: str(row, "id"), email: str(row, "email"), email_confirmed_at: strOrNull(row, "email_confirmed_at"), display_name: str(row, "display_name"), password_hash: strOrNull(row, "password_hash"), created_at: str(row, "created_at"), color_scheme: isColorScheme(scheme) ? scheme : "system" };
 }
 
 export function toModel(row: unknown): ModelRow | null {
   if (!isRecord(row)) return null;
   return { id: str(row, "id"), owner_id: str(row, "owner_id"), name: str(row, "name"), created_at: str(row, "created_at"), updated_at: str(row, "updated_at") };
+}
+
+export function toModelAccess(row: unknown, userId: string): { model: ModelRow; access: ModelAccess } | null {
+  const model = toModel(row);
+  if (!model || !isRecord(row)) return null;
+  if (model.owner_id === userId) return { model, access: "owner" };
+  return row.role == null ? null : { model, access: shareRole(row.role) };
+}
+
+export function toSharedModel(row: unknown): SharedModelRow | null {
+  const model = toModel(row);
+  if (!model || !isRecord(row)) return null;
+  return { ...model, role: shareRole(row.role), owner_name: str(row, "owner_name"), team_names: stringList(parseJsonValue(row.team_names)) };
 }
 
 export function toModelCreation(row: unknown): ModelCreation {
@@ -670,7 +701,27 @@ const UPGRADES: readonly string[] = [
   "ALTER TABLE assistant_clients ADD COLUMN token_auth_method TEXT NOT NULL DEFAULT 'none' CHECK (token_auth_method IN ('none', 'client_secret_post', 'client_secret_basic'))",
   "ALTER TABLE assistant_clients ADD COLUMN secret_hash TEXT",
   SQLITE_TRANSFER_SCHEMA,
+  SQLITE_TEAM_SCHEMA,
 ];
+
+// This account upgrade can run before or after the numbered model and team upgrades.
+function ensureEmailConfirmation(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = 'users_clear_email_confirmation'").get()) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'email_confirmed_at'").get()) {
+      db.exec("ALTER TABLE users ADD COLUMN email_confirmed_at TEXT");
+    }
+    db.exec(`CREATE TRIGGER IF NOT EXISTS users_clear_email_confirmation
+      AFTER UPDATE OF email ON users
+      WHEN OLD.email <> NEW.email COLLATE NOCASE
+      BEGIN UPDATE users SET email_confirmed_at = NULL WHERE id = NEW.id; END;`);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
 
 export function openDb(file: string): WebStore {
   if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
@@ -702,6 +753,11 @@ export function openDb(file: string): WebStore {
       throw err;
     }
   }
+  ensureEmailConfirmation(db);
+
+  function insertReset(tokenHash: string, userId: string, expiresAt: Date): void {
+    db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString());
+  }
 
   return {
     transfers: sqliteTransfers(db, writeTransaction),
@@ -714,6 +770,17 @@ export function openDb(file: string): WebStore {
       const user = toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(input.id));
       if (!user) throw new Error("[mutinybim-web db] the new account was not saved");
       return user;
+    },
+    async createSupabaseUser({ id, email, displayName }) {
+      return writeTransaction(() => {
+        if (db.prepare("SELECT 1 FROM identities WHERE provider = 'supabase' AND subject = ?").get(id)) return false;
+        const at = now();
+        const inserted = db.prepare("INSERT INTO users (id, email, display_name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
+          .run(id, email, displayName, at);
+        if (!inserted.changes) return false;
+        db.prepare("INSERT INTO identities (provider, subject, user_id, created_at) VALUES ('supabase', ?, ?, ?)").run(id, id, at);
+        return true;
+      });
     },
     async userByEmail(email) {
       return toUser(db.prepare("SELECT * FROM users WHERE email = ?").get(email));
@@ -733,6 +800,12 @@ export function openDb(file: string): WebStore {
     },
     async linkIdentity(provider, subject, userId) {
       db.prepare("INSERT OR IGNORE INTO identities (provider, subject, user_id, created_at) VALUES (?, ?, ?, ?)").run(provider, subject, userId, now());
+    },
+    async confirmIdentityEmail(provider, subject, userId, email) {
+      db.prepare(`UPDATE users SET email_confirmed_at = ?
+        WHERE id = ? AND email = ? AND email_confirmed_at IS NULL
+          AND EXISTS (SELECT 1 FROM identities WHERE provider = ? AND subject = ? AND user_id = users.id)`)
+        .run(now(), userId, email, provider, subject);
     },
     async identitySubject(userId, provider) {
       const row = db.prepare("SELECT subject FROM identities WHERE user_id = ? AND provider = ?").get(userId, provider);
@@ -765,14 +838,42 @@ export function openDb(file: string): WebStore {
     },
 
     async createPasswordReset(tokenHash, userId, expiresAt) {
-      db.prepare("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").run(userId, now());
-      db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(tokenHash, userId, now(), expiresAt.toISOString());
+      writeTransaction(() => {
+        db.prepare("DELETE FROM password_resets WHERE user_id = ? OR expires_at < ?").run(userId, now());
+        insertReset(tokenHash, userId, expiresAt);
+      });
+    },
+    resetMail: {
+      async stage(tokenHash, userId, expiresAt) {
+        writeTransaction(() => {
+          db.prepare("DELETE FROM password_resets WHERE expires_at <= ?").run(now());
+          insertReset(tokenHash, userId, expiresAt);
+        });
+      },
+      delivered(tokenHash) {
+        // SMTP replies may arrive out of order. Retire only earlier links for
+        // this account while the delivered link is still present.
+        db.prepare(`DELETE FROM password_resets
+          WHERE user_id = (SELECT user_id FROM password_resets WHERE token_hash = ? AND expires_at > ?)
+            AND rowid < (SELECT rowid FROM password_resets WHERE token_hash = ?)`).run(tokenHash, now(), tokenHash);
+      },
+      discard(tokenHash) {
+        db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash);
+      },
     },
     async userByPasswordReset(tokenHash) {
       return toUser(db.prepare("SELECT u.* FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ? AND r.expires_at > ?").get(tokenHash, now()));
     },
-    async usePasswordReset(tokenHash) {
-      db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash);
+    async redeemPasswordReset(tokenHash, passwordHash) {
+      return writeTransaction(() => {
+        const link = db.prepare("DELETE FROM password_resets WHERE token_hash = ? AND expires_at > ? RETURNING user_id").get(tokenHash, now());
+        if (!isRecord(link) || typeof link.user_id !== "string") return null;
+        // A replacement email can still be in flight when an earlier link is used.
+        db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(link.user_id);
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, link.user_id);
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(link.user_id);
+        return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(link.user_id));
+      });
     },
 
     async createModel(input) {
@@ -840,22 +941,10 @@ export function openDb(file: string): WebStore {
     },
 
     async accessTo(userId, modelId) {
-      const row = db.prepare(`SELECT m.*, s.role FROM models m
-        LEFT JOIN model_shares s ON s.model_id = m.id AND s.user_id = ?
-        WHERE m.id = ?`).get(userId, modelId);
-      const model = toModel(row);
-      if (!model) return null;
-      if (model.owner_id === userId) return { model, access: "owner" };
-      return row?.role == null ? null : { model, access: shareRole(row.role) };
+      return toModelAccess(db.prepare(SQLITE_MODEL_ACCESS).get({ $person: userId, $model: modelId }), userId);
     },
     async sharedWith(userId) {
-      return db
-        .prepare("SELECT m.*, s.role, u.display_name AS owner_name FROM model_shares s JOIN models m ON m.id = s.model_id JOIN users u ON u.id = m.owner_id WHERE s.user_id = ? ORDER BY m.updated_at DESC")
-        .all(userId)
-        .flatMap((r) => {
-          const model = toModel(r);
-          return model && isRecord(r) ? [{ ...model, role: shareRole(r.role), owner_name: str(r, "owner_name") }] : [];
-        });
+      return db.prepare(SQLITE_SHARED_MODELS).all(userId, userId).flatMap((r) => toSharedModel(r) ?? []);
     },
     async sharesOf(modelId) {
       return db

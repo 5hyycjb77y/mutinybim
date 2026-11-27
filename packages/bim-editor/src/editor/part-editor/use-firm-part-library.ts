@@ -103,10 +103,14 @@ export function useFirmPartLibraryFrom(port: EditorDataHost['firmLibrary'], want
     await fetchLibrary()
   }, [fetchLibrary])
 
+  const cancelPending = useCallback(() => {
+    ++lastRequest.current
+  }, [])
+
   useEffect(() => {
     if (wanted) void fetchLibrary()
-    return () => { ++lastRequest.current }
-  }, [wanted, fetchLibrary])
+    return cancelPending
+  }, [wanted, fetchLibrary, cancelPending])
 
   const entries = useMemo((): CatalogEntry[] => {
     if (!loaded) return []

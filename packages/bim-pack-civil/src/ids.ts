@@ -14,6 +14,12 @@ export const CIVIL_CLASS = {
   stormSystem: "civil.storm_system",
   alignment: "civil.alignment",
   catchment: "civil.catchment",
+  /**
+   * A TIN of existing or proposed ground. The stored element kind and the
+   * class id are the same word: the mesh is the kind's shape, not a parameter
+   * (parameters are scalars).
+   */
+  gradingSurface: "civil.grading_surface",
 } as const;
 export type CivilClassId = (typeof CIVIL_CLASS)[keyof typeof CIVIL_CLASS];
 

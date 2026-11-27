@@ -83,9 +83,9 @@ describe("proof packs build only through the add-on contract", () => {
     expect(allowed("@permitzip/bim-kernel/src/validate", file, packDir, contract)).toBe(false);
   });
 
-  it("Civil is still a proof pack: not first-party, and refused if it reached for another add-on", () => {
+  it("Civil stays on the contract surface even after graduating to first-party, and is refused if it reaches for another add-on", () => {
     const manifests = readFileSync(path.join(ROOT, "packages/bim-kernel/src/packs/first-party/manifests.ts"), "utf8");
-    expect(manifests).not.toMatch(/id: "civil"/);
+    expect(manifests).toMatch(/id: "civil"/);
     const file = path.join(ROOT, "packages/bim-pack-civil/src/pack.ts");
     const packDir = path.join(ROOT, "packages/bim-pack-civil");
     expect(allowed("@permitzip/bim-pack-structural", file, packDir, contract)).toBe(false);

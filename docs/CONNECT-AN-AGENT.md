@@ -55,19 +55,25 @@ point (`BimToolPack` in `packages/bim-mcp/src/server.ts`), without touching
 the core. Pack membership lives in one place, the `packages/bim-plugin`
 catalogue.
 
-**Every other tool family** (parts and equipment, routing and fittings,
-electrical and plumbing, views, sheets, drafting and detailing, drawing sets,
-schedules, coordination lint, groups and phases, linked models) is in
-`packages/bim-mcp-packs`. Start the server with `--packs all` to add them
-(159 tools on top of the core's 9). They keep the tool names and arguments
-hosted products use, so they take a `project_id` (any uuid on a local
-server, which has one workspace). On your computer, printed sheets, issued
+**Legacy single-purpose tool families** (parts and equipment, routing and
+fittings, electrical and plumbing, views, sheets, drafting and detailing,
+drawing sets, schedules, coordination lint, groups and phases, linked models)
+live in `packages/bim-mcp-packs`. **These legacy MCP packs are being retired in
+favor of `@permitzip/bim-script`**: no new single-purpose MCP tools will be
+added, and the daily-driver MCP surface stays at **10 tools at most**. Of the
+159 pack tools, **138** are already covered by scripts (see
+[Scripting coverage](./SCRIPTING-COVERAGE.md)) and return a hint pointing to
+their script equivalent when called; only **21** remain genuine host steps
+(rendering, printing, issuing, firm/schedule libraries, Autodesk Docs, lint
+settings, and AI cut-sheet/picture reads). Start the server with `--packs
+<family>` or `--packs all` only when you need one of those host-step tools (or
+a legacy workflow during migration). On your computer, printed sheets, issued
 sets and saved pictures are written under `--files <dir>` (default
-`./mutinybim-files`); schedules, firm parts, lint settings and route
-defaults are kept in memory; and the few tools that need a hosted MutinyBIM
-(Autodesk Docs linking, branches, reading a picture with AI, a project's
-adopted code editions) answer in plain words that they aren't available
-here. Every edit any pack makes asks you first, like the core's.
+`./mutinybim-files`); schedules, firm parts, lint settings and route defaults
+are kept in memory; and the few tools that need a hosted MutinyBIM (Autodesk
+Docs linking, branches, reading a picture with AI, a project's adopted code
+editions) answer in plain words that they aren't available here. Every edit any
+pack makes asks you first, like the core's.
 
 ### Start it
 

@@ -268,9 +268,9 @@ export function privacyPage(): string {
   ]);
 }
 
-/** Password recovery: sends a reset email when Supabase Auth is enabled, otherwise explains local recovery. */
-export function forgotPage(config: WebConfig, options: { email?: string; flash?: Flash } = {}): string {
-  if (config.supabase) {
+/** Password recovery: sends a reset email through Supabase Auth or the app's own mail, otherwise explains local recovery. */
+export function forgotPage(config: WebConfig, options: { email?: string; flash?: Flash; mail?: boolean } = {}): string {
+  if (config.supabase || options.mail) {
     return page(
       <Card>
         <CardHeader>
@@ -284,7 +284,7 @@ export function forgotPage(config: WebConfig, options: { email?: string; flash?:
               Send reset link
             </Button>
           </form>
-          {config.supabase.google ? (
+          {config.supabase?.google ? (
             <p className="text-xs text-(--mutiny-muted)">
               Signed up with Google? You don't need a password — use <strong>Continue with Google</strong> on the log-in page.
             </p>
@@ -597,7 +597,7 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
                       {m.name}
                     </a>
                     <span className="text-xs text-(--mutiny-muted)">
-                      {m.owner_name}'s · changed {formatWhen(m.updated_at)}
+                      {m.owner_name}'s{m.team_names.length > 0 && ` · via ${m.team_names.join(", ")}`} · changed {formatWhen(m.updated_at)}
                     </span>
                   </div>
                   <Badge variant={m.role === "edit" ? "default" : "secondary"}>{m.role === "edit" ? "Can edit" : "View only"}</Badge>
@@ -675,7 +675,7 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
       <PageTitle lede="People you share with see it under “Shared with you” on their My models page. They need a MutinyBIM account on this server; this app sends no email, so tell them yourself.">Share “{model.name}”</PageTitle>
       <Card>
         <CardHeader>
-          <CardTitle>Who has it</CardTitle>
+          <CardTitle>Owner and personal shares</CardTitle>
         </CardHeader>
         <CardContent>
           <ul className="flex flex-col gap-2" data-testid="shares">
@@ -701,9 +701,9 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
                   </Button>
                 </form>
                 <ConfirmForm action={`/models/${model.id}/share/${s.user_id}/delete`}
-                  question={`Stop sharing “${model.name}” with ${s.display_name}? ` + (options.offer?.recipient_id === s.user_id
-                    ? "This disconnects them and ends their ownership offer."
-                    : "They are disconnected at once.")}>
+                  question={`Stop sharing “${model.name}” directly with ${s.display_name}? ` + (options.offer?.recipient_id === s.user_id
+                    ? "This ends their ownership offer. Any team access still applies."
+                    : "Any team access still applies.")}>
                   <Button type="submit" size="sm" variant="ghost" className="text-(--mutiny-danger)">
                     Remove
                   </Button>
@@ -711,13 +711,13 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
               </li>
             ))}
           </ul>
-          {shares.length === 0 ? <p className="text-(--mutiny-muted)">Only you have this model so far.</p> : null}
+          {shares.length === 0 ? <p className="text-(--mutiny-muted)">No personal shares yet.</p> : null}
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
           <CardTitle>Add someone</CardTitle>
-          <CardDescription>“Can edit” lets them change the model, make branches and save versions. “View only” lets them look and nothing else.</CardDescription>
+          <CardDescription>“Can edit” lets them change the model, make branches and save versions. A personal “View only” share can coexist with edit access through a team.</CardDescription>
         </CardHeader>
         <form method="post" action={`/models/${model.id}/share`} className="flex flex-wrap items-end gap-2">
           <Field className="min-w-60 flex-1">
@@ -1006,7 +1006,10 @@ export function connectPage(config: WebConfig, user: UserRow, view: ConnectView,
           </li>
         </ul>
         <CardDescription>
-          Your assistant opens a MutinyBIM sign-in page: log in and press Allow. No key to copy. It starts with the core tools (ten at most); ask it to turn on a tool family when a job needs one, or connect a family directly at <Code>{`${config.origin}/packs/<family>/mcp`}</Code> (for example <Code>{`${config.origin}/packs/electrical/mcp`}</Code>).
+          Your assistant opens a MutinyBIM sign-in page: log in and press Allow. No key to copy. It starts with the core tools (ten at most): <strong>@permitzip/bim-script</strong> is the primary AI capability layer, and 138 of the 159 legacy pack tools are already covered by scripts. Legacy single-purpose MCP packs are being retired and no new MCP tools will be added.
+        </CardDescription>
+        <CardDescription>
+          Only 21 tools remain genuine host steps (rendering view/sheet images, printing PDFs, issuing sets, firm and schedule libraries, Autodesk Docs, and lint settings). Turn on a family with <Code>bim_enable_pack</Code> only when you need one of those host steps — or, for clients that do not dynamically refresh tool lists (such as Claude remote connectors), connect directly to <Code>{`${config.origin}/packs/<family>/mcp`}</Code> (for example <Code>{`${config.origin}/packs/model/mcp`}</Code> for rendering/printing).
         </CardDescription>
         <CardDescription>
           When your assistant can't ask you itself, its changes wait on <a href="/approvals">Approvals</a> until you press Approve. Its scripts run here in a sealed box with no network; a script only previews until you approve what it does.

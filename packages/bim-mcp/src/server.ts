@@ -4,6 +4,7 @@ import { BIM_TOOL_PACKS, CORE_PACK_ID, bimPack, bimPackOfTool } from "@permitzip
 import type { BimToolHost } from "./host";
 import { registerBimNetworkReadTools, registerBimSummaryReadTools } from "./reads/tools";
 import type { CoreSchemas } from "./schemas";
+import { HOST_STEP_TOOL_NAMES, LEGACY_TOOL_SCRIPT_EQUIVALENTS, isHostStepTool, withLegacyToolNudge } from "./scripts/coverage";
 import { registerBimScriptTools, type ScriptToolOptions } from "./scripts/tools";
 
 /**
@@ -198,36 +199,87 @@ function resolveFamily(name: string, here: readonly FamilyHere[]): string | null
 
 function familyLines(tools: ReadonlyMap<string, FamilyTool>, here: readonly FamilyHere[]): string[] {
   return here.map((f) => {
-    const members = [...tools.values()].filter((t) => t.family === f.id);
-    const on = members.filter((t) => t.handle.enabled).length;
-    return `- ${f.id} (${members.length} tools, ${on === members.length ? "on" : on > 0 ? `${on} on` : "off"}): ${f.purpose}`;
+    const members = [...tools.entries()].filter(([, t]) => t.family === f.id);
+    const on = members.filter(([, t]) => t.handle.enabled).length;
+    const hostSteps = members.filter(([name]) => isHostStepTool(name)).length;
+    const hostNote = hostSteps > 0 ? `, ${hostSteps} host step${hostSteps === 1 ? "" : "s"}` : ", script-covered";
+    return `- ${f.id} (${members.length} tools${hostNote}, ${on === members.length ? "on" : on > 0 ? `${on} on` : "off"}): ${f.purpose}`;
   });
 }
 
-function registerPackControlTool(server: McpServer, tools: ReadonlyMap<string, FamilyTool>, here: readonly FamilyHere[]): void {
+type NotificationExtra = {
+  sendNotification?: (notification: { method: string; params?: Record<string, unknown> }) => Promise<void>;
+};
+
+async function notifyToolListChangedOnce(rawServer: McpServer, extra: unknown): Promise<void> {
+  const sender = typeof extra === "object" && extra !== null ? (extra as NotificationExtra).sendNotification : undefined;
+  if (typeof sender === "function") {
+    try {
+      await sender({ method: "notifications/tools/list_changed" });
+      return;
+    } catch {
+      // Fall back to server-level broadcast when the request context cannot send notifications.
+    }
+  }
+  rawServer.sendToolListChanged();
+}
+
+function registerPackControlTool(server: McpServer, rawServer: McpServer, tools: ReadonlyMap<string, FamilyTool>, here: readonly FamilyHere[]): void {
   const ids = here.map((f) => f.id);
+  const coveredCount = Object.keys(LEGACY_TOOL_SCRIPT_EQUIVALENTS).length;
+  const hostStepCount = HOST_STEP_TOOL_NAMES.length;
+  const totalLegacy = coveredCount + hostStepCount;
   server.registerTool(
     PACK_CONTROL_TOOL,
     {
-      title: "Turn on a tool family",
+      title: "Turn on a legacy tool family",
       description:
-        "Scripts can do almost everything (see bim_script_reference); turn on a tool family only when the job needs its single-purpose tools. " +
-        "No argument: lists the families, one line each, and which are on. With `family`: turns that family's tools on for this session; the tool list changes (notifications/tools/list_changed).",
+        "Prefer @permitzip/bim-script (bim_script_reference): 138 of 159 pack tools are already covered by scripts and slated for retirement; only 21 are host steps. " +
+        "No argument: lists the families and which are on. With `family`: turns that family on for this session and sends one notifications/tools/list_changed.",
       inputSchema: { family: z.string().optional().describe(`A family: ${ids.join(", ")}.`) },
     },
-    async ({ family }) => {
-      if (family === undefined) return { content: [{ type: "text" as const, text: `Tool families here:\n${familyLines(tools, here).join("\n")}` }] };
+    async ({ family }, extra) => {
+      if (family === undefined) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `Try @permitzip/bim-script first (see bim_script_reference): ${coveredCount} of ${totalLegacy} legacy pack tools are already script-covered and slated for retirement. Only ${hostStepCount} are host steps (rendering, printing, issuing, firm/schedule libraries, Autodesk Docs, lint settings).\n` +
+                `Tool families here:\n${familyLines(tools, here).join("\n")}\n` +
+                `Clients that do not dynamically refresh tool lists (for example Claude remote connectors) can connect directly to /packs/<family>/mcp when they genuinely need one of the ${hostStepCount} host-step tools.`,
+            },
+          ],
+        };
+      }
       const slug = resolveFamily(family, here);
       if (!slug) return { isError: true, content: [{ type: "text" as const, text: `"${family}" is not a tool family here. Families: ${ids.join(", ")}.` }] };
       const turned: string[] = [];
+      const hostSteps: string[] = [];
       for (const [name, tool] of tools) {
-        if (tool.family === slug && !tool.handle.enabled) {
-          tool.handle.enable();
-          turned.push(name);
+        if (tool.family === slug) {
+          if (isHostStepTool(name)) hostSteps.push(name);
+          if (!tool.handle.enabled) {
+            // Flip enabled directly so the loop coalesces into a single notifications/tools/list_changed below.
+            tool.handle.enabled = true;
+            turned.push(name);
+          }
         }
       }
-      const words = turned.length > 0 ? `Turned on ${slug}: ${turned.join(", ")}. Your tool list has changed.` : `${slug} is already on (or has no tools on this server).`;
-      return { content: [{ type: "text" as const, text: words }] };
+      if (turned.length > 0) await notifyToolListChangedOnce(rawServer, extra);
+      const status =
+        turned.length > 0
+          ? `Turned on ${slug}: ${turned.join(", ")}. Your tool list has changed.`
+          : `${slug} is already on (or has no tools on this server).`;
+      const scriptNote =
+        hostSteps.length > 0
+          ? `Note: Only ${hostSteps.join(", ")} in ${slug} ${hostSteps.length === 1 ? "is a host step" : "are host steps"}; the other legacy tools in this family are covered by @permitzip/bim-script (check bim_script_reference first) and slated for retirement.`
+          : `Note: Every tool in ${slug} is a legacy tool already covered by @permitzip/bim-script (check bim_script_reference first) and slated for retirement.`;
+      const staticClientNote =
+        hostSteps.length > 0
+          ? ` If your client does not dynamically refresh tool lists (for example Claude remote connectors), connect directly to /packs/${slug}/mcp when you genuinely need ${hostSteps.length === 1 ? "that host-step tool" : "those host-step tools"}.`
+          : ` Clients that do not dynamically refresh tool lists (for example Claude remote connectors) do not need /packs/${slug}/mcp — use scripts via /mcp instead.`;
+      return { content: [{ type: "text" as const, text: `${status}\n${scriptNote}${staticClientNote}` }] };
     },
   );
 }
@@ -242,17 +294,18 @@ export function createBimToolServer(options: BimToolServerOptions): McpServer {
   const packs = options.packs ?? [];
   const problems = packProblems(packs);
   if (problems.length > 0) throw new Error(`The MutinyBIM tool server can't start: ${problems.join(" ")}`);
-  const packLine = packs.length > 0 ? ` More tools are here in families that are off until you turn one on with ${PACK_CONTROL_TOOL}; a script usually does the job without them.` : "";
+  const packLine = packs.length > 0 ? ` Legacy tool families stay off until enabled with ${PACK_CONTROL_TOOL}; prefer scripts (bim_script_reference) unless you need a host-step tool.` : "";
   const server = new McpServer(
     { name: options.name ?? "mutinybim", version: options.version ?? BIM_TOOL_SERVER_VERSION },
     { instructions: `${CORE_INSTRUCTIONS}${packLine}${options.instructions ? ` ${options.instructions}` : ""}` },
   );
   const target = options.aroundTool ? wrappingTools(server, options.aroundTool) : server;
   registerBimCoreTools(target, options.host, options);
+  const packTarget = withLegacyToolNudge(target);
   const tools = new Map<string, FamilyTool>();
   for (const pack of packs) {
     const handles = new Map<string, RegisteredTool>();
-    pack.register(recordingTools(target, handles), options.host);
+    pack.register(recordingTools(packTarget, handles), options.host);
     for (const [name, handle] of handles) tools.set(name, { handle, family: toolFamily(name) ?? pack.id });
   }
   if (options.families === "all") return server;
@@ -264,6 +317,6 @@ export function createBimToolServer(options: BimToolServerOptions): McpServer {
     on.add(id);
   }
   for (const tool of tools.values()) if (!on.has(tool.family)) tool.handle.disable();
-  if (tools.size > 0) registerPackControlTool(target, tools, here);
+  if (tools.size > 0) registerPackControlTool(target, server, tools, here);
   return server;
 }

@@ -18,10 +18,13 @@
  *   node --import tsx services/bim-authority/drills/group-commit-store.ts
  */
 import { randomUUID } from "node:crypto";
-import { BUILTIN_PART_TYPES, applyChangeset, canonicalJson, type Changeset, type Command, type ModelState } from "@permitzip/bim-kernel";
+import { builtinPartTypes, applyChangeset, canonicalJson, type Changeset, type Command, type ModelState } from "@permitzip/bim-kernel";
+import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { PipelineBrokenError, Sequencer, type CommitOutcome } from "@permitzip/bim-sync";
 import { PostgresCommitStore, connect } from "../src/pg-store";
+
+installFirstPartyAddOns();
 
 const url = process.env.BIM_PARTS_DRILL_DB_URL;
 if (!url) throw new Error("Set BIM_PARTS_DRILL_DB_URL to a throwaway database on this machine");
@@ -56,7 +59,7 @@ async function seed(sql: Sql, modelId: string, model: ModelState): Promise<void>
 
 const store = (sql: Sql, modelId: string, owner: string) => new PostgresCommitStore(sql, { modelId, owner, ownerMachine: null, leaseTtlMs: 10_000 });
 
-const diffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+const diffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
 if (!diffuser) throw new Error("starter library has no air terminal");
 
 function editsFor(person: number, count: number): Command[] {

@@ -76,7 +76,7 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 export class PgBranchRegistry implements BranchRegistry {
-  constructor(private readonly sql: Sql) {}
+  constructor(private readonly sql: Sql | Tx) {}
 
   async list(baseModelId: string): Promise<readonly BranchRef[]> {
     const rows = await this.sql<BranchRow[]>`

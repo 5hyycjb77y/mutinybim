@@ -29,7 +29,7 @@ function sampleMarketModel(): ModelState {
 
 const MIN: Vec2 = { x: 500, y: 300 };
 const MAX: Vec2 = { x: 700, y: 440 };
-const pointsOf = (p: Primitive): Vec2[] => (p.kind === "line" ? [p.a, p.b] : p.kind === "rect" ? [p.at, { x: p.at.x + p.size.x, y: p.at.y + p.size.y }] : p.kind === "fill" ? [...p.points] : [p.at]);
+const pointsOf = (p: Primitive): Vec2[] => (p.kind === "line" ? [p.a, p.b] : p.kind === "rect" ? [p.at, { x: p.at.x + p.size.x, y: p.at.y + p.size.y }] : p.kind === "fill" || p.kind === "stroke" ? [...p.points] : [p.at]);
 const texts = (prims: readonly Primitive[]) => prims.flatMap((p) => (p.kind === "text" ? [p.text] : []));
 
 beforeAll(() => {

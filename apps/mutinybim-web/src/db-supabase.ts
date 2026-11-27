@@ -1,6 +1,6 @@
 /**
  * Supabase / Postgres metadata store implementing `WebStore` over PostgREST
- * and the atomic RPCs defined in `db/migrations/20261124000000_mutinybim_web_initial.sql`.
+ * and the atomic RPCs defined in `db/migrations/`.
  *
  * Uses built-in fetch with zero extra dependencies, keeping the open-source
  * app self-contained while letting hosted deployments store accounts, sessions,
@@ -16,12 +16,13 @@ import {
   toLinkedGrant,
   toLinkedModel,
   toModel,
+  toModelAccess,
   toModelCreation,
+  toSharedModel,
   toUser,
   type AssistantCodeRow,
   type OAuthClientRow,
   type OAuthStateRow,
-  type SharedModelRow,
   type ShareRow,
   type WebStore,
 } from "./db";
@@ -158,8 +159,12 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       if (!user) throw new Error("[mutinybim-web supabase-db] the new account was not saved");
       return user;
     },
+    async createSupabaseUser({ id, email, displayName }) {
+      return (await rpc("web_create_supabase_user", { p_id: id, p_email: email, p_display_name: displayName })) === true;
+    },
     async userByEmail(email) {
-      return toUser(await selectOne("users", { select: "*", email: `ilike.${email.trim().toLowerCase()}` }));
+      const rows = await rpc("web_user_by_email", { p_email: email.trim() });
+      return toUser(Array.isArray(rows) ? rows[0] : null);
     },
     userById,
     async renameUser(id, displayName) {
@@ -180,6 +185,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
         prefer: "resolution=ignore-duplicates",
         body: { provider, subject, user_id: userId, created_at: now() },
       });
+    },
+    async confirmIdentityEmail(provider, subject, userId, email) {
+      await rpc("web_confirm_oidc_email", { p_provider: provider, p_subject: subject, p_user_id: userId, p_email: email });
     },
     async identitySubject(userId, provider) {
       const row = await selectOne("identities", { select: "subject", user_id: eq(userId), provider: eq(provider) });
@@ -231,8 +239,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       if (!isRecord(row) || typeof row.user_id !== "string") return null;
       return userById(row.user_id);
     },
-    async usePasswordReset(tokenHash) {
-      await request(`/rest/v1/password_resets?${new URLSearchParams({ token_hash: eq(tokenHash) })}`, { method: "DELETE" });
+    async redeemPasswordReset(tokenHash, passwordHash) {
+      const userId = await rpc("web_redeem_password_reset", { p_token_hash: tokenHash, p_password_hash: passwordHash });
+      return typeof userId === "string" ? userById(userId) : null;
     },
 
     async createModel(input) {
@@ -285,31 +294,12 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
     },
 
     async accessTo(userId, modelId) {
-      // Acceptance changes the owner and consumes the recipient's share in one commit.
-      const row = await selectOne("models", {
-        select: "*,model_shares(role)", id: eq(modelId), "model_shares.user_id": eq(userId),
-      });
-      const model = toModel(row);
-      if (!model || !isRecord(row)) return null;
-      if (model.owner_id === userId) return { model, access: "owner" };
-      const share = Array.isArray(row.model_shares) ? row.model_shares[0] : null;
-      return isRecord(share) ? { model, access: shareRole(share.role) } : null;
+      return toModelAccess(await rpc("web_access_to", { p_user: userId, p_model: modelId }), userId);
     },
     async sharedWith(userId) {
-      const rows = await selectRows("model_shares", {
-        select: "role,models!inner(id,owner_id,name,created_at,updated_at,users!models_owner_id_fkey(display_name))",
-        user_id: eq(userId),
-      });
-      const out: SharedModelRow[] = [];
-      for (const r of rows) {
-        if (!isRecord(r) || !isRecord(r.models)) continue;
-        const model = toModel(r.models);
-        const owner = isRecord(r.models.users) ? r.models.users : null;
-        if (!model || !owner || typeof owner.display_name !== "string") continue;
-        out.push({ ...model, role: shareRole(r.role), owner_name: owner.display_name });
-      }
-      out.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
-      return out;
+      const rows = await rpc("web_shared_with", { p_user: userId });
+      if (!Array.isArray(rows)) throw new Error("[mutinybim-web supabase-db] expected a shared model list");
+      return rows.flatMap((r) => toSharedModel(r) ?? []);
     },
     async sharesOf(modelId) {
       const rows = await selectRows("model_shares", {

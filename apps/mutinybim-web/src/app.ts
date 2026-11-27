@@ -33,7 +33,8 @@ import { ModelCreator } from "./model-creation";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
 import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
 import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
-import { digest, hashPassword, pkcePair, randomToken, verifyPassword } from "./secrets";
+import { EMAIL_SHAPE, resetMail, smtpMailer, type Mailer } from "./mailer";
+import { digest, hashPassword, issuePasswordReset, pkcePair, randomToken, verifyPassword } from "./secrets";
 import { exchangePkceCode, googleAuthorizeUrl, requestPasswordReset, signInWithPassword, signUpWithPassword, SupabaseAuthError, updatePassword, verifyTokenHash, type SupabaseUser } from "./supabase-auth";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +74,8 @@ export interface AppOptions {
   readonly scripts?: HostedScripts;
   /** The key linked-host passes are kept under (tests); default MUTINYBIM_WEB_LINK_KEY. null: linked hosts off. */
   readonly linkKeys?: LinkKeys | null;
+  /** Delivers the app's email (tests pass a recording mailer). Default: SMTP when MUTINYBIM_WEB_MAIL=smtp; null: none. */
+  readonly mailer?: Mailer | null;
 }
 
 /** The scripts setting as a runner: the sealed box (default), off, or this computer's own runner (loopback servers only). */
@@ -91,6 +94,8 @@ export interface App {
   readonly db: Db;
   readonly models: ModelStore;
   listen(): Promise<void>;
+  /** Waits for work the app finished after replying, such as sending email. */
+  settled(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -179,6 +184,20 @@ function safeReturn(value: string | null | undefined, fallback = "/models"): str
   return value;
 }
 
+/**
+ * For pages whose address holds a one-time token: the Referer header carries only
+ * this app's origin, never the path with the token, even to this site. Not
+ * "no-referrer", which makes browsers send `Origin: null` on the page's own form
+ * posts, so the same-site check would refuse them.
+ */
+const TOKEN_PAGE = { "referrer-policy": "strict-origin" } as const;
+
+/** An error's code or name, for logs that must not repeat its message. */
+function errorCode(err: unknown): string {
+  if (err instanceof Error) return "code" in err && (typeof err.code === "string" || typeof err.code === "number") ? String(err.code) : err.name;
+  return typeof err;
+}
+
 function baseModelOf(modelId: string): string {
   return parseBranchModelId(modelId)?.baseModelId ?? modelId;
 }
@@ -209,6 +228,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   });
   const creator = new ModelCreator(db, path.join(config.dataDir, "models"));
   const throttle = new Throttle(20, 10 * 60_000);
+  const mailer = options.mailer !== undefined ? options.mailer : config.mail ? smtpMailer(config.mail) : null;
+  // A few reset emails per address per hour, so nobody can flood an inbox or keep replacing its link.
+  const resetMailLimit = new Throttle(3, 60 * 60_000);
+  const afterReply = new Set<Promise<void>>();
   const ipOf = (req: IncomingMessage): string => clientIp(req, Boolean(config.trustProxy));
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
   const approvals = new ApprovalBook(db);
@@ -275,8 +298,18 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     return sessionCookie(token, SESSION_DAYS * 86_400);
   };
 
-  /** Ensures a verified Supabase Auth user has a matching local user + identity row. */
-  async function syncSupabaseUser(sbUser: SupabaseUser, options?: { readonly allowCreate?: boolean }): Promise<{ readonly user: UserRow; readonly created: boolean } | null> {
+  /**
+   * Ensures a Supabase Auth user has a matching local user + identity row.
+   * An existing account is attached by email only when this sign-in came
+   * through Google and Google reported the address verified. Supabase marks
+   * every address confirmed when its "Confirm email" setting is off, so a
+   * password sign-up proves nothing. An emailed link isn't enough either: the
+   * Supabase user behind it may carry a password someone else chose. For the
+   * same reason the Supabase user must sign in only through Google: Supabase
+   * merges a Google sign-in into an existing Supabase user with that address,
+   * which may already hold someone else's password.
+   */
+  async function syncSupabaseUser(sbUser: SupabaseUser, options?: { readonly allowCreate?: boolean; readonly provenBy?: "google" }): Promise<{ readonly user: UserRow; readonly created: boolean } | "email_in_use" | null> {
     const isGoogle = sbUser.providers.includes("google");
     const byIdentity = await db.userByIdentity("supabase", sbUser.id);
     if (byIdentity) {
@@ -284,17 +317,24 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       return { user: byIdentity, created: false };
     }
     const byEmail = await db.userByEmail(sbUser.email);
+    let created = false;
     if (byEmail) {
+      if (options?.provenBy !== "google" || !sbUser.emailConfirmed || !sbUser.googleVerifiedEmail) {
+        console.warn("[mutinybim-web] a supabase sign-in used an existing account's email; not attached", { userId: byEmail.id });
+        return "email_in_use";
+      }
       await db.linkIdentity("supabase", sbUser.id, byEmail.id);
-      if (isGoogle) await db.linkIdentity("google", sbUser.id, byEmail.id);
-      return { user: byEmail, created: false };
+    } else {
+      if (options?.allowCreate === false || !config.signupOpen) return null;
+      created = await db.createSupabaseUser({ id: sbUser.id, email: sbUser.email, displayName: sbUser.displayName });
     }
-    if (options?.allowCreate === false || !config.signupOpen) return null;
-    const created = await db.createUser({ id: sbUser.id, email: sbUser.email, displayName: sbUser.displayName, passwordHash: null });
-    await db.linkIdentity("supabase", sbUser.id, created.id);
-    if (isGoogle) await db.linkIdentity("google", sbUser.id, created.id);
-    console.log("[mutinybim-web] account synced from supabase", { userId: created.id, google: isGoogle });
-    return { user: created, created: true };
+    // A duplicate insert can lose to a different binding. Only the stored
+    // subject owner can receive this session or its Google sign-in marker.
+    const linked = await db.userByIdentity("supabase", sbUser.id);
+    if (!linked || linked.id !== (byEmail?.id ?? sbUser.id)) return "email_in_use";
+    if (isGoogle) await db.linkIdentity("google", sbUser.id, linked.id);
+    if (created) console.log("[mutinybim-web] account synced from supabase", { userId: linked.id, google: isGoogle });
+    return { user: linked, created };
   }
 
   /** A form post must come from this app's own pages (SameSite cookies plus an Origin check). */
@@ -377,6 +417,39 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked, pending, inbox) };
   }
 
+  /** Runs work after the reply has gone; `settled()` and `close()` wait for it. */
+  function afterReplying(work: () => Promise<void>): void {
+    const running: Promise<void> = work()
+      .catch((err: unknown) => console.error("[mutinybim-web] work after a reply failed", { code: errorCode(err) }))
+      .finally(() => afterReply.delete(running));
+    afterReply.add(running);
+  }
+
+  /** Emails a reset link when an account uses this address and its hourly limit allows. Never logs the link. */
+  async function mailResetLink(email: string): Promise<void> {
+    const links = db.resetMail;
+    if (!mailer || !links) return;
+    const person = await db.userByEmail(email);
+    if (!person) return;
+    // Checked before a new link is made, so an over-limit request leaves the last emailed link working.
+    if (!resetMailLimit.allow(person.email)) {
+      console.log("[mutinybim-web] reset email skipped: hourly limit for this address", { userId: person.id });
+      return;
+    }
+    const token = await issuePasswordReset(links.stage, person.id);
+    const tokenHash = digest(token);
+    try {
+      await mailer.send(resetMail(config.origin, person.email, token));
+    } catch (err) {
+      links.discard(tokenHash);
+      // A transport's error can echo the message, so only its code is logged.
+      console.error("[mutinybim-web] reset email failed", { userId: person.id, code: errorCode(err) });
+      return;
+    }
+    links.delivered(tokenHash);
+    console.log("[mutinybim-web] reset email sent", { userId: person.id });
+  }
+
   async function handleAuthCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: OAuthProviderConfig): Promise<void> {
     const error = url.searchParams.get("error");
     if (error) {
@@ -393,15 +466,22 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const linking = state.return_to.startsWith("link:");
     const returnTo = safeReturn(linking ? state.return_to.slice(5) : state.return_to);
     const known = await db.userByIdentity(provider.id, person.subject);
+    async function confirmProviderEmail(user: UserRow): Promise<void> {
+      if (person.emailVerified && person.email && !user.email_confirmed_at) {
+        await db.confirmIdentityEmail(provider.id, person.subject, user.id, person.email);
+      }
+    }
     if (linking) {
       const current = await sessionUser(req);
       if (!current) return redirect(res, "/login?return_to=%2Fsettings");
       if (known && known.id !== current.id) return html(res, 409, settingsPage(config, current, await db.identitiesOf(current.id), { flash: { kind: "error", text: `That ${provider.label.replace(/^Log in with /i, "")} account is already linked to another MutinyBIM account.` } }));
       await db.linkIdentity(provider.id, person.subject, current.id);
+      await confirmProviderEmail(current);
       console.log("[mutinybim-web] linked a sign-in", { provider: provider.id, userId: current.id });
       return redirect(res, await afterSignIn(current.id, provider, `${returnTo}${returnTo.includes("?") ? "&" : "?"}linked=${provider.id}`));
     }
     if (known) {
+      await confirmProviderEmail(known);
       console.log("[mutinybim-web] signed in", { provider: provider.id, userId: known.id });
       return redirect(res, await afterSignIn(known.id, provider, returnTo), { "set-cookie": await startSession(known.id, provider.id) });
     }
@@ -414,6 +494,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (!config.signupOpen) return html(res, 403, loginPage(config, { returnTo, flash: { kind: "error", text: "New accounts can't be made on this server right now." } }));
     const user = await db.createUser({ id: randomUUID(), email: person.email, displayName: person.name ?? person.email.split("@")[0] ?? "You", passwordHash: null });
     await db.linkIdentity(provider.id, person.subject, user.id);
+    await confirmProviderEmail(user);
     console.log("[mutinybim-web] account made through a sign-in provider", { provider: provider.id, userId: user.id });
     return redirect(res, await afterSignIn(user.id, provider, returnTo), { "set-cookie": await startSession(user.id, provider.id) });
   }
@@ -459,7 +540,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       console.error("[mutinybim-web] supabase callback verification failed", { code: err.code, status: err.status });
       return html(res, err.status, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: err.words } }), { "set-cookie": clearPkce });
     }
-    const synced = await syncSupabaseUser(verified.user);
+    const synced = await syncSupabaseUser(verified.user, flow === "google" ? { provenBy: "google" } : {});
+    if (synced === "email_in_use") {
+      return html(res, 409, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "That email belongs to an existing MutinyBIM account. Log in with that account's password, or reset it." } }), { "set-cookie": clearPkce });
+    }
     if (!synced) {
       return html(res, 403, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "New accounts can't be made on this server right now." } }), { "set-cookie": clearPkce });
     }
@@ -530,19 +614,27 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         const returnTo = safeReturn(form.get("return_to"));
         if (!throttle.allow(`login:${ipOf(req)}`)) return html(res, 429, loginPage(config, { email, returnTo, flash: { kind: "error", text: "Too many tries from here. Wait ten minutes, then try again." } }));
         if (config.supabase) {
+          // Pre-migration local accounts still hold an scrypt hash; the right password opens them without linking anything.
+          const localAccount = async (): Promise<UserRow | null> => {
+            const legacy = email ? await db.userByEmail(email) : null;
+            return legacy?.password_hash && (await verifyPassword(password, legacy.password_hash)) ? legacy : null;
+          };
           try {
             const signedIn = await signInWithPassword(config.supabase, { email, password }, options.fetchImpl);
             const synced = await syncSupabaseUser(signedIn.user);
+            if (synced === "email_in_use") {
+              // The Supabase user stays unattached, but whoever knows this account's own password is its owner.
+              const legacy = await localAccount();
+              if (legacy) return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
+              return html(res, 409, loginPage(config, { email, returnTo, flash: { kind: "error", text: "That email belongs to an existing MutinyBIM account. Log in with that account's password, or reset it." } }));
+            }
             if (!synced) return html(res, 403, loginPage(config, { email, returnTo, flash: { kind: "error", text: "New accounts can't be made on this server right now." } }));
             return redirect(res, returnTo, { "set-cookie": await startSession(synced.user.id, "password") });
           } catch (err) {
             if (!(err instanceof SupabaseAuthError)) throw err;
             if (err.code === "invalid_credentials") {
-              // Seamless fallback for pre-migration local accounts that still hold an scrypt hash.
-              const legacy = email ? await db.userByEmail(email) : null;
-              if (legacy?.password_hash && (await verifyPassword(password, legacy.password_hash))) {
-                return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
-              }
+              const legacy = await localAccount();
+              if (legacy) return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
             }
             return html(res, err.status, loginPage(config, { email, returnTo, flash: { kind: "error", text: err.words } }));
           }
@@ -558,12 +650,19 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     }
 
     if (pathname === "/forgot") {
-      if (method === "GET") return user ? redirect(res, "/settings#password") : html(res, 200, forgotPage(config));
-      if (method === "POST" && config.supabase) {
+      const mail = mailer !== null;
+      if (method === "GET") return user ? redirect(res, "/settings#password") : html(res, 200, forgotPage(config, { mail }));
+      if (method === "POST" && (config.supabase || mail)) {
         const form = await readForm(req);
         const email = (form.get("email") ?? "").trim().toLowerCase();
-        if (!throttle.allow(`forgot:${ipOf(req)}`)) return html(res, 429, forgotPage(config, { email, flash: { kind: "error", text: "Too many reset requests from here. Wait ten minutes, then try again." } }));
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return html(res, 400, forgotPage(config, { email, flash: { kind: "error", text: "Enter a full email address, like name@example.com." } }));
+        if (!throttle.allow(`forgot:${ipOf(req)}`)) return html(res, 429, forgotPage(config, { email, mail, flash: { kind: "error", text: "Too many reset requests from here. Wait ten minutes, then try again." } }));
+        if (!EMAIL_SHAPE.test(email)) return html(res, 400, forgotPage(config, { email, mail, flash: { kind: "error", text: "Enter a full email address, like name@example.com." } }));
+        const sent = `If an account uses ${email}, we sent a password reset link. Check your inbox.`;
+        if (!config.supabase) {
+          // Reply before the lookup, so the time it takes can't tell anyone whether the account exists.
+          html(res, 200, forgotPage(config, { email, mail, flash: { kind: "ok", text: sent } }));
+          return afterReplying(() => mailResetLink(email));
+        }
         const { verifier, challenge } = pkcePair();
         const state = randomToken();
         await db.saveOAuthState({ state, provider: "supabase-recovery", codeVerifier: verifier, returnTo: "/reset-password" });
@@ -571,11 +670,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           await requestPasswordReset(config.supabase, { email, redirectTo: supabaseCallbackUri(), codeChallenge: challenge }, options.fetchImpl);
         } catch (err) {
           if (err instanceof SupabaseAuthError && err.status === 429) {
-            return html(res, 429, forgotPage(config, { email, flash: { kind: "error", text: err.words } }));
+            return html(res, 429, forgotPage(config, { email, mail, flash: { kind: "error", text: err.words } }));
           }
           console.error("[mutinybim-web] supabase password reset request failed", { err });
         }
-        return html(res, 200, forgotPage(config, { email, flash: { kind: "ok", text: `If an account uses ${email}, we sent a password reset link. Check your inbox.` } }), {
+        return html(res, 200, forgotPage(config, { email, mail, flash: { kind: "ok", text: sent } }), {
           "set-cookie": makeCookie(SUPABASE_PKCE_COOKIE, state, 900, "/auth/supabase/callback"),
         });
       }
@@ -606,16 +705,16 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (reset?.[1]) {
       const tokenHash = digest(reset[1]);
       const person = await db.userByPasswordReset(tokenHash);
-      if (method === "GET") return html(res, person ? 200 : 410, resetPage({ token: reset[1], email: person?.email ?? null }));
+      if (method === "GET") return html(res, person ? 200 : 410, resetPage({ token: reset[1], email: person?.email ?? null }), TOKEN_PAGE);
       if (method === "POST") {
-        if (!person) return html(res, 410, resetPage({ token: reset[1], email: null }));
+        if (!person) return html(res, 410, resetPage({ token: reset[1], email: null }), TOKEN_PAGE);
         const password = (await readForm(req)).get("password") ?? "";
-        if (password.length < 8) return html(res, 400, resetPage({ token: reset[1], email: person.email, flash: { kind: "error", text: "Use a password of at least 8 characters." } }));
-        await db.setPassword(person.id, await hashPassword(password));
-        await db.usePasswordReset(tokenHash);
-        await db.deleteSessionsOf(person.id);
-        console.log("[mutinybim-web] password reset with a reset link", { userId: person.id });
-        return redirect(res, "/models?reset=1", { "set-cookie": await startSession(person.id, "reset") });
+        if (password.length < 8) return html(res, 400, resetPage({ token: reset[1], email: person.email, flash: { kind: "error", text: "Use a password of at least 8 characters." } }), TOKEN_PAGE);
+        // The link is checked again where it is used up: of two uses at once, only one saves a password.
+        const redeemed = await db.redeemPasswordReset(tokenHash, await hashPassword(password));
+        if (!redeemed) return html(res, 410, resetPage({ token: reset[1], email: null }), TOKEN_PAGE);
+        console.log("[mutinybim-web] password reset with a reset link", { userId: redeemed.id });
+        return redirect(res, "/models?reset=1", { "set-cookie": await startSession(redeemed.id, "reset") });
       }
     }
 
@@ -653,6 +752,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
               });
             }
             const synced = await syncSupabaseUser({ ...signedUp.user, displayName: name });
+            if (synced === "email_in_use") return fail("An account with that email already exists. Log in instead.", 409);
             if (!synced) return fail("New accounts can't be made on this server right now.", 403);
             console.log("[mutinybim-web] account made", { userId: synced.user.id, auth: "supabase" });
             return redirect(res, "/models?welcome=1", { "set-cookie": await startSession(synced.user.id, "password") });
@@ -915,11 +1015,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         const person = email ? await db.userByEmail(email) : null;
         if (!person) return fail(404, `No MutinyBIM account here uses ${email || "that email"}. Ask them to sign up first (this app sends no invitations), then share again.`);
         if (person.id === user.id) return fail(400, "That's you; you already own this model.");
-        const before = (await db.sharesOf(model.id)).find((s) => s.user_id === person.id);
         if (!(await db.share({ modelId: model.id, userId: person.id, role, invitedBy: user.id }))) throw new Refusal(404, NOT_YOURS);
-        if (before && before.role !== role) disconnect(model.id, person.id);
+        await refreshMemberAccess(model.id, person.id);
         console.log("[mutinybim-web] model shared", { modelId: model.id, ownerId: user.id, userId: person.id, role });
-        const words = before ? `${person.display_name} can now ${role === "edit" ? "edit" : "only view"} it.` : `Shared with ${person.display_name}. They see it under “Shared with you” on My models.`;
+        const words = `Saved ${person.display_name}’s personal share as ${role === "edit" ? "Can edit" : "View only"}.`;
         return html(res, 200, await renderShare({ flash: { kind: "ok", text: words } }));
       }
     }
@@ -928,10 +1027,12 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       const model = await ownModel(user, unshareRoute[1]);
       const removed = (await db.sharesOf(model.id)).find((s) => s.user_id === unshareRoute[2]);
       if (!(await db.unshare(model.id, unshareRoute[2], user.id))) throw new Refusal(404, NOT_YOURS);
-      disconnect(model.id, unshareRoute[2]);
+      const access = await refreshMemberAccess(model.id, unshareRoute[2]);
       console.log("[mutinybim-web] model unshared", { modelId: model.id, ownerId: user.id, userId: unshareRoute[2] });
+      const remaining = access === "edit" ? "They can still edit it." : access === "view" ? "They can still view it."
+        : access === "owner" ? "They now own it." : "They no longer have access.";
       return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { offer: await db.transfers.outgoing(model.id),
-        flash: { kind: "ok", text: removed ? `${removed.display_name} no longer has “${model.name}”.` : "They already didn't have it." } }));
+        flash: { kind: "ok", text: removed ? `Removed ${removed.display_name}’s personal share. ${remaining}` : "There was no personal share to remove." } }));
     }
 
     if (user && pathname === "/settings" && method === "GET") {
@@ -1193,6 +1294,19 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     }
   }
 
+  async function refreshMemberAccess(modelId: string, userId: string): Promise<ModelAccess | null> {
+    try {
+      const access = (await db.accessTo(userId, modelId))?.access ?? null;
+      for (const entry of live.get(modelId) ?? []) {
+        if (entry.userId === userId && entry.access !== access) closeChanged(entry);
+      }
+      return access;
+    } catch (error) {
+      disconnect(modelId, userId);
+      throw error;
+    }
+  }
+
   /**
    * One connection to the model server, for a person: the first hello names
    * the model, the person's access to it is checked, and the connection
@@ -1297,6 +1411,9 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           resolve();
         });
       }),
+    async settled() {
+      while (afterReply.size > 0) await Promise.all(afterReply);
+    },
     async close() {
       for (const client of wss.clients) client.terminate();
       await assistantTools.close();
@@ -1304,6 +1421,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       // Long-lived assistant streams would hold the close open; they reconnect to the next server.
       server.closeAllConnections();
       await closed;
+      while (afterReply.size > 0) await Promise.all(afterReply);
       await models.flush();
       await db.close();
     },

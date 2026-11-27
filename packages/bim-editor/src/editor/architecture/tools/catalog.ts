@@ -4,7 +4,7 @@
  * fold under More.
  */
 
-export type ArchitectureToolId = 'level' | 'grid' | 'reference_plane' | 'wall' | 'wall_rectangle' | 'door' | 'window' | 'floor' | 'room' | 'opening' | 'ceiling' | 'roof' | 'column' | 'stair'
+export type ArchitectureToolId = 'level' | 'grid' | 'reference_plane' | 'wall' | 'wall_rectangle' | 'door' | 'window' | 'floor' | 'room' | 'opening' | 'ceiling' | 'roof' | 'column' | 'stair' | 'railing'
 
 /** `room`: click inside closed walls (a space bounded by them). `rectangle`: two opposite corners make a closed chain of four. */
 export type ToolMode = 'chain' | 'rectangle' | 'line' | 'area' | 'point' | 'hosted' | 'room' | 'dialog'
@@ -39,6 +39,7 @@ export const BUILD_TOOLS: readonly ArchitectureTool[] = [
   { id: 'roof', label: 'Roof', description: 'Draw a roof by its footprint', mode: 'area', kind: 'architecture.roof', noun: 'roof' },
   { id: 'column', label: 'Column', description: 'Place a column', mode: 'point', kind: 'column', noun: 'column' },
   { id: 'stair', label: 'Stair', description: 'Draw a straight stair from its foot to its top', mode: 'line', kind: 'architecture.stair', noun: 'stair' },
+  { id: 'railing', label: 'Railing', description: 'Draw a guardrail or handrail along a balcony, mezzanine, or stairwell edge', mode: 'line', kind: 'architecture.railing', noun: 'railing' },
   { id: 'wall_rectangle', label: 'Rectangle walls', description: 'Click two opposite corners: four walls, joined at every corner', mode: 'rectangle', kind: 'wall', noun: 'wall' },
 ]
 

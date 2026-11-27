@@ -161,6 +161,15 @@ describe("class recognition", () => {
     expect(index.elementsOf("mep.plumbing_fixture").map((e) => e.id)).toEqual(["WH-1", "L-1"]);
   });
 
+  it("skips a malformed stored part_type whose definition is missing without crashing recognition", () => {
+    const registry = builtinRegistry();
+    const brokenType = { id: "pt-bad", kind: "part_type", definition: null };
+    const part = { id: "P-1", kind: "part", typeId: "pt-bad", levelId: "L1", position: { x: 0, y: 0 }, offsetMm: 0, rotationDeg: 0, mark: "P1", values: {} };
+    const elements = { "pt-bad": brokenType, "P-1": part } as unknown as Parameters<typeof buildClassIndex>[1]["elements"];
+    const index = buildClassIndex(registry, { elements });
+    expect(index.classesOf(asElementId("P-1"))).toEqual([]);
+  });
+
   it("keeps the kernel's built-in classes free of fields (fields come from providers and libraries)", () => {
     const registry = builtinRegistry();
     for (const cls of BUILTIN_CLASSES) expect(registry.fieldsFor(cls.id)).toEqual([]);

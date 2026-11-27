@@ -23,16 +23,53 @@ export interface ScriptReport {
   readonly value: unknown;
 }
 
+/** One sheet or view image a script asks the host to render (`ctx.render` / `markups.renderSheet` / `documents.renderSheet`). */
+export interface ScriptRenderRequest {
+  readonly kind: "sheet" | "view";
+  readonly targetId: string;
+  readonly label: string;
+  /** Optional crop region in paper millimetres from the top-left corner. */
+  readonly regionMm?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+  /** Draw sheet review markups on top of the sheet (default true for sheet renders). */
+  readonly includeMarkups?: boolean;
+  /** Include resolved review markups when `includeMarkups` is true (default false). */
+  readonly includeResolvedMarkups?: boolean;
+  /** Print underlying sheet linework black-only while keeping review markups vivid colour (default false). */
+  readonly monochromeSheet?: boolean;
+  /** Element or markup ids to outline with a focus frame on the rendered image. */
+  readonly highlightIds?: readonly string[];
+  readonly dpi?: number;
+  readonly maxPx?: number;
+}
+
 /** At most this many reports per run. */
 export const MAX_SCRIPT_REPORTS = 50;
 /** At most this much report JSON per run (labels and values together). */
 export const MAX_SCRIPT_REPORT_BYTES = 16 * 1024;
+/** At most this many rendered images requested per run. */
+export const MAX_SCRIPT_RENDERS = 6;
 
 export type ScriptOutput =
-  | { readonly kind: "edits"; readonly label: string; readonly steps: number; readonly batches: readonly EditBatch[]; readonly report?: readonly ScriptReport[] }
-  | { readonly kind: "part_types"; readonly types: readonly { readonly typeId: string; readonly definition: PartTypeDefinition }[]; readonly report?: readonly ScriptReport[] };
+  | { readonly kind: "edits"; readonly label: string; readonly steps: number; readonly batches: readonly EditBatch[]; readonly report?: readonly ScriptReport[]; readonly renders?: readonly ScriptRenderRequest[] }
+  | { readonly kind: "part_types"; readonly types: readonly { readonly typeId: string; readonly definition: PartTypeDefinition }[]; readonly report?: readonly ScriptReport[]; readonly renders?: readonly ScriptRenderRequest[] };
 
 const reportSchema = z.array(z.object({ label: z.string().min(1).max(120), value: z.unknown() })).max(MAX_SCRIPT_REPORTS).optional();
+const ptSchema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
+const renderRequestSchema = z
+  .object({
+    kind: z.enum(["sheet", "view"]),
+    targetId: z.string().min(1).max(200),
+    label: z.string().trim().min(1).max(160),
+    regionMm: z.object({ min: ptSchema, max: ptSchema }).strict().optional(),
+    includeMarkups: z.boolean().optional(),
+    includeResolvedMarkups: z.boolean().optional(),
+    monochromeSheet: z.boolean().optional(),
+    highlightIds: z.array(z.string().min(1).max(200)).max(50).optional(),
+    dpi: z.number().min(20).max(400).optional(),
+    maxPx: z.number().int().min(200).max(2400).optional(),
+  })
+  .strict();
+const rendersSchema = z.array(renderRequestSchema).max(MAX_SCRIPT_RENDERS).optional();
 
 /** The envelope as JSON (what a runner returns); batches and definitions are re-parsed by `parseScriptOutput`. */
 export const scriptOutputSchema = z.discriminatedUnion("kind", [
@@ -42,11 +79,13 @@ export const scriptOutputSchema = z.discriminatedUnion("kind", [
     steps: z.number().int().min(0),
     batches: z.array(z.object({ type: z.literal("batch_edits"), label: z.string().trim().min(1).max(160), commands: z.array(z.record(z.string(), z.unknown())).min(1).max(MAX_EDIT_BATCH_STEPS) })).max(200),
     report: reportSchema,
+    renders: rendersSchema,
   }),
   z.object({
     kind: z.literal("part_types"),
     types: z.array(z.object({ typeId: z.string().min(1).max(200), definition: z.unknown() })).min(1).max(200),
     report: reportSchema,
+    renders: rendersSchema,
   }),
 ]);
 
@@ -91,6 +130,7 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
   if (!env.success) throw new ScriptOutputError(`The script's output isn't in the kit's shape: ${env.error.issues.map((i) => `${i.path.join(".") || "(top)"} ${i.message}`).join("; ")}.`);
   const out = env.data;
   const report = out.report ? { report: checkedReport(out.report) } : {};
+  const renders = out.renders && out.renders.length > 0 ? { renders: out.renders } : {};
   if (out.kind === "part_types") {
     return {
       kind: "part_types",
@@ -100,6 +140,7 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
         return { typeId: t.typeId, definition: def.data };
       }),
       ...report,
+      ...renders,
     };
   }
   let steps = 0;
@@ -115,7 +156,7 @@ export function parseScriptOutput(raw: unknown): ScriptOutput {
     return { type: "batch_edits", label: b.label, commands: parsed.data.commands };
   });
   if (steps !== out.steps) throw new ScriptOutputError(`The output says ${out.steps} steps but its batches hold ${steps}.`);
-  return { kind: "edits", label: out.label, steps, batches, ...report };
+  return { kind: "edits", label: out.label, steps, batches, ...report, ...renders };
 }
 
 /** A runner's reports, held to the same size the kit keeps them to. */

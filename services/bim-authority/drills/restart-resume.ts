@@ -29,7 +29,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   elementsFromRows,
   incrementalValidationStats,
   issuesOf,
@@ -106,7 +106,7 @@ function reopenFromRows(head: ModelState): ModelState {
 async function main(): Promise<void> {
   if (!isTier(tierArg)) throw new Error(`--tier must be one of ${Object.keys(FULL_BIM_TIERS).join(", ")}; got ${tierArg}`);
   if (!Number.isInteger(editorsN) || editorsN < 1 || !Number.isInteger(moves) || moves < 1) throw new Error("--editors and --moves must be whole numbers of at least 1");
-  const diffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+  const diffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
   if (!diffuser) throw new Error("the starter library has no air terminal to place");
 
   const log = new DurableLog(createFullBimModel({ ...FULL_BIM_TIERS[tierArg], modelId: `restart-drill-${tierArg}` }), writeDelayMs);

@@ -6,7 +6,7 @@
  * client and decided by the sequencer with the history it fetches itself,
  * a retried placement is answered once, and an agent preview saves nothing.
  */
-import { BUILTIN_PART_TYPES, canonicalJson, type Actor, type Command, type LibraryEntry } from "@permitzip/bim-kernel";
+import { builtinPartTypes, canonicalJson, type Actor, type Command, type LibraryEntry } from "@permitzip/bim-kernel";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { AgentSession, InMemoryCommitStore, Sequencer, SyncClient, SyncHub, listPartTypes, queryElements, type CommitOutcome } from "../src";
 
@@ -14,7 +14,7 @@ const avery: Actor = { id: "user-avery", name: "Avery", kind: "human" };
 const priya: Actor = { id: "user-priya", name: "Priya", kind: "human" };
 
 function libraryType(category: string): LibraryEntry {
-  const found = BUILTIN_PART_TYPES.find((t) => t.definition.category === category);
+  const found = builtinPartTypes().find((t) => t.definition.category === category);
   if (!found) throw new Error(`no ${category} in the starter library`);
   return found;
 }

@@ -17,6 +17,8 @@ export interface SupabaseUser {
   readonly email: string;
   readonly displayName: string;
   readonly emailConfirmed: boolean;
+  /** The account has only Google identities, and each one verifies this email. */
+  readonly googleVerifiedEmail: boolean;
   /** Auth providers attached to this Supabase user (e.g. ["email", "google"]). */
   readonly providers: readonly string[];
 }
@@ -61,8 +63,16 @@ function parseUser(raw: unknown): SupabaseUser | null {
     : str(appMeta.provider)
       ? [str(appMeta.provider)!]
       : [];
-  const emailConfirmed = Boolean(str(raw.email_confirmed_at) || str(raw.confirmed_at));
-  return { id, email, displayName, emailConfirmed, providers };
+  // app_metadata.provider names only the first provider. Use the full list
+  // and Google's identity data to establish which address Google verified.
+  const onlyGoogle = Array.isArray(appMeta.providers) && appMeta.providers.length > 0
+    && appMeta.providers.every((provider) => provider === "google");
+  const googleVerifiedEmail = onlyGoogle && Array.isArray(raw.identities) && raw.identities.length > 0
+    && raw.identities.every((identity: unknown) => isRecord(identity) && identity.provider === "google"
+      && isRecord(identity.identity_data) && identity.identity_data.email_verified === true
+      && str(identity.identity_data.email)?.toLowerCase() === email);
+  const emailConfirmed = str(raw.email_confirmed_at) !== null;
+  return { id, email, displayName, emailConfirmed, googleVerifiedEmail, providers };
 }
 
 function extractError(body: unknown, status: number): { readonly code: string | null; readonly message: string } {

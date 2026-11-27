@@ -1,6 +1,7 @@
 import {
   BookOpenCheck,
   Plug,
+  LogOut,
   ShieldAlert,
   ChartLine,
   ImagePlus,
@@ -69,6 +70,7 @@ import {
   FileBox,
   GitBranch,
   UserCheck,
+  Users,
   FilePen,
   Sparkles,
 } from 'lucide-react'
@@ -128,6 +130,8 @@ export type RibbonSelection =
   | null
 
 export interface BuildingModelRibbonContext {
+  readonly openManageMembers?: () => void
+  readonly signOut?: () => void
   readonly tool: BuildingModelTool
   readonly chooseTool: (tool: BuildingModelTool) => void
   /** Null when editing is allowed; otherwise why not, in the operator's words. */
@@ -686,6 +690,8 @@ export function buildingModelRibbon(ctx: BuildingModelRibbonContext): RibbonTab[
           id: 'project',
           label: 'Project',
           commands: [
+            ...(ctx.openManageMembers ? [{ id: 'manage-members', label: 'Manage members', icon: Users, description: 'Review and change who can access the model', keywords: ['people', 'role', 'access'], run: ctx.openManageMembers, testId: 'ribbon-manage-members' }] : []),
+            ...(ctx.signOut ? [{ id: 'sign-out', label: 'Sign out', icon: LogOut, description: 'End this tab’s sign-in session', keywords: ['account', 'session'], run: ctx.signOut, testId: 'ribbon-sign-out' }] : []),
             {
               id: 'part-types',
               label: 'Part types',

@@ -14,7 +14,24 @@ import {
   type ViewElement,
 } from "@permitzip/bim-kernel";
 import { DOOR_SCHEDULE, WALL_TYPES_SCHEDULE, WINDOW_SCHEDULE } from "@permitzip/bim-pack-architecture";
+import {
+  CIVIL_CLASS,
+  CIVIL_PARAM,
+  CIVIL_RCP,
+  CIVIL_STORM_SERVICE,
+  GRADING_SURFACE_SCHEDULE,
+  IMPORT_LANDXML_SURFACES,
+  MANHOLE_TYPE,
+  OUTFALL_TYPE,
+  STORM_CATCHMENT_SCHEDULE,
+  STORM_INLET_TYPE,
+  STORM_PIPE_SCHEDULE,
+  STORM_STRUCTURE_SCHEDULE,
+  cutFillBetween,
+  readGradingSurfaces,
+} from "@permitzip/bim-pack-civil";
 import { LIGHTING_FIXTURE_SCHEDULE } from "@permitzip/bim-pack-electrical";
+import { to } from "@permitzip/bim-units";
 import { standardNoteParagraphs } from "@permitzip/bim-library";
 import { AIR_DEVICE_SCHEDULE, MECHANICAL_EQUIPMENT_SCHEDULE, previewAirConnect } from "@permitzip/bim-pack-mechanical";
 import { PLUMBING_FIXTURE_SCHEDULE } from "@permitzip/bim-pack-plumbing";
@@ -39,6 +56,8 @@ import {
   SHOWCASE_WC_COMMERCIAL,
   SHOWCASE_WORKTABLE,
 } from "./showcase-parts";
+import { SHOWCASE_SHEET_MARKUPS } from "./showcase-markups";
+import { appendShowcaseDetails } from "./showcase-details";
 
 /**
  * MutinyBIM flagship default showcase model:
@@ -125,6 +144,62 @@ const STRUCT_HIDE_OTHER = {
   "struct.footing": { visible: false },
   "struct.roof_deck": { visible: false },
 } as const;
+
+const CIVIL_SITE_HIDE = {
+  ...STRUCT_HIDE_OTHER,
+  duct: { visible: false },
+  duct_fitting: { visible: false },
+  air_terminal: { visible: false },
+  electrical_devices: { visible: false },
+  lighting_fixtures: { visible: false },
+  "mep.mechanical_equipment": { visible: false },
+  "mep.electrical_equipment": { visible: false },
+  "mep.plumbing_fixture": { visible: false },
+} as const;
+
+function buildShowcaseCivilLandXml(): string {
+  // 5 x 4 lot grid spanning x = -36'..80', y = -22'..50' around the 56' x 28' studio (0..56', 0..28').
+  // Existing grade slopes naturally from NE high (+1.80') down to SW low (-2.60') toward outfall OF-1.
+  // Proposed pad levels the building footprint to -0.75' (1" below the 8" L1 concrete slab underside at -8")
+  // with positive perimeter drainage slopes toward inlets CI-1, CI-2 and outfall OF-1.
+  const xs = [-36, 0, 28, 56, 80] as const;
+  const ys = [-22, 0, 28, 50] as const;
+  const existingZ = (x: number, y: number): number => Number((-0.4 + 0.01897 * (x - 22) + 0.03056 * (y - 14)).toFixed(2));
+  const proposedGrid: readonly (readonly number[])[] = [
+    // y = -22 (south boundary swale draining west to SW outfall)
+    [-2.55, -2.05, -1.75, -1.55, -1.35],
+    // y = 0 (south pad edge: flat -0.75' under building 0..56')
+    [-2.15, -0.75, -0.75, -0.75, -1.25],
+    // y = 28 (north pad edge: flat -0.75' under building 0..56')
+    [-1.45, -0.75, -0.75, -0.75, -1.05],
+    // y = 50 (north boundary swale draining west to CI-2)
+    [-0.95, -0.65, -0.35, -0.15, 0.25],
+  ];
+  const makeSurface = (name: string, zAt: (ix: number, iy: number, x: number, y: number) => number): string => {
+    const pnts: string[] = [];
+    let id = 1;
+    for (let iy = 0; iy < ys.length; iy++) {
+      for (let ix = 0; ix < xs.length; ix++) {
+        const x = xs[ix]!;
+        const y = ys[iy]!;
+        pnts.push(`<P id="${id++}">${y} ${x} ${zAt(ix, iy, x, y).toFixed(2)}</P>`);
+      }
+    }
+    const faces: string[] = [];
+    const stride = xs.length;
+    for (let iy = 0; iy < ys.length - 1; iy++) {
+      for (let ix = 0; ix < xs.length - 1; ix++) {
+        const a = iy * stride + ix + 1;
+        const b = a + 1;
+        const c = a + stride + 1;
+        const d = a + stride;
+        faces.push(`<F>${a} ${b} ${c}</F>`, `<F>${a} ${c} ${d}</F>`);
+      }
+    }
+    return `<Surface name="${name}"><Definition surfType="TIN"><Pnts>${pnts.join("")}</Pnts><Faces>${faces.join("")}</Faces></Definition></Surface>`;
+  };
+  return `<?xml version="1.0"?><LandXML version="1.2"><Units><Imperial linearUnit="foot"/></Units><Surfaces>${makeSurface("Existing Grade", (_ix, _iy, x, y) => existingZ(x, y))}${makeSurface("Proposed Pad", (ix, iy) => proposedGrid[iy]![ix]!)}</Surfaces></LandXML>`;
+}
 
 const ARCH_HIDE_MEP = {
   ...STRUCT_HIDE_OTHER,
@@ -315,10 +390,10 @@ function buildShowcase(modelId: string): ModelState {
   ];
 
   const stairwellHole: Vec2[] = [
-    pt(20.5 * FT, 20.5 * FT),
-    pt(33.2 * FT, 20.5 * FT),
-    pt(33.2 * FT, 27.3 * FT),
-    pt(20.5 * FT, 27.3 * FT),
+    pt(26.7 * FT, 15.2 * FT),
+    pt(33.5 * FT, 15.2 * FT),
+    pt(33.5 * FT, 27.4 * FT),
+    pt(26.7 * FT, 27.4 * FT),
   ];
 
   let m: ModelState = { modelId, revision: 0 as Revision, elements: {}, connections: [], settings: DEFAULT_SETTINGS };
@@ -417,9 +492,11 @@ function buildShowcase(modelId: string): ModelState {
       elementId: "slab-l2-terrace",
       levelId: "L2",
       kind: "slab",
+      classId: "struct.floor_deck",
       typeId: "type-slab-limestone",
-      placement: { kind: "area", outline: [pt(W_WEST - HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, 0), pt(W_WEST - HALF_EXT, 0)] },
+      placement: { kind: "area", outline: [pt(W_WEST - HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, 0), pt(W_WEST - HALF_EXT, 0)], spanDirectionDeg: 90 },
       size: { thicknessMm: Math.round(8 * IN) },
+      values: { "struct.occupancy": "corridor" },
     },
 
     // Level 1 Exterior & Interior Walls
@@ -460,9 +537,8 @@ function buildShowcase(modelId: string): ModelState {
     // - Rotated strong-axis wide-flange I-sections, cambered W18x35 girders, W16x26/W14x22 beams
     // - Full gravity load path (Roof + Floor decks + RTU-1 equipment weight → Beams → Columns → Pad Footings)
     // =========================================================================
-    // Continuous 2-story interior column on Grid B (L1 → ROOF) + East Studio interior column (L1 → L2)
+    // Continuous 2-story interior column on Grid B (L1 → ROOF); East Studio stays column-free under the 22' clear-span roof girder G2-B4
     { type: "create_element", elementId: "col-l1-1", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(26 * FT, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "ROOF", topOffsetMm: -Math.round(4 * IN), values: { mark: "C25B" } },
-    { type: "create_element", elementId: "col-l1-2", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(45 * FT, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C35B" } },
     // Level 1 Grid 1–4 × A–C steel columns (top tied to L2 underside)
     { type: "create_element", elementId: "col-l1-1a", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(0, 0) }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C1A" } },
     { type: "create_element", elementId: "col-l1-1b", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(0, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C1B" } },
@@ -502,7 +578,6 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_element", elementId: "ftg-3a", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(W_MAIN, 0) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F3A" } },
     { type: "create_element", elementId: "ftg-3b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-6x6", placement: { kind: "point", position: pt(W_MAIN, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(6 * FT), depthMm: Math.round(6 * FT) }, values: { mark: "F3B" } },
     { type: "create_element", elementId: "ftg-3c", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(W_MAIN, D_ALL) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F3C" } },
-    { type: "create_element", elementId: "ftg-35b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(45 * FT, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F35B" } },
     { type: "create_element", elementId: "ftg-4a", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4A" } },
     { type: "create_element", elementId: "ftg-4b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4B" } },
     { type: "create_element", elementId: "ftg-4c", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4C" } },
@@ -510,18 +585,18 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_element", elementId: "ftg-3s", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_MAIN, -4.5 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F3S" } },
 
     // Level 2 Floor Framing & East Studio Roof Framing (top-of-steel at -4" embedded into composite deck)
-    // E-W Primary Gravity Beams & Girders (receiving N-S one-way slab-l2-main & deck-roof-east + RTU-1)
+    // E-W Primary Gravity Beams & Girders (receiving N-S one-way slab-l2-main, slab-l2-terrace & deck-roof-east + RTU-1)
     { type: "create_element", elementId: "bm-l2-a1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(0, 0), end: pt(W_WEST, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A1" } },
     { type: "create_element", elementId: "bm-l2-a2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, 0), end: pt(W_MAIN, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A2" } },
-    { type: "create_element", elementId: "bm-l2-a3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, 0), end: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A3", "struct.camber": Math.round(0.75 * IN) } },
-    { type: "create_element", elementId: "bm-l2-b1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(0, 14 * FT), end: pt(W_WEST, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B1" } },
+    { type: "create_element", elementId: "bm-l2-a3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, 0), end: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A3" } },
+    { type: "create_element", elementId: "bm-l2-b1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(0, 14 * FT), end: pt(W_WEST, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B1" } },
     { type: "create_element", elementId: "bm-l2-b2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, 14 * FT), end: pt(26 * FT, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B2" } },
     { type: "create_element", elementId: "bm-l2-b3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(26 * FT, 14 * FT), end: pt(W_MAIN, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B3" } },
-    { type: "create_element", elementId: "bm-l2-b4", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_MAIN, 14 * FT), end: pt(45 * FT, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B4" } },
-    { type: "create_element", elementId: "bm-l2-b5", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(45 * FT, 14 * FT), end: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B5" } },
+    // 22' clear-span East Studio roof girder carrying deck-roof-east live load + RTU-1 equipment point load
+    { type: "create_element", elementId: "bm-l2-b4", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(W_MAIN, 14 * FT), end: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B4" } },
     { type: "create_element", elementId: "bm-l2-c1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(0, D_ALL), end: pt(W_WEST, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C1" } },
     { type: "create_element", elementId: "bm-l2-c2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, D_ALL), end: pt(W_MAIN, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C2" } },
-    { type: "create_element", elementId: "bm-l2-c3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, D_ALL), end: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C3", "struct.camber": Math.round(0.75 * IN) } },
+    { type: "create_element", elementId: "bm-l2-c3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_MAIN, D_ALL), end: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C3" } },
     // South Balcony Framing + N-S Tie/Collector Beams at Level 2
     { type: "create_element", elementId: "bm-l2-s1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(W_WEST, -4.5 * FT), end: pt(W_MAIN, -4.5 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-S1" } },
     { type: "create_element", elementId: "bm-l2-1s", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w12x26", label: "W12x26", placement: { kind: "line", start: pt(0, 0), end: pt(0, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "T2-1S" } },
@@ -576,24 +651,25 @@ function buildShowcase(modelId: string): ModelState {
           outline: [pt(36.0 * FT, 2.0 * FT), pt(54.0 * FT, 2.0 * FT), pt(54.0 * FT, 20.0 * FT), pt(36.0 * FT, 20.0 * FT)],
           grid: { spacingXMm: TILE_4FT_MM, spacingYMm: TILE_2FT_MM, origin: pt(36.0 * FT, 2.0 * FT), rotationDeg: 0 },
         },
-        { ceilingId: "clg-l1-reception", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "soffit", outline: [pt(W_WEST + 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 19.8 * FT), pt(W_WEST + 4 * IN, 19.8 * FT)] },
+        { ceilingId: "clg-l1-reception", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "soffit", outline: [pt(W_WEST + 4 * IN, 13.5 * FT), pt(26.5 * FT, 13.5 * FT), pt(26.5 * FT, 19.8 * FT), pt(W_WEST + 4 * IN, 19.8 * FT)] },
         { ceilingId: "clg-l1-restroom", levelId: "L1", heightMm: Math.round(9.0 * FT), form: "flat", outline: [pt(6 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, D_ALL - 6 * IN), pt(6 * IN, D_ALL - 6 * IN)] },
       ],
     },
     { type: "set_element_values", elementIds: ["clg-l1-studio"], values: { "material.id": "architecture.act_ceiling" } },
     { type: "set_element_values", elementIds: ["clg-l1-reception", "clg-l1-restroom"], values: { "material.id": "architecture.gypsum_partition" } },
 
-    // Code-Compliant 180° U-Turn Oak Stair (L1 → L2, rises cleanly inside stairwell 20.5'..33.2' with zero wall penetration!)
+    // Code-Compliant 180° U-Turn Oak Stair (L1 0'-0" → L2 12'-0": 22 risers @ 6.55", 10+10 treads @ 11.02", 3'-0" width & mid-landing; climbs North along East wall, turns Left onto NE mid-landing, and arrives heading South onto the wide-open L2 Loft at y = 15.2' with 15' clear ahead & 8'-6" gallery to West!)
     {
       type: "create_element",
       kind: "architecture.stair",
       elementId: "stair-main",
       levelId: "L1",
-      placement: { kind: "line", start: pt(21.4 * FT, 25.7 * FT), end: pt(28.4 * FT, 25.7 * FT) },
-      size: { widthMm: Math.round(3.25 * FT) },
+      placement: { kind: "line", start: pt(31.8 * FT, 15.2 * FT), end: pt(31.8 * FT, 24.386 * FT) },
+      size: { widthMm: Math.round(3.0 * FT) },
       values: {
         "architecture.stair_form": "u_shape",
-        "architecture.stair_turn": "right",
+        "architecture.stair_turn": "left",
+        "architecture.risers": 22,
         "architecture.landing_depth_mm": Math.round(3.0 * FT),
         "architecture.well_gap_mm": Math.round(0.5 * FT),
         "material.id": "architecture.wood_oak",
@@ -636,10 +712,51 @@ function buildShowcase(modelId: string): ModelState {
     wall("w-l2-para-s", "L2", W_MAIN, 0, W_ALL, 0, EXT_T, PARAPET_H, "type-wall-concrete"),
     wall("w-l2-para-e", "L2", W_ALL, 0, W_ALL, D_ALL, EXT_T, PARAPET_H, "type-wall-concrete"),
     wall("w-l2-para-n", "L2", W_MAIN, D_ALL, W_ALL, D_ALL, EXT_T, PARAPET_H, "type-wall-concrete"),
-    // L2 South Balcony Architectural Glass Guardrail
-    wall("w-l2-rail-s", "L2", W_WEST, -4.8 * FT, W_MAIN, -4.8 * FT, 90, GUARD_H, "type-wall-curtain"),
-    wall("w-l2-rail-w", "L2", W_WEST, -4.8 * FT, W_WEST, 0, 90, GUARD_H, "type-wall-curtain"),
-    wall("w-l2-rail-e", "L2", W_MAIN, -4.8 * FT, W_MAIN, 0, 90, GUARD_H, "type-wall-curtain"),
+    // L2 South Balcony 42" Architectural Glass Guardrail (first-class `architecture.railing` → `IfcRailing`, continuous U-polyline)
+    {
+      type: "create_element",
+      elementId: "rail-l2-balcony",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(W_WEST, 0), end: pt(W_MAIN, 0) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(5 * FT),
+        "architecture.railing_path": [pt(W_WEST, 0), pt(W_WEST, -4.8 * FT), pt(W_MAIN, -4.8 * FT), pt(W_MAIN, 0)].map((p) => `${p.x},${p.y}`).join(";"),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
+    // L2 Stairwell Opening 42" Architectural Glass Guardrails (West edge + South edge over Flight 1; leaves Flight 2 arrival 26.7'..29.8' open)
+    {
+      type: "create_element",
+      elementId: "rail-l2-stair-w",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(26.7 * FT, 15.2 * FT), end: pt(26.7 * FT, 27.4 * FT) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(4.5 * FT),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
+    {
+      type: "create_element",
+      elementId: "rail-l2-stair-s",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(29.8 * FT, 15.2 * FT), end: pt(33.5 * FT, 15.2 * FT) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(4 * FT),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
 
     // Level 2 Doors & Windows
     ...opening("d-201", "L2", "w-l2-core", "door", 10 * FT, 3 * FT, 7 * FT, "D201", { "architecture.door_operation": "SINGLE_SWING_LEFT", "host.side": -1 }),
@@ -740,6 +857,9 @@ function buildShowcase(modelId: string): ModelState {
           typeId: t.id,
           definition: t.definition,
         })),
+        { typeId: "civil-inlet-grate", definition: STORM_INLET_TYPE },
+        { typeId: "civil-manhole-48", definition: MANHOLE_TYPE },
+        { typeId: "civil-outfall-hw", definition: OUTFALL_TYPE },
       ],
     },
   ]);
@@ -778,7 +898,7 @@ function buildShowcase(modelId: string): ModelState {
 
   m = runCmds(m, [
     // Packaged RTU-1 on East flat parapet roof (L2 = 12'-0", hosted on deck-roof-east; 511 lb operating weight from Carrier 50FC-A06 cut sheet) + IMC 306.5 compliant indoor inline EF-1 (Greenheck CSP-B150) discharging up through passive spun-aluminum roof gravity hood GV-1 seated flush on sloped roof!
-    { type: "place_part", partId: "rtu-1", typeId: SHOWCASE_RTU.id, levelId: "L2", position: pt(48.5 * FT, 16.0 * FT), offsetMm: 0, host: { kind: "slab", elementId: "deck-roof-east" }, mark: "RTU-1", values: { circuit: "HP-1-1,3,5", serves: "Studio & Reception", room: "East Roof" } },
+    { type: "place_part", partId: "rtu-1", typeId: SHOWCASE_RTU.id, levelId: "L2", position: pt(48.5 * FT, 16.0 * FT), offsetMm: 0, host: { kind: "slab", elementId: "deck-roof-east" }, mark: "RTU-1", values: { circuit: "HP-1-1,3,5", serves: "Studio & Reception", room: "East Roof", "electrical.disconnect_required": true, "electrical.local_disconnect": "required", "electrical.disconnect_note": "NEC 440.14 — served via wall-mounted SD-RTU-1 within sight on east parapet" } },
     { type: "place_part", partId: "ef-1", typeId: SHOWCASE_INLINE_FAN.id, levelId: "L2", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(12.2 * FT), host: { kind: "slab", elementId: "deck-roof-west" }, mark: "EF-1", values: { circuit: "LP-1-7", serves: "Restrooms 102 & 202", room: "Restroom 202 Ceiling Plenum (Indoor)" } },
     { type: "place_part", partId: "gv-1", typeId: SHOWCASE_GRAVITY_HOOD.id, levelId: "ROOF", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(4.4 * FT), mark: "GV-1", values: { serves: "EF-1 Exhaust Discharge", room: "Upper Roof" } },
 
@@ -788,9 +908,9 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "sd-3", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(23.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 400, room: "Reception & Break 103" } },
     { type: "place_part", partId: "sd-4", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(29.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 400, room: "Reception & Break 103" } },
 
-    // 2 Return Grilles (Type Mark RG-1; dead-center in Studio ACT 2'×2' half-tile at (39', 13'), clear of trunks!)
-    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(39.0 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 1000 } },
-    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(28.5 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 700 } },
+    // 2 Return Grilles (Type Mark RG-1; dead-center in Studio ACT 2'×2' half-tile at (45', 25') & Reception at (23.2', 19.2'), 100% clear of supply ducts & stairwell!)
+    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(45.0 * FT, 25.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 1000 } },
+    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(23.2 * FT, 19.2 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 700 } },
 
     // Stacked Restroom Exhaust Grilles (Type Mark EG-1; L1 9'-0" & L2 8'-6" over open restroom aisle north of vanity)
     { type: "place_part", partId: "eg-2", typeId: eg.id, levelId: "L1", position: pt(11.6 * FT, 25.2 * FT), offsetMm: Math.round(9.0 * FT), mark: "", values: { airflow: 150 } },
@@ -810,7 +930,8 @@ function buildShowcase(modelId: string): ModelState {
       points: [pt(47.12 * FT, 10.5 * FT), pt(22.0 * FT, 10.5 * FT)],
     },
 
-    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → 16"×12" trunk at Y = 19.35' with 2" external duct wrap!
+    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → turns NORTH to Y = 19.35' (zero overlap with South-going SA drop!),
+    // runs West in East Studio north of SD-2, jogs South at X = 35.5' (clear East of stairwell), and continues West at Y = 12.7' (2'-6" south of stairwell & 2'-2" north of SA)!
     {
       type: "route_run",
       idPrefix: "ra-main",
@@ -821,7 +942,7 @@ function buildShowcase(modelId: string): ModelState {
       insulation: { kind: "wrap", thicknessMm: Math.round(2 * IN) },
       system: RA_SYS,
       from: { kind: "part", partId: "rtu-1", connectorId: "return" },
-      points: [pt(47.12 * FT, 19.35 * FT), pt(27.0 * FT, 19.35 * FT)],
+      points: [pt(47.12 * FT, 19.35 * FT), pt(35.5 * FT, 19.35 * FT), pt(35.5 * FT, 12.7 * FT), pt(20.5 * FT, 12.7 * FT)],
     },
 
     // Exhaust Air: indoor inline EF-1 in Restroom 202 ceiling plenum (100% clear of walls & D203) → straight L2 plenum header to EG-1 + branch drop to L1 EG-2 + vertical roof discharge to GV-1!
@@ -868,6 +989,9 @@ function buildShowcase(modelId: string): ModelState {
   if ("refused" in airPlan) {
     throw new Error(`showcase flex connect refused: ${airPlan.refused}`);
   }
+  if (airPlan.joinable < 6) {
+    throw new Error(`showcase flex connect incomplete (${airPlan.joinable}/6): ${airPlan.lines.filter((l) => !l.ok).map((l) => `${l.elementId}: ${l.text}`).join(" | ")}`);
+  }
   m = runCmds(m, airPlan.plan.commands);
 
   // =========================================================================
@@ -888,7 +1012,7 @@ function buildShowcase(modelId: string): ModelState {
     // Exterior Site Utilities + MEP Room Water Service Entry (buried below 8" slab at -350 mm, ZERO water/sewer clash!)
     { type: "place_part", partId: "mtr-1", typeId: waterMeter.id, levelId: "L1", position: pt(-6.0 * FT, Y_WATER), offsetMm: -350, mark: "MTR-1", values: { room: "Site West" } },
     { type: "place_part", partId: "rpz-1", typeId: rpz.id, levelId: "L1", position: pt(1.6 * FT, Y_WATER), offsetMm: Math.round(3.0 * FT), mark: "RPZ-1", values: { room: "MEP / Electrical 101" } },
-    { type: "place_part", partId: "wh-1", typeId: SHOWCASE_WATER_HEATER.id, levelId: "L1", position: pt(13.5 * FT, 18.0 * FT), offsetMm: 0, mark: "WH-1", values: { room: "MEP / Electrical 101", circuit: "HP-1-2,4,6" } },
+    { type: "place_part", partId: "wh-1", typeId: SHOWCASE_WATER_HEATER.id, levelId: "L1", position: pt(13.5 * FT, 18.0 * FT), offsetMm: 0, mark: "WH-1", values: { room: "MEP / Electrical 101", circuit: "HP-1-2,4,6", "electrical.disconnect_required": false, "electrical.local_disconnect": "not_required", "electrical.disconnect_note": "NEC 422.31(B) — lockable breaker in HP-1 within MEP Room 101" } },
     { type: "place_part", partId: "et-1", typeId: expTank.id, levelId: "L1", position: pt(15.6 * FT, 18.8 * FT), offsetMm: Math.round(4.5 * FT), mark: "ET-1", values: { room: "MEP / Electrical 101" } },
     { type: "place_part", partId: "mh-1", typeId: manhole.id, levelId: "L1", position: pt(-10.0 * FT, Y_SAN), offsetMm: -545, rotationDeg: 180, mark: "MH-1", values: { room: "Public Sewer" } },
     // Exterior Floor Cleanout at grade (z = 0) with parametric 21" riser neck extending straight down into the sloped 4" sanitary lateral!
@@ -950,6 +1074,7 @@ function buildShowcase(modelId: string): ModelState {
         { x: Math.round(3.1 * FT), y: Math.round(20.6 * FT), elevationMm: 520 },
         { x: Math.round(17.5 * FT), y: Math.round(20.6 * FT), elevationMm: 520 },
         { x: Math.round(17.5 * FT), y: Math.round(15.0 * FT) - 120, elevationMm: 520 },
+        { x: Math.round(17.5 * FT), y: Math.round(15.0 * FT) - 120, elevationMm: 916 },
       ],
       to: { kind: "part", partId: "ks-101", connectorId: "cw" },
     },
@@ -990,7 +1115,11 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: 520,
       system: DCW_SYS,
       from: { kind: "run_branch", segmentId: dcwL1Header() },
-      points: [{ x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: 520 }],
+      points: [
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: 520 },
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: 520 },
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: 700 },
+      ],
       to: { kind: "part", partId: "lav-101", connectorId: "cw" },
     },
     {
@@ -1002,7 +1131,11 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: 520,
       system: DCW_SYS,
       from: { kind: "run_branch", segmentId: dcwL1Header() },
-      points: [{ x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: 520 }],
+      points: [
+        { x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: 520 },
+        { x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: 520 },
+        { x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: 700 },
+      ],
       to: { kind: "part", partId: "lav-102", connectorId: "cw" },
     },
     {
@@ -1037,6 +1170,7 @@ function buildShowcase(modelId: string): ModelState {
         { x: Math.round(5.6 * FT), y: Math.round(19.6 * FT), elevationMm: H1 + 520 },
         { x: Math.round(5.6 * FT), y: Math.round(20.6 * FT), elevationMm: H1 + 520 },
         { x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: H1 + 520 },
+        { x: Math.round(14.6 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: H1 + 700 },
       ],
       to: { kind: "part", partId: "lav-202", connectorId: "cw" },
     },
@@ -1081,7 +1215,11 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: H1 + 520,
       system: DCW_SYS,
       from: { kind: "run_branch", segmentId: dcwL2EW },
-      points: [{ x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: H1 + 520 }],
+      points: [
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT), elevationMm: H1 + 520 },
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: H1 + 520 },
+        { x: Math.round(11.0 * FT) + 100, y: Math.round(20.6 * FT) + 165, elevationMm: H1 + 700 },
+      ],
       to: { kind: "part", partId: "lav-201", connectorId: "cw" },
     },
 
@@ -1101,7 +1239,7 @@ function buildShowcase(modelId: string): ModelState {
         { x: Math.round(16.6 * FT), y: Math.round(20.1 * FT), elevationMm: 700 },
         { x: Math.round(16.6 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 700 },
         { x: Math.round(17.8 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 700 },
-        { x: Math.round(17.8 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 520 },
+        { x: Math.round(17.8 * FT), y: Math.round(15.0 * FT) + 120, elevationMm: 916 },
       ],
       to: { kind: "part", partId: "ks-101", connectorId: "hw" },
     },
@@ -1122,7 +1260,7 @@ function buildShowcase(modelId: string): ModelState {
       points: [
         { x: Math.round(13.5 * FT) + 102, y: Math.round(19.4 * FT), elevationMm: Math.round(6.0 * FT) },
         { x: Math.round(11.0 * FT) - 100, y: Math.round(19.4 * FT), elevationMm: Math.round(6.0 * FT) },
-        { x: Math.round(11.0 * FT) - 100, y: Math.round(19.4 * FT), elevationMm: 520 },
+        { x: Math.round(11.0 * FT) - 100, y: Math.round(19.4 * FT), elevationMm: 700 },
       ],
       to: { kind: "part", partId: "lav-101", connectorId: "hw" },
     },
@@ -1137,8 +1275,6 @@ function buildShowcase(modelId: string): ModelState {
       from: { kind: "run_branch", segmentId: dhwL1EW },
       points: [
         { x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: 700 },
-        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: 700 },
-        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: 520 },
       ],
       to: { kind: "part", partId: "lav-102", connectorId: "hw" },
     },
@@ -1157,8 +1293,6 @@ function buildShowcase(modelId: string): ModelState {
         { x: Math.round(15.6 * FT), y: Math.round(19.3 * FT), elevationMm: H1 + 700 },
         { x: Math.round(15.6 * FT), y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
         { x: Math.round(11.0 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
-        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 700 },
-        { x: Math.round(11.0 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 520 },
       ],
       to: { kind: "part", partId: "lav-201", connectorId: "hw" },
     },
@@ -1177,8 +1311,6 @@ function buildShowcase(modelId: string): ModelState {
       from: { kind: "run_branch", segmentId: dhwL2EW },
       points: [
         { x: Math.round(14.6 * FT) - 100, y: Math.round(20.1 * FT), elevationMm: H1 + 700 },
-        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 700 },
-        { x: Math.round(14.6 * FT) - 100, y: Math.round(20.8 * FT), elevationMm: H1 + 520 },
       ],
       to: { kind: "part", partId: "lav-202", connectorId: "hw" },
     },
@@ -1212,6 +1344,7 @@ function buildShowcase(modelId: string): ModelState {
       system: SAN_SYS,
       from: { kind: "part", partId: "ks-101", connectorId: "w" },
       points: [
+        { x: Math.round(X_CORE_EAST_FACE + 349), y: Math.round(15.0 * FT), elevationMm: 450 },
         { x: Math.round(17.7 * FT), y: Math.round(15.0 * FT), elevationMm: 450 },
         { x: Math.round(17.7 * FT), y: Math.round(15.0 * FT), elevationMm: sanZ(17.7 * FT) },
         { x: Math.round(17.7 * FT), y: Math.round(Y_SAN), elevationMm: sanZ(17.7 * FT) },
@@ -1254,12 +1387,13 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
-      elevationMm: 480,
+      elevationMm: 400,
       system: SAN_SYS,
       from: { kind: "part", partId: "lav-101", connectorId: "w" },
       points: [
-        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: 480 },
-        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: sanZ(11.0 * FT) },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 315), elevationMm: 400 },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET), elevationMm: 400 },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET), elevationMm: sanZ(11.0 * FT) },
         { x: Math.round(11.0 * FT), y: Math.round(Y_SAN), elevationMm: sanZ(11.0 * FT) },
       ],
       to: { kind: "run_branch", segmentId: sanSeg() },
@@ -1270,12 +1404,13 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
-      elevationMm: 480,
+      elevationMm: 400,
       system: SAN_SYS,
       from: { kind: "part", partId: "lav-102", connectorId: "w" },
       points: [
-        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: 480 },
-        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: sanZ(14.6 * FT) },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 315), elevationMm: 400 },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET), elevationMm: 400 },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET), elevationMm: sanZ(14.6 * FT) },
         { x: Math.round(14.6 * FT), y: Math.round(Y_SAN), elevationMm: sanZ(14.6 * FT) },
       ],
       to: { kind: "run_branch", segmentId: sanSeg() },
@@ -1344,12 +1479,13 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
-      elevationMm: H1 + 480,
+      elevationMm: H1 + 400,
       system: SAN_SYS,
       from: { kind: "part", partId: "lav-201", connectorId: "w" },
       points: [
-        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: H1 + 480 },
-        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: sanL2Z(11.0 * FT) },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET_NORTH_FACE + 315), elevationMm: H1 + 400 },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET), elevationMm: H1 + 400 },
+        { x: Math.round(11.0 * FT), y: Math.round(Y_WET), elevationMm: sanL2Z(11.0 * FT) },
         { x: Math.round(11.0 * FT), y: Math.round(Y_SAN), elevationMm: sanL2Z(11.0 * FT) },
       ],
       to: { kind: "run_branch", segmentId: sanL2Header() },
@@ -1360,12 +1496,13 @@ function buildShowcase(modelId: string): ModelState {
       levelId: "L1",
       domain: "pipe",
       size: pvc(2),
-      elevationMm: H1 + 480,
+      elevationMm: H1 + 400,
       system: SAN_SYS,
       from: { kind: "part", partId: "lav-202", connectorId: "w" },
       points: [
-        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: H1 + 480 },
-        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 80), elevationMm: sanL2Z(14.6 * FT) },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET_NORTH_FACE + 315), elevationMm: H1 + 400 },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET), elevationMm: H1 + 400 },
+        { x: Math.round(14.6 * FT), y: Math.round(Y_WET), elevationMm: sanL2Z(14.6 * FT) },
         { x: Math.round(14.6 * FT), y: Math.round(Y_SAN), elevationMm: sanL2Z(14.6 * FT) },
       ],
       to: { kind: "run_branch", segmentId: sanL2Header() },
@@ -1393,7 +1530,12 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: "vent-stack-s1" },
-      points: [pt(9.5 * FT, Y_VENT), pt(17.5 * FT, Y_VENT), pt(17.5 * FT, 15.0 * FT)],
+      points: [
+        pt(9.5 * FT, Y_VENT),
+        pt(17.5 * FT, Y_VENT),
+        pt(17.5 * FT, 15.0 * FT),
+        { x: Math.round(17.5 * FT), y: Math.round(15.0 * FT), elevationMm: 916 },
+      ],
       to: { kind: "part", partId: "ks-101", connectorId: "v" },
     },
   ]);
@@ -1411,7 +1553,7 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: ventL1EastSeg },
-      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE)],
+      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE + 50)],
       to: { kind: "part", partId: "lav-101", connectorId: "v" },
     },
     {
@@ -1423,7 +1565,7 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: ventL1EastSeg },
-      points: [pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE)],
+      points: [pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE + 50)],
       to: { kind: "part", partId: "lav-102", connectorId: "v" },
     },
     // L2 Horizontal Branch Vent at L2 + 5'-0" AFF (serving L-3 & L-4, wet-venting L2 bathroom-group WCs per IPC 912!)
@@ -1436,7 +1578,7 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: H1 + Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: ventUpperSeg },
-      points: [pt(9.5 * FT, Y_VENT), pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE)],
+      points: [pt(9.5 * FT, Y_VENT), pt(14.6 * FT, Y_VENT), pt(14.6 * FT, Y_WET_NORTH_FACE + 50)],
       to: { kind: "part", partId: "lav-202", connectorId: "v" },
     },
   ]);
@@ -1452,7 +1594,7 @@ function buildShowcase(modelId: string): ModelState {
       elevationMm: H1 + Math.round(5.0 * FT),
       system: VENT_SYS,
       from: { kind: "run_branch", segmentId: ventL2EastSeg },
-      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE)],
+      points: [pt(11.0 * FT, Y_VENT), pt(11.0 * FT, Y_WET_NORTH_FACE + 50)],
       to: { kind: "part", partId: "lav-201", connectorId: "v" },
     },
   ]);
@@ -1516,7 +1658,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-17", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(32.0 * FT, 10.5 * FT), offsetMm: CEILING_Z, mark: "F1-5", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-13", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(20.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-6", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-14", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(26.0 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-7", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "switched", type_mark: "F1E" } },
-    { type: "place_part", partId: "lt-15", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(31.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-8", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-15", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(23.5 * FT, 22.5 * FT), offsetMm: CEILING_Z, mark: "F1-8", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-18", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(20.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-9", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     { type: "place_part", partId: "lt-19", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(26.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-10", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     { type: "place_part", partId: "lt-20", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(34.5 * FT, 23.5 * FT), offsetMm: Math.round(10.8 * FT), mark: "F1-11", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
@@ -1562,7 +1704,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-213", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(22.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-17", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-214", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(30.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-18", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F2" } },
     // Dedicated L2 stairwell emergency downlight centered inside the stairwell shaft above the U-stair mid-landing & upper flight (NFPA 101 3D tread compliance!)
-    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(32.5 * FT, 23.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
+    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(30.0 * FT, 22.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
 
     // Emergency Exit / Combo Units above Studio corridor door D104 & L2 Stair Head
     { type: "place_part", partId: "exit-1", typeId: exit.id, levelId: "L1", position: pt(34.5 * FT, 10.5 * FT), offsetMm: Math.round(8.5 * FT), mark: "EX-1", values: { emergency: true, emergency_mode: "unswitched", type_mark: "EX" } },
@@ -1681,8 +1823,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-power",
-      name: "Elec — Power Plan (Chamfered)",
-      description: "Electrical power plan locking chamfered orthogonal circuit graphics and clean device marks.",
+      name: "Elec — Power Plan",
+      description: "Electrical power plan locking orthogonal circuit graphics and clean device marks.",
       viewTypes: ["floor_plan"],
       locks: ["discipline", "annotations", "pack_props"],
       props: {
@@ -1694,8 +1836,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-lighting",
-      name: "Elec — Lighting Plan (Chamfered)",
-      description: "Electrical lighting RCP locking chamfered orthogonal wiring and lighting visibility filters.",
+      name: "Elec — Lighting Plan",
+      description: "Electrical lighting RCP locking orthogonal wiring and lighting visibility filters.",
       viewTypes: ["ceiling_plan"],
       locks: ["discipline", "category_overrides", "pack_props"],
       props: {
@@ -1959,8 +2101,23 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_viewport", viewportId: "vp-struct-sec-ns", sheetId: "sheet-s201", viewId: "view-struct-sec-ns", center: { x: 400, y: 440 } },
 
     { type: "create_sheet", sheetId: "sheet-s301", number: "S-301", name: "STRUCTURAL COLUMN & BEAM SCHEDULES", discipline: "structure", group: "Structural", sortOrder: 354 },
-    { type: "place_viewport", viewportId: "vp-sched-columns", sheetId: "sheet-s301", viewId: "view-sched-columns", center: { x: 220, y: 295 } },
-    { type: "place_viewport", viewportId: "vp-sched-beams", sheetId: "sheet-s301", viewId: "view-sched-beams", center: { x: 605, y: 295 } },
+    { type: "place_viewport", viewportId: "vp-sched-columns", sheetId: "sheet-s301", viewId: "view-sched-columns", center: { x: 205, y: 240 } },
+    { type: "place_viewport", viewportId: "vp-sched-beams", sheetId: "sheet-s301", viewId: "view-sched-beams", center: { x: 590, y: 295 } },
+    {
+      type: "create_text_note",
+      itemId: "note-s301-basis",
+      ownerId: "sheet-s301",
+      at: { x: 132, y: 415 },
+      width: 245,
+      textSize: 2.3,
+      paragraphs: [
+        { runs: [{ text: "STRUCTURAL DEFLECTION & LOAD PATH BASIS", bold: true }] },
+        { runs: [{ text: "1. STEEL FRAMING: ASTM A992 (E = 29,000 KSI), STRONG-AXIS CATALOG Ix, SIMPLY SUPPORTED CONSTANT-EI EULER-BERNOULLI BENDING (NO SHEAR DEFORMATION)." }] },
+        { runs: [{ text: "2. LIVE DEFL. / LIVE L/Δ: MODELED ONE-WAY DECK LIVE LOAD ONLY (50 PSF OFFICE FLOOR, 100 PSF BALCONY CORRIDOR, 20 PSF ORDINARY ROOF)." }] },
+        { runs: [{ text: "3. TOTAL DEFL. / TOTAL L/Δ: SERVICE-LEVEL DEAD (BEAM SELF-WEIGHT) + LIVE + EQUIPMENT POINT LOADS (RTU-1 ON 22' CLEAR-SPAN GIRDER G2-B4, EF-1 ON ROOF)." }] },
+        { runs: [{ text: "4. SPAN RATIOS ARE UNFACTORED INFORMATIONAL L/Δ VALUES; NO CODE SERVICEABILITY LIMIT IS EVALUATED." }] },
+      ],
+    },
 
     // ---- Mechanical Views & Sheets (M-101 + M-201) ----
     // Separate Rooftop Unit Schedule, Exhaust Fan Schedule (only relevant columns per equipment type!), and Type-Based Air Device Schedule!
@@ -2138,7 +2295,7 @@ function buildShowcase(modelId: string): ModelState {
         },
       },
     },
-    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
+    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showLinkLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
     {
       type: "create_view",
       viewId: "view-oneline-dist",
@@ -2151,6 +2308,7 @@ function buildShowcase(modelId: string): ModelState {
           hints: {
             title: "DISTRIBUTION ONE-LINE DIAGRAM (≥ 60A FEEDERS)",
             showLoads: true,
+            showLinkLoads: true,
             showWarnings: true,
             faultCurrent: true,
             minLoadRatingA: 60,
@@ -2434,6 +2592,89 @@ function buildShowcase(modelId: string): ModelState {
       type: "set_element_locks",
       ids: ["mdp"],
       locked: true,
+    },
+    // Seeded human review markups (non-printing on permit PDFs; vivid colour on screen & agent renders)
+    ...SHOWCASE_SHEET_MARKUPS,
+  ]);
+
+  // Append CAD-standard Mechanical Drafting Details sheet (M-501: RTU-1 curb & restroom exhaust wall cap)
+  m = appendShowcaseDetails(m);
+
+  // =========================================================================
+  // 8. CIVIL SITE GRADING (LandXML TINs) & EXTERIOR STORM DRAINAGE PACKAGE
+  // =========================================================================
+  const rcpSize = (inches: number) => ({ shape: "pipe" as const, nominalMm: inches * IN, material: "pe" as const, materialId: CIVIL_RCP });
+  const stormSys = { id: "sys-storm", kind: CIVIL_STORM_SERVICE, name: "Site Storm Drainage" };
+
+  m = runCmds(m, [
+    { type: IMPORT_LANDXML_SURFACES, landXml: buildShowcaseCivilLandXml(), levelId: "L1" } as unknown as Command,
+    // Exterior storm structures placed cleanly outside the 56' x 28' building footprint and clear of sanitary MH-1 (-10', 20.5')
+    { type: "place_part", partId: "ci-1", typeId: "civil-inlet-grate", levelId: "L1", position: pt(40 * FT, -14 * FT), rotationDeg: 0, mark: "CI-1" },
+    { type: "place_part", partId: "ci-2", typeId: "civil-inlet-grate", levelId: "L1", position: pt(-14 * FT, 38 * FT), rotationDeg: 90, mark: "CI-2" },
+    { type: "place_part", partId: "smh-1", typeId: "civil-manhole-48", levelId: "L1", position: pt(-14 * FT, -14 * FT), rotationDeg: 0, mark: "SMH-1" },
+    { type: "place_part", partId: "of-1", typeId: "civil-outfall-hw", levelId: "L1", position: pt(-32 * FT, -14 * FT), rotationDeg: 0, mark: "OF-1" },
+    // Reinforced concrete storm pipes routed connector-to-connector on sys-storm
+    { type: "route_run", idPrefix: "st-101", levelId: "L1", domain: "pipe", size: rcpSize(15), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "ci-1", connectorId: "out" }, to: { kind: "part", partId: "smh-1", connectorId: "in_e" } },
+    { type: "route_run", idPrefix: "st-102", levelId: "L1", domain: "pipe", size: rcpSize(15), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "ci-2", connectorId: "out" }, to: { kind: "part", partId: "smh-1", connectorId: "in_n" } },
+    { type: "route_run", idPrefix: "st-103", levelId: "L1", domain: "pipe", size: rcpSize(18), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "smh-1", connectorId: "out" }, to: { kind: "part", partId: "of-1", connectorId: "in" } },
+    { type: "set_element_class", elementIds: ["ci-1", "ci-2"], classId: CIVIL_CLASS.stormInlet },
+    { type: "set_element_class", elementIds: ["smh-1"], classId: CIVIL_CLASS.manhole },
+    { type: "set_element_class", elementIds: ["of-1"], classId: CIVIL_CLASS.outfall },
+    { type: "set_element_class", elementIds: ["sys-storm"], classId: CIVIL_CLASS.stormSystem },
+    { type: "set_element_values", elementIds: ["ci-1"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-1.5 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-4.3 * FT), [CIVIL_PARAM.inletCapacity]: 2.5 } },
+    { type: "set_element_values", elementIds: ["ci-2"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-0.8 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-4.2 * FT), [CIVIL_PARAM.inletCapacity]: 2.5 } },
+    { type: "set_element_values", elementIds: ["smh-1"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-1.9 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-5.1 * FT) } },
+    { type: "set_element_values", elementIds: ["of-1"], values: { [CIVIL_PARAM.invertElevation]: Math.round(-5.35 * FT) } },
+    { type: "set_element_values", elementIds: ["sys-storm"], values: { [CIVIL_PARAM.designIntensity]: 4.0, [CIVIL_PARAM.minSlope]: 0.5 } },
+    { type: "create_zone", zoneId: "catchment-c1", name: "C-1 South Apron & Roof", purpose: "drainage_catchment", outline: { levelId: "L1", outline: [pt(0, -22 * FT), pt(76 * FT, -22 * FT), pt(76 * FT, 28 * FT), pt(0, 28 * FT)] }, servedBy: "ci-1" },
+    { type: "create_zone", zoneId: "catchment-c2", name: "C-2 North & West Lawn", purpose: "drainage_catchment", outline: { levelId: "L1", outline: [pt(-34 * FT, 28 * FT), pt(56 * FT, 28 * FT), pt(56 * FT, 50 * FT), pt(-34 * FT, 50 * FT)] }, servedBy: "ci-2" },
+    { type: "set_element_class", elementIds: ["catchment-c1", "catchment-c2"], classId: CIVIL_CLASS.catchment },
+    { type: "set_element_values", elementIds: ["catchment-c1"], values: { [CIVIL_PARAM.surface]: "paved" } },
+    { type: "set_element_values", elementIds: ["catchment-c2"], values: { [CIVIL_PARAM.surface]: "lawn_heavy_average" } },
+  ]);
+
+  const grading = readGradingSurfaces(m.elements);
+  const existingTin = grading.surfaces.find((s) => s.role === "existing");
+  const proposedTin = grading.surfaces.find((s) => s.role === "proposed");
+  if (!existingTin || !proposedTin) throw new Error("showcase: missing Civil LandXML grading surfaces");
+  const earthwork = cutFillBetween(existingTin, proposedTin);
+  const cutYd3 = to(earthwork.cut, "yd3");
+  const fillYd3 = to(earthwork.fill, "yd3");
+  const netYd3 = to(earthwork.net, "yd3");
+  const overlapFt2 = to(earthwork.overlapArea, "ft2");
+
+  m = runCmds(m, [
+    {
+      type: "create_view",
+      viewId: "view-civil-site",
+      name: "Civil Site — Grading & Storm Drainage Plan",
+      viewType: "floor_plan",
+      crop: { min: pt(-38 * FT, -25 * FT), max: pt(82 * FT, 52 * FT) },
+      props: { level: "Level 1", scale: 96, discipline: "civil", categoryOverrides: CIVIL_SITE_HIDE },
+    },
+    { type: "create_view", viewId: "view-sched-civil-structures", name: "Storm Structure Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_STRUCTURE_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-pipes", name: "Storm Pipe Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_PIPE_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-catchments", name: "Storm Catchment Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_CATCHMENT_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-surfaces", name: "Grading Surface Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: GRADING_SURFACE_SCHEDULE } },
+    { type: "create_sheet", sheetId: "sheet-c101", number: "C-101", name: "CIVIL SITE, GRADING & DRAINAGE PLAN", discipline: "civil", group: "Civil", sortOrder: 50 },
+    { type: "place_viewport", viewportId: "vp-civil-site", sheetId: "sheet-c101", viewId: "view-civil-site", center: { x: 255, y: 245 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-structures", sheetId: "sheet-c101", viewId: "view-sched-civil-structures", center: { x: 660, y: 120 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-pipes", sheetId: "sheet-c101", viewId: "view-sched-civil-pipes", center: { x: 660, y: 230 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-catchments", sheetId: "sheet-c101", viewId: "view-sched-civil-catchments", center: { x: 660, y: 335 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-surfaces", sheetId: "sheet-c101", viewId: "view-sched-civil-surfaces", center: { x: 660, y: 440 } },
+    {
+      type: "create_text_note",
+      itemId: "note-c101-earthwork",
+      ownerId: "sheet-c101",
+      at: { x: 55, y: 470 },
+      width: 420,
+      paragraphs: [
+        { runs: [{ text: "EARTHWORK CUT & FILL SUMMARY (LANDXML 1.2 TIN PRISMOIDAL)", bold: true }] },
+        { runs: [{ text: `Existing Grade (${existingTin.id}) vs. Proposed Pad (${proposedTin.id}) — Overlap: ${overlapFt2.toFixed(0)} ft²` }] },
+        { runs: [{ text: `CUT: ${cutYd3.toFixed(1)} yd³   |   FILL: ${fillYd3.toFixed(1)} yd³   |   NET (FILL − CUT): ${netYd3 >= 0 ? "+" : ""}${netYd3.toFixed(1)} yd³` }] },
+        { runs: [{ text: "DESIGN STORM: 4.0 in/h (Rational Method), Min Pipe Slope: 0.50%, ASTM C76 Class III RCP." }] },
+        { runs: [{ text: "NOTE: Preliminary engine takeoff — requires review by a licensed civil engineer prior to permit or bid." }] },
+      ],
     },
   ]);
 

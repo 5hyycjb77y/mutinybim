@@ -13,7 +13,7 @@
  *   node --expose-gc --import tsx scripts/perf/mutinybim/f6-typicals.ts
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   DEFAULT_SETTINGS,
   RequirementsEngine,
   allocationPolicyOf,
@@ -22,8 +22,11 @@ import {
   type Command,
   type ModelState,
 } from "../../../packages/bim-kernel/src";
+import { installFirstPartyAddOns } from "../../../packages/bim-first-party/src";
 import { LintEngine, DEFAULT_LINT_CONFIG } from "../../../packages/bim-lint/src";
 import { gc, percentile, round, timeSync } from "./lib";
+
+installFirstPartyAddOns();
 
 const SAMPLES = 9;
 
@@ -70,8 +73,8 @@ function copiesAdvance(others: number): { p50: number; p95: number; rederived: n
 }
 
 function copyLint(copies: number): { p50: number; p95: number; findings: number } {
-  const rtu = BUILTIN_PART_TYPES.find((t) => t.id === "builtin:rtu-5-ton@2");
-  const fan = BUILTIN_PART_TYPES.find((t) => t.id === "builtin:inline-fan-10@1");
+  const rtu = builtinPartTypes().find((t) => t.id === "builtin:rtu-5-ton@2");
+  const fan = builtinPartTypes().find((t) => t.id === "builtin:inline-fan-10@1");
   if (!rtu || !fan) throw new Error("starter library is missing the RTU or the fan");
   let m: ModelState = { modelId: "f6-lint", revision: 0 as ModelState["revision"], elements: {}, connections: [], settings: DEFAULT_SETTINGS };
   m = run(m, { type: "create_level", levelId: "roof", name: "ROOF", elevationMm: 7500 }).model;

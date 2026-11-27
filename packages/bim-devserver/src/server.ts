@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { WebSocketServer } from "ws";
-import { asRevision, branchModelId, buildSheetScene, buildSheetSceneFor, definitionTypes, demoSheetDefinition, elementValues, exampleRooftopUnit, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
+import { asRevision, branchModelId, buildSheetScene, buildSheetSceneFor, definitionTypes, demoSheetDefinition, documentIndex, elementValues, exampleRooftopUnit, executeCommand, isBranchId, parseBranchModelId, type Command, type DrawingItem, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
 import { createDemoModel, createPlacedDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { captureSnapshot, issueFromSnapshot, renderSheetPdf } from "@permitzip/bim-sheets";
 import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
@@ -144,11 +144,21 @@ if (!["eager", "lazy", "off"].includes(editorMode)) {
   process.exit(1);
 }
 
+const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
+const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
+const nativeSignIn = process.env.BIM_DEV_NATIVE_SIGNIN === "1";
+if (nativeSignIn && (!externalAuthority || signInUrl)) throw new Error("Native sign-in needs BIM_DEV_AUTHORITY_URL and its own OIDC provider");
+if (externalAuthority && !signInUrl && !nativeSignIn) {
+  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
+  process.exit(1);
+}
+const landingModel = nativeSignIn && externalAuthority ? new URL(externalAuthority).searchParams.get("model") ?? mainModelId : mainModelId;
+
 const editor: EditorDemo | null =
   editorMode === "off"
     ? null
     : createEditorDemo({
-        mainModelId: async () => mainModelId,
+        mainModelId: async () => landingModel,
         authority: async (branch) => {
           const url = `ws://127.0.0.1:${port}/sync`;
           if (branch === null) return { url, modelId: mainModelId };
@@ -217,15 +227,9 @@ async function exportPdf(res: ServerResponse) {
   });
 }
 
-const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
-const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
-if (externalAuthority && !signInUrl) {
-  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
-  process.exit(1);
-}
-
 /** Which model server the editor page opens, and the sign-in it presents there. */
 async function demoConfig(res: ServerResponse, url: URL, firmParts: LocalFirmParts | null): Promise<void> {
+  if (nativeSignIn) return send(res, 200, "application/json", JSON.stringify({ authority: "native", authorityUrl: externalAuthority }));
   if (!externalAuthority || !signInUrl) return send(res, 200, "application/json", JSON.stringify({ authority: "in-process", firmPartsId: firmParts?.id }));
   const name = (url.searchParams.get("name") ?? "You").slice(0, 60);
   const answer = await fetch(`${signInUrl}/token?name=${encodeURIComponent(name)}`);
@@ -273,6 +277,27 @@ async function serveFirmParts(req: IncomingMessage, res: ServerResponse, url: UR
 
 async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () => Promise<string>, css: string, firmParts: LocalFirmParts | null) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  if (nativeSignIn && req.method === "GET" && url.pathname === "/auth/native/callback" && editor) {
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("cache-control", "no-store");
+    await editor.handle(req, res, new URL("/m/sign-in", url));
+    return;
+  }
+  if (nativeSignIn && externalAuthority && req.method === "POST" && ["/auth/native/start", "/auth/native/finish", "/auth/native/sign-out"].includes(url.pathname)) {
+    const target = new URL(url.pathname, externalAuthority);
+    target.protocol = target.protocol === "wss:" ? "https:" : "http:";
+    const transport = target.protocol === "https:" ? await import("node:https") : await import("node:http");
+    const forward = transport.request(target, { method: "POST", headers: { "content-type": req.headers["content-type"] ?? "",
+      origin: req.headers.origin ?? "", cookie: req.headers.cookie ?? "",
+      ...(url.pathname === "/auth/native/sign-out" && req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+    } }, (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    });
+    forward.on("error", () => { if (!res.headersSent) send(res, 502, "text/plain", "The local model server is unavailable."); else res.end(); });
+    req.pipe(forward);
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/demo-config.json") return demoConfig(res, url, firmParts);
   if (firmParts && url.pathname === "/api/bim/library/part-types") return serveFirmParts(req, res, url, firmParts);
   if (req.method === "GET" && url.pathname === "/feasibility") return send(res, 200, "text/html; charset=utf-8", INDEX_HTML);
@@ -335,6 +360,91 @@ async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () =>
     const head = await served.sequencer.head();
     return send(res, 200, "application/json", JSON.stringify({ modelId: head.modelId, revision: head.revision, elements: Object.keys(head.elements).length, connections: served.hub.connectionCount() }));
   }
+  if (req.method === "GET" && url.pathname === "/debug/markups") {
+    const served = await models.open(url.searchParams.get("model") ?? mainModelId);
+    if (!served) return send(res, 404, "application/json", JSON.stringify({ error: "No such model or branch here." }));
+    const head = await served.sequencer.head();
+    const idx = documentIndex(head);
+    const all: Array<{
+      itemId: string;
+      sheetId: string;
+      sheetNumber: string;
+      points: DrawingItem["points"];
+      markup: NonNullable<DrawingItem["markup"]>;
+    }> = [];
+    for (const sheet of idx.sheets) {
+      for (const item of idx.markupsBySheet.get(sheet.id) ?? []) {
+        if (item.deleted || !item.markup) continue;
+        all.push({
+          itemId: item.id,
+          sheetId: sheet.id,
+          sheetNumber: sheet.number,
+          points: item.points,
+          markup: item.markup,
+        });
+      }
+    }
+    return send(res, 200, "application/json", JSON.stringify({ modelId: head.modelId, revision: head.revision, count: all.length, markups: all }, null, 2));
+  }
+  if (req.method === "POST" && url.pathname === "/debug/save-showcase-markups") {
+    const allowSave = process.env.MUTINYBIM_ALLOW_SAVE_SHOWCASE_MARKUPS === "1" || process.argv.includes("--allow-save-showcase-markups");
+    if (!allowSave) {
+      return send(
+        res,
+        403,
+        "application/json",
+        JSON.stringify({
+          error: "Showcase markup saving is disabled by default. Restart devserver with MUTINYBIM_ALLOW_SAVE_SHOWCASE_MARKUPS=1 (or --allow-save-showcase-markups) and send header 'X-Mutiny-Dev-Save: 1'.",
+        }),
+      );
+    }
+    const remote = req.socket.remoteAddress ?? "";
+    const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+    const origin = req.headers.origin;
+    const originOk =
+      !origin ||
+      origin === `http://127.0.0.1:${url.port || "80"}` ||
+      origin === `http://localhost:${url.port || "80"}`;
+    const saveHeader = req.headers["x-mutiny-dev-save"];
+    if (!isLoopback || !originOk || saveHeader !== "1") {
+      return send(
+        res,
+        403,
+        "application/json",
+        JSON.stringify({ error: "Forbidden: requires loopback client, same-origin (or no Origin), and 'X-Mutiny-Dev-Save: 1' header." }),
+      );
+    }
+    const served = await models.open(url.searchParams.get("model") ?? mainModelId);
+    if (!served) return send(res, 404, "application/json", JSON.stringify({ error: "No such model or branch here." }));
+    const head = await served.sequencer.head();
+    const idx = documentIndex(head);
+    const commands: Array<Extract<Command, { type: "add_sheet_markup" }>> = [];
+    for (const sheet of idx.sheets) {
+      for (const item of idx.markupsBySheet.get(sheet.id) ?? []) {
+        if (item.deleted || !item.markup) continue;
+        commands.push({
+          type: "add_sheet_markup",
+          itemId: item.id,
+          sheetId: sheet.id,
+          points: item.points.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })),
+          markup: item.markup,
+        });
+      }
+    }
+    const targetPath = path.join(root, "packages/bim-first-party/src/seed/showcase-markups.ts");
+    const tsSource =
+      `import type { Command } from "@permitzip/bim-kernel";\n\n` +
+      `export type ShowcaseMarkupCommand = Extract<Command, { type: "add_sheet_markup" }>;\n\n` +
+      `/**\n` +
+      ` * Seeded sheet review markups for the MutinyBIM showcase model (\`createShowcaseDemoModel\`).\n` +
+      ` * Saved from live showcase rev ${head.revision} (${commands.length} stroke${commands.length === 1 ? "" : "s"}).\n` +
+      ` */\n` +
+      `export const SHOWCASE_SHEET_MARKUPS: readonly ShowcaseMarkupCommand[] = ${JSON.stringify(commands, null, 2)};\n`;
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(targetPath, tsSource, "utf8");
+    console.log("[bim-devserver] saved showcase markups", { count: commands.length, revision: head.revision, targetPath });
+    return send(res, 200, "application/json", JSON.stringify({ ok: true, saved: commands.length, revision: head.revision, file: "packages/bim-first-party/src/seed/showcase-markups.ts" }));
+  }
   if (editor && (await editor.handle(req, res, url))) return;
   send(res, 404, "text/plain", "Not found");
 }
@@ -359,7 +469,7 @@ async function main() {
   const firmParts = catalogPath && !externalAuthority ? new (await import("./firm-parts")).LocalFirmParts(catalogPath) : null;
   const server = createServer((req, res) => {
     handle(req, res, clientJs, css, firmParts).catch((err) => {
-      console.error("[bim-devserver] request failed", { url: req.url, err });
+      console.error("[bim-devserver] request failed", { path: req.url?.split("?")[0], err });
       send(res, 500, "text/plain", "Server error: see devserver log");
     });
   });
@@ -414,11 +524,14 @@ async function main() {
   wss.on("error", (err) => console.error("[bim-devserver] websocket server error", err.message));
 
   server.on("close", () => firmParts?.close());
-  server.listen({ port, host: firmParts ? "127.0.0.1" : undefined }, () => {
+  // Docker forwards the host's loopback port to the editor's container interface.
+  const listenHost = process.env.BIM_DEV_BIND_HOST ?? (nativeSignIn || firmParts ? "127.0.0.1" : undefined);
+  server.listen({ port, host: listenHost }, () => {
     const address = server.address();
     const listenPort = typeof address === "object" && address ? address.port : port;
     if (editor) {
-      console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${listenPort}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
+      if (nativeSignIn) console.log("[bim-devserver] Native sign-in ready. Open a served model at the configured editor origin.");
+      else console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${listenPort}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
       console.log(`[bim-devserver] editor build ${editorMode === "eager" ? "starting now" : "starts on the first editor page"} (cached in ${editor.outDir})`);
     } else {
       console.log("[bim-devserver] editor off (BIM_DEV_EDITOR=off)");

@@ -59,9 +59,7 @@ function builds<T>(fn: () => T): { value: T; count: number } {
 }
 
 const SETS: ReadonlyArray<readonly [string, () => PackSet]> = [
-  ["first-party add-ons", () => PackSet.create(FIRST_PARTY_ADDONS)],
-  // Structural is one of the first-party add-ons since round 14.
-  ["first-party (Structural among them) + Civil", () => PackSet.create([...FIRST_PARTY_ADDONS, CIVIL_PACK])],
+  ["first-party add-ons (Structural and Civil among them)", () => PackSet.create(FIRST_PARTY_ADDONS)],
   ["first-party + an outside data add-on", () => PackSet.create([...FIRST_PARTY_ADDONS, outsidePack()])],
   ["Structural + Civil + an outside data add-on", () => PackSet.create([STRUCTURAL_PACK, CIVIL_PACK, outsidePack()])],
 ];

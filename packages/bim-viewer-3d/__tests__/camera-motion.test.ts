@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { makeCameraControls } from "../src/navigation";
 import { ModelViewer3D } from "../src/viewer";
+import { WalkMotion } from "../src/walk";
 
 /** Use the production controls and two cameras without allocating a WebGL context in jsdom. */
 function viewerRig() {
@@ -16,9 +17,40 @@ function viewerRig() {
   const fragments = { update: jest.fn(async () => {}) };
   Object.assign(viewer, { mode: "3d", projection: "orthographic", controls, perspective, orthoView: ortho, container: canvas, renderer: { domElement: canvas },
     pointerClaims: new Set(), passThroughListeners: new Set(), cameraListeners: new Set(), cameraSettledListeners: new Set(), zoomFloor: 1,
+    walk: new WalkMotion(), walkOn: false, walkListeners: new Set(), cameraModeListeners: new Set(),
+    walkStep: new THREE.Vector3(), walkForward: new THREE.Vector3(), walkRight: new THREE.Vector3(),
     fragments, scene, references: new Map(), palette: { css: () => "orange" } });
-  return { viewer, fragments, scene };
+  const advanceFrame = () => {
+    viewer["stepWalk"](1 / 30);
+    viewer["controls"].update(1 / 30);
+  };
+  return { viewer, fragments, scene, advanceFrame };
 }
+
+it("takes over a moving keyboard walk and returns the last playback pose to manual navigation", () => {
+  const { viewer, advanceFrame } = viewerRig();
+  viewer.setProjection("perspective");
+  viewer.setWalk(true);
+  viewer.walkKey("KeyW", true);
+  advanceFrame();
+  const stopped = jest.fn();
+  const playback = viewer.beginCameraMotion(undefined, stopped)!;
+  expect(viewer.walking()).toBe(false);
+  const pose = { eye: { x: 1200, y: -4000, z: 1600 }, target: { x: 1200, y: -2000, z: 1600 } };
+  playback.look(pose);
+  const from = viewer.camera3dState()!;
+  advanceFrame();
+  expect(viewer.camera3dState()).toEqual(from);
+  viewer.setWalk(true);
+  expect(stopped).toHaveBeenCalledTimes(1);
+  expect(viewer.pointerClaimed()).toBe(false);
+  expect(viewer.camera3dState()).toEqual(from);
+  playback.release();
+  expect(viewer.cameraMode()).toBe("walk");
+  viewer.walkKey("KeyW", true);
+  advanceFrame();
+  expect(viewer.camera3dState()!.eye.y).toBeGreaterThan(from.eye.y);
+});
 
 it("temporarily uses perspective, keeps a stationary walker at rest, and releases the route and previous projection exactly once", () => {
   const { viewer, fragments, scene } = viewerRig();

@@ -5,8 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SheetTitle } from '../../contracts/building-model/sheet-title'
 import { toast } from 'sonner'
 import { escapeLeavesField, leftFieldHint } from '../escape-step'
-import { ChevronDown, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
-import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, NORTH_ARROW_RADIUS_MM, boxToPaper, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutBoundaryPolygon, calloutHead, calloutLeaderAnchor, calloutSyncCommands, canonicalJson, chainOf, dimensionPoints, drawDimension, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, leaderPrimitives, leaderStart, noteAutoShoulderPaper, noteContentFingerprint, noteLabel, noteLeadersAfterMove, noteText, normalizeParagraphs, paragraphsForCommand, polygonBounds, referencingSheet, resolveNote, sectionMarkEndpoints, tagLines, textBlockToSvg, viewportNorthArrow, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type Primitive, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
+import { ChevronDown, Eye, EyeOff, KeyRound, Circle, Cloud, Minus, MousePointer2, MoveHorizontal, PaintBucket, PenTool, Printer, Puzzle, Rainbow, Repeat, Spline, Square, SquareDashed, Tag, Trash2, Type, Hexagon, Waves, Waypoints, ZoomIn, ZoomOut } from 'lucide-react'
+import { DEFAULT_ANNOTATION_CROP_OFFSET_MM, DEFAULT_HIGHLIGHTER_OPACITY, DEFAULT_MARKER_OPACITY, DEFAULT_NOTE_SIZE_MM, ELEV_RADIUS_MM, HEAD_RADIUS_MM, NORTH_ARROW_RADIUS_MM, boxToPaper, paperToBox, LEADER_ARROWS, NOTE_LIMITS, STANDARD_SCALES, calloutBoundaryPolygon, calloutHead, calloutLeaderAnchor, calloutSyncCommands, canonicalJson, chainOf, dimensionPoints, drawDimension, elementsOfKind, elevationMarkCenter, enlargedPlanCommands, gridBubbleEndpoints, layoutDraft, leaderPrimitives, leaderStart, noteAutoShoulderPaper, noteContentFingerprint, noteLabel, noteLeadersAfterMove, noteText, normalizeParagraphs, paragraphsForCommand, polygonBounds, referencingSheet, resolveNote, sectionMarkEndpoints, tagLines, textBlockToSvg, viewportNorthArrow, viewportTitleLayout, cropForWindow, detailItemBounds, documentIndex, frameForViewport, modelToPaper, paperWorkingAngleDeg, paperToModel, planReferenceViews, rectangleLines, sceneToSvg, scaleLabel, sheetViewports, viewCrop, viewOnPaper, viewportOnPaper, LOAD_SUMMARY_TEMPLATE, asElementId, blockFieldChoices, fieldBlockTemplateProblem, renderFieldBlock, type FieldBlockSpec, type DrawingItem, type DrawingShape, type ModelState, type NoteLeader, type NoteParagraph, type Primitive, type TextBlock, type Rect, type Vec2, type ViewElement, type ViewProps, type ViewFrame, type Viewport, type ViewBackgrounds, type ElementId, type TagSpec, scheduleViewColumns } from '@permitzip/bim-kernel'
 import { distributionEquipment } from '@permitzip/bim-pack-electrical'
 import type { Presence } from '@permitzip/bim-sync'
 import { NOTE_LOCK_REFRESH_MS, PresenceClock, editingNoteActivity, lockMessage, noteLocks, type NoteLock } from '@permitzip/bim-sync/note-locks'
@@ -64,6 +64,10 @@ import { doubleClickOpensView } from './placed-view-actions'
 import { keyTakenByModelTool, planPointerFor, type PlanPointer } from '../view-input/plan-pointer'
 import { annotationGrips, calloutBoundaryAfterGrip, gripCommand, type Grip } from './draft/grips'
 import { dragGhost, dragMoveCommand, dragStarted, dragTo } from './draft/drag-move'
+import { MarkupBar } from './MarkupBar'
+import { MarkupProperties } from './MarkupProperties'
+import { DEFAULT_MARKUP_BRUSH, SHEET_MARKUP_SHORTCUT, applyMarkupShortcut, hitTestMarkupStroke, recognizeSmartShape, simplifyMarkupStroke, type MarkupBrushState } from './markup-tools'
+import { printSheetPdf } from './print-sheet'
 
 const NoteEditor = dynamic(() => import('./notes/NoteEditor').then((m) => m.NoteEditor), { ssr: false })
 const CalcBlockProperties = dynamic(() => import('../calc-sheets/CalcBlockProperties').then((m) => m.CalcBlockProperties), { ssr: false })
@@ -104,6 +108,10 @@ type Drag =
   | { readonly kind: 'boundary-edge'; readonly index: number; readonly from: Vec2; readonly to: Vec2 }
   /** A note's edge: width re-wraps live; the bottom edge fixes the height. */
   | { readonly kind: 'note-size'; readonly id: string; readonly edge: NoteEdge; readonly from: Vec2; readonly start: NoteFrame; readonly frame: NoteFrame }
+  /** Freehand felt-tip marker or highlighter stroke drawn directly on sheet paper (mm). */
+  | { readonly kind: 'markup'; readonly points: readonly Vec2[] }
+  /** Dragging the markup eraser across strokes on the sheet. */
+  | { readonly kind: 'markup-erase'; readonly erased: ReadonlySet<string> }
 
 /** A note box on paper while it is dragged: top-left, width, fixed height (null grows with the text). */
 interface NoteFrame {
@@ -220,6 +228,7 @@ const DRAFT_EXTRA: ReadonlyArray<{ tool: Tool; label: string; icon: React.ReactN
 
 const SHEET_TOOLS: ReadonlyArray<{ tool: Tool; label: string; icon: React.ReactNode }> = [
   { tool: 'select', label: 'Select and move', icon: <MousePointer2 /> },
+  { tool: 'markup', label: 'Marker', icon: <PenTool /> },
   { tool: 'text', label: 'Note', icon: <Type /> },
   { tool: 'line', label: 'Line', icon: <Minus /> },
   { tool: 'rect', label: 'Rectangle', icon: <Square /> },
@@ -315,8 +324,13 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
   const [dropHint, setDropHint] = useState(false)
   /** The viewport opened for editing in place on the sheet (double-click). If it leaves the sheet, sheet editing resumes. */
   const [activeId, setActiveId] = useState<string | null>(null)
+  /** Felt-tip Marker / Highlighter settings for sheet review markups. */
+  const [markupBrush, setMarkupBrush] = useState<MarkupBrushState>(DEFAULT_MARKUP_BRUSH)
 
-  const drawn = useDrawnScene(model, target, sheetTitle, backgrounds)
+  const drawn = useDrawnScene(model, target, sheetTitle, backgrounds, undefined, {
+    includeMarkups: markupBrush.showMarkups,
+    includeResolvedMarkups: markupBrush.showResolved,
+  })
   const blocks = useMemo(() => new Map<string, TextBlock>((drawn.scene?.textBlocks ?? []).map((b) => [b.itemId, b])), [drawn.scene])
   /** The note or dimension drawn live in the overlay (editing, resizing, moving, or dragging a grip) instead of the static base SVG. */
   const liveNoteId =
@@ -386,6 +400,21 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
 
   const index = useMemo(() => documentIndex(model), [model])
   const sheet = target.kind === 'sheet' ? model.elements[target.sheetId] : undefined
+  const sheetMarkups = useMemo(
+    () => (target.kind === 'sheet' ? (index.markupsBySheet.get(target.sheetId) ?? []) : []),
+    [index, target],
+  )
+  const visibleSheetMarkups = useMemo(
+    () =>
+      markupBrush.showMarkups
+        ? sheetMarkups.filter((m) => markupBrush.showResolved || (m.markup?.status ?? 'open') !== 'resolved')
+        : [],
+    [sheetMarkups, markupBrush.showMarkups, markupBrush.showResolved],
+  )
+  const openMarkupCount = useMemo(
+    () => sheetMarkups.filter((m) => (m.markup?.status ?? 'open') === 'open').length,
+    [sheetMarkups],
+  )
   const titleView = target.kind === 'detail' ? model.elements[target.viewId] : undefined
   const printTitle = sheet?.kind === 'sheet' ? `${sheet.number} ${sheet.title}` : titleView?.kind === 'view' ? titleView.name : 'Drawing'
   const placed = useMemo<PlacedFrame[]>(() => {
@@ -957,6 +986,15 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         }
       }
       const plainKey = !e.metaKey && !e.ctrlKey && !e.altKey
+      if (plainKey && !e.repeat && target.kind === 'sheet' && !active && canEdit && !drag) {
+        const markupNext = applyMarkupShortcut(e.key, tool === 'markup', markupBrush)
+        if (markupNext) {
+          e.preventDefault()
+          setMarkupBrush(markupNext.brush)
+          setTool(markupNext.nextTool)
+          return
+        }
+      }
       if (plainKey && !e.repeat && similarChord.current.press(e.key, e.timeStamp) && tool === 'select' && selection?.kind === 'item') {
         const picked = items.find((i) => i.id === selection.id)
         if (picked?.tag) {
@@ -1034,7 +1072,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, selectedViewportIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored, annotatedView, model, toPaperPoint])
+  }, [drag, setDrag, noteEdit, tool, setTool, selection, canEdit, send, active, finishEditing, items, editNote, draftInput, draft, selectedIds, selectedViewportIds, modelEdit, boundary, finishBoundary, cancelBoundary, plineSketch, finishPlineSketch, cancelPlineSketch, tracing, placing, modelView, startTagLike, blockedReason, toStored, annotatedView, model, toPaperPoint, target.kind, markupBrush])
 
   /** Paper point under a pointer event on the overlay or anything in it. */
   const paperOf = (e: React.PointerEvent<SVGElement>): Vec2 | null => {
@@ -1205,6 +1243,26 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       if (send(keynoteCommand({ elementId: hit.elementId, key, ownerId, itemId: id, head: toStored(head), leader: true }), `keynote ${key}`)) setSelection({ kind: 'item', id })
       return
     }
+    if (tool === 'markup') {
+      if (target.kind !== 'sheet' || active) return
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      if (!markupBrush.showMarkups) setMarkupBrush((b) => ({ ...b, showMarkups: true }))
+      if (markupBrush.eraser) {
+        const hit = visibleSheetMarkups.find((m) => hitTestMarkupStroke(m, at, 3 / Math.max(zoom, 0.25)))
+        const erased = new Set<string>()
+        if (hit && send({ type: 'delete_drawing_item', itemId: hit.id }, 'erase markup')) {
+          erased.add(hit.id)
+          if (selection?.kind === 'item' && selection.id === hit.id) setSelection(null)
+        }
+        setDrag({ kind: 'markup-erase', erased })
+        return
+      }
+      setSelection(null)
+      setAlsoPicked([])
+      setDrag({ kind: 'markup', points: [at] })
+      return
+    }
     // A press with a drawing tool starts a drag on the drawing, never a text selection: text already selected on
     // the page (double-clicking a view to edit it selects some) was dragged instead, the browser cancelled the
     // pointer, and the line was dropped (crop-on-sheet, main run 42378325886).
@@ -1358,6 +1416,23 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
       case 'marquee':
         setDrag({ ...drag, b: at })
         break
+      case 'markup': {
+        const prev = drag.points[drag.points.length - 1]
+        if (!prev || Math.hypot(at.x - prev.x, at.y - prev.y) >= 0.45) {
+          setDrag({ kind: 'markup', points: [...drag.points, at] })
+        }
+        break
+      }
+      case 'markup-erase': {
+        const hit = visibleSheetMarkups.find((m) => !drag.erased.has(m.id) && hitTestMarkupStroke(m, at, 3 / Math.max(zoom, 0.25)))
+        if (hit && send({ type: 'delete_drawing_item', itemId: hit.id }, 'erase markup')) {
+          const erased = new Set(drag.erased)
+          erased.add(hit.id)
+          if (selection?.kind === 'item' && selection.id === hit.id) setSelection(null)
+          setDrag({ kind: 'markup-erase', erased })
+        }
+        break
+      }
       default:
         setDrag({ ...drag, to: at })
     }
@@ -1372,6 +1447,32 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         const at = paperOf(e)
         if (at) draftInput.up(at)
       }
+      return
+    }
+    if (d.kind === 'markup-erase') return
+    if (d.kind === 'markup') {
+      if (target.kind !== 'sheet') return
+      const simplified = simplifyMarkupStroke(d.points, 0.5, 400)
+      const shaped = markupBrush.smartShapes ? recognizeSmartShape(simplified) : { points: simplified }
+      const itemId = newId('markup')
+      send(
+        {
+          type: 'add_sheet_markup',
+          itemId,
+          sheetId: target.sheetId,
+          points: shaped.points,
+          markup: {
+            tool: markupBrush.tool,
+            color: markupBrush.color,
+            widthMm: markupBrush.widthMm,
+            status: 'open',
+            ...(shaped.smartShape ? { smartShape: shaped.smartShape } : {}),
+            ...(selfActorId ? { author: selfActorId } : {}),
+            createdAt: new Date().toISOString(),
+          },
+        },
+        markupBrush.tool === 'highlighter' ? 'highlight sheet' : 'mark up sheet',
+      )
       return
     }
     if (d.kind === 'marquee') {
@@ -1618,6 +1719,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
 
   const selectedViewport = selection?.kind === 'viewport' ? placed.find((v) => v.viewport.id === selection.id) ?? null : null
   const selectedItem = selection?.kind === 'item' ? items.find((i) => i.id === selection.id) ?? null : null
+  const selectedMarkup = selection?.kind === 'item' ? sheetMarkups.find((m) => m.id === selection.id) ?? null : null
   const selectedLock = selectedItem ? (locks.get(selectedItem.id) ?? null) : null
 
   /** The open, resizing, or dragging note, laid out from the live position/box by the same engine that prints it. */
@@ -1774,6 +1876,10 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
 
   const toolHint = draftInput.prompt
     ? draftInput.prompt
+    : tool === 'markup' && target.kind === 'sheet' && !active
+    ? markupBrush.eraser
+      ? 'Markup eraser: click or drag across review strokes to erase them. M marker · H highlighter · Esc done.'
+      : `Sheet ${markupBrush.tool === 'highlighter' ? 'highlighter' : 'marker'}: draw with mouse or stylus${markupBrush.smartShapes ? ' (Smart snap on)' : ''}. M marker · H highlighter · E erase · 1–6 colour · S snap · Esc done.`
     : tool === 'keynote' && !noteEdit
     ? `Click an element to give it keynote ${cleanKey(keynoteKey) ?? '(pick one first)'}: it gets the key and a keynote tag, and the sheet's keynote list shows it. Esc to stop.`
     : noteEdit
@@ -1899,6 +2005,97 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
           </ToggleGroup>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {target.kind === 'sheet' && !active && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={tool === 'markup' ? 'secondary' : 'outline'}
+                      size="sm"
+                      className="h-7 gap-1.5 px-2.5 text-xs"
+                      disabled={!canEdit}
+                      aria-pressed={tool === 'markup'}
+                      data-testid="sheet-marker-toggle"
+                      onClick={() => setTool(tool === 'markup' ? 'select' : 'markup')}
+                    >
+                      <PenTool className="size-3.5" style={tool === 'markup' ? { color: markupBrush.color } : undefined} />
+                      Marker
+                      <kbd className="rounded border border-border/80 bg-muted/60 px-1 font-mono text-[10px] text-muted-foreground">
+                        {SHEET_MARKUP_SHORTCUT}
+                      </kbd>
+                      {openMarkupCount > 0 && (
+                        <span className="rounded-full bg-danger-100 px-1.5 text-[10px] font-semibold text-danger-700">
+                          {openMarkupCount}
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{!canEdit ? blockedReason : 'Felt-tip Marker for quick redlines on this sheet (M for Marker, H for Highlighter; non-printing by default)'}</TooltipContent>
+                </Tooltip>
+                {sheetMarkups.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" data-testid="sheet-markups-menu">
+                        {markupBrush.showMarkups ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5 text-muted-foreground" />}
+                        Markups ({sheetMarkups.length})
+                        <ChevronDown className="size-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className={CLOSES_AT_ONCE}>
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onSelect={() => setMarkupBrush((b) => ({ ...b, showMarkups: !b.showMarkups }))}>
+                          {markupBrush.showMarkups ? <EyeOff className="mr-2 size-3.5" /> : <Eye className="mr-2 size-3.5" />}
+                          {markupBrush.showMarkups ? 'Hide markups on screen' : 'Show markups on screen'}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setMarkupBrush((b) => ({ ...b, showResolved: !b.showResolved, showMarkups: true }))}>
+                          {markupBrush.showResolved ? 'Hide resolved markups' : 'Show resolved markups'}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            if (target.kind !== 'sheet') return
+                            void printSheetPdf(model, target.sheetId, sheetTitle, backgrounds, sheetImages?.source ?? null, undefined, {
+                              includeMarkups: true,
+                              includeResolvedMarkups: markupBrush.showResolved,
+                            })
+                              .then((printed) => toast.success(`Printed check set with markups (${printed.fileName})`))
+                              .catch((err) => toast.error(err instanceof Error ? err.message : 'Check-set print failed'))
+                          }}
+                        >
+                          <Printer className="mr-2 size-3.5" />
+                          Print check set (with markups)
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          disabled={!canEdit || !sheetMarkups.some((m) => m.markup?.status === 'addressed')}
+                          onSelect={() => {
+                            if (target.kind !== 'sheet') return
+                            send({ type: 'clear_sheet_markups', sheetId: target.sheetId, statuses: ['addressed'] }, 'clear yellow-lined markups')
+                          }}
+                        >
+                          <Trash2 className="mr-2 size-3.5" />
+                          Clear yellow-lined markups
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!canEdit}
+                          className="text-destructive focus:text-destructive"
+                          onSelect={() => {
+                            if (target.kind !== 'sheet') return
+                            send({ type: 'clear_sheet_markups', sheetId: target.sheetId }, 'clear all sheet markups')
+                            setSelection(null)
+                          }}
+                        >
+                          <Trash2 className="mr-2 size-3.5" />
+                          Clear all markups on sheet
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                <Separator orientation="vertical" className="mx-0.5 h-4" />
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={zoomControl.zoomOut}>
@@ -1945,7 +2142,15 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
         <div className="relative flex min-h-0 flex-1 flex-col" data-testid="drawing-canvas-area">
         {active && <EditingViewIndicator viewName={active.view.name} onDone={finishEditing} />}
         <div className={`pointer-events-none absolute inset-x-3 z-20 flex justify-center ${active ? 'top-12' : 'top-3'}`} data-testid="draft-options-slot">
-          <DraftOptionsBar
+          {tool === 'markup' && target.kind === 'sheet' && !active ? (
+            <MarkupBar
+              brush={markupBrush}
+              onChange={setMarkupBrush}
+              onDone={() => setTool('select')}
+              openCount={openMarkupCount}
+            />
+          ) : (
+            <DraftOptionsBar
             tool={tool}
             settings={draft.settings}
             onSettings={draft.setSettings}
@@ -2003,6 +2208,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                   : null
             }
           />
+          )}
         </div>
         <div
           ref={scrollRef}
@@ -2790,6 +2996,60 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                 </g>
               )}
               {tool === 'select' && tagElbows.grip}
+              {target.kind === 'sheet' && !active && tool === 'select' && visibleSheetMarkups.map((m) => {
+                if (m.points.length === 0) return null
+                const selected = selection?.kind === 'item' && selection.id === m.id
+                const hitWidth = Math.max(6 / Math.max(zoom, 0.25), (m.markup?.widthMm ?? 2.4) + 3)
+                const pts = m.points.map((p) => `${p.x} ${p.y}`).join(' ')
+                return (
+                  <g
+                    key={`mk-hit-${m.id}`}
+                    className="cursor-pointer"
+                    data-testid={`sheet-markup-hit-${m.id}`}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.stopPropagation()
+                      setSelection({ kind: 'item', id: m.id })
+                      setAlsoPicked([])
+                    }}
+                  >
+                    {selected && m.points.length === 1 && (
+                      <circle cx={m.points[0]!.x} cy={m.points[0]!.y} r={(m.markup?.widthMm ?? 2.4) * 0.75 + 2} fill="none" stroke={PRIMARY} strokeWidth={0.6 / Math.max(zoom, 0.25)} pointerEvents="none" />
+                    )}
+                    {selected && m.points.length >= 2 && (
+                      <polyline points={pts} fill="none" stroke={PRIMARY} strokeWidth={(m.markup?.widthMm ?? 2.4) + 2.2 / Math.max(zoom, 0.25)} strokeOpacity={0.35} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+                    )}
+                    {m.points.length === 1 ? (
+                      <circle cx={m.points[0]!.x} cy={m.points[0]!.y} r={hitWidth / 2} fill="transparent" />
+                    ) : (
+                      <polyline points={pts} fill="none" stroke="transparent" strokeWidth={hitWidth} strokeLinecap="round" strokeLinejoin="round" />
+                    )}
+                  </g>
+                )
+              })}
+              {drag?.kind === 'markup' && drag.points.length > 0 && (
+                <g pointerEvents="none" data-testid="sheet-markup-preview">
+                  {drag.points.length === 1 ? (
+                    <circle
+                      cx={drag.points[0]!.x}
+                      cy={drag.points[0]!.y}
+                      r={markupBrush.widthMm / 2}
+                      fill={markupBrush.color}
+                      fillOpacity={markupBrush.tool === 'highlighter' ? DEFAULT_HIGHLIGHTER_OPACITY : DEFAULT_MARKER_OPACITY}
+                    />
+                  ) : (
+                    <polyline
+                      points={drag.points.map((p) => `${p.x} ${p.y}`).join(' ')}
+                      fill="none"
+                      stroke={markupBrush.color}
+                      strokeWidth={markupBrush.widthMm}
+                      strokeOpacity={markupBrush.tool === 'highlighter' ? DEFAULT_HIGHLIGHTER_OPACITY : DEFAULT_MARKER_OPACITY}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
+                </g>
+              )}
               {drag?.kind === 'draw' && <DrawPreview drag={drag} />}
               {moveGhost && (
                 <g data-testid="drag-move-preview">
@@ -2937,6 +3197,18 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
           />
           {viewportProperties?.(selectedViewport.view.id)}
           </>
+        ) : selectedMarkup && alsoPicked.length === 0 ? (
+          <MarkupProperties
+            item={selectedMarkup}
+            canEdit={canEdit}
+            blockedReason={blockedReason}
+            onUpdate={(patch) =>
+              send({ type: 'update_sheet_markup', itemId: selectedMarkup.id, ...patch }, 'update sheet markup')
+            }
+            onDelete={() => {
+              if (send({ type: 'delete_drawing_item', itemId: selectedMarkup.id }, 'delete sheet markup')) setSelection(null)
+            }}
+          />
         ) : selectedItem?.callout && alsoPicked.length === 0 ? (
           <CalloutProperties
             item={selectedItem}

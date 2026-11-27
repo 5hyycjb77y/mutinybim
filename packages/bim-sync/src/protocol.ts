@@ -42,6 +42,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
   /** Change the loaded areas; the server sends only partitions not already covered. */
   z.object({ type: z.literal("interest"), interest: interestSchema }),
   z.object({ type: z.literal("command"), request: commandRequestSchema }),
+  z.object({ type: z.literal("read_save_receipt"), idempotencyKey: z.string().min(8).max(128), commandDigest: z.string().regex(/^[0-9a-f]{16}$/) }),
   z.object({
     type: z.literal("heartbeat"),
     lastRevision: z.number().int().min(0),
@@ -116,10 +117,12 @@ export type ServerMessage =
    */
   /** `protocol`: what this server stores and forwards (absent from servers before round 5: version 1, no features). */
   /** `branch`: present when this session is on a branch (servers advertising `branches:sessions`). */
-  | { readonly type: "welcome"; readonly model: import("@permitzip/bim-kernel").ModelState; readonly interest?: Interest; readonly durableRevision?: number; readonly protocol?: Protocol; readonly branch?: import("@permitzip/bim-kernel").BranchRef }
+  | { readonly type: "welcome"; readonly model: import("@permitzip/bim-kernel").ModelState; readonly interest?: Interest; readonly durableRevision?: number; readonly protocol?: Protocol; readonly branch?: import("@permitzip/bim-kernel").BranchRef; readonly canWrite?: boolean }
+  | { readonly type: "model_access"; readonly canWrite: boolean }
   /** `durable`: the server's durable revision when this was sent (may be below this changeset's). */
   | { readonly type: "changeset"; readonly changeset: import("@permitzip/bim-kernel").Changeset; readonly durable?: number }
   | { readonly type: "outcome"; readonly idempotencyKey: string; readonly outcome: import("./store").CommitOutcome }
+  | { readonly type: "save_receipt"; readonly idempotencyKey: string; readonly outcome: import("./store").CommitOutcome | null }
   /** `serverTime` (epoch ms) and the echoed `sentAt` let the client estimate its clock offset. */
   | { readonly type: "head"; readonly revision: number; readonly serverTime?: number; readonly sentAt?: number; readonly durable?: number }
   /** Revision `revision` committed with nothing inside your areas: keeps every client's revision count contiguous. */

@@ -16,7 +16,7 @@
  * Used by group-commit-kill.test.ts (small) and
  * scripts/perf/mutinybim/kill-drill.ts (25 and 50 editors).
  */
-import { BUILTIN_PART_TYPES, canonicalJson, type Actor, type BimElement, type Command } from "@permitzip/bim-kernel";
+import { builtinPartTypes, canonicalJson, type Actor, type BimElement, type Command } from "@permitzip/bim-kernel";
 import { FULL_BIM_TIERS, createFullBimModel } from "@permitzip/bim-first-party/seed";
 import { DurableLog, GroupCommitMemoryStore, Sequencer, SyncClient, SyncHub, type HubConnection } from "../../src";
 
@@ -103,7 +103,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 export async function runKillDrill(opts: KillDrillOptions): Promise<KillDrillReport> {
   const random = rng(opts.seed ?? 42);
-  const foundDiffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+  const foundDiffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
   if (!foundDiffuser) throw new Error("starter library has no air terminal");
   const diffuser = foundDiffuser;
   const log = new DurableLog(createFullBimModel({ ...FULL_BIM_TIERS.XS, modelId: "kill-drill" }), opts.writeDelayMs);

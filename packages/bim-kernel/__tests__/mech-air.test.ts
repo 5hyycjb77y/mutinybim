@@ -9,7 +9,7 @@
  * duct and no mounting plane.
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   DEFAULT_SETTINGS,
   FLEX_LENGTH_WARNING_MM,
   applyChangeset,
@@ -253,7 +253,7 @@ describe("outdoor air on built-in equipment (bug log #19)", () => {
   it("keeps earlier versions readable for models that placed them, and offers only the current ones", () => {
     expect(builtinPartType("builtin:rtu-5-ton@1")).toBeDefined();
     expect(builtinPartType("builtin:makeup-air-unit-480@1")).toBeDefined();
-    const offered = new Set(BUILTIN_PART_TYPES.map((t) => t.id));
+    const offered = new Set(builtinPartTypes().map((t) => t.id));
     expect(offered.has("builtin:rtu-5-ton@1")).toBe(false);
     expect(offered.has("builtin:rtu-5-ton@2")).toBe(true);
   });

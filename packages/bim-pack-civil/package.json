@@ -11,7 +11,7 @@
     "registry": "https://npm.pkg.github.com"
   },
   "type": "module",
-  "description": "MutinyBIM civil proof pack: storm catchments, inlets, manholes, outfalls and alignments, rational-method runoff carried down a gravity network. Built only through the add-on contract; imports no kernel source.",
+  "description": "MutinyBIM civil proof pack: storm catchments, inlets, manholes, outfalls and alignments, rational-method runoff on a gravity network, and LandXML TIN surfaces with prismoidal cut and fill. Built only through the add-on contract; imports no kernel source.",
   "exports": {
     ".": "./src/index.ts"
   },
