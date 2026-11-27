@@ -11,7 +11,7 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`PartBuilder.box`](#partbuilderbox): A box standing on the base.
 - [`PartBuilder.cylinder`](#partbuildercylinder): A cylinder along x, y or z (z stands on the base): a tank, a water heater, a fan.
 - [`PartBuilder.transition`](#partbuildertransition): A taper along x between two rectangular openings: width and height both change (fromHeight / toHeight), and offset moves the outlet.
-- [`PartBuilder.connector`](#partbuilderconnector): A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind and size.
+- [`PartBuilder.connector`](#partbuilderconnector): A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind, size, and `endType` (use exact add-on IDs for duct and pipe — e.g. `"mechanical.slip"`, `"mechanical.flanged"`, `"plumbing_gas.sweat"`, `"plumbing_gas.threaded"`, `"plumbing_gas.flare"`, `"mechanical.brazed"`; full live list via `bim_script_reference({ topic: "Connector end types" })`; omit `endType` for electrical `shape: "none"`).
 - [`PartBuilder.build`](#partbuilderbuild): The part-type definition, checked with the kernel's schema and part rules (a problem fails here, in the kernel's words).
 - [`PartBuilder.check`](#partbuildercheck): `build` plus the kernel's connector placement warnings (a part with warnings still saves).
 - [`PartBuilder.extrude`](#partbuilderextrude): Push a profile (any outline, with holes) straight out of its view between from and to; cut: true removes material instead.
@@ -28,6 +28,28 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`PartBuilder.connectorAt`](#partbuilderconnectorat): A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood.
 - [`PartBuilder.instanceParam`](#partbuilderinstanceparam): A value each placed copy carries for itself (a panel's name, its mains), with an optional default; shown in properties and schedules, not in the shape.
 - [`PartBuilder.draft`](#partbuilderdraft): The definition as built so far, unchecked.
+
+## Connector end types (`endType`)
+
+Exact `endType` IDs declared by the active first-party add-ons (read from `connectorEndTypeTable()`). Pass these on duct and pipe connectors; electrical connectors use `shape: "none"` with no `endType`.
+
+| Domain | `endType` ID | Label | Joins via |
+| --- | --- | --- | --- |
+| `pipe` | `plumbing_gas.threaded` | Threaded (NPT) | — |
+| `pipe` | `plumbing_gas.sweat` | Sweat (soldered) | `plumbing_gas.threaded` (sweat-to-thread adapter) |
+| `pipe` | `plumbing_gas.press` | Press | `plumbing_gas.threaded` (press-to-thread adapter) |
+| `pipe` | `plumbing_gas.no_hub` | No-hub coupling | `plumbing_gas.hub_gasket` (no-hub to hub adapter) |
+| `pipe` | `plumbing_gas.hub_gasket` | Hub and spigot, compression gasket | — |
+| `pipe` | `plumbing_gas.solvent_weld` | Solvent weld | `plumbing_gas.threaded` (threaded adapter) |
+| `pipe` | `plumbing_gas.pex_crimp` | PEX crimp ring | `plumbing_gas.threaded` (PEX-to-thread adapter) |
+| `pipe` | `plumbing_gas.pex_expansion` | PEX expansion | `plumbing_gas.threaded` (PEX-to-thread adapter) |
+| `pipe` | `plumbing_gas.fusion` | Socket fusion | `plumbing_gas.threaded` (transition fitting) |
+| `pipe` | `plumbing_gas.csst_mechanical` | CSST mechanical fitting | `plumbing_gas.threaded` (CSST termination fitting) |
+| `pipe` | `plumbing_gas.flare` | Flare (SAE 45°) | `plumbing_gas.threaded` (flare-to-thread adapter) |
+| `pipe` | `mechanical.brazed` | Brazed | `plumbing_gas.flare` (braze-to-flare adapter), `plumbing_gas.threaded` (braze-to-thread adapter) |
+| `duct` | `mechanical.slip` | Slip | `mechanical.flanged` (slip-to-flange adapter), `mechanical.formed_flange` (slip-to-flange adapter) |
+| `duct` | `mechanical.flanged` | Flanged | `mechanical.formed_flange` (companion flange) |
+| `duct` | `mechanical.formed_flange` | Formed flange (TDC / TDF) | — |
 
 ## PartBuilder.planSymbol
 
@@ -176,13 +198,13 @@ export default defineScript({
 
 ## PartBuilder.connector
 
-A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind and size. Faces are the first body's (envelope) or, with of "body", the box around everything built.
+A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind, size, and `endType` (use exact add-on IDs for duct and pipe — e.g. `"mechanical.slip"`, `"mechanical.flanged"`, `"plumbing_gas.sweat"`, `"plumbing_gas.threaded"`, `"plumbing_gas.flare"`, `"mechanical.brazed"`; full live list via `bim_script_reference({ topic: "Connector end types" })`; omit `endType` for electrical `shape: "none"`). Faces are the first body's (envelope) or, with of "body", the box around everything built.
 
 ```ts
 connector(face: Face, c: ConnectorSpec & { offset?: [Length, Length] }, of?: "envelope" | "body"): PartBuilder
 ```
 
-Topics: connector, duct connection, pipe connection, gas, electrical connection, power
+Topics: connector, endType, end type, duct connection, duct connector, pipe connection, pipe connector, gas, refrigerant, flare, brazed, electrical connection, power
 
 <details><summary>Example script</summary>
 
@@ -196,6 +218,8 @@ export default defineScript({
     const b = parts.part("Box", { type: "24", category: "generic" });
     b.box({ length: v.width, width: units.in(12), height: units.in(12) });
     b.connector("top", { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(12), height: units.in(8), endType: "mechanical.slip" });
+    b.connector("front", { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", shape: "round", diameter: units.in(0.75), endType: "plumbing_gas.sweat" });
+    b.connector("back", { id: "ref", label: "Refrigerant", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.375), endType: "plumbing_gas.flare" });
     b.connector("left", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none" });
     ctx.parts.define("acme.box.24", b.build());
   },
@@ -581,13 +605,13 @@ export default defineScript({
 
 ## PartBuilder.connectorAt
 
-A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood.
+A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood. Pass an exact add-on `endType` ID for duct and pipe connectors (see `bim_script_reference({ topic: "Connector end types" })`).
 
 ```ts
 connectorAt(c: ConnectorSpec & { at: [Length, Length, Length]; facing: Face }): PartBuilder
 ```
 
-Topics: connector, condensate, drain connection, exact position
+Topics: connector, endType, end type, pipe connector, duct connector, condensate, drain connection, refrigerant, flare, brazed, exact position
 
 <details><summary>Example script</summary>
 
@@ -600,7 +624,9 @@ export default defineScript({
   run(ctx, v) {
     const b = parts.part("Box", { type: "24", category: "generic" });
     b.box({ length: v.width, width: units.in(12), height: units.in(12) });
-    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "sanitary", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });
+    b.connectorAt({ id: "supply", label: "Supply air", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(10), height: units.in(6), at: [units.in(0), units.in(0), units.in(12)], facing: "top", endType: "mechanical.flanged" });
+    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "condensate", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });
+    b.connectorAt({ id: "line", label: "Refrigerant suction", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.5), at: [units.in(12), units.in(4), units.in(2)], facing: "front", endType: "plumbing_gas.flare" });
     ctx.parts.define("acme.box.24", b.build());
   },
 });

@@ -15,6 +15,14 @@ export { resolveAreaLevel, resolveLevelRef } from "./level-ref";
 export { registerBimScriptTools, approvalIo, SEALED_MACHINE_WORDS, type ScriptToolHelpers, type ScriptToolOptions } from "./scripts/tools";
 export { renderScriptRequests } from "./scripts/render-images";
 export {
+  HOST_STEP_TOOL_NAMES,
+  LEGACY_TOOL_SCRIPT_EQUIVALENTS,
+  appendLegacyToolNudge,
+  isHostStepTool,
+  legacyToolNudge,
+  withLegacyToolNudge,
+} from "./scripts/coverage";
+export {
   SCRIPT_APPLY_TOOL,
   SCRIPT_SAVE_PART_TYPE_TOOL,
   SCRIPT_TOOL_PACK_ID,

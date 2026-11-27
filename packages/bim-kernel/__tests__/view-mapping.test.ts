@@ -8,7 +8,7 @@
  * it cast onto a horizontal floor, so a section had no correct mapping at all.
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   DEFAULT_SETTINGS,
   buildViewPickIndex,
   buildViewScene,
@@ -39,7 +39,7 @@ const IN = 25.4;
 const NOW = () => "2026-10-20T00:00:00.000Z";
 const SA = { id: "sys-sa", kind: "supply_air" as const, name: "Supply Air 1" };
 const TRUNK = { shape: "rect" as const, width: 14 * IN, height: 10 * IN };
-const DIFFUSER = BUILTIN_PART_TYPES.find((t) => t.id === "builtin:supply-diffuser-24@1");
+const DIFFUSER = builtinPartTypes().find((t) => t.id === "builtin:supply-diffuser-24@1");
 
 let seq = 0;
 function apply(m: ModelState, command: Command): ModelState {

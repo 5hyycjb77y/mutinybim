@@ -377,3 +377,16 @@ Import existing and proposed LandXML 1.2 TIN surfaces into a civil-enabled model
 3. Report the earthwork quantities and any review/overlap issues with `ctx.report`.
 
 Uses: `ctx.edit`, `ctx.calc`, `ctx.report`
+
+## Connector end types
+
+Task: connector end types
+
+Exact connector endType IDs declared by active add-ons — pipe: plumbing_gas.threaded, plumbing_gas.sweat, plumbing_gas.press, plumbing_gas.no_hub, plumbing_gas.hub_gasket, plumbing_gas.solvent_weld, plumbing_gas.pex_crimp, plumbing_gas.pex_expansion, plumbing_gas.fusion, plumbing_gas.csst_mechanical, plumbing_gas.flare, mechanical.brazed; duct: mechanical.slip, mechanical.flanged, mechanical.formed_flange. Electrical connectors use shape: "none" with no endType.
+
+1. pipe: plumbing_gas.threaded (Threaded (NPT)), plumbing_gas.sweat (Sweat (soldered)) [via: plumbing_gas.threaded (sweat-to-thread adapter)], plumbing_gas.press (Press) [via: plumbing_gas.threaded (press-to-thread adapter)], plumbing_gas.no_hub (No-hub coupling) [via: plumbing_gas.hub_gasket (no-hub to hub adapter)], plumbing_gas.hub_gasket (Hub and spigot, compression gasket), plumbing_gas.solvent_weld (Solvent weld) [via: plumbing_gas.threaded (threaded adapter)], plumbing_gas.pex_crimp (PEX crimp ring) [via: plumbing_gas.threaded (PEX-to-thread adapter)], plumbing_gas.pex_expansion (PEX expansion) [via: plumbing_gas.threaded (PEX-to-thread adapter)], plumbing_gas.fusion (Socket fusion) [via: plumbing_gas.threaded (transition fitting)], plumbing_gas.csst_mechanical (CSST mechanical fitting) [via: plumbing_gas.threaded (CSST termination fitting)], plumbing_gas.flare (Flare (SAE 45°)) [via: plumbing_gas.threaded (flare-to-thread adapter)], mechanical.brazed (Brazed) [via: plumbing_gas.flare (braze-to-flare adapter), plumbing_gas.threaded (braze-to-thread adapter)].
+2. duct: mechanical.slip (Slip) [via: mechanical.flanged (slip-to-flange adapter), mechanical.formed_flange (slip-to-flange adapter)], mechanical.flanged (Flanged) [via: mechanical.formed_flange (companion flange)], mechanical.formed_flange (Formed flange (TDC / TDF)).
+3. Electrical connectors use domain: "electrical", systemKind: "power", shape: "none" and omit endType.
+4. Unknown or custom endType values are kept with an advisory warning so parts still preview and save, while declared IDs enable joint-compatibility and adapter checks.
+
+Uses: `PartBuilder.connector`, `PartBuilder.connectorAt`, `parts.part`

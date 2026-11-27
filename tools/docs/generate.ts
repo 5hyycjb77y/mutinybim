@@ -16,7 +16,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { FIRST_PARTY_ADDONS, installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { activePackSet, PACK_READ_POINT, type Pack } from "@permitzip/bim-kernel/packs";
 import { builtinCalcRegistry } from "@permitzip/bim-calc";
-import { KIT_ENTRIES, KIT_EXAMPLES, KIT_EXAMPLES_PATH, KIT_RECIPES, commandFields, kitDeclarations, scriptCommands, type KitEntry } from "@permitzip/bim-script";
+import { KIT_ENTRIES, KIT_EXAMPLES, KIT_EXAMPLES_PATH, KIT_RECIPES, commandFields, connectorEndTypesByDomain, connectorEndTypesRecipe, kitDeclarations, scriptCommands, type KitEntry } from "@permitzip/bim-script";
 import { BIM_TOOL_PACKS } from "@permitzip/bim-plugin";
 import { CORE_TOOL_BUDGET, LOCAL_SCHEMAS, createBimToolServer, toolFamily } from "@permitzip/bim-mcp";
 import { createLocalHost, startInMemoryModelServer, starterModel } from "@permitzip/bim-mcp/local";
@@ -95,7 +95,28 @@ function kitPages(files: Files): void {
       "</details>",
       "",
     ]);
-    files.set(`${REFERENCE_DIR}/script-kit/${p.file}.md`, page(p.title, `${p.about}\n\nEvery example below is a complete script that passes the kit's checks; the kit's tests run each one.`, [...toc, "", ...body]));
+    const extra: string[] = [];
+    if (p.file === "part-builder") {
+      const byDomain = connectorEndTypesByDomain();
+      if (byDomain.size > 0) {
+        extra.push(
+          "## Connector end types (`endType`)",
+          "",
+          "Exact `endType` IDs declared by the active first-party add-ons (read from `connectorEndTypeTable()`). Pass these on duct and pipe connectors; electrical connectors use `shape: \"none\"` with no `endType`.",
+          "",
+          "| Domain | `endType` ID | Label | Joins via |",
+          "| --- | --- | --- | --- |",
+        );
+        for (const [domain, rows] of byDomain) {
+          for (const r of rows) {
+            const via = r.joinsVia?.length ? r.joinsVia.map((v) => `\`${v.endType}\` (${v.fitting})`).join(", ") : "—";
+            extra.push(`| \`${domain}\` | \`${r.id}\` | ${cell(r.label)} | ${cell(via)} |`);
+          }
+        }
+        extra.push("");
+      }
+    }
+    files.set(`${REFERENCE_DIR}/script-kit/${p.file}.md`, page(p.title, `${p.about}\n\nEvery example below is a complete script that passes the kit's checks; the kit's tests run each one.`, [...toc, "", ...extra, ...body]));
   }
   const known = new Set(KIT_PAGES.map((p) => p.ns));
   const stray = [...new Set(KIT_ENTRIES.map(nsOf))].filter((ns) => !known.has(ns));
@@ -103,7 +124,7 @@ function kitPages(files: Files): void {
 }
 
 function recipesPage(): string {
-  const body = KIT_RECIPES.flatMap((r) => [
+  const body = [...KIT_RECIPES, connectorEndTypesRecipe()].flatMap((r) => [
     `## ${r.name}`,
     "",
     `Task: ${r.task}`,

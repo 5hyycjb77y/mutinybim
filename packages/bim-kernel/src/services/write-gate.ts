@@ -7,6 +7,7 @@ import { activeServiceRegistry, connectorDomainIds, isKnownLoadService, isKnownS
 import { peerReads } from "../elements/feature";
 import { CONNECTOR_END_TYPES_FEATURE, LINKS_DESIGN_FEATURE, PARTS_CONNECTOR_VALUES_FEATURE } from "./types";
 import { BUILTIN_CONNECTOR_IDS } from "./builtin";
+import { BUILTIN_LIBRARY_VERSION } from "../library/builtin";
 import { GEOMETRY_SOLID_PROGRAM_2_FEATURE, isPartModel2 } from "../part-model/schema-2";
 
 /**
@@ -135,13 +136,25 @@ export function serviceWriteRefusal(id: string, view: View, recordWords: string,
 
 const sameJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
-/** A part type's connectors this command added or changed: their domain must be drawable, and new `values` need the peer to read them. */
-function checkConnectors(next: Extract<BimElement, { kind: "part_type" }>, prior: BimElement | undefined): void {
+/** Whether `def` is a shipped starter/showcase type whose connector `endType` may downgrade cleanly for an older peer (matching `linkForPeer`). */
+export function downgradeShippedBuiltinEndTypes(typeId: string, def: Extract<BimElement, { kind: "part_type" }>["definition"]): Extract<BimElement, { kind: "part_type" }>["definition"] {
+  if (peerReads(CONNECTOR_END_TYPES_FEATURE)) return def;
+  const isShipped = def.source.kind === "builtin" && (def.source.libraryVersion === BUILTIN_LIBRARY_VERSION || typeId.startsWith("builtin:") || typeId.startsWith("showcase:"));
+  if (!isShipped || !def.connectors.some((c) => c.endType !== undefined)) return def;
+  return {
+    ...def,
+    connectors: def.connectors.map(({ endType: _endType, ...rest }) => rest),
+  };
+}
+
+/** A part type's connectors this command added or changed: their domain must be drawable, and new `values` / `endType` need the peer to read them. Shipped starter/showcase types downgrade cleanly for older peers by omitting `endType`, matching `linkForPeer`. */
+function checkConnectors(working: Record<string, BimElement>, next: Extract<BimElement, { kind: "part_type" }>, prior: BimElement | undefined): void {
   const before = new Map<string, PartConnector>(prior?.kind === "part_type" ? prior.definition.connectors.map((c) => [c.id, c]) : []);
   // The kernel's own connector domains draw whichever add-ons are on; a row may add a domain of its own.
   const domains: readonly string[] = [...BUILTIN_CONNECTOR_IDS, ...connectorDomainIds(registryInForce())];
   const name = recordName(next);
-  for (const c of next.definition.connectors) {
+  const downgraded = prior === undefined ? downgradeShippedBuiltinEndTypes(next.id, next.definition) : next.definition;
+  for (const c of downgraded.connectors) {
     const was = before.get(c.id);
     if (was?.domain !== c.domain && !domains.includes(c.domain)) {
       refuse("invalid_value", `${name}'s ${c.label} connects to "${c.domain}", which this version of the model can't draw. Use a duct, pipe or electrical connection`, [next.id]);
@@ -152,6 +165,7 @@ function checkConnectors(next: Extract<BimElement, { kind: "part_type" }>, prior
     const endTypeRefused = endTypeWriteRefusal(name, c.label, c.endType, was?.endType);
     if (endTypeRefused) refuse("invalid_value", endTypeRefused, [next.id]);
   }
+  if (downgraded !== next.definition) working[next.id] = { ...next, definition: downgraded };
 }
 
 /** A part type newly written with a solid program (part model schema 2) or a `script` source needs a peer that reads them; an older one can't store it. */
@@ -182,7 +196,7 @@ function checkTouched(base: Readonly<Record<string, BimElement>>, working: Recor
     const next = working[id];
     if (!next) continue;
     if (next.kind === "part_type") {
-      checkConnectors(next, base[id]);
+      checkConnectors(working, next, base[id]);
       checkSolidProgram(next, base[id]);
     }
     if (next.kind === "service_link") linkForPeer(working, next, base[id]);

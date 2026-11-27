@@ -2,7 +2,7 @@
  * @jest-environment node
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   applyChangeset,
   asElementId,
   canonicalJson,
@@ -31,7 +31,7 @@ import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 const NOW = () => "2026-10-19T00:00:00.000Z";
 const id = asElementId;
 function libraryType(pred: (t: LibraryEntry) => boolean): LibraryEntry {
-  const found = BUILTIN_PART_TYPES.find(pred);
+  const found = builtinPartTypes().find(pred);
   if (!found) throw new Error("starter library is missing a type");
   return found;
 }
@@ -111,11 +111,12 @@ function addTag(m: Model, targetId: string): ModelState {
 
 describe("starter library", () => {
   it("every built-in type is a valid definition with resolvable geometry and connectors", () => {
-    expect(BUILTIN_PART_TYPES.length).toBeGreaterThanOrEqual(12);
-    const categories = new Set(BUILTIN_PART_TYPES.map((t) => t.definition.category));
+    const all = builtinPartTypes();
+    expect(all.length).toBeGreaterThanOrEqual(12);
+    const categories = new Set(all.map((t) => t.definition.category));
     const wanted: PartCategory[] = ["air_terminal", "mechanical_equipment", "electrical_device", "electrical_equipment", "lighting_fixture", "plumbing_fixture"];
     for (const c of wanted) expect(categories.has(c)).toBe(true);
-    for (const t of BUILTIN_PART_TYPES) {
+    for (const t of all) {
       expect(partTypeDefinitionSchema.safeParse(t.definition).success).toBe(true);
       expect(partTypeIssues(t.definition)).toEqual([]);
       for (const prim of resolveGeometry(t.definition)) {

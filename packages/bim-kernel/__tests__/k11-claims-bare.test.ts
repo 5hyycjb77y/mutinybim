@@ -10,10 +10,10 @@
  * bare kernel slid a tap (or refused it as "no add-on lets a duct_segment
  * carry branches") and moved a unit with no add-on loaded.
  */
-import { DEFAULT_SETTINGS, SERVICE_POINT, builtinPartType, elementsOfKind, executeCommand, type Command, type LibraryEntry, type ModelState } from "../src";
+import { BUILTIN_LIBRARY_VERSION, DEFAULT_SETTINGS, PART_TYPE_POINT, SERVICE_POINT, builtinPartType, elementsOfKind, executeCommand, type Command, type LibraryEntry, type ModelState } from "../src";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { ELECTRICAL_MANIFEST, MECHANICAL_MANIFEST, PackSet, contribute, definePack, installedFirstPartyPacks, withPackSet } from "../src/packs";
-import { MECHANICAL_SERVICE_ROWS } from "@permitzip/bim-pack-mechanical";
+import { MECHANICAL_SERVICE_ROWS, mechanicalStarterTypes, supersededMechanicalStarterTypes } from "@permitzip/bim-pack-mechanical";
 import { ELECTRICAL_SERVICE_ROWS } from "@permitzip/bim-pack-electrical";
 
 const NOT_LOADED = "This model uses Mechanical, which isn't loaded here";
@@ -40,7 +40,16 @@ function run(m: ModelState, command: Command): ModelState {
  * claims below run with no add-on.
  */
 function routedAir(): ModelState {
-  const services = PackSet.create([definePack(ELECTRICAL_MANIFEST, [contribute(SERVICE_POINT, ELECTRICAL_SERVICE_ROWS)]), definePack(MECHANICAL_MANIFEST, [contribute(SERVICE_POINT, MECHANICAL_SERVICE_ROWS)])]);
+  const services = PackSet.create([
+    definePack(ELECTRICAL_MANIFEST, [contribute(SERVICE_POINT, ELECTRICAL_SERVICE_ROWS)]),
+    definePack(MECHANICAL_MANIFEST, [
+      contribute(SERVICE_POINT, MECHANICAL_SERVICE_ROWS),
+      contribute(PART_TYPE_POINT, [
+        ...mechanicalStarterTypes(BUILTIN_LIBRARY_VERSION).map((entry) => ({ entry })),
+        ...supersededMechanicalStarterTypes(BUILTIN_LIBRARY_VERSION).map((entry) => ({ entry, superseded: true })),
+      ]),
+    ]),
+  ]);
   return withPackSet(services, drawRoutedAir);
 }
 

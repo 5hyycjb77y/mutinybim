@@ -1006,7 +1006,10 @@ export function connectPage(config: WebConfig, user: UserRow, view: ConnectView,
           </li>
         </ul>
         <CardDescription>
-          Your assistant opens a MutinyBIM sign-in page: log in and press Allow. No key to copy. It starts with the core tools (ten at most); ask it to turn on a tool family when a job needs one, or connect a family directly at <Code>{`${config.origin}/packs/<family>/mcp`}</Code> (for example <Code>{`${config.origin}/packs/electrical/mcp`}</Code>).
+          Your assistant opens a MutinyBIM sign-in page: log in and press Allow. No key to copy. It starts with the core tools (ten at most): <strong>@permitzip/bim-script</strong> is the primary AI capability layer, and 138 of the 159 legacy pack tools are already covered by scripts. Legacy single-purpose MCP packs are being retired and no new MCP tools will be added.
+        </CardDescription>
+        <CardDescription>
+          Only 21 tools remain genuine host steps (rendering view/sheet images, printing PDFs, issuing sets, firm and schedule libraries, Autodesk Docs, and lint settings). Turn on a family with <Code>bim_enable_pack</Code> only when you need one of those host steps — or, for clients that do not dynamically refresh tool lists (such as Claude remote connectors), connect directly to <Code>{`${config.origin}/packs/<family>/mcp`}</Code> (for example <Code>{`${config.origin}/packs/model/mcp`}</Code> for rendering/printing).
         </CardDescription>
         <CardDescription>
           When your assistant can't ask you itself, its changes wait on <a href="/approvals">Approvals</a> until you press Approve. Its scripts run here in a sealed box with no network; a script only previews until you approve what it does.

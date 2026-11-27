@@ -14,10 +14,13 @@
  *   node --import tsx services/bim-authority/drills/parts-store.ts
  */
 import { randomUUID } from "node:crypto";
-import { BUILTIN_PART_TYPES, canonicalJson, type Command, type ModelState } from "@permitzip/bim-kernel";
+import { builtinPartTypes, canonicalJson, type Command, type ModelState } from "@permitzip/bim-kernel";
+import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { Sequencer, type CommitOutcome } from "@permitzip/bim-sync";
 import { PostgresCommitStore, connect } from "../src/pg-store";
+
+installFirstPartyAddOns();
 
 const url = process.env.BIM_PARTS_DRILL_DB_URL;
 if (!url) throw new Error("Set BIM_PARTS_DRILL_DB_URL to a throwaway database on this machine");
@@ -61,7 +64,7 @@ async function main(): Promise<void> {
       const head = await store.head();
       return sequencer.submit({ idempotencyKey: `${MODEL}-step-${n}`, baseRevision: base ?? head.revision, actor, command, clientSessionId: "drill" });
     };
-    const diffuser = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+    const diffuser = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
     if (!diffuser) throw new Error("no air terminal in the starter library");
 
     const level = await send({ type: "create_level", levelId: "lvl-1", name: "Level 1", elevationMm: 0 });

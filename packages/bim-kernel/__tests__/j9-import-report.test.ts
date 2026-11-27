@@ -32,16 +32,23 @@ describe("j9-import-report", () => {
     expect(rows).toEqual(
       expect.arrayContaining([
         ["In", "no_service", "In carries no system", "Choose the system In carries"],
-        ["In", "no_end_type", "In has no end type", "Choose In's end type (slip, flanged or formed flange (TDC / TDF))"],
+        ["In", "no_end_type", "In has no end type", "Choose In's end type (mechanical.slip (slip), mechanical.flanged (flanged) or mechanical.formed_flange (formed flange (TDC / TDF)))"],
         ["Out", "wrong_facing", "Out points nowhere (its direction is zero)", "Set Out's direction to point out of the part"],
-        ["Out", "end_type_wrong_domain", "Out takes pipe, but a slip end is made for duct", "Choose an end type made for pipe"],
+        ["Out", "end_type_wrong_domain", "Out takes pipe, but a slip end (mechanical.slip) is made for duct", expect.stringMatching(/^Choose an end type made for pipe \(.*plumbing_gas\.sweat.*plumbing_gas\.flare.*mechanical\.brazed.*\)$/)],
       ]),
     );
   });
 
-  it("an end type no add-on declares is kept and reported", () => {
+  it("an end type no add-on declares is kept and reported with valid ids for its domain", () => {
     const report = partTypeImportReport(straightPiece("Odd", { endType: "firm.mystery_end" }));
     expect(report.problems.map((p) => p.check)).toEqual(["unknown_end_type", "unknown_end_type"]);
+    expect(report.problems[0]?.nextStep).toContain("mechanical.slip");
+    expect(report.problems[0]?.nextStep).toContain("mechanical.flanged");
+
+    const pipeReport = partTypeImportReport(straightPiece("Odd pipe", { domain: "pipe", systemKind: "refrigerant", endType: "pipe.flare" }));
+    expect(pipeReport.problems.map((p) => p.check)).toEqual(["unknown_end_type", "unknown_end_type"]);
+    expect(pipeReport.problems[0]?.nextStep).toContain("plumbing_gas.flare");
+    expect(pipeReport.problems[0]?.nextStep).toContain("mechanical.brazed");
   });
 
   it("a connector facing into the part is reported from its placement check", () => {

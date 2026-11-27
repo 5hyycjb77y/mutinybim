@@ -27,4 +27,5 @@ export const PIPE_END_TYPES: readonly ConnectorEndTypeItem[] = [
   pipe("pex_expansion", "PEX expansion", toThread("PEX-to-thread adapter")),
   pipe("fusion", "Socket fusion", toThread("transition fitting")),
   pipe("csst_mechanical", "CSST mechanical fitting", toThread("CSST termination fitting")),
+  pipe("flare", "Flare (SAE 45°)", toThread("flare-to-thread adapter")),
 ];

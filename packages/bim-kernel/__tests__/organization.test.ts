@@ -7,7 +7,7 @@
  * phase filter.
  */
 import {
-  BUILTIN_PART_TYPES,
+  builtinPartTypes,
   DEFAULT_GROUP_ID,
   DEFAULT_PHASE_ID,
   PHASE_DASH,
@@ -77,7 +77,7 @@ class Model {
   }
 }
 
-const DIFFUSER = BUILTIN_PART_TYPES.find((t) => t.definition.category === "air_terminal");
+const DIFFUSER = builtinPartTypes().find((t) => t.definition.category === "air_terminal");
 if (!DIFFUSER) throw new Error("starter library has no air terminal");
 
 type Line = Extract<Primitive, { kind: "line" }>;

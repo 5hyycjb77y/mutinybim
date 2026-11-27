@@ -63,13 +63,13 @@ Water, drainage, vent and fuel gas networks; fixture units; plumbing and gas siz
 | Add-on library rows | 4 |
 | Agent tools | 3 |
 | Block tables | 1 |
-| Built-in part types | 39 |
+| Built-in part types | 41 |
 | Calculation sheets | 3 |
 | Calculations | 14 |
 | Catalog record types | 2 |
 | Commands | 4 |
 | Connection quantity checks | 1 |
-| Connector end types | 10 |
+| Connector end types | 11 |
 | Design limit defaults | 9 |
 | Design limit measures | 1 |
 | Diagram graphs | 2 |
@@ -109,9 +109,10 @@ Air and hydronic networks served by equipment; ventilation and pressurization.
 | --- | --- |
 | Add-on library rows | 3 |
 | Block tables | 2 |
+| Built-in part types | 9 |
 | Calculations | 5 |
 | Commands | 6 |
-| Connector end types | 3 |
+| Connector end types | 4 |
 | Connector faces | 1 |
 | Design limit defaults | 1 |
 | Diagram graphs | 1 |

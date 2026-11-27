@@ -15,13 +15,15 @@ import {
   LINT_RULE_POINT,
   NETWORK_ADAPTER_POINT,
   PACK_READ_POINT,
+  PART_TYPE_POINT,
   PRESSURE_TARGET_POINT,
   TAG_FIELD_ALIAS_POINT,
   TAG_STYLE_PRESET_POINT,
   type ErasedContribution,
   type Pack,
 } from "@permitzip/bim-pack/runtime";
-import { guard, isDuctDesignCommand, ductDesignCommandSchemas, refuse, type BlockTableDef, type FieldProviderRow, type NetworkAdapterItem, type PackCommandDef, type PressureTargetRow, type TagFieldAliasRow, type TagStylePresetRow } from "@permitzip/bim-kernel";
+import { BUILTIN_LIBRARY_VERSION, guard, isDuctDesignCommand, ductDesignCommandSchemas, refuse, type BlockTableDef, type FieldProviderRow, type NetworkAdapterItem, type PackCommandDef, type PressureTargetRow, type TagFieldAliasRow, type TagStylePresetRow } from "@permitzip/bim-kernel";
+import { mechanicalStarterPartTypeRows } from "./library/mechanical";
 import { MECHANICAL_MANIFEST } from "@permitzip/bim-kernel/packs";
 import { CONNECTOR_FACE_POINT, CONNECTOR_END_TYPE_POINT, DISCIPLINE_POINT, ELEMENT_KIND_POINT, FITTING_FAMILY_POINT, LIBRARY_ROWS_POINT, LINKED_PLAN_DISPLAY_POINT, LINKED_REFERENCE_POINT, LOAD_SECTION_POINT, SERVICE_LINE_CODE_POINT, SERVICE_POINT, SYMBOL_POINT } from "@permitzip/bim-kernel";
 import { MECHANICAL_DETAIL_SYMBOLS } from "./detail-symbols";
@@ -142,6 +144,7 @@ export const MECHANICAL_CONTRIBUTIONS: readonly ErasedContribution[] = [
   contribute(SERVICE_LINE_CODE_POINT, MECHANICAL_SERVICE_LINE_CODES),
   contribute(LOAD_SECTION_POINT, [MECHANICAL_AIR_LOAD_SECTION]),
   contribute(CONNECTOR_END_TYPE_POINT, MECHANICAL_END_TYPES),
+  contribute(PART_TYPE_POINT, mechanicalStarterPartTypeRows(BUILTIN_LIBRARY_VERSION)),
   contribute(COMMAND_POINT, [...INSULATION_COMMANDS, TERMINAL_AIRFLOW_COMMAND, ...MECHANICAL_LEGACY_COMMANDS]),
   contribute(BLOCK_TABLE_POINT, TABLES),
   ventilationReaderContribution(OUTDOOR_AIR_ENGINE),

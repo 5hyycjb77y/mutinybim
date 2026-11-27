@@ -291,10 +291,11 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "PartBuilder.connector",
-    summary: "A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind and size. Faces are the first body's (envelope) or, with of \"body\", the box around everything built.",
+    summary:
+      'A connector on a face, pointing out of it: duct, pipe, gas or electrical, with its system kind, size, and `endType` (use exact add-on IDs for duct and pipe — e.g. `"mechanical.slip"`, `"mechanical.flanged"`, `"plumbing_gas.sweat"`, `"plumbing_gas.threaded"`, `"plumbing_gas.flare"`, `"mechanical.brazed"`; full live list via `bim_script_reference({ topic: "Connector end types" })`; omit `endType` for electrical `shape: "none"`). Faces are the first body\'s (envelope) or, with of "body", the box around everything built.',
     signature: "connector(face: Face, c: ConnectorSpec & { offset?: [Length, Length] }, of?: \"envelope\" | \"body\"): PartBuilder",
-    example: part(`${BOX}\n    b.connector("top", { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(12), height: units.in(8), endType: "mechanical.slip" });\n    b.connector("left", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none" });\n    ctx.parts.define("acme.box.24", b.build());`),
-    topics: ["connector", "duct connection", "pipe connection", "gas", "electrical connection", "power"],
+    example: part(`${BOX}\n    b.connector("top", { id: "supply", label: "Supply", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(12), height: units.in(8), endType: "mechanical.slip" });\n    b.connector("front", { id: "cw", label: "Cold water", domain: "pipe", systemKind: "domestic_cold_water", shape: "round", diameter: units.in(0.75), endType: "plumbing_gas.sweat" });\n    b.connector("back", { id: "ref", label: "Refrigerant", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.375), endType: "plumbing_gas.flare" });\n    b.connector("left", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none" });\n    ctx.parts.define("acme.box.24", b.build());`),
+    topics: ["connector", "endType", "end type", "duct connection", "duct connector", "pipe connection", "pipe connector", "gas", "refrigerant", "flare", "brazed", "electrical connection", "power"],
   },
   {
     name: "PartBuilder.build",
@@ -417,10 +418,11 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "PartBuilder.connectorAt",
-    summary: "A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood.",
+    summary:
+      'A connector at an exact point of the part (x to the front, y to the left, z up), facing out of a face: an outlet on a section, a stub on a hood. Pass an exact add-on `endType` ID for duct and pipe connectors (see `bim_script_reference({ topic: "Connector end types" })`).',
     signature: "connectorAt(c: ConnectorSpec & { at: [Length, Length, Length]; facing: Face }): PartBuilder",
-    example: part(`${BOX}\n    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "sanitary", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });\n    ctx.parts.define("acme.box.24", b.build());`),
-    topics: ["connector", "condensate", "drain connection", "exact position"],
+    example: part(`${BOX}\n    b.connectorAt({ id: "supply", label: "Supply air", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(10), height: units.in(6), at: [units.in(0), units.in(0), units.in(12)], facing: "top", endType: "mechanical.flanged" });\n    b.connectorAt({ id: "drain", label: "Condensate drain", domain: "pipe", systemKind: "condensate", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(-4), units.in(2)], facing: "front", endType: "plumbing_gas.threaded" });\n    b.connectorAt({ id: "line", label: "Refrigerant suction", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.5), at: [units.in(12), units.in(4), units.in(2)], facing: "front", endType: "plumbing_gas.flare" });\n    ctx.parts.define("acme.box.24", b.build());`),
+    topics: ["connector", "endType", "end type", "pipe connector", "duct connector", "condensate", "drain connection", "refrigerant", "flare", "brazed", "exact position"],
   },
   {
     name: "PartBuilder.instanceParam",

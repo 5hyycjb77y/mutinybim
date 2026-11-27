@@ -64,7 +64,7 @@
       "duct": 1
     },
     "packages/bim-kernel/src/annotation/detailing.ts": {
-      "duct": 11,
+      "duct": 12,
       "electrical": 2,
       "conductor": 1,
       "mechanical": 3
@@ -292,7 +292,7 @@
       "plumbing": 1
     },
     "packages/bim-kernel/src/documents.ts": {
-      "duct": 5,
+      "duct": 4,
       "electrical": 2,
       "fixture": 2,
       "panel": 1,
@@ -305,7 +305,7 @@
       "duct": 1
     },
     "packages/bim-kernel/src/drawing/runs.ts": {
-      "duct": 18,
+      "duct": 17,
       "conduit": 1,
       "vent": 1,
       "gas": 1
@@ -319,8 +319,8 @@
       "conduit": 2
     },
     "packages/bim-kernel/src/drawing/views.ts": {
-      "duct": 9,
-      "circuit": 2
+      "duct": 10,
+      "circuit": 1
     },
     "packages/bim-kernel/src/fields/params.ts": {
       "panel": 1
@@ -395,25 +395,14 @@
       "conductor": 1
     },
     "packages/bim-kernel/src/library/builtin.ts": {
-      "voltage": 30,
+      "voltage": 18,
       "electrical": 4,
-      "cfm": 30,
-      "diffuser": 2,
-      "airflow": 17,
-      "duct": 15,
-      "gas": 1,
-      "mechanical": 3,
-      "circuit": 15,
-      "ampacity": 1,
-      "ventilation": 2,
       "receptacle": 2,
+      "circuit": 14,
       "panel": 5,
       "panelboard": 3,
       "feeder": 1,
-      "fixture": 9,
-      "plumbing": 2,
-      "drainage": 2,
-      "sanitary": 2
+      "fixture": 1
     },
     "packages/bim-kernel/src/library/revit-convert.ts": {
       "duct": 21,

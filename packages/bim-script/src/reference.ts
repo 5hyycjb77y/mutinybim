@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COMMAND_POINT, commandSchema } from "@permitzip/bim-kernel";
+import { COMMAND_POINT, commandSchema, connectorEndTypeTable, type ConnectorEndTypeItem } from "@permitzip/bim-kernel";
 import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { KIT_EXAMPLES, KIT_EXAMPLES_PATH } from "./examples";
 import { stepRefusal } from "./output";
@@ -138,12 +138,97 @@ const STOP = new Set(["a", "an", "the", "i", "do", "how", "to", "make", "with", 
 const GENERIC_COMMAND_VERBS = new Set(["add", "create", "define", "delete", "edit", "get", "list", "put", "register", "remove", "save", "set", "update"]);
 
 function words(text: string): string[] {
-  return text
+  const splitCamel = text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  const raw = `${text} ${splitCamel}`
     .toLowerCase()
     .replace(/[^a-z0-9_. -]+/g, " ")
     .split(/[\s._-]+/)
     .map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w))
     .filter((w) => w.length > 1 && !STOP.has(w));
+  return [...new Set(raw)];
+}
+
+/** Active connector end types grouped by domain, read live from `connectorEndTypeTable()`. */
+export function connectorEndTypesByDomain(): ReadonlyMap<string, readonly ConnectorEndTypeItem[]> {
+  const table = connectorEndTypeTable();
+  const byDomain = new Map<string, ConnectorEndTypeItem[]>();
+  for (const id of table.ids) {
+    const row = table.row(id);
+    if (!row) continue;
+    const domains = row.domains && row.domains.length > 0 ? row.domains : ["any"];
+    for (const domain of domains) {
+      const list = byDomain.get(domain) ?? [];
+      list.push(row);
+      byDomain.set(domain, list);
+    }
+  }
+  return byDomain;
+}
+
+/** Live reference recipe for connector `endType` IDs from the active add-ons' `connectorEndTypeTable()`. */
+export function connectorEndTypesRecipe(): KitRecipe {
+  const byDomain = connectorEndTypesByDomain();
+  const formatRow = (r: ConnectorEndTypeItem): string => {
+    const via = r.joinsVia?.length ? ` [via: ${r.joinsVia.map((v) => `${v.endType} (${v.fitting})`).join(", ")}]` : "";
+    return `${r.id} (${r.label})${via}`;
+  };
+  const domainSteps: string[] = [];
+  const summaryParts: string[] = [];
+  const dynamicTopics: string[] = [
+    "endType",
+    "end type",
+    "end types",
+    "connector",
+    "connector end type",
+    "pipe connector",
+    "duct connector",
+    "refrigerant",
+    "mini-split",
+    "line set",
+    "joint",
+    "fitting",
+  ];
+  for (const [domain, rows] of byDomain) {
+    domainSteps.push(`${domain}: ${rows.map(formatRow).join(", ")}.`);
+    summaryParts.push(`${domain}: ${rows.map((r) => r.id).join(", ")}`);
+    dynamicTopics.push(domain, `${domain} connector`);
+    for (const r of rows) dynamicTopics.push(r.id, r.label);
+  }
+  const ductExampleId = byDomain.get("duct")?.[0]?.id ?? "mechanical.slip";
+  const pipeRows = byDomain.get("pipe") ?? [];
+  const pipeExampleId = pipeRows.find((r) => r.id.endsWith(".flare"))?.id ?? pipeRows[0]?.id ?? "plumbing_gas.threaded";
+  const pipeWaterId = pipeRows.find((r) => r.id.endsWith(".sweat"))?.id ?? pipeExampleId;
+  return {
+    name: "Connector end types",
+    task: "connector end types",
+    summary:
+      summaryParts.length > 0
+        ? `Exact connector endType IDs declared by active add-ons — ${summaryParts.join("; ")}. Electrical connectors use shape: "none" with no endType.`
+        : 'Pass exact connector endType IDs declared by active add-ons on duct and pipe connectors. Electrical connectors use shape: "none" with no endType.',
+    steps: [
+      ...(domainSteps.length > 0 ? domainSteps : ["No add-on end types are active in this pack set."]),
+      'Electrical connectors use domain: "electrical", systemKind: "power", shape: "none" and omit endType.',
+      "Unknown or custom endType values are kept with an advisory warning so parts still preview and save, while declared IDs enable joint-compatibility and adapter checks.",
+    ],
+    uses: ["PartBuilder.connector", "PartBuilder.connectorAt", "parts.part"],
+    topics: [...new Set(dynamicTopics)],
+    example: `import { defineScript, units, parts } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "part",
+  reads: {},
+  parameters: {},
+  run(ctx) {
+    const b = parts.part("Mini-split indoor unit", { type: "12 MBH", category: "mechanical_equipment" });
+    b.box({ length: units.in(32), width: units.in(8), height: units.in(11) });
+    b.connector("bottom", { id: "supply", label: "Supply air", domain: "duct", systemKind: "supply_air", shape: "rect", width: units.in(26), height: units.in(4), endType: "${ductExampleId}" });
+    b.connectorAt({ id: "liquid", label: "Refrigerant liquid", domain: "pipe", systemKind: "refrigerant", shape: "round", diameter: units.in(0.25), at: [units.in(-12), units.in(4), units.in(3)], facing: "left", endType: "${pipeExampleId}" });
+    b.connectorAt({ id: "condensate", label: "Condensate drain", domain: "pipe", systemKind: "condensate", shape: "round", diameter: units.in(0.75), at: [units.in(12), units.in(4), units.in(2)], facing: "left", endType: "${pipeWaterId}" });
+    b.connector("right", { id: "power", label: "Power", domain: "electrical", systemKind: "power", shape: "none", voltage: 208, poles: 2 });
+    ctx.parts.define("acme.minisplit.12", b.build());
+  },
+});
+`,
+  };
 }
 
 /** Closest `ctx.edit` commands to a query or guessed command name (e.g. `"add_sheet_note"` → `create_text_note`). */
@@ -187,11 +272,18 @@ export function searchCommands(query: string, limit = 6): readonly CommandEntry[
 
 function score(query: readonly string[], phrase: string, fields: readonly { readonly text: string; readonly weight: number }[]): number {
   let total = 0;
+  const matched = new Set<string>();
   for (const f of fields) {
     const have = new Set(words(f.text));
-    for (const q of query) if (have.has(q)) total += f.weight;
+    for (const q of query) {
+      if (have.has(q)) {
+        total += f.weight;
+        matched.add(q);
+      }
+    }
     if (phrase.length > 3 && f.text.toLowerCase().includes(phrase)) total += f.weight * 2;
   }
+  if (matched.size > 1) total += (matched.size - 1) * 4;
   return total;
 }
 
@@ -201,7 +293,8 @@ export function searchReference(query: string, limit = 8): readonly ReferenceHit
   const phrase = query.toLowerCase().trim();
   if (q.length === 0) return [];
   const hits: { hit: ReferenceHit; score: number }[] = [];
-  for (const r of KIT_RECIPES) {
+  const recipes = [...KIT_RECIPES, connectorEndTypesRecipe()];
+  for (const r of recipes) {
     const s = score(q, phrase, [{ text: r.topics.join(" "), weight: 4 }, { text: r.task, weight: 4 }, { text: r.name, weight: 3 }, { text: r.summary, weight: 1 }]);
     if (s > 0) hits.push({ hit: { kind: "recipe", name: r.name, task: r.task, summary: r.summary, steps: r.steps, uses: r.uses, example: r.example }, score: s + 1 });
   }
@@ -670,7 +763,7 @@ export function referenceMarkdown(): string {
     "## Recipes",
     "",
   ];
-  for (const r of KIT_RECIPES) out.push(`### ${r.name}`, "", r.summary, "", ...r.steps.map((s, i) => `${i + 1}. ${s}`), "", `Uses: ${r.uses.map((u) => `\`${u}\``).join(", ")}`, "");
+  for (const r of [...KIT_RECIPES, connectorEndTypesRecipe()]) out.push(`### ${r.name}`, "", r.summary, "", ...r.steps.map((s, i) => `${i + 1}. ${s}`), "", `Uses: ${r.uses.map((u) => `\`${u}\``).join(", ")}`, "");
   out.push("## Kit functions", "");
   for (const e of KIT_ENTRIES) out.push(`### \`${e.name}\``, "", e.summary, "", "```ts", e.signature, "```", "", "```ts", e.example.trimEnd(), "```", "");
   out.push("## Commands (`ctx.edit`)", "");

@@ -16,6 +16,7 @@ import {
   partTypeIssues,
 } from "./parts";
 import { GLOBAL_PARTITION, disciplineSchema } from "./partition";
+import { downgradeShippedBuiltinEndTypes } from "./services/write-gate";
 import { authoredFieldValue, finish, refuse, type AuthoredWrite, type ExecuteResult, type IntentPredicate } from "./command-core";
 import { elementKindTable, type ElementKindItem, type ElementKindValue } from "./registry/element-kind-point";
 import { kindRowOf, storedField, writeKindValue } from "./kinds";
@@ -309,7 +310,8 @@ function partTypeFor(reader: TrackedReader, working: Record<string, BimElement>,
   const existing = reader.find(typeId);
   if (existing) {
     const type = requireKind(existing, "part_type");
-    if (command.partType && canonicalJson(command.partType) !== canonicalJson(type.definition)) {
+    const incoming = command.partType ? downgradeShippedBuiltinEndTypes(command.typeId, command.partType) : undefined;
+    if (incoming && canonicalJson(incoming) !== canonicalJson(type.definition)) {
       refuse("already_exists", `This model already has a different part type with id ${command.typeId}; ${verb} that one or use a new type id`, [typeId]);
     }
     return type;

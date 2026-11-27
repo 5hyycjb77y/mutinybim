@@ -395,10 +395,13 @@ export interface ConverterConnectorNote {
 
 const isPlaceholderService = (kind: string): boolean => kind === "other" || kind.length === 0;
 
-function choiceWords(labels: readonly string[]): string {
-  const words = labels.map((l) => endTypeWords({ label: l }));
-  if (words.length <= 1) return words.join("");
-  return `${words.slice(0, -1).join(", ")} or ${words[words.length - 1]}`;
+function endTypeChoices(table: ReturnType<typeof connectorEndTypeTable>, domain: string): string {
+  const items = table
+    .forDomain(domain)
+    .filter((r) => r.domains !== undefined)
+    .map((r) => `${r.id} (${endTypeWords(r)})`);
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
 }
 
 /**
@@ -435,13 +438,27 @@ export function partImportReport(
     }
     if (c.endType === undefined) {
       if (table.declaresDomain(c.domain)) {
-        const choices = table.forDomain(c.domain).filter((r) => r.domains !== undefined).map((r) => r.label);
-        add(c, "no_end_type", `${label} has no end type`, `Choose ${label}'s end type (${choiceWords(choices)})`);
+        const choices = endTypeChoices(table, c.domain);
+        add(c, "no_end_type", `${label} has no end type`, `Choose ${label}'s end type (${choices})`);
       }
     } else {
       const row = table.row(c.endType);
-      if (!row) add(c, "unknown_end_type", `${label}'s end type "${c.endType}" isn't one the add-ons here declare; it is kept, but nothing checks what it joins`, `Choose one of the end types listed for ${label}, or turn on the add-on that declares it`);
-      else if (row.domains !== undefined && !row.domains.includes(c.domain)) add(c, "end_type_wrong_domain", `${label} takes ${c.domain}, but ${articleFor(endTypeWords(row))} ${endTypeWords(row)} end is made for ${row.domains.join(" or ")}`, `Choose an end type made for ${c.domain}`);
+      const valid = table.declaresDomain(c.domain) ? endTypeChoices(table, c.domain) : "";
+      if (!row) {
+        add(
+          c,
+          "unknown_end_type",
+          `${label}'s end type "${c.endType}" isn't one the add-ons here declare; it is kept, but nothing checks what it joins`,
+          valid ? `Choose one of the ${c.domain} end types (${valid}), or turn on the add-on that declares it` : `Choose one of the end types listed for ${label}, or turn on the add-on that declares it`,
+        );
+      } else if (row.domains !== undefined && !row.domains.includes(c.domain)) {
+        add(
+          c,
+          "end_type_wrong_domain",
+          `${label} takes ${c.domain}, but ${articleFor(endTypeWords(row))} ${endTypeWords(row)} end (${row.id}) is made for ${row.domains.join(" or ")}`,
+          valid ? `Choose an end type made for ${c.domain} (${valid})` : `Choose an end type made for ${c.domain}`,
+        );
+      }
     }
   }
   for (const warning of options.placement ?? []) {

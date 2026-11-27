@@ -15,14 +15,14 @@
  * changeset carried every changed element's whole body (and its whole
  * `before` record for undo).
  */
-import { BUILTIN_PART_TYPES, canonicalJson, type Actor, type Changeset, type Command, type CommandRequest, type LibraryEntry, type ModelState } from "@permitzip/bim-kernel";
+import { builtinPartTypes, canonicalJson, type Actor, type Changeset, type Command, type CommandRequest, type LibraryEntry, type ModelState } from "@permitzip/bim-kernel";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { InMemoryCommitStore, Sequencer, changesetPatch, diffRecord, jsonBytes, replayChangesetPatch } from "../src";
 
 const avery: Actor = { id: "user-avery", name: "Avery", kind: "human" };
 
 function libraryType(category: string): LibraryEntry {
-  const found = BUILTIN_PART_TYPES.find((t) => t.definition.category === category);
+  const found = builtinPartTypes().find((t) => t.definition.category === category);
   if (!found) throw new Error(`no ${category} in the starter library`);
   return found;
 }

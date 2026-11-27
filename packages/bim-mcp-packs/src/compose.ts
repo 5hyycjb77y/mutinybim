@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolveNecEdition } from "@permitzip/bim-calc";
 import type { Registry } from "@permitzip/bim-kernel";
+import { withLegacyToolNudge } from "@permitzip/bim-mcp";
 import { area, baseRevision, editAs, readAs, target, type Extra, type ResolveBimCaller } from "./runtime";
 import type { Capability } from "./capabilities";
 import { registerBimCalcTools } from "./calc/calc";
@@ -75,8 +76,9 @@ function isExtra(value: unknown): value is Extra {
 }
 
 export function registerBimToolPacks(rawServer: McpServer, host: BimToolPacksHost): void {
-  // A tool that names one element takes `element_id` too; every tool says whether it changes the model (MCP annotations).
-  const server = withElementIdAlias(withBimToolAnnotations(rawServer));
+  // A tool that names one element takes `element_id` too; every tool says whether it changes the model (MCP annotations);
+  // script-covered legacy tools append a retirement hint steering agents to @permitzip/bim-script first.
+  const server = withElementIdAlias(withBimToolAnnotations(withLegacyToolNudge(rawServer)));
   const { caller } = host;
   registerBimLintTools(server, caller, host.lint);
   registerBimViewTools(server, caller, host.views);

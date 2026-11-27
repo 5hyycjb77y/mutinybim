@@ -17,6 +17,7 @@ import {
   checkScriptOutput,
   checkScriptSource,
   commandFields,
+  connectorEndTypesRecipe,
   evaluateClashReport,
   kitUseWarnings,
   lintScript,
@@ -459,13 +460,25 @@ function stoppedBody(stopped: Extract<ScriptRunResult, { ok: false }>, repeated:
 
 function checkLines(check: OutputCheck) {
   if (check.kind === "part_types") {
-    // Types with problems first, so a cap never hides one.
-    const types = [...check.types].sort((a, b) => Number(b.problems.length > 0) - Number(a.problems.length > 0));
+    // Types with blocking problems first, then advisory warnings, so a cap never hides one.
+    const types = [...check.types].sort(
+      (a, b) =>
+        Number(b.problems.length > 0) - Number(a.problems.length > 0) ||
+        Number(b.warnings.length > 0) - Number(a.warnings.length > 0),
+    );
     const { shown, more } = capped(types, MAX_PART_LINES);
     return [
       ...shown.map((t) => {
         const problems = capped(t.problems, MAX_FINDINGS);
-        return { type_id: t.typeId, problems: problems.shown, ...(problems.more > 0 ? { more_problems: problems.more } : {}), ...(t.notes.length ? { notes: t.notes.slice(0, 5) } : {}) };
+        const warnings = capped(t.warnings, MAX_FINDINGS);
+        return {
+          type_id: t.typeId,
+          problems: problems.shown,
+          ...(problems.more > 0 ? { more_problems: problems.more } : {}),
+          ...(warnings.shown.length > 0 ? { warnings: warnings.shown } : {}),
+          ...(warnings.more > 0 ? { more_warnings: warnings.more } : {}),
+          ...(t.notes.length ? { notes: t.notes.slice(0, 5) } : {}),
+        };
       }),
       ...(more > 0 ? [{ more_types: more, message: `${more} more part types aren't listed here; define fewer types in one run to see each one's checks.` }] : []),
     ];
@@ -598,7 +611,8 @@ const SENDING_WORDS = ["script id", "script_id", "replace", "replacement", "patc
 function referenceTopic(name: string) {
   const key = name.trim().toLowerCase();
   if (key === SENDING_SCRIPTS.name.toLowerCase()) return SENDING_SCRIPTS;
-  const recipe = KIT_RECIPES.find((r) => r.name.toLowerCase() === key || r.task.toLowerCase() === key);
+  const endTypes = connectorEndTypesRecipe();
+  const recipe = [...KIT_RECIPES, endTypes].find((r) => r.name.toLowerCase() === key || r.task.toLowerCase() === key);
   if (recipe) return { kind: "recipe", name: recipe.name, task: recipe.task, summary: recipe.summary, steps: recipe.steps, uses: recipe.uses, example: recipe.example };
   const entry = KIT_ENTRIES.find((e) => e.name.toLowerCase() === key);
   return entry ? { kind: "function", name: entry.name, summary: entry.summary, signature: entry.signature, example: entry.example } : null;
@@ -635,10 +649,10 @@ const referenceIndex = (keepsScripts: boolean) => ({
   module: 'import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script"; export default defineScript({ kind: "part" | "layout" | "route", reads, parameters, run(ctx, values) { ... } }). Import nothing else; no fetch, files, timers, Date or Math.random.',
   kit: kitByNamespace(),
   /** The jobs an engineer names, each with a worked example: read one with topic (topic: "Schedules") for its steps and script. */
-  tasks: Object.fromEntries(KIT_RECIPES.map((r) => [r.task, r.name])),
+  tasks: Object.fromEntries([...KIT_RECIPES, connectorEndTypesRecipe()].map((r) => [r.task, r.name])),
   rules: {
     levels: "Level arguments are level ids: building.level returns one, ctx.model.levels() lists them (reads.levels: true). The kit's helpers also take the name of exactly one level the script read; raw ctx.edit commands take only the id.",
-    parts: 'A part script (kind: "part") defines part types: parts.part(name, { type, category }) → box / cylinder / transition bodies → connector(face, { id, label, domain, systemKind, shape, width?, height?, diameter? }) → ctx.parts.define(typeId, builder.build()). Whole example: bim_script_reference({ topic: "PartBuilder.connector" }).',
+    parts: 'A part script (kind: "part") defines part types: parts.part(name, { type, category }) → box / cylinder / transition bodies → connector(face, { id, label, domain, systemKind, shape, width?, height?, diameter?, endType? }) → ctx.parts.define(typeId, builder.build()). Valid duct/pipe endType IDs: bim_script_reference({ topic: "Connector end types" }). Whole example: bim_script_reference({ topic: "PartBuilder.connector" }).',
     part_types_in_layouts: 'A layout or route script uses part types by listing their ids in reads.partTypes ("acme.rtu.*" patterns work) and placing them with equipment.place; it never calls ctx.parts.define.',
     reads: 'Read what a kit function works from: building.spaceInWalls traces walls, so read them (reads.kinds: ["wall"]) unless the script draws them first. bim_check_output warns when a call needs data the reads don\'t send.',
     see_values: "ctx.report(label, value) shows what the script read or worked out in bim_run_script's report (50 reports, 16 KB a run); a script that only reports still runs. Don't throw an error to see a value.",
@@ -1008,7 +1022,12 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           });
         }
         const parts = partLines(got.output, got.check);
-        const body = { status: got.check.ok ? "previewed" : "has_issues", kind: "part_types", types: parts.types, ...(parts.notes.length > 0 ? { notes: parts.notes } : {}), checks: checkLines(got.check), ...report, approval, ...idPart(sid, !got.check.ok), ms: run.result.ok ? run.result.ms : 0 };
+        const warningCount = got.check.kind === "part_types" ? got.check.types.reduce((sum, t) => sum + t.warnings.length, 0) : 0;
+        const notes = [
+          ...parts.notes,
+          ...(warningCount > 0 && got.check.ok ? [`${warningCount} advisory connector warning${warningCount === 1 ? "" : "s"} (listed in checks); saving is still allowed.`] : []),
+        ];
+        const body = { status: got.check.ok ? "previewed" : "has_issues", kind: "part_types", types: parts.types, ...(notes.length > 0 ? { notes } : {}), checks: checkLines(got.check), ...report, approval, ...idPart(sid, !got.check.ok), ms: run.result.ok ? run.result.ms : 0 };
         if (!got.check.ok) return json(body);
         const byId = await notePreviewQuietly(store, kept, ran);
         const script = byId && kept ? { script: { id: kept.id } } : { script: scriptEcho(resolved.script), values };
@@ -1121,11 +1140,14 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
         const parts = partRows(got.output);
         if (canonicalJson(parts) !== canonicalJson(args.parts)) return json({ status: "stale_preview", message: "The parts named in this call aren't the ones the script makes, so nothing was saved.", nothing_changed: true });
         if (!got.check.ok) return json({ status: "refused", message: "The parts don't pass the kit's checks.", checks: checkLines(got.check), nothing_changed: true });
+        const advisoryWarnings = got.check.kind === "part_types" ? got.check.types.flatMap((t) => t.warnings.map((w) => `${t.typeId}: ${w}`)) : [];
+        const warningSuffix = advisoryWarnings.length > 0 ? ` (${advisoryWarnings.length} advisory connector warning${advisoryWarnings.length === 1 ? "" : "s"})` : "";
         const declined = await gate(helpers, server, extra, {
           tool: SCRIPT_SAVE_PART_TYPE_TOOL,
           projectId: args.project_id,
           ...(args.model_id ? { modelId: args.model_id } : {}),
-          summary: `save ${parts.length} part type${parts.length === 1 ? "" : "s"} (${parts.map((p) => p.name).join(", ")}) and the script version to the library`,
+          summary: `save ${parts.length} part type${parts.length === 1 ? "" : "s"} (${parts.map((p) => p.name).join(", ")}) and the script version to the library${warningSuffix}`,
+          ...(advisoryWarnings.length > 0 ? { reasons: advisoryWarnings.slice(0, MAX_FINDINGS) } : {}),
           tier: "ask_every_time",
         });
         if (declined) return declined;
@@ -1151,6 +1173,7 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           library: "firm",
           ...(scriptSave ? { script: { key: script.key, version: script.version, result: scriptSave.status, approved_for_agents: false } } : {}),
           parts: saved.map((s, i) => ({ type_id: items[i]?.key, result: s.status, ...(s.status === "saved" ? { revision: s.summary.revision, because: s.because } : s.status === "refused" ? { message: s.message } : { revision: s.revision }) })),
+          ...(advisoryWarnings.length > 0 ? { warnings: advisoryWarnings.slice(0, MAX_FINDINGS) } : {}),
           message: `${saved.filter((s) => s.status === "saved").length} part type(s) saved to the firm library, ${saved.filter((s) => s.status === "up_to_date").length} already up to date.${scriptSave ? " Other agents can run the script only after a person approves this version." : ""}`,
         });
       } catch (err) {

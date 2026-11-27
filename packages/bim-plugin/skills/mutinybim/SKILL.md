@@ -117,7 +117,9 @@ single calls. Use a family's single tools for one or two edits.
   `reads.partTypes` and placing them with `equipment.place`; it never calls
   `ctx.parts.define`. Duct connectors need an end
   type (`mechanical.slip`, `mechanical.flanged`, `mechanical.formed_flange`);
-  pipe ones too (`plumbing_gas.sweat`, `plumbing_gas.threaded`, …).
+  pipe ones too (`plumbing_gas.sweat`, `plumbing_gas.threaded`,
+  `plumbing_gas.flare`, `mechanical.brazed`, … — search `endType` in
+  `bim_script_reference` for the full list).
 - `building.level`, `building.walls`, `building.floor`, `building.door`,
   `building.window`, `building.space`, `building.spaceInWalls`,
   `building.ceiling` (outline, height, and optional real-scale ACT `grid`: `{ preset: "2x4" | "2x2" }` or custom `spacingX`/`spacingY`, `origin`, `rotationDeg`),
@@ -240,16 +242,19 @@ These hold here and in every family.
 - **Units:** distances, offsets and elevations in feet; duct sizes and paper
   positions in inches; airflow in CFM; pipe by nominal inches plus material.
 
-## Families: single-purpose tools, opt-in
+## Families: legacy single-purpose tools (being retired)
 
-The single-purpose tools come in families. Turn one on only when the
-reference says a job has no script yet, or for a one-off edit: on a
-MutinyBIM tool server that is `bim_enable_pack` (or connecting that family's
-own endpoint); a host that loads skills turns a family on with the skill of
-the same name. **One family at a time, and only the one the task in front of
-you needs. Never turn on every family, and never turn one on "in case"**:
-every tool is re-sent on every step (four families is about 200 tools), and
-long tool lists confuse models. Turn one off when the task moves on.
+**`@permitzip/bim-script` is the primary AI capability layer.** Legacy
+single-purpose MCP packs are being retired, no new MCP tools will be added,
+and the daily-driver surface stays at ten tools at most. All 138 non-host
+pack tools are already covered by scripts — write a script first. Turn on a
+family (`bim_enable_pack`, or a host's matching skill) **only** when the job
+genuinely needs one of the 21 host-step tools (rendering images, printing
+PDFs, issuing sets, firm/schedule libraries, Autodesk Docs, lint settings,
+or AI cut-sheet/picture reads). **One family at a time; never turn on every
+family or enable one "in case"** — long tool lists confuse models. Clients
+that do not refresh tool lists dynamically (such as Claude remote
+connectors) can connect to `/packs/<family>/mcp` only for those host steps.
 
 | Family (skill) | Turn it on for |
 | --- | --- |
