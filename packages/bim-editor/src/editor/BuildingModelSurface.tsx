@@ -9,7 +9,7 @@ import { AUTO_TAG_CATEGORIES, ORGANIZATION_ZONE, elementsOfKind, lockOf, planAut
 import type { ConnectionStatus, Presence, SaveState } from '@permitzip/bim-sync'
 import { AWAITING_WRITE_ACCESS, type ConnectionProblem } from './operator-messages'
 import { SHEET_FIRM_NAME, type SheetTitle } from '../contracts/building-model/sheet-title'
-import { panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
+import { BUTTONS_RIGHT, panButtonOf } from '@permitzip/bim-viewer-3d/pan-buttons'
 import type { LoadedReference, ModelViewer3D, Pick as ViewerPick, SceneLightingPreset } from '@permitzip/bim-viewer-3d'
 import { elevationCut, kernelToScene, livePlanCutMm, liveView, type Projection } from '@permitzip/bim-viewer-3d/light'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
@@ -165,6 +165,7 @@ import { buildingModelQuickCommands, buildingModelRibbon, PROJECTION_SHORTCUT, t
 import { OrientationControls } from './orientation/OrientationControls'
 import { OrbitPointMarker } from './orientation/OrbitPointMarker'
 import { OrbitPointClicks } from './orbit-point'
+import { walkKeyAction, WALKING_HINT } from './walk-keys'
 import { PlusHandles, plusHandlesViewFor, type FaceHandle } from './PlusHandles'
 import { useCopyChord } from './copy-chord'
 import { PROPERTIES_DEFAULT_WIDTH_PX, PROPERTIES_SURFACE, ResizableSideRail } from './layout/ResizableSideRail'
@@ -843,6 +844,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       if (camera) rememberCamera(cameraRememberKey, camera)
     })
   }, [viewer, cameraRememberKey, cameraMemory.loaded, rememberCamera])
+
+  // A walk shows its keys while it holds, however it started (the toolbar's Walk button or W); they leave with it.
+  useEffect(() => {
+    if (!viewer) return
+    return viewer.onWalkChange((walking) => setToolHint((hint) => (walking ? WALKING_HINT : hint === WALKING_HINT ? null : hint)))
+  }, [viewer])
 
   // An open plan or 3D view shows the live model in the visual style it sets; otherwise shaded with edges, as before.
   const liveStyle = openView && !showDrawing ? openView.props?.visualStyle ?? 'shaded_edges' : 'shaded_edges'
@@ -2087,6 +2094,29 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
         else requestDelete(toDelete.id)
         return
       }
+      // Drawings and open schedule grids handle their own keyboard navigation and Escape.
+      if (showDrawing || scheduleGridOpen) return
+      // Walking the 3D view with W A S D, E and Q (`walk-keys.ts`): the camera has those keys, and Esc leaves the walk before anything else.
+      const walker = session?.viewer
+      if (walker) {
+        const walk = walkKeyAction(e, walker.walking())
+        if (walk === 'start') {
+          if (live3dOpen && projection === 'perspective') {
+            e.preventDefault()
+            walker.setWalk(true)
+            walker.walkKey(e.code, true)
+            return
+          }
+        } else if (walk === 'move') {
+          e.preventDefault()
+          walker.walkKey(e.code, true)
+          return
+        } else if (walk === 'stop') {
+          e.preventDefault()
+          walker.setWalk(false)
+          return
+        }
+      }
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const ids = selection?.kind === 'group' ? selection.ids : selection?.kind === 'authored' ? [selection.element.id] : []
         if (ids.length > 0 && !e.defaultPrevented && isNudgeKey(e.key)) {
@@ -2095,8 +2125,6 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
           return
         }
       }
-      // Drawings handle their own Tab, Escape and drafting keys (`ModelDrawingLayer`, `DrawingCanvas`).
-      if (showDrawing) return
       if (tool === 'select' && session && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if ((e.key === 'a' || e.key === 'A') && canEdit && selection?.kind === 'authored' && (selection.element.kind === 'run_segment' || selection.element.kind === 'run_fitting')) {
           e.preventDefault()
@@ -2222,6 +2250,9 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       else void session?.clearSelection()
     }
     const onKeyUp = (e: KeyboardEvent) => {
+      // A walk key came up wherever the focus is by then (a field too): the camera must not keep walking.
+      const walker = sessionRef.current?.viewer
+      if (walker?.walking()) walker.walkKey(e.code, false)
       if (e.key === 'Shift') sessionRef.current?.setShiftHeld(false)
       const before = altLockRef.current
       if (e.key === 'Alt' && before !== null) {
@@ -2240,7 +2271,7 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
+  }, [arbiter, finishDrag, tool, selection, chooseTool, requestDelete, requestGroupDelete, runUndo, showDrawing, scheduleGridOpen, live3dOpen, projection, drawingSection, canEdit, routeChoices, chooseRoute, offsetArmed, inheritArmed, routeLike, stopPlannedPlacing, finishRouteAfterClicks])
   const createView = useCallback(
     async (viewType: Exclude<CreatableViewType, 'section'>, input: { name: string; level: string | null; scale: number }): Promise<string | null> => {
       const viewer = sessionRef.current?.viewer
@@ -3479,6 +3510,12 @@ export function BuildingModelSurface({ projectId, projectName, projectNumber, us
               const at = { x: e.clientX - rect.left, y: e.clientY - rect.top }
               if (selection) setContextMenu(at)
               else void sessionRef.current?.selectAt(e.clientX, e.clientY).then(() => setContextMenu(at))
+            }}
+            onWheelCapture={(e) => {
+              // Right-button + scroll adjusts walk speed while walking: release must not open the right-click menu.
+              if (rightDownAt.current && (e.buttons & BUTTONS_RIGHT) !== 0 && sessionRef.current?.viewer?.walking()) {
+                rightDownAt.current = null
+              }
             }}
             onContextMenu={(e) => e.preventDefault()}
             onDoubleClick={(e) => void orbitClicks.doubleClicked(sessionRef.current?.viewer, e.clientX, e.clientY, { tool, planOpen })}
