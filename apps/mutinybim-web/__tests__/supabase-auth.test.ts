@@ -289,6 +289,12 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
     if (url.pathname === "/rest/v1/rpc/web_rotate_assistant_refresh") {
       return Response.json({ status: "reused" });
     }
+    if (url.pathname === "/rest/v1/rpc/web_redeem_password_reset") {
+      return Response.json(body?.p_token_hash === "live-hash" ? "u-1" : null);
+    }
+    if (url.pathname === "/rest/v1/users" && url.searchParams.get("id") === "eq.u-1") {
+      return Response.json([{ id: "u-1", email: "sam@example.com", display_name: "Sam", password_hash: "scrypt$new", color_scheme: "system", created_at: "2026-11-24T00:00:00Z" }]);
+    }
     return Response.json([]);
   };
 
@@ -305,6 +311,15 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
   });
   expect(rotated).toEqual({ reused: true });
   expect(seen.map((s) => s.path.split("?")[0])).toEqual(["/rest/v1/users", "/rest/v1/rpc/web_take_oauth_state", "/rest/v1/rpc/web_rotate_assistant_refresh"]);
+
+  // Redeeming a reset link is one RPC: no separate password write or session delete.
+  seen.length = 0;
+  expect((await store.redeemPasswordReset("live-hash", "scrypt$new"))?.id).toBe("u-1");
+  expect(await store.redeemPasswordReset("spent-hash", "scrypt$other")).toBeNull();
+  expect(seen.filter((s) => s.method !== "GET")).toEqual([
+    { method: "POST", path: "/rest/v1/rpc/web_redeem_password_reset", body: { p_token_hash: "live-hash", p_password_hash: "scrypt$new" } },
+    { method: "POST", path: "/rest/v1/rpc/web_redeem_password_reset", body: { p_token_hash: "spent-hash", p_password_hash: "scrypt$other" } },
+  ]);
 });
 
 test("a viewer opening a model during handover sees the direct share or the new ownership", async () => {

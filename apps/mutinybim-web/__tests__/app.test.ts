@@ -430,6 +430,48 @@ test("password recovery: a reset link works once, signs out everywhere, and chan
   expect(forgot).toContain("npm run web:reset-password");
 });
 
+test("two uses of one reset link at once: exactly one password is saved, and only its session survives", async () => {
+  await start();
+  const earlier = await signUp("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
+  if (!user || !app) throw new Error("no account");
+  const token = randomToken();
+  await app.db.createPasswordReset(digest(token), user.id, new Date(Date.now() + 3_600_000));
+  const signedIn = async (cookie: string) => (await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status === 200;
+
+  const attempts = await Promise.all(["password-from-a", "password-from-b"].map(async (password) => ({ password, response: await post(`/reset/${token}`, { password }) })));
+  expect(attempts.map((a) => a.response.status).sort()).toEqual([303, 410]);
+  const won = attempts.find((a) => a.response.status === 303);
+  const lost = attempts.find((a) => a.response.status === 410);
+  if (!won || !lost) throw new Error("expected one winner and one refusal");
+  expect(lost.response.headers.get("set-cookie")).toBeNull();
+  expect(await signedIn(sessionCookie(won.response))).toBe(true);
+  expect(await signedIn(earlier)).toBe(false);
+  expect((await post("/login", { email: "sam@example.com", password: won.password })).status).toBe(303);
+  expect((await post("/login", { email: "sam@example.com", password: lost.password })).status).toBe(401);
+  expect(await app.db.userByPasswordReset(digest(token))).toBeNull();
+});
+
+test("redeeming a reset link refuses an expired or used link and then changes nothing", async () => {
+  await start();
+  const cookie = await signUp("sam@example.com");
+  const user = await app?.db.userByEmail("sam@example.com");
+  if (!user || !app) throw new Error("no account");
+  const before = user.password_hash;
+  const stale = randomToken();
+  await app.db.createPasswordReset(digest(stale), user.id, new Date(Date.now() - 1_000));
+  expect(await app.db.redeemPasswordReset(digest(stale), "scrypt$not-used")).toBeNull();
+  expect((await app.db.userById(user.id))?.password_hash).toBe(before);
+  expect((await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status).toBe(200);
+
+  const live = randomToken();
+  await app.db.createPasswordReset(digest(live), user.id, new Date(Date.now() + 3_600_000));
+  expect((await app.db.redeemPasswordReset(digest(live), "scrypt$first"))?.id).toBe(user.id);
+  expect(await app.db.redeemPasswordReset(digest(live), "scrypt$second")).toBeNull();
+  expect((await app.db.userById(user.id))?.password_hash).toBe("scrypt$first");
+  expect((await fetch(`${base}/models`, { headers: { cookie }, redirect: "manual" })).status).toBe(303);
+});
+
 test("the theme choice is kept in the account and drawn on every page", async () => {
   await start();
   const cookie = await signUp("sam@example.com");
