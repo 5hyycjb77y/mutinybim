@@ -17,10 +17,13 @@ const ADDED_ROUND_14 = ["duct-rated-crossing", "duct-ceiling-clearance", "struct
 /** Electrical photometrics, emergency egress & equipment disconnect rules (IES LM-63 / NFPA 101 / IBC §1008.3.5 / NEC 440.14). */
 const ADDED_PHOTOMETRICS = ["photometrics-normal-illuminance", "photometrics-egress-compliance", "equipment-missing-disconnect"];
 
+/** Civil storm drainage rules (first-party Civil add-on, run last after Structural). */
+const ADDED_CIVIL = ["civil.inlet_overloaded", "civil.slope_below_minimum"];
+
 describe("c6x-lint-order", () => {
   it("runs every rule in the batch 5c order, each unchanged", () => {
     const now = activeLintRules()
-      .filter((r) => !ADDED_AFTER_5C.includes(r.id) && !ADDED_ROUND_14.includes(r.id) && !ADDED_PHOTOMETRICS.includes(r.id))
+      .filter((r) => !ADDED_AFTER_5C.includes(r.id) && !ADDED_ROUND_14.includes(r.id) && !ADDED_PHOTOMETRICS.includes(r.id) && !ADDED_CIVIL.includes(r.id))
       .map((r): Row => [r.id, r.severity, r.pack, r.version, r.reads, r.title]);
     expect(now).toEqual(BATCH_5C);
   });
@@ -44,7 +47,7 @@ describe("c6x-lint-order", () => {
     const ids = activeLintRules().map((r) => r.id);
     const tempering = ids.indexOf("makeup-air-tempering-unknown");
     expect(ids.slice(tempering + 1, tempering + 3)).toEqual(["duct-rated-crossing", "duct-ceiling-clearance"]);
-    expect(ids.at(-1)).toBe("struct.footing_unsupported");
+    expect(ids.slice(-3)).toEqual(["struct.footing_unsupported", "civil.inlet_overloaded", "civil.slope_below_minimum"]);
   });
 
   it("ranks never decrease along the run", () => {

@@ -9,7 +9,7 @@
  * flag the synthetic site's overloaded inlet and flat pipe; its calcs run
  * through the real calc registry (`runPackCalc`) with bim-units codes.
  */
-import { CALC_POINT, CLASS_POINT, LINT_RULE_POINT, PackSet, activePackSet, networkForService, packFieldRegistry, runPackCalc, runPackConformance, runPackLint, withPackSet } from "@permitzip/bim-pack";
+import { CALC_POINT, CLASS_POINT, FIELD_PROVIDER_POINT, LIBRARY_ROWS_POINT, LINT_RULE_POINT, PACK_READ_POINT, PackSet, activePackSet, networkForService, packFieldRegistry, runPackCalc, runPackConformance, runPackLint, withPackSet } from "@permitzip/bim-pack";
 import { installedFirstPartyPacks } from "@permitzip/bim-pack";
 
 /** The first-party add-ons every host installs (jest.setup.js installs them before this file loads). */
@@ -18,9 +18,10 @@ import { pipeMaterialRow, type ModelState } from "@permitzip/bim-kernel";
 import { activeClassRegistry } from "@permitzip/bim-kernel/registry";
 import { isWalkedService, serviceById } from "@permitzip/bim-kernel/services";
 import { CIVIL_PACK } from "../src/pack";
+import { CIVIL_STORM_NETWORK_READ } from "../src/pack-reads";
 import { CIVIL_SET, syntheticSiteModel } from "./fixtures/synthetic-site";
 
-const set = PackSet.create([...FIRST_PARTY_PACKS, CIVIL_PACK]);
+const set = PackSet.create(FIRST_PARTY_PACKS);
 
 describe("civil pack contract", () => {
   let model: ModelState;
@@ -34,7 +35,7 @@ describe("civil pack contract", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("is seen inside its set's scope and not outside it", () => {
+  it("is installed first-party and contributes classes, service, network, fields, schedules, rules, calcs and pack reads", () => {
     const inside = withPackSet(set, () => ({
       manhole: activeClassRegistry().getClass("civil.manhole")?.ifc,
       storm: serviceById("civil.storm"),
@@ -42,6 +43,9 @@ describe("civil pack contract", () => {
       rcp: pipeMaterialRow("civil.rcp")?.fallback,
       rules: activePackSet().items(LINT_RULE_POINT).map((r) => r.id).filter((id) => id.startsWith("civil.")),
       calcs: activePackSet().items(CALC_POINT).map((c) => c.info.id).filter((id) => id.startsWith("civil.")),
+      fieldProviders: activePackSet().items(FIELD_PROVIDER_POINT).map((p) => p.id).filter((id) => id.startsWith("civil.")),
+      schedules: activePackSet().items(LIBRARY_ROWS_POINT).map((r) => r.item.id).filter((id) => id.startsWith("civil:")),
+      reads: activePackSet().items(PACK_READ_POINT).map((r) => r.id).filter((id) => id.startsWith("civil.")),
     }));
     expect(inside.manhole).toEqual({ entity: "IfcDistributionChamberElement", predefinedType: "MANHOLE" });
     expect(inside.storm && isWalkedService(inside.storm)).toBe(true);
@@ -49,20 +53,42 @@ describe("civil pack contract", () => {
     expect(inside.rcp).toBe("pe");
     expect(inside.rules).toEqual(["civil.inlet_overloaded", "civil.slope_below_minimum"]);
     expect(inside.calcs).toEqual(["civil.rational_runoff", "civil.manning_full_capacity", "civil.surface_cut_fill"]);
+    expect(inside.fieldProviders).toEqual(["civil.site"]);
+    expect(inside.schedules).toEqual([
+      "civil:schedule_template:storm_structure_schedule",
+      "civil:schedule_template:storm_pipe_schedule",
+      "civil:schedule_template:storm_catchment_schedule",
+      "civil:schedule_template:grading_surface_schedule",
+    ]);
+    expect(inside.reads).toEqual(["civil.storm_network", "civil.grading_surfaces"]);
 
-    expect(activeClassRegistry().getClass("civil.manhole")).toBeUndefined();
-    expect(serviceById("civil.storm")).toBeNull();
-    expect(networkForService("civil.storm")).toBeNull();
-    expect(pipeMaterialRow("civil.rcp")).toBeNull();
-    expect(activePackSet().items(LINT_RULE_POINT).some((r) => r.id.startsWith("civil."))).toBe(false);
+    // First-party: Civil is always active beside Electrical, Architecture and Structural.
+    expect(activePackSet().has("civil")).toBe(true);
+    expect(activeClassRegistry().getClass("civil.manhole")?.ifc).toEqual({ entity: "IfcDistributionChamberElement", predefinedType: "MANHOLE" });
+    expect(serviceById("civil.storm")?.id).toBe("civil.storm");
+    expect(pipeMaterialRow("civil.rcp")?.fallback).toBe("pe");
     expect(withPackSet(set, () => serviceById("storm"))).toBe(serviceById("storm"));
-    // The always-installed Electrical, Architecture (round 13) and Structural (round 14) add-ons contribute their classes beside the civil pack's own.
     expect(set.contributors(CLASS_POINT)).toEqual([
       { packId: "electrical", packName: "Electrical", version: "1.0.0", count: 2 },
       { packId: "architecture", packName: "Architecture", version: "1.0.0", count: 10 },
       { packId: "struct", packName: "Structural", version: "0.1.0", count: 9 },
       { packId: "civil", packName: "Civil", version: "0.1.0", count: 8 },
     ]);
+  });
+
+  it("civil.storm_network pack read traces upstream catchments and downstream flow path", () => {
+    const out = CIVIL_STORM_NETWORK_READ.run(model, { elementId: "MH1" }) as {
+      design_intensity_in_per_h: number | null;
+      structures: readonly { id: string; total_runoff_cfs: number | null }[];
+      findings: readonly { rule: string }[];
+      focus?: { upstreamStructureIds: readonly string[]; downstreamPathIds: readonly string[]; contributingCatchmentIds: readonly string[] };
+    };
+    expect(out.design_intensity_in_per_h).toBe(4);
+    expect(out.structures.find((s) => s.id === "OF1")?.total_runoff_cfs).toBeCloseTo(4.501, 2);
+    expect(out.findings.map((f) => f.rule).sort()).toEqual(["civil.inlet_overloaded", "civil.slope_below_minimum"]);
+    expect(out.focus?.downstreamPathIds).toEqual(["MH1", "OF1"]);
+    expect([...(out.focus?.upstreamStructureIds ?? [])].sort()).toEqual(["I1", "I2"]);
+    expect([...(out.focus?.contributingCatchmentIds ?? [])].sort()).toEqual(["C1", "C2", "C3"]);
   });
 
   it("puts its parameters in the field registry with kind, unit and IFC home", () => {
@@ -88,8 +114,8 @@ describe("civil pack contract", () => {
     expect(inlet?.at.x_ft).toBeCloseTo(350, 6);
     expect(inlet?.at.z_ft).toBeCloseTo(100, 6);
     expect(inlet?.message).toBe("I1 takes 2.64 cfs of runoff but can take 2.50 cfs");
-    // Not loaded without the pack: the same model, built-ins only.
-    expect(runPackLint(model, PackSet.create([])).filter((f) => f.rule.startsWith("civil."))).toEqual([]);
+    // First-party: Civil's lint rules are active even on a plain PackSet.
+    expect(runPackLint(model, PackSet.create([])).filter((f) => f.rule.startsWith("civil.")).length).toBe(2);
   });
 
   it("its calcs, run by the real calc registry, give the hand checks in real units", () => {
@@ -106,7 +132,7 @@ describe("civil pack contract", () => {
     if (!pipe.ok) throw new Error(pipe.reason);
     expect(pipe.run.values.find((v) => v.key === "full_capacity")).toMatchObject({ unit: "cfs" });
     expect(pipe.run.values.find((v) => v.key === "full_velocity")).toMatchObject({ unit: "ft/s" });
-    const outside = runPackCalc(PackSet.create([]), { calc: "civil.rational_runoff", inputs: { area_ft2: 1, surface: "paved", intensity_in_per_h: 1 } });
-    expect(outside.ok).toBe(false);
+    const alwaysOn = runPackCalc(PackSet.create([]), { calc: "civil.rational_runoff", inputs: { area_ft2: 1, surface: "paved", intensity_in_per_h: 1 } });
+    expect(alwaysOn.ok).toBe(true);
   });
 });

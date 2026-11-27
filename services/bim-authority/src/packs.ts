@@ -1,16 +1,14 @@
 import { bindModelPacks, PackSet, type Pack } from "@permitzip/bim-kernel/packs";
 import { installModelSetupHost, isModelSetupRecordId, modelSetupOf, pinnedPacks, resolveModelSetup, type ModelSettings, type ModelState } from "@permitzip/bim-kernel";
 import { installFirstPartyAddOns } from "@permitzip/bim-first-party";
-import { CIVIL_PACK } from "@permitzip/bim-pack-civil";
 
 /**
- * Add-ons this model server can load beyond the first-party trades: Civil as
- * a Preview add-on (round 8). A model uses it only when its own add-on switch
- * is on (an organization record, `set_model_addon`), so every other model is
- * served exactly as before. Structural is first-party since round 14. A host's
- * editor installs the same list.
+ * Add-ons this model server can load beyond the first-party trades.
+ * Structural (round 14) and Civil are first-party (on in every model);
+ * additional Preview or outside add-ons join here. A host's editor installs
+ * the same list.
  */
-export const INSTALLED_PACKS: readonly Pack[] = [CIVIL_PACK];
+export const INSTALLED_PACKS: readonly Pack[] = [];
 
 let firstPartyInstalled = false;
 

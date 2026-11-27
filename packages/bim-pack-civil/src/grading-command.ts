@@ -25,6 +25,8 @@ export const importLandXmlCommandSchema = z
     landXml: z.string().trim().min(1).max(2_000_000),
     /** Role by surface name. Wins over a guess from the name. */
     roles: z.record(z.string().trim().min(1).max(120), surfaceRole).optional(),
+    /** Optional site/ground level id so floor plans on that level display the imported contours. */
+    levelId: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 
@@ -37,11 +39,17 @@ function executeImport(model: ModelState, command: PackCommand): ExecuteResult {
   if (imported.problems.length > 0) refuse("invalid_value", [...imported.problems, ...imported.notes].join(" "));
   const reader = new TrackedReader(model);
   const working = draftElements(model.elements);
+  const levelInfo = parsed.data.levelId
+    ? (() => {
+        const lvl = working[parsed.data.levelId];
+        return { levelId: parsed.data.levelId, levelName: lvl?.kind === "level" ? lvl.name : parsed.data.levelId };
+      })()
+    : undefined;
   const touched: ElementId[] = [];
   for (const surface of imported.surfaces) {
     const id = asElementId(surface.id);
     if (working[id]) refuse("invalid_value", `${surface.name} would be saved as ${id}, which is already in the model. Rename the surface or remove that element, then import again.`, [id]);
-    working[id] = gradingSurfaceRecord(id, surface);
+    working[id] = gradingSurfaceRecord(id, surface, levelInfo);
     touched.push(id);
   }
   const names = imported.surfaces.map((s) => `${s.name} (${s.role === "unassigned" ? "role not set" : s.role})`).join(" and ");

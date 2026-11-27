@@ -14,4 +14,7 @@ export * from "./surfaces";
 export * from "./landxml";
 export * from "./tin-volume";
 export * from "./grading-command";
+export * from "./fields";
+export * from "./schedules";
+export * from "./pack-reads";
 export * from "./pack";

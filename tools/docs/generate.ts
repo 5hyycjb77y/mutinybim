@@ -22,7 +22,6 @@ import { CORE_TOOL_BUDGET, LOCAL_SCHEMAS, createBimToolServer, toolFamily } from
 import { createLocalHost, startInMemoryModelServer, starterModel } from "@permitzip/bim-mcp/local";
 import { localToolPacks } from "@permitzip/bim-mcp-packs";
 import { slug } from "./slug";
-import { CIVIL_PACK } from "@permitzip/bim-pack-civil";
 import { SITE_PACK } from "@permitzip/bim-pack-site";
 import { DEVELOPMENT_PACK } from "@permitzip/bim-pack-development";
 
@@ -195,7 +194,7 @@ function addOnsPage(): string {
       ...FIRST_PARTY_ADDONS.flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
       "## Other add-ons",
       "",
-      ...[CIVIL_PACK, SITE_PACK, DEVELOPMENT_PACK].flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
+      ...[SITE_PACK, DEVELOPMENT_PACK].flatMap((p) => addOnSection(p).map((l) => l.replace(/^## /, "### "))),
     ],
   );
 }

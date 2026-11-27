@@ -11,11 +11,10 @@
  * `services/bim-authority/src/packs.ts` and `lib/building-model/installed-packs.ts`).
  */
 import { FIRST_PARTY_ADDONS } from "@permitzip/bim-first-party";
-import { CIVIL_PACK } from "@permitzip/bim-pack-civil";
 import { PackSet, firstPartyPackName, installFirstPartyPacks, isFirstPartyPackId, type Pack } from "@permitzip/bim-kernel/packs";
 import type { ScriptAddOn } from "@permitzip/bim-script";
 
-export const RUNNER_ADDONS: readonly Pack[] = [...FIRST_PARTY_ADDONS, CIVIL_PACK];
+export const RUNNER_ADDONS: readonly Pack[] = [...FIRST_PARTY_ADDONS];
 
 function words(addOn: ScriptAddOn): string {
   const name = isFirstPartyPackId(addOn.id) ? firstPartyPackName(addOn.id) : null;

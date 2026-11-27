@@ -68,17 +68,17 @@ describe("k14-stand-ins-gone", () => {
   });
 
   it("with the first-party add-ons on, every model reads round 13's service rows byte for byte, in round 13's order", () => {
-    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct"]);
+    expect(installedFirstPartyPacks().map((p) => p.manifest.id)).toEqual(["electrical", "plumbing_gas", "mechanical", "fire_protection", "architecture", "struct", "civil"]);
     const base = firstPartyServiceRegistry();
     expect(activeServiceRegistry()).toBe(base);
     const want = FROZEN.services.map((json) => {
       const row = JSON.parse(json) as { id: string };
       return row.id === "other" ? JSON.stringify({ ...row, discipline: "general" }) : json;
     });
-    // `struct.gravity_load` (Structural, first-party since round 14) is a namespaced pack row after them.
+    // `struct.gravity_load` (Structural, first-party since round 14) and `civil.storm` (Civil, first-party) are namespaced pack rows after them.
     const builtins = base.rows.filter((r) => !/[.:]/.test(r.id));
     expect(builtins.map((r) => JSON.stringify(r))).toEqual(want);
-    expect(base.rows.slice(builtins.length).map((r) => r.id)).toEqual(["struct.gravity_load"]);
+    expect(base.rows.slice(builtins.length).map((r) => r.id)).toEqual(["struct.gravity_load", "civil.storm"]);
     expect(systemKindIds(base).slice(0, 28)).toEqual(FROZEN.services.map((j) => JSON.parse(j) as { id: string; asSystem: boolean }).filter((r) => r.asSystem).map((r) => r.id));
     expect(loadServiceIds(base).slice(0, 10)).toEqual(["power", "cold_water", "hot_water", "sanitary", "grease_waste", "gas", "supply_air", "outside_air", "exhaust_air", "heat_gain"]);
     expect(connectorDomainIds(base)).toEqual(["duct", "pipe", "electrical"]);

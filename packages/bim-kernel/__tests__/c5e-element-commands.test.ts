@@ -87,9 +87,9 @@ describe("class, type and values", () => {
   });
 
   it("a class the model doesn't have (no pack defines it), a kernel-namespace class that doesn't exist, or an id with no namespace, is refused", () => {
-    // Civil's classes: an add-on this model doesn't use (Structural, used here before round 14, is first-party now).
-    const pack = readsCore(() => executeElementCommand(model(), parse({ type: "set_element_class", elementIds: ["b1"], classId: "civil.storm_pipe" })));
-    expect(pack.ok ? "" : pack.error.message).toBe(`"civil.storm_pipe" isn't a class this model knows: add the pack that defines civil classes to the model, or choose a class it has`);
+    // zz's classes: an add-on this model doesn't use (Structural and Civil are first-party now).
+    const pack = readsCore(() => executeElementCommand(model(), parse({ type: "set_element_class", elementIds: ["b1"], classId: "zz.storm_pipe" })));
+    expect(pack.ok ? "" : pack.error.message).toBe(`"zz.storm_pipe" isn't a class this model knows: add the pack that defines zz classes to the model, or choose a class it has`);
     const bad = readsCore(() => executeElementCommand(model(), parse({ type: "set_element_class", elementIds: ["w1"], classId: "arch.curtain_thing" })));
     expect(bad.ok ? "" : bad.error.message).toBe(`"arch.curtain_thing" isn't one of the model's arch classes`);
     const bare = readsCore(() => executeElementCommand(model(), parse({ type: "set_element_class", elementIds: ["w1"], classId: "wall" })));

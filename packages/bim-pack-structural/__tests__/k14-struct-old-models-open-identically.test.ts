@@ -60,11 +60,12 @@ describe("k14 old Structural models open identically", () => {
     expect(after).toEqual(before);
   });
 
-  it("a stored Structural pin is not an add-on this host lacks", () => {
+  it("a stored Structural or Civil pin is not an add-on this host lacks", () => {
     const pin = { id: STRUCT_PACK_ID, version: STRUCT_PACK_VERSION };
     expect(STRUCT_PACK_VERSION).toBe("0.1.0");
     expect(pinnedPacks([pin], []).missing).toEqual([]);
     expect(resolveModelSetup({ hasEntries: true, pins: [pin], firmDisciplines: [], key: "k14" }, []).missing).toEqual([]);
-    expect(pinnedPacks([{ id: "civil", version: "0.1.0" }], []).missing).toEqual([{ id: "civil", version: "0.1.0" }]);
+    expect(pinnedPacks([{ id: "civil", version: "0.1.0" }], []).missing).toEqual([]);
+    expect(pinnedPacks([{ id: "site", version: "0.1.0" }], []).missing).toEqual([{ id: "site", version: "0.1.0" }]);
   });
 });

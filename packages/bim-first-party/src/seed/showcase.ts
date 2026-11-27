@@ -14,7 +14,24 @@ import {
   type ViewElement,
 } from "@permitzip/bim-kernel";
 import { DOOR_SCHEDULE, WALL_TYPES_SCHEDULE, WINDOW_SCHEDULE } from "@permitzip/bim-pack-architecture";
+import {
+  CIVIL_CLASS,
+  CIVIL_PARAM,
+  CIVIL_RCP,
+  CIVIL_STORM_SERVICE,
+  GRADING_SURFACE_SCHEDULE,
+  IMPORT_LANDXML_SURFACES,
+  MANHOLE_TYPE,
+  OUTFALL_TYPE,
+  STORM_CATCHMENT_SCHEDULE,
+  STORM_INLET_TYPE,
+  STORM_PIPE_SCHEDULE,
+  STORM_STRUCTURE_SCHEDULE,
+  cutFillBetween,
+  readGradingSurfaces,
+} from "@permitzip/bim-pack-civil";
 import { LIGHTING_FIXTURE_SCHEDULE } from "@permitzip/bim-pack-electrical";
+import { to } from "@permitzip/bim-units";
 import { standardNoteParagraphs } from "@permitzip/bim-library";
 import { AIR_DEVICE_SCHEDULE, MECHANICAL_EQUIPMENT_SCHEDULE, previewAirConnect } from "@permitzip/bim-pack-mechanical";
 import { PLUMBING_FIXTURE_SCHEDULE } from "@permitzip/bim-pack-plumbing";
@@ -127,6 +144,62 @@ const STRUCT_HIDE_OTHER = {
   "struct.footing": { visible: false },
   "struct.roof_deck": { visible: false },
 } as const;
+
+const CIVIL_SITE_HIDE = {
+  ...STRUCT_HIDE_OTHER,
+  duct: { visible: false },
+  duct_fitting: { visible: false },
+  air_terminal: { visible: false },
+  electrical_devices: { visible: false },
+  lighting_fixtures: { visible: false },
+  "mep.mechanical_equipment": { visible: false },
+  "mep.electrical_equipment": { visible: false },
+  "mep.plumbing_fixture": { visible: false },
+} as const;
+
+function buildShowcaseCivilLandXml(): string {
+  // 5 x 4 lot grid spanning x = -36'..80', y = -22'..50' around the 56' x 28' studio (0..56', 0..28').
+  // Existing grade slopes naturally from NE high (+1.80') down to SW low (-2.60') toward outfall OF-1.
+  // Proposed pad levels the building footprint to -0.75' (1" below the 8" L1 concrete slab underside at -8")
+  // with positive perimeter drainage slopes toward inlets CI-1, CI-2 and outfall OF-1.
+  const xs = [-36, 0, 28, 56, 80] as const;
+  const ys = [-22, 0, 28, 50] as const;
+  const existingZ = (x: number, y: number): number => Number((-0.4 + 0.01897 * (x - 22) + 0.03056 * (y - 14)).toFixed(2));
+  const proposedGrid: readonly (readonly number[])[] = [
+    // y = -22 (south boundary swale draining west to SW outfall)
+    [-2.55, -2.05, -1.75, -1.55, -1.35],
+    // y = 0 (south pad edge: flat -0.75' under building 0..56')
+    [-2.15, -0.75, -0.75, -0.75, -1.25],
+    // y = 28 (north pad edge: flat -0.75' under building 0..56')
+    [-1.45, -0.75, -0.75, -0.75, -1.05],
+    // y = 50 (north boundary swale draining west to CI-2)
+    [-0.95, -0.65, -0.35, -0.15, 0.25],
+  ];
+  const makeSurface = (name: string, zAt: (ix: number, iy: number, x: number, y: number) => number): string => {
+    const pnts: string[] = [];
+    let id = 1;
+    for (let iy = 0; iy < ys.length; iy++) {
+      for (let ix = 0; ix < xs.length; ix++) {
+        const x = xs[ix]!;
+        const y = ys[iy]!;
+        pnts.push(`<P id="${id++}">${y} ${x} ${zAt(ix, iy, x, y).toFixed(2)}</P>`);
+      }
+    }
+    const faces: string[] = [];
+    const stride = xs.length;
+    for (let iy = 0; iy < ys.length - 1; iy++) {
+      for (let ix = 0; ix < xs.length - 1; ix++) {
+        const a = iy * stride + ix + 1;
+        const b = a + 1;
+        const c = a + stride + 1;
+        const d = a + stride;
+        faces.push(`<F>${a} ${b} ${c}</F>`, `<F>${a} ${c} ${d}</F>`);
+      }
+    }
+    return `<Surface name="${name}"><Definition surfType="TIN"><Pnts>${pnts.join("")}</Pnts><Faces>${faces.join("")}</Faces></Definition></Surface>`;
+  };
+  return `<?xml version="1.0"?><LandXML version="1.2"><Units><Imperial linearUnit="foot"/></Units><Surfaces>${makeSurface("Existing Grade", (_ix, _iy, x, y) => existingZ(x, y))}${makeSurface("Proposed Pad", (ix, iy) => proposedGrid[iy]![ix]!)}</Surfaces></LandXML>`;
+}
 
 const ARCH_HIDE_MEP = {
   ...STRUCT_HIDE_OTHER,
@@ -784,6 +857,9 @@ function buildShowcase(modelId: string): ModelState {
           typeId: t.id,
           definition: t.definition,
         })),
+        { typeId: "civil-inlet-grate", definition: STORM_INLET_TYPE },
+        { typeId: "civil-manhole-48", definition: MANHOLE_TYPE },
+        { typeId: "civil-outfall-hw", definition: OUTFALL_TYPE },
       ],
     },
   ]);
@@ -2505,6 +2581,84 @@ function buildShowcase(modelId: string): ModelState {
 
   // Append CAD-standard Mechanical Drafting Details sheet (M-501: RTU-1 curb & restroom exhaust wall cap)
   m = appendShowcaseDetails(m);
+
+  // =========================================================================
+  // 8. CIVIL SITE GRADING (LandXML TINs) & EXTERIOR STORM DRAINAGE PACKAGE
+  // =========================================================================
+  const rcpSize = (inches: number) => ({ shape: "pipe" as const, nominalMm: inches * IN, material: "pe" as const, materialId: CIVIL_RCP });
+  const stormSys = { id: "sys-storm", kind: CIVIL_STORM_SERVICE, name: "Site Storm Drainage" };
+
+  m = runCmds(m, [
+    { type: IMPORT_LANDXML_SURFACES, landXml: buildShowcaseCivilLandXml(), levelId: "L1" } as unknown as Command,
+    // Exterior storm structures placed cleanly outside the 56' x 28' building footprint and clear of sanitary MH-1 (-10', 20.5')
+    { type: "place_part", partId: "ci-1", typeId: "civil-inlet-grate", levelId: "L1", position: pt(40 * FT, -14 * FT), rotationDeg: 0, mark: "CI-1" },
+    { type: "place_part", partId: "ci-2", typeId: "civil-inlet-grate", levelId: "L1", position: pt(-14 * FT, 38 * FT), rotationDeg: 90, mark: "CI-2" },
+    { type: "place_part", partId: "smh-1", typeId: "civil-manhole-48", levelId: "L1", position: pt(-14 * FT, -14 * FT), rotationDeg: 0, mark: "SMH-1" },
+    { type: "place_part", partId: "of-1", typeId: "civil-outfall-hw", levelId: "L1", position: pt(-32 * FT, -14 * FT), rotationDeg: 0, mark: "OF-1" },
+    // Reinforced concrete storm pipes routed connector-to-connector on sys-storm
+    { type: "route_run", idPrefix: "st-101", levelId: "L1", domain: "pipe", size: rcpSize(15), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "ci-1", connectorId: "out" }, to: { kind: "part", partId: "smh-1", connectorId: "in_e" } },
+    { type: "route_run", idPrefix: "st-102", levelId: "L1", domain: "pipe", size: rcpSize(15), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "ci-2", connectorId: "out" }, to: { kind: "part", partId: "smh-1", connectorId: "in_n" } },
+    { type: "route_run", idPrefix: "st-103", levelId: "L1", domain: "pipe", size: rcpSize(18), system: stormSys, points: [], slopeInPerFt: 0, from: { kind: "part", partId: "smh-1", connectorId: "out" }, to: { kind: "part", partId: "of-1", connectorId: "in" } },
+    { type: "set_element_class", elementIds: ["ci-1", "ci-2"], classId: CIVIL_CLASS.stormInlet },
+    { type: "set_element_class", elementIds: ["smh-1"], classId: CIVIL_CLASS.manhole },
+    { type: "set_element_class", elementIds: ["of-1"], classId: CIVIL_CLASS.outfall },
+    { type: "set_element_class", elementIds: ["sys-storm"], classId: CIVIL_CLASS.stormSystem },
+    { type: "set_element_values", elementIds: ["ci-1"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-1.5 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-4.3 * FT), [CIVIL_PARAM.inletCapacity]: 2.5 } },
+    { type: "set_element_values", elementIds: ["ci-2"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-0.8 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-4.2 * FT), [CIVIL_PARAM.inletCapacity]: 2.5 } },
+    { type: "set_element_values", elementIds: ["smh-1"], values: { [CIVIL_PARAM.rimElevation]: Math.round(-1.9 * FT), [CIVIL_PARAM.invertElevation]: Math.round(-5.1 * FT) } },
+    { type: "set_element_values", elementIds: ["of-1"], values: { [CIVIL_PARAM.invertElevation]: Math.round(-5.35 * FT) } },
+    { type: "set_element_values", elementIds: ["sys-storm"], values: { [CIVIL_PARAM.designIntensity]: 4.0, [CIVIL_PARAM.minSlope]: 0.5 } },
+    { type: "create_zone", zoneId: "catchment-c1", name: "C-1 South Apron & Roof", purpose: "drainage_catchment", outline: { levelId: "L1", outline: [pt(0, -22 * FT), pt(76 * FT, -22 * FT), pt(76 * FT, 28 * FT), pt(0, 28 * FT)] }, servedBy: "ci-1" },
+    { type: "create_zone", zoneId: "catchment-c2", name: "C-2 North & West Lawn", purpose: "drainage_catchment", outline: { levelId: "L1", outline: [pt(-34 * FT, 28 * FT), pt(56 * FT, 28 * FT), pt(56 * FT, 50 * FT), pt(-34 * FT, 50 * FT)] }, servedBy: "ci-2" },
+    { type: "set_element_class", elementIds: ["catchment-c1", "catchment-c2"], classId: CIVIL_CLASS.catchment },
+    { type: "set_element_values", elementIds: ["catchment-c1"], values: { [CIVIL_PARAM.surface]: "paved" } },
+    { type: "set_element_values", elementIds: ["catchment-c2"], values: { [CIVIL_PARAM.surface]: "lawn_heavy_average" } },
+  ]);
+
+  const grading = readGradingSurfaces(m.elements);
+  const existingTin = grading.surfaces.find((s) => s.role === "existing");
+  const proposedTin = grading.surfaces.find((s) => s.role === "proposed");
+  if (!existingTin || !proposedTin) throw new Error("showcase: missing Civil LandXML grading surfaces");
+  const earthwork = cutFillBetween(existingTin, proposedTin);
+  const cutYd3 = to(earthwork.cut, "yd3");
+  const fillYd3 = to(earthwork.fill, "yd3");
+  const netYd3 = to(earthwork.net, "yd3");
+  const overlapFt2 = to(earthwork.overlapArea, "ft2");
+
+  m = runCmds(m, [
+    {
+      type: "create_view",
+      viewId: "view-civil-site",
+      name: "Civil Site — Grading & Storm Drainage Plan",
+      viewType: "floor_plan",
+      crop: { min: pt(-38 * FT, -25 * FT), max: pt(82 * FT, 52 * FT) },
+      props: { level: "Level 1", scale: 96, discipline: "civil", categoryOverrides: CIVIL_SITE_HIDE },
+    },
+    { type: "create_view", viewId: "view-sched-civil-structures", name: "Storm Structure Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_STRUCTURE_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-pipes", name: "Storm Pipe Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_PIPE_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-catchments", name: "Storm Catchment Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: STORM_CATCHMENT_SCHEDULE } },
+    { type: "create_view", viewId: "view-sched-civil-surfaces", name: "Grading Surface Schedule", viewType: "schedule", props: { discipline: "civil", scheduleV2: GRADING_SURFACE_SCHEDULE } },
+    { type: "create_sheet", sheetId: "sheet-c101", number: "C-101", name: "CIVIL SITE, GRADING & DRAINAGE PLAN", discipline: "civil", group: "Civil", sortOrder: 50 },
+    { type: "place_viewport", viewportId: "vp-civil-site", sheetId: "sheet-c101", viewId: "view-civil-site", center: { x: 255, y: 245 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-structures", sheetId: "sheet-c101", viewId: "view-sched-civil-structures", center: { x: 660, y: 120 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-pipes", sheetId: "sheet-c101", viewId: "view-sched-civil-pipes", center: { x: 660, y: 230 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-catchments", sheetId: "sheet-c101", viewId: "view-sched-civil-catchments", center: { x: 660, y: 335 } },
+    { type: "place_viewport", viewportId: "vp-sched-civil-surfaces", sheetId: "sheet-c101", viewId: "view-sched-civil-surfaces", center: { x: 660, y: 440 } },
+    {
+      type: "create_text_note",
+      itemId: "note-c101-earthwork",
+      ownerId: "sheet-c101",
+      at: { x: 55, y: 470 },
+      width: 420,
+      paragraphs: [
+        { runs: [{ text: "EARTHWORK CUT & FILL SUMMARY (LANDXML 1.2 TIN PRISMOIDAL)", bold: true }] },
+        { runs: [{ text: `Existing Grade (${existingTin.id}) vs. Proposed Pad (${proposedTin.id}) — Overlap: ${overlapFt2.toFixed(0)} ft²` }] },
+        { runs: [{ text: `CUT: ${cutYd3.toFixed(1)} yd³   |   FILL: ${fillYd3.toFixed(1)} yd³   |   NET (FILL − CUT): ${netYd3 >= 0 ? "+" : ""}${netYd3.toFixed(1)} yd³` }] },
+        { runs: [{ text: "DESIGN STORM: 4.0 in/h (Rational Method), Min Pipe Slope: 0.50%, ASTM C76 Class III RCP." }] },
+        { runs: [{ text: "NOTE: Preliminary engine takeoff — requires review by a licensed civil engineer prior to permit or bid." }] },
+      ],
+    },
+  ]);
 
   const hero = m.elements["view-3d-hero"] as ViewElement | undefined;
   if (!hero) throw new Error("showcase: missing view-3d-hero");

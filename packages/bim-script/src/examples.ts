@@ -51,6 +51,12 @@ const ABOUT: readonly Omit<KitExample, "source">[] = [
     builds: "Two permit-ready CAD mechanical details (RTU on 14 in insulated roof curb with concentric diffuser dog-leg, and ceiling toilet exhaust fan with 6 in hooded exterior wall cap) using halftone/screened hatches, mechanical 2D components, break lines, CAD dimensions, aligned callout stacks, and automated overlap QA on sheet M-501.",
     topics: ["mechanical details", "drafting", "detail view", "rtu curb", "exhaust fan", "louver", "callout", "hatch", "cad"],
   },
+  {
+    name: "civil-site",
+    title: "Civil site grading",
+    builds: "Imports existing and proposed LandXML 1.2 TIN surfaces onto a Site level, computes prismoidal cut, fill, net earthwork and overlap area, and places a Site Grading Plan on sheet C-101.",
+    topics: ["civil", "grading", "landxml", "tin", "cut and fill", "earthwork", "site plan", "contours"],
+  },
 ];
 
 export const KIT_EXAMPLES: readonly KitExample[] = ABOUT.map((a) => ({ ...a, source: KIT_EXAMPLE_SOURCES[a.name] ?? "" }));

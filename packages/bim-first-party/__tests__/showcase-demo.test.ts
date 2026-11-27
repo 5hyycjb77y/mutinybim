@@ -228,7 +228,7 @@ describe("createShowcaseDemoModel", () => {
     }
   });
 
-  it("renders all 22 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
+  it("renders all 23 Arch D sheets cleanly (including Civil C-101) with no unresolved callout references and verified passing normal + egress photometrics", () => {
     const sheets = active.filter((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet");
     expect(sheets.map((s) => s.number).sort()).toEqual([
       "A-101",
@@ -238,6 +238,7 @@ describe("createShowcaseDemoModel", () => {
       "A-201",
       "A-301",
       "A-302",
+      "C-101",
       "E-001",
       "E-101",
       "E-102",
@@ -276,6 +277,20 @@ describe("createShowcaseDemoModel", () => {
       const svg = sceneToSvg(scene);
       expect(svg).toContain("<svg");
       expect(svg).not.toContain("?? DIMENSION REFERENCE MISSING");
+      if (sh.number === "C-101") {
+        const plainSvg = svg.replace(/\u00a0/g, " ");
+        expect(plainSvg).toContain("STORM STRUCTURE SCHEDULE");
+        expect(plainSvg).toContain("STORM PIPE SCHEDULE");
+        expect(plainSvg).toContain("STORM CATCHMENT SCHEDULE");
+        expect(plainSvg).toContain("GRADING SURFACE SCHEDULE");
+        expect(plainSvg).toContain("EARTHWORK CUT &amp; FILL SUMMARY");
+        expect(plainSvg).toContain("Existing Grade");
+        expect(plainSvg).toContain("Proposed Pad");
+        expect(plainSvg).toContain("C-1 South Apron &amp; Roof");
+        expect(plainSvg).toContain("CI-1");
+        expect(plainSvg).toContain("SMH-1");
+        expect(plainSvg).toContain("OF-1");
+      }
       if (sh.number === "E-201") {
         expect(svg.replace(/\u00a0/g, " ")).toContain("AFC 42 KA");
         expect(svg).toMatch(/\d+(?:\.\d+)?\s*kVA/i);

@@ -2,13 +2,15 @@
 
 # Pack reads (ctx.read)
 
-What the add-ons let a script read with `ctx.read("<id>", input)`: 13 reads. A read never edits.
+What the add-ons let a script read with `ctx.read("<id>", input)`: 15 reads. A read never edits.
 
 | Read | What it returns |
 | --- | --- |
 | `bim_plumbing_catalog` | Pipe types, pipe systems' looks and sizing |
 | `bim_propose_links_from_text` | Circuits proposed from typed circuit numbers |
 | `bim_read_panel` | A panel's slots |
+| `civil.grading_surfaces` | Civil LandXML grading TIN surfaces (metadata, bounds, plan area) |
+| `civil.storm_network` | Civil storm network (follow the water: structures, catchments, pipes, runoff & findings) |
 | `electrical.catalog` | Connection types, feeder types and room templates |
 | `electrical.check` | The electrical design check |
 | `electrical.circuit_template_plan` | A room template's circuits for the units given |

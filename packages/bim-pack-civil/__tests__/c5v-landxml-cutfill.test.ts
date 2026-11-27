@@ -38,7 +38,7 @@ import { bindModelPacks, PackSet, runPackCalc, withPackSet } from "@permitzip/bi
 import { IMPORT_LANDXML_SURFACES } from "../src/grading-command";
 import { importLandXml, MAX_TIN_POINTS, MAX_XML_DEPTH } from "../src/landxml";
 import { CIVIL_PACK } from "../src/pack";
-import { readGradingSurfaces, type GradingSurface, type SurfaceRole, type TinFace, type TinVertex } from "../src/surfaces";
+import { GRADING_SURFACE_KIND_ROW, readGradingSurfaces, type GradingSurface, type SurfaceRole, type TinFace, type TinVertex } from "../src/surfaces";
 import { cutFillBetween } from "../src/tin-volume";
 
 const DEMO_SITE = readFileSync(new URL("./fixtures/demo-site.landxml", import.meta.url), "utf8");
@@ -375,5 +375,32 @@ describe("grading surfaces in the model", () => {
     expect(to(result.fill, "ft3")).toBeCloseTo(320 * 320, 2);
     expect(to(result.cut, "ft3")).toBeCloseTo(0, 6);
     expect(elapsedMs).toBeLessThan(500);
+  });
+
+  it("provides 3D solid prisms, civil-only 2D contour graphics, pick outline, and tag text for grading surfaces", () => {
+    let head = empty();
+    head = commit(head, { type: IMPORT_LANDXML_SURFACES, landXml: DEMO_SITE, levelId: "L1" });
+    const parsed = readGradingSurfaces(head.elements).surfaces;
+    const exSurface = parsed.find((s) => s.role === "existing");
+    const prSurface = parsed.find((s) => s.role === "proposed");
+    const existing = exSurface ? head.elements[exSurface.id] : undefined;
+    const proposed = prSurface ? head.elements[prSurface.id] : undefined;
+    if (!existing || !proposed || !exSurface) throw new Error("expected both surfaces");
+
+    expect(GRADING_SURFACE_KIND_ROW.tagText?.(existing, head.elements)).toBe(`${exSurface.name} (existing)`);
+    expect(GRADING_SURFACE_KIND_ROW.pickShape?.(proposed, head.elements)?.form).toBe("outline");
+
+    // 3D solid: proposed renders tilted prisms; existing yields to proposed so they don't Z-fight.
+    const propSolid = GRADING_SURFACE_KIND_ROW.solid?.(proposed, { elements: head.elements, floorMm: 0 });
+    expect(propSolid?.form).toBe("prisms");
+    if (propSolid?.form === "prisms") expect(propSolid.blocks.length).toBeGreaterThan(0);
+    expect(GRADING_SURFACE_KIND_ROW.solid?.(existing, { elements: head.elements, floorMm: 0 })).toBeNull();
+
+    // 2D planGraphics: draws contours on civil/general plans, hides on architectural/RCP plans.
+    const baseCtx = { elements: head.elements, scale: 120, levelId: "L1", detail: "medium" as const, drawing: "view" as const, lookingUp: false, connectedTo: () => null };
+    const civilLines = GRADING_SURFACE_KIND_ROW.planGraphics?.(proposed, { ...baseCtx, discipline: "civil" });
+    expect((civilLines ?? []).length).toBeGreaterThan(0);
+    expect(GRADING_SURFACE_KIND_ROW.planGraphics?.(proposed, { ...baseCtx, discipline: "architecture" })).toEqual([]);
+    expect(GRADING_SURFACE_KIND_ROW.planGraphics?.(proposed, { ...baseCtx, discipline: "civil", lookingUp: true })).toEqual([]);
   });
 });

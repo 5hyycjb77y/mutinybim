@@ -65,12 +65,12 @@ export function runRationalRunoff(input: RationalRunoffInput): CivilCalcOutput<R
   const acres = to(area, "acre");
   const peakCfs = to(q, "cfs");
   const shortcut = c * input.intensity_in_per_h * acres;
-  const cCite = input.runoff_coefficient !== undefined ? [] : [RUNOFF_COEFFICIENT_TABLE];
+  const cCite = input.runoff_coefficient !== undefined ? [RATIONAL_METHOD] : [RUNOFF_COEFFICIENT_TABLE];
   return {
     values: [
       { key: "peak_runoff", label: "Peak runoff", value: peakCfs, unit: "cfs", cite: [RATIONAL_METHOD] },
       { key: "runoff_coefficient", label: "Runoff coefficient C", value: c, unit: "1", cite: cCite },
-      { key: "area", label: "Area", value: acres, unit: "acre", cite: [] },
+      { key: "area", label: "Area", value: acres, unit: "acre", cite: [RATIONAL_METHOD] },
     ],
     steps: [
       { label: "Runoff coefficient", detail: input.runoff_coefficient !== undefined ? `C = ${c} as given` : `C = ${c}, the design value for ${row?.label ?? input.surface} (range ${row?.low}–${row?.high})`, cite: cCite },
@@ -112,6 +112,7 @@ export function runManningCapacity(input: ManningCapacityInput): CivilCalcOutput
   const capacityCfs = to(flow.capacity, "cfs");
   const velocityFps = to(flow.velocity, "ft/s");
   const nCite = input.manning_n !== undefined ? [] : [MANNING_N_TABLE];
+  const nValueCite = nCite.length > 0 ? nCite : [MANNING_EQUATION];
   const issues: CivilCalcOutput<ManningCapacityDetail>["issues"][number][] = [];
   if (input.flow_cfs !== undefined && input.flow_cfs > capacityCfs) issues.push({ severity: "warning", message: `The pipe carries ${input.flow_cfs.toFixed(2)} cfs but holds ${capacityCfs.toFixed(2)} cfs flowing full; it surcharges`, cite: [MANNING_EQUATION] });
   if (input.slope_pct < 0.5) issues.push({ severity: "warning", message: `${input.slope_pct} % is flatter than the 0.5 % minimum`, cite: [MIN_SLOPE_CRITERION] });
@@ -119,7 +120,7 @@ export function runManningCapacity(input: ManningCapacityInput): CivilCalcOutput
     values: [
       { key: "full_capacity", label: "Capacity flowing full", value: capacityCfs, unit: "cfs", cite: [MANNING_EQUATION, ...nCite] },
       { key: "full_velocity", label: "Velocity flowing full", value: velocityFps, unit: "ft/s", cite: [MANNING_EQUATION] },
-      { key: "manning_n", label: "Manning's n", value: n, unit: null, cite: nCite },
+      { key: "manning_n", label: "Manning's n", value: n, unit: null, cite: nValueCite },
     ],
     steps: [{ label: "Manning, flowing full", detail: `Q = (1.486/n)·A·R^(2/3)·S^(1/2) with n = ${n}, D = ${input.diameter_in} in, S = ${input.slope_pct} %: ${capacityCfs.toFixed(3)} cfs at ${velocityFps.toFixed(2)} ft/s`, cite: [MANNING_EQUATION, ...nCite] }],
     issues,

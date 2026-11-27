@@ -1,18 +1,14 @@
 import { bindModelPacks, modelPackSet, outsidePacksForPins, unbindModelPacks, withModelPacks, type InstalledOutsidePack, type Pack, type PackPin, type PackSet } from '@permitzip/bim-kernel/packs'
 import { installModelSetupHost, modelSetupOf, resolveModelSetup, type ModelSetup, type ModelState } from '@permitzip/bim-kernel'
 import { FIRST_PARTY_ADDONS, installFirstPartyAddOns } from '@permitzip/bim-first-party'
-import { CIVIL_PACK } from '@permitzip/bim-pack-civil'
 
 /**
  * The add-ons this deployment can open models with, beyond the
- * first-party trades. Civil is installed as a Preview add-on (round 8): a
- * model uses it only once someone switches it on for that model (Building
- * Model › Manage › Model settings › Add-ons), so every other model opens
- * exactly as before. Structural is first-party since round 14 (on in every
- * model). The model server keeps the same list
- * (`services/bim-authority/src/packs.ts`).
+ * first-party trades. Structural (round 14) and Civil are first-party (on in
+ * every model); additional Preview or outside add-ons join here. The model
+ * server keeps the same list (`services/bim-authority/src/packs.ts`).
  */
-export const INSTALLED_PACKS: readonly Pack[] = [CIVIL_PACK]
+export const INSTALLED_PACKS: readonly Pack[] = []
 
 /** Add-ons whose results are not yet for issued drawings: listed with a Preview badge. Every installed non-first-party add-on is Preview this round. */
 export const PREVIEW_PACK_IDS: ReadonlySet<string> = new Set(INSTALLED_PACKS.map((p) => p.manifest.id))

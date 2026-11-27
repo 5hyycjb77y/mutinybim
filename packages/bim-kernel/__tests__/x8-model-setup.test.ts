@@ -104,9 +104,10 @@ describe("x8-preview-switch", () => {
 
   it("an add-on this server lacks, or another version of it, can't be switched on; a built-in trade can't be switched at all", () => {
     const start = model("x8-refusals");
-    expect(attempt(start, { type: "set_model_addon", packId: "civil", version: "0.1.0", on: true })).toBe("civil 0.1.0 isn't installed on this server, so it can't be switched on. Settings › MutinyBIM library › Add-ons lists what is installed");
-    // Structural is first-party since round 14: built in, like Electrical.
+    expect(attempt(start, { type: "set_model_addon", packId: "zz", version: "0.1.0", on: true })).toBe("zz 0.1.0 isn't installed on this server, so it can't be switched on. Settings › MutinyBIM library › Add-ons lists what is installed");
+    // Structural (round 14) and Civil are first-party: built in, like Electrical.
     expect(attempt(start, { type: "set_model_addon", packId: "struct", version: "0.1.0", on: true })).toBe("Structural is built in: every model has it, so it can't be switched per model");
+    expect(attempt(start, { type: "set_model_addon", packId: "civil", version: "0.1.0", on: true })).toBe("Civil is built in: every model has it, so it can't be switched per model");
     expect(attempt(start, { type: "set_model_addon", packId: "vt", version: "2.0.0", on: true })).toBe("This server has Vertical transportation (test) 1.0.0, not 2.0.0. Switch on the version it has");
     expect(attempt(start, { type: "set_model_addon", packId: "electrical", version: "1.0.0", on: false })).toMatch(/is built in: every model has it, so it can't be switched per model$/);
   });

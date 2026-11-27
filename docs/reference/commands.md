@@ -2,7 +2,7 @@
 
 # Edit commands (ctx.edit)
 
-Every single edit a script may send with `ctx.edit`, read from the kernel's own schemas and those of the add-ons in force: 212 commands. The kit functions build these for you; reach for a command directly only when no kit function fits.
+Every single edit a script may send with `ctx.edit`, read from the kernel's own schemas and those of the add-ons in force: 213 commands. The kit functions build these for you; reach for a command directly only when no kit function fits.
 
 | Command | From |
 | --- | --- |
@@ -22,6 +22,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 | [`auto_connect_runs`](#auto_connect_runs) | kernel |
 | [`calibrate_underlay`](#calibrate_underlay) | kernel |
 | [`change_elevation`](#change_elevation) | kernel |
+| [`civil.import_landxml_surfaces`](#civilimport_landxml_surfaces) | add-on |
 | [`clear_classification`](#clear_classification) | kernel |
 | [`clear_group_typical`](#clear_group_typical) | kernel |
 | [`clear_sheet_markups`](#clear_sheet_markups) | kernel |
@@ -347,6 +348,12 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - toMm?: number
 - elevationMm: number
 - style: "45"|"90"
+
+## civil.import_landxml_surfaces
+
+- landXml: string
+- roles?: object
+- levelId?: string
 
 ## clear_classification
 

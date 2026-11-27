@@ -6,9 +6,11 @@
  * binder) and for reads by id after the server rebinds from the head. Fails
  * on round 7: the server shipped no add-ons and bound only `settings.packs`.
  */
-import { DEFAULT_SETTINGS, DISCIPLINE_POINT, addonSetupId, commandSchema, planCommit, withUpgradePolicy, type ModelState } from "@permitzip/bim-kernel";
-import { activePackSet, unbindModelPacks, withModelPacks } from "@permitzip/bim-kernel/packs";
-import { bindServedModelState, ensureFirstPartyAddOns, touchesModelSetup } from "../packs";
+import { DEFAULT_SETTINGS, DISCIPLINE_POINT, addonSetupId, commandSchema, installModelSetupHost, planCommit, withUpgradePolicy, type ModelState } from "@permitzip/bim-kernel";
+import { activePackSet, definePack, unbindModelPacks, withModelPacks } from "@permitzip/bim-kernel/packs";
+import { INSTALLED_PACKS, bindServedModelState, ensureFirstPartyAddOns, touchesModelSetup } from "../packs";
+
+const TEST_PREVIEW_PACK = definePack({ id: "zz", name: "Preview test", version: "0.1.0", kernel: "^1.0.0" }, []);
 
 const actor = { id: "avery", name: "Avery", kind: "human" as const };
 let seq = 0;
@@ -25,7 +27,13 @@ function model(modelId: string): ModelState {
   return commit(empty, { type: "create_level", levelId: "lvl-1", name: "L1", elevationMm: 0 }).model;
 }
 
-beforeAll(() => ensureFirstPartyAddOns());
+beforeAll(() => {
+  ensureFirstPartyAddOns();
+  installModelSetupHost(() => [TEST_PREVIEW_PACK]);
+});
+afterAll(() => {
+  installModelSetupHost(() => INSTALLED_PACKS);
+});
 afterEach(() => {
   unbindModelPacks("x8-served");
   unbindModelPacks("x8-served-other");
@@ -33,17 +41,17 @@ afterEach(() => {
 
 it("x8-preview-switch (server): a committed switch rebinds the served model; a model without one stays without", () => {
   const head = model("x8-served");
-  bindServedModelState(head);
-  expect(withModelPacks("x8-served", () => activePackSet().has("civil"))).toBe(false);
-  const on = commit(head, { type: "set_model_addon", packId: "civil", version: "0.1.0", on: true });
+  bindServedModelState(head, [TEST_PREVIEW_PACK]);
+  expect(withModelPacks("x8-served", () => activePackSet().has("zz"))).toBe(false);
+  const on = commit(head, { type: "set_model_addon", packId: "zz", version: "0.1.0", on: true });
   expect(touchesModelSetup(on.changeset.elements.map((e) => e.id))).toBe(true);
-  expect(on.changeset.elements.map((e) => e.id)).toEqual([addonSetupId("civil")]);
-  bindServedModelState(on.model);
-  expect(withModelPacks("x8-served", () => activePackSet().has("civil"))).toBe(true);
+  expect(on.changeset.elements.map((e) => e.id)).toEqual([addonSetupId("zz")]);
+  bindServedModelState(on.model, [TEST_PREVIEW_PACK]);
+  expect(withModelPacks("x8-served", () => activePackSet().has("zz"))).toBe(true);
 
   const other = model("x8-served-other");
-  bindServedModelState(other);
-  expect(withModelPacks("x8-served-other", () => activePackSet().has("civil"))).toBe(false);
+  bindServedModelState(other, [TEST_PREVIEW_PACK]);
+  expect(withModelPacks("x8-served-other", () => activePackSet().has("zz"))).toBe(false);
 });
 
 it("x8-firm-discipline-pin (server binder): the commit path stores a view under the pinned firm discipline", () => {
@@ -56,5 +64,5 @@ it("x8-firm-discipline-pin (server binder): the commit path stores a view under 
 
 it("x8-setup-entries-mixed-version (server): with an older client connected the switch is refused, never stored", () => {
   const head = model("x8-served");
-  expect(() => commit(head, { type: "set_model_addon", packId: "civil", version: "0.1.0", on: true }, (f) => f !== "organization:setup")).toThrow(/older version that doesn't store add-on and discipline settings/);
+  expect(() => commit(head, { type: "set_model_addon", packId: "zz", version: "0.1.0", on: true }, (f) => f !== "organization:setup")).toThrow(/older version that doesn't store add-on and discipline settings/);
 });

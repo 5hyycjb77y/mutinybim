@@ -11,7 +11,7 @@ import { CIVIL_CLASS, CIVIL_RCP, CIVIL_RUNOFF, CIVIL_STORM_ADAPTER, CIVIL_STORM_
  * - manhole: IfcDistributionChamberElement MANHOLE;
  * - storm inlet: IfcWasteTerminal GULLYSUMP (?) (a catch basin: a gully with a sump);
  * - outfall: IfcDistributionChamberElement USERDEFINED "OUTFALL" (?) (IFC has no outfall type);
- * - storm pipe: IfcPipeSegment RIGIDSEGMENT;
+ * - storm pipe: IfcPipeSegment CULVERT;
  * - alignment: IfcAlignment (4.3), no PredefinedType;
  * - catchment: IfcSpatialZone USERDEFINED "CATCHMENT";
  * - grading surface: IfcGeographicElement TERRAIN (?) (the TIN is the record's shape; IFC has no TIN entity).
@@ -29,7 +29,7 @@ export const CIVIL_CLASSES: readonly PackClass[] = [
   { id: CIVIL_CLASS.stormInlet, label: "Storm inlet", discipline: "civil", ifc: { entity: "IfcWasteTerminal", predefinedType: "GULLYSUMP" }, recognize: byClassId("part", CIVIL_CLASS.stormInlet), description: "A grate or curb inlet that takes surface runoff into the storm network" },
   { id: CIVIL_CLASS.manhole, label: "Manhole", discipline: "civil", ifc: { entity: "IfcDistributionChamberElement", predefinedType: "MANHOLE" }, recognize: byClassId("part", CIVIL_CLASS.manhole), description: "A structure where storm pipes join, with a rim and an invert" },
   { id: CIVIL_CLASS.outfall, label: "Outfall", discipline: "civil", ifc: { entity: "IfcDistributionChamberElement", predefinedType: "USERDEFINED", objectType: "OUTFALL" }, recognize: byClassId("part", CIVIL_CLASS.outfall), description: "Where the storm network discharges, at a fixed invert" },
-  { id: CIVIL_CLASS.stormPipe, label: "Storm pipe", discipline: "civil", ifc: { entity: "IfcPipeSegment", predefinedType: "RIGIDSEGMENT" }, recognize: { elementKinds: ["run_segment"], where: [{ path: "system.systemKind", op: "equals", value: CIVIL_STORM_SERVICE }] }, description: "A pipe run segment on a storm system" },
+  { id: CIVIL_CLASS.stormPipe, label: "Storm pipe", discipline: "civil", ifc: { entity: "IfcPipeSegment", predefinedType: "CULVERT" }, recognize: { elementKinds: ["run_segment"], where: [{ path: "system.systemKind", op: "equals", value: CIVIL_STORM_SERVICE }] }, description: "A pipe run segment on a storm system" },
   { id: CIVIL_CLASS.stormSystem, label: "Storm system", discipline: "civil", ifc: { entity: "IfcDistributionSystem", predefinedType: "STORMWATER" }, recognize: byClassId("mep_system", CIVIL_CLASS.stormSystem), description: "A site storm network: its design storm and minimum slope" },
   { id: CIVIL_CLASS.alignment, label: "Alignment", discipline: "civil", ifc: { entity: "IfcAlignment" }, recognize: byClassId("component", CIVIL_CLASS.alignment), description: "A stationed centreline with a vertical profile (a road, a swale, a utility run)" },
   { id: CIVIL_CLASS.catchment, label: "Catchment", discipline: "civil", ifc: { entity: "IfcSpatialZone", predefinedType: "USERDEFINED", objectType: "CATCHMENT" }, recognize: byClassId("zone", CIVIL_CLASS.catchment), description: "An outlined area whose runoff drains to one inlet" },
