@@ -18,3 +18,4 @@ export * from "./plan-snap";
 export * from "./reference-tone-plan";
 export * from "./pan-buttons";
 export * from "./wheel-zoom";
+export * from "./walk-keys";
