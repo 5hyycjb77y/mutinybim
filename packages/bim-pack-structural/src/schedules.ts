@@ -49,8 +49,10 @@ export const BEAM_SCHEDULE = list(
     field("depth", "DEPTH"),
     field("max_moment", "MAX MOMENT"),
     field("end_reaction", "END REACTION"),
-    { id: "max_deflection", kind: "field", path: "max_deflection", heading: "MAX DEFL.", unit: "in", precision: { kind: "decimals", digits: 2 } },
-    field("deflection_ratio", "L/Δ"),
+    { id: "max_live_deflection", kind: "field", path: "max_live_deflection", heading: "LIVE DEFL.", unit: "in", precision: { kind: "decimals", digits: 2 } },
+    { id: "live_deflection_ratio", kind: "field", path: "live_deflection_ratio", heading: "LIVE L/Δ", widthMm: 27 },
+    { id: "max_deflection", kind: "field", path: "max_deflection", heading: "TOTAL DEFL.", unit: "in", precision: { kind: "decimals", digits: 2 } },
+    { id: "deflection_ratio", kind: "field", path: "deflection_ratio", heading: "TOTAL L/Δ", widthMm: 31 },
   ],
   "mark",
 );
@@ -86,6 +88,6 @@ const template = (key: string, definition: ScheduleDefinitionV2, description: st
 
 export const STRUCTURAL_SCHEDULE_TEMPLATES: readonly LibraryRow[] = [
   template("column_schedule", COLUMN_SCHEDULE, "Every structural column with its mark, AISC section, grade, base/top levels, height, and live gravity load."),
-  template("beam_schedule", BEAM_SCHEDULE, "Every structural beam with its mark, AISC section, grade, level, span, depth, maximum moment, end reaction, elastic deflection, and L/Δ ratio."),
+  template("beam_schedule", BEAM_SCHEDULE, "Every structural beam with its mark, AISC section, grade, level, span, depth, maximum moment, end reaction, live-load and total-load elastic deflection, and their calculated L/Δ ratios."),
   template("footing_schedule", FOOTING_SCHEDULE, "Every pad footing with its mark, plan dimensions, thickness, and service-level dead, live, equipment, and total gravity loads."),
 ];

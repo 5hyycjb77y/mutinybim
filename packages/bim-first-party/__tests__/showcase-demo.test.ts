@@ -345,8 +345,8 @@ describe("createShowcaseDemoModel", () => {
     expect(lp.unsupportedBeamEnds).toEqual([]);
     expect(lp.problems).toEqual([]);
     expect(lp.beams.length).toBeGreaterThanOrEqual(30);
-    expect(lp.columns.length).toBe(25);
-    expect(lp.footings.length).toBe(16);
+    expect(lp.columns.length).toBe(24);
+    expect(lp.footings.length).toBe(15);
     for (const f of lp.footings) {
       expect(f.load.total).toBeGreaterThan(0);
     }
@@ -501,18 +501,37 @@ describe("createShowcaseDemoModel", () => {
       expect(ev60?.equipment).toContain("rtu-1");
     }
 
-    // Verify PR #151 elastic beam deflection wired into gravity load path + Sheet S-301
+    // Verify PR #151 + PR #171 live-load vs total-load elastic beam deflection wired into gravity load path + Sheet S-301
     const lp = structuralLoadPath(model);
     const loadedWithDefl = lp.beams.filter((b) => b.maxDeflection !== undefined && b.maxDeflection > 0);
-    expect(loadedWithDefl.length).toBeGreaterThanOrEqual(8);
+    const loadedWithLiveDefl = lp.beams.filter((b) => b.maxLiveDeflection !== undefined && b.maxLiveDeflection > 0);
+    expect(loadedWithDefl.length).toBeGreaterThanOrEqual(12);
+    expect(loadedWithLiveDefl.length).toBeGreaterThanOrEqual(12);
+    // Clear-span 22' East Studio roof girder G2-B4 carries deck live load + RTU-1 equipment point load -> total > live deflection
+    const g2b4 = lp.beams.find((b) => b.id === "bm-l2-b4");
+    expect(g2b4?.maxLiveDeflection).toBeGreaterThan(0);
+    expect(g2b4?.maxDeflection).toBeGreaterThan(g2b4!.maxLiveDeflection! * 1.15);
+    // L2 office floor girder G2-B1 and L2 south balcony beam B2-S1 both carry non-zero live load deflection
+    const g2b1 = lp.beams.find((b) => b.id === "bm-l2-b1");
+    expect(g2b1?.maxLiveDeflection).toBeGreaterThan(0);
+    expect(g2b1?.maxDeflection).toBeGreaterThan(g2b1!.maxLiveDeflection!);
+    const b2s1 = lp.beams.find((b) => b.id === "bm-l2-s1");
+    expect(b2s1?.maxLiveDeflection).toBeGreaterThan(0);
+    expect(b2s1?.maxDeflection).toBeGreaterThan(b2s1!.maxLiveDeflection!);
+
     const s301 = model.elements["sheet-s301"];
     expect(s301?.kind).toBe("sheet");
     if (s301?.kind === "sheet") {
       const s301Scene = buildSheetSceneFor(model, s301.id, { projectName: "MutinyBIM Showcase" });
       const s301Svg = sceneToSvg(s301Scene);
-      expect(s301Svg).toContain("MAX DEFL.");
-      expect(s301Svg).toContain("L/Δ");
-      expect(s301Svg).toMatch(/L\/\d+/);
+      expect(s301Svg).toContain("LIVE DEFL.");
+      expect(s301Svg).toContain("LIVE L/Δ");
+      expect(s301Svg).toContain("TOTAL DEFL.");
+      expect(s301Svg).toContain("TOTAL L/Δ");
+      expect(s301Svg).toContain("L/1032");
+      expect(s301Svg).toContain("L/877");
+      expect(s301Svg).toContain("L/754");
+      expect(s301Svg.replace(/\u00a0/g, " ")).toContain("STRUCTURAL DEFLECTION &amp; LOAD PATH BASIS");
       // Verify the two placed schedule viewports on Arch D Sheet S-301 do not overlap horizontally and fit inside the titleblock margin
       const colVp = model.elements["vp-sched-columns"];
       const bmVp = model.elements["vp-sched-beams"];

@@ -33,7 +33,7 @@ describe("building structural script helpers", () => {
         building.column(ctx, { id: "c2", level: "L1", at: { x: units.ft(20), y: units.ft(0) }, height: units.ft(11.3333), section: "W10x33", grade: "A992", mark: "C2" });
         building.column(ctx, { id: "c3", level: "L1", at: { x: units.ft(0), y: units.ft(14) }, topLevel: "ROOF", topOffset: units.in(-4), baseOffset: units.in(6), section: "W8x31", mark: "C3" });
 
-        building.beam(ctx, { id: "b1", level: "L2", from: { x: units.ft(0), y: units.ft(0) }, to: { x: units.ft(20), y: units.ft(0) }, section: "W16x26", grade: "A992", camber: units.in(0.75), mark: "B1" });
+        building.beam(ctx, { id: "b1", level: "L2", from: { x: units.ft(0), y: units.ft(0) }, to: { x: units.ft(20), y: units.ft(0) }, section: "W16x26", grade: "A992", elasticModulus: units.of("stress", 29000, "ksi"), camber: units.in(0.75), mark: "B1" });
         building.floor(ctx, {
           id: "deck1",
           level: "L2",
@@ -82,6 +82,8 @@ describe("building structural script helpers", () => {
 
     const lp = structuralLoadPath(model);
     expect(lp.beams.length).toBe(1);
+    expect(lp.beams[0]!.maxLiveDeflection).toBeGreaterThan(0);
+    expect(lp.beams[0]!.maxDeflection).toBeGreaterThan(lp.beams[0]!.maxLiveDeflection!);
     expect(lp.footings.length).toBe(2);
     expect(lp.footings[0]!.load.total).toBeGreaterThan(0);
     expect(lp.footings[1]!.load.total).toBeGreaterThan(0);

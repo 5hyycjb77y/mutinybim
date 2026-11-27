@@ -2,7 +2,8 @@
 
 import { clientOnly as dynamic } from '@permitzip/bim-editor/client-only'
 import { useState } from 'react'
-import { headlineKindValue, type BimElement, type ParamValue, type PartTypeDefinition, type RunFitting, type RunSegment } from '@permitzip/bim-kernel'
+import { elementClass, fieldProviderRegistry, headlineKindValue, type BimElement, type ModelState, type ParamValue, type PartTypeDefinition, type RunFitting, type RunSegment } from '@permitzip/bim-kernel'
+import { formatter, PROFILE_US_FEET_INCHES, qty } from '@permitzip/bim-units'
 import { Button } from '../ui/button'
 import { Field, FieldGroup, FieldLabel } from '../ui/field'
 import { Input } from '../ui/input'
@@ -227,6 +228,7 @@ export function SelectionPanel({
           </Item>
         ))}
       </ItemGroup>
+      {view && <ComputedFieldsSection model={view} element={el} />}
       {view && session && (
         <ClassificationSection
           key={`classification:${el.id}:${el.version}`}
@@ -243,6 +245,56 @@ export function SelectionPanel({
       {selection.element.kind === 'duct_segment' && selection.element.profile.shape === 'rect' && (
         <ResizeForm key={selection.element.id + selection.element.version} element={selection.element} onResize={onResize} canEdit={canEdit} />
       )}
+    </>
+  )
+}
+
+const SKIP_COMPUTED_GROUPS: ReadonlySet<string> = new Set(['Identity', 'Location', 'Quantities'])
+
+/** Read-only computed fields contributed by active field providers for the selected element's class, grouped generically. */
+function ComputedFieldsSection({ model, element }: { readonly model: ModelState; readonly element: BimElement }) {
+  const cls = elementClass(model.elements, element)
+  if (!cls) return null
+  const groups = new Map<string, [string, string][]>()
+  const ctx = { elements: model.elements }
+  for (const f of fieldProviderRegistry().fieldsFor(cls)) {
+    if (f.writer.kind !== 'none' || !f.read || !f.group || SKIP_COMPUTED_GROUPS.has(f.group)) continue
+    const raw = f.read(element, ctx)
+    if (raw === null || raw === '' || Array.isArray(raw)) continue
+    let text: string
+    if (typeof raw === 'number' && f.valueType === 'quantity' && f.kind) {
+      const si = f.unit ? qty(f.kind, raw, f.unit) : raw
+      const useFieldUnit = f.unit === 'in'
+      const override = useFieldUnit ? { unit: f.unit, precision: { kind: 'decimals' as const, digits: 2 } } : undefined
+      text = formatter(f.kind, PROFILE_US_FEET_INCHES, override)(si)
+    } else if (typeof raw === 'boolean') {
+      text = raw ? 'Yes' : 'No'
+    } else {
+      text = String(raw)
+    }
+    const list = groups.get(f.group) ?? []
+    list.push([f.label, text])
+    groups.set(f.group, list)
+  }
+  if (groups.size === 0) return null
+  return (
+    <>
+      {[...groups.entries()].map(([group, rows]) => (
+        <div key={group} className="flex flex-col gap-1.5">
+          <Separator />
+          <span className="text-xs font-medium text-muted-foreground">{group}</span>
+          <ItemGroup className="gap-1">
+            {rows.map(([k, v]) => (
+              <Item key={k} size="sm">
+                <ItemContent>
+                  <ItemDescription className="text-xs">{k}</ItemDescription>
+                  <ItemTitle className="text-xs font-normal">{v}</ItemTitle>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
+        </div>
+      ))}
     </>
   )
 }

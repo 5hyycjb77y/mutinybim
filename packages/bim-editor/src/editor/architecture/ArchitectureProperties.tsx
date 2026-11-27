@@ -17,7 +17,7 @@ import { typeDescription } from './tools/tool-types'
 import { WallBaseField, WallTopField } from './WallTopField'
 import { OpeningSillField } from './OpeningSillField'
 
-const TYPED_KINDS: ReadonlySet<string> = new Set(['wall', 'opening', 'slab', 'ceiling', 'column'])
+const TYPED_KINDS: ReadonlySet<string> = new Set(['wall', 'opening', 'slab', 'ceiling', 'column', 'beam'])
 const ARCH_ADDON_KINDS: ReadonlySet<string> = new Set(['architecture.roof', 'architecture.stair', 'architecture.railing'])
 const NO_TYPE = '__none__'
 const NO_MATERIAL = '__default_material__'

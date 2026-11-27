@@ -27,7 +27,9 @@ contract only, with **no kernel edits**. It imports `@permitzip/bim-pack`,
 - **The gravity load path**: a `struct.gravity_load` service row and a
   network-to-total adapter (`struct.load_path`); the kernel walks and totals
   reactions down deck → beam → column → footing (`serviceNetworkTotals`), by
-  load case (dead, live, equipment).
+  load case (dead, live, equipment). Beams expose separate live-load and
+  combined service-load elastic deflections and calculated span-to-deflection
+  ratios when explicit E and catalogue strong-axis Ix are available.
 - **A lint rule** (`struct.footing_unsupported`) and **a calc**
   (`struct.simple_beam`: reactions, largest moment, utilisation and, given
   E and I, the largest elastic deflection and where it is).
@@ -38,7 +40,12 @@ contract only, with **no kernel edits**. It imports `@permitzip/bim-pack`,
   round 6), no live-load reduction, no lateral loads.
 - Deflection only when both E and I are given (never a default): elastic
   bending, constant EI, small deflections, no shear deformation, positive
-  down. No deflection limit is checked.
+  down. Live deflection uses the modeled live load only; total deflection uses
+  dead + live + equipment. Ratios are calculated L/Δ values, not code limits.
+  Missing stiffness omits deflection values. A beam carrying no live-loaded deck
+  reports zero live deflection; a beam carrying a deck with missing or unknown
+  occupancy omits live deflection and reports incomplete live loading rather
+  than reporting zero. No deflection limit is checked.
 - One-way rectangular decks; beams square to the span; simple spans only.
 - Footing and deck self-weight are not counted.
 - Beam ends are network nodes of their own (`<beamId>@start`), because one

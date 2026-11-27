@@ -497,10 +497,10 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
   },
   {
     name: "building.beam",
-    summary: "A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.",
-    signature: "beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string",
-    example: layout(`    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", mark: "B1" });`),
-    topics: ["beam", "framing", "steel", "wide flange", "structure"],
+    summary: "A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.",
+    signature: "beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly elasticModulus?: Measure; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string",
+    example: layout(`    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", elasticModulus: units.of("stress", 29000, "ksi"), mark: "B1" });`),
+    topics: ["beam", "framing", "steel", "wide flange", "structure", "deflection", "elastic modulus"],
   },
   {
     name: "building.footing",

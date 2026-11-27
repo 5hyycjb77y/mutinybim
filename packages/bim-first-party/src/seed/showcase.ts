@@ -419,9 +419,11 @@ function buildShowcase(modelId: string): ModelState {
       elementId: "slab-l2-terrace",
       levelId: "L2",
       kind: "slab",
+      classId: "struct.floor_deck",
       typeId: "type-slab-limestone",
-      placement: { kind: "area", outline: [pt(W_WEST - HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, 0), pt(W_WEST - HALF_EXT, 0)] },
+      placement: { kind: "area", outline: [pt(W_WEST - HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, -5.0 * FT), pt(W_MAIN + HALF_EXT, 0), pt(W_WEST - HALF_EXT, 0)], spanDirectionDeg: 90 },
       size: { thicknessMm: Math.round(8 * IN) },
+      values: { "struct.occupancy": "corridor" },
     },
 
     // Level 1 Exterior & Interior Walls
@@ -462,9 +464,8 @@ function buildShowcase(modelId: string): ModelState {
     // - Rotated strong-axis wide-flange I-sections, cambered W18x35 girders, W16x26/W14x22 beams
     // - Full gravity load path (Roof + Floor decks + RTU-1 equipment weight → Beams → Columns → Pad Footings)
     // =========================================================================
-    // Continuous 2-story interior column on Grid B (L1 → ROOF) + East Studio interior column (L1 → L2)
+    // Continuous 2-story interior column on Grid B (L1 → ROOF); East Studio stays column-free under the 22' clear-span roof girder G2-B4
     { type: "create_element", elementId: "col-l1-1", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(26 * FT, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "ROOF", topOffsetMm: -Math.round(4 * IN), values: { mark: "C25B" } },
-    { type: "create_element", elementId: "col-l1-2", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(45 * FT, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C35B" } },
     // Level 1 Grid 1–4 × A–C steel columns (top tied to L2 underside)
     { type: "create_element", elementId: "col-l1-1a", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(0, 0) }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C1A" } },
     { type: "create_element", elementId: "col-l1-1b", levelId: "L1", kind: "column", classId: "struct.column_steel", typeId: "type-col-w10x33", material: "steel", placement: { kind: "point", position: pt(0, 14 * FT), rotationDeg: 90 }, size: { widthMm: 254, depthMm: 254 }, topLevelId: "L2", topOffsetMm: -Math.round(4 * IN), values: { mark: "C1B" } },
@@ -504,7 +505,6 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_element", elementId: "ftg-3a", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(W_MAIN, 0) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F3A" } },
     { type: "create_element", elementId: "ftg-3b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-6x6", placement: { kind: "point", position: pt(W_MAIN, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(6 * FT), depthMm: Math.round(6 * FT) }, values: { mark: "F3B" } },
     { type: "create_element", elementId: "ftg-3c", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(W_MAIN, D_ALL) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F3C" } },
-    { type: "create_element", elementId: "ftg-35b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-5x5", placement: { kind: "point", position: pt(45 * FT, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(5 * FT), depthMm: Math.round(5 * FT) }, values: { mark: "F35B" } },
     { type: "create_element", elementId: "ftg-4a", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4A" } },
     { type: "create_element", elementId: "ftg-4b", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4B" } },
     { type: "create_element", elementId: "ftg-4c", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F4C" } },
@@ -512,18 +512,18 @@ function buildShowcase(modelId: string): ModelState {
     { type: "create_element", elementId: "ftg-3s", levelId: "L1", kind: "component", category: "footing", classId: "struct.footing_pad", typeId: "type-ftg-4x4", placement: { kind: "point", position: pt(W_MAIN, -4.5 * FT) }, baseOffsetMm: -Math.round(8 * IN), size: { widthMm: Math.round(4 * FT), depthMm: Math.round(4 * FT) }, values: { mark: "F3S" } },
 
     // Level 2 Floor Framing & East Studio Roof Framing (top-of-steel at -4" embedded into composite deck)
-    // E-W Primary Gravity Beams & Girders (receiving N-S one-way slab-l2-main & deck-roof-east + RTU-1)
+    // E-W Primary Gravity Beams & Girders (receiving N-S one-way slab-l2-main, slab-l2-terrace & deck-roof-east + RTU-1)
     { type: "create_element", elementId: "bm-l2-a1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(0, 0), end: pt(W_WEST, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A1" } },
     { type: "create_element", elementId: "bm-l2-a2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, 0), end: pt(W_MAIN, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A2" } },
-    { type: "create_element", elementId: "bm-l2-a3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, 0), end: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A3", "struct.camber": Math.round(0.75 * IN) } },
-    { type: "create_element", elementId: "bm-l2-b1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(0, 14 * FT), end: pt(W_WEST, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B1" } },
+    { type: "create_element", elementId: "bm-l2-a3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, 0), end: pt(W_ALL, 0) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-A3" } },
+    { type: "create_element", elementId: "bm-l2-b1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(0, 14 * FT), end: pt(W_WEST, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B1" } },
     { type: "create_element", elementId: "bm-l2-b2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, 14 * FT), end: pt(26 * FT, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B2" } },
     { type: "create_element", elementId: "bm-l2-b3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(26 * FT, 14 * FT), end: pt(W_MAIN, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B3" } },
-    { type: "create_element", elementId: "bm-l2-b4", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_MAIN, 14 * FT), end: pt(45 * FT, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B4" } },
-    { type: "create_element", elementId: "bm-l2-b5", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(45 * FT, 14 * FT), end: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B5" } },
+    // 22' clear-span East Studio roof girder carrying deck-roof-east live load + RTU-1 equipment point load
+    { type: "create_element", elementId: "bm-l2-b4", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(W_MAIN, 14 * FT), end: pt(W_ALL, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "G2-B4" } },
     { type: "create_element", elementId: "bm-l2-c1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(0, D_ALL), end: pt(W_WEST, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C1" } },
     { type: "create_element", elementId: "bm-l2-c2", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_WEST, D_ALL), end: pt(W_MAIN, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C2" } },
-    { type: "create_element", elementId: "bm-l2-c3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w18x35", label: "W18x35", placement: { kind: "line", start: pt(W_MAIN, D_ALL), end: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C3", "struct.camber": Math.round(0.75 * IN) } },
+    { type: "create_element", elementId: "bm-l2-c3", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w16x26", label: "W16x26", placement: { kind: "line", start: pt(W_MAIN, D_ALL), end: pt(W_ALL, D_ALL) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-C3" } },
     // South Balcony Framing + N-S Tie/Collector Beams at Level 2
     { type: "create_element", elementId: "bm-l2-s1", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w14x22", label: "W14x22", placement: { kind: "line", start: pt(W_WEST, -4.5 * FT), end: pt(W_MAIN, -4.5 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "B2-S1" } },
     { type: "create_element", elementId: "bm-l2-1s", levelId: "L2", kind: "beam", classId: "struct.beam_steel", typeId: "type-bm-w12x26", label: "W12x26", placement: { kind: "line", start: pt(0, 0), end: pt(0, 14 * FT) }, baseOffsetMm: -Math.round(4 * IN), values: { mark: "T2-1S" } },
@@ -2007,8 +2007,23 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_viewport", viewportId: "vp-struct-sec-ns", sheetId: "sheet-s201", viewId: "view-struct-sec-ns", center: { x: 400, y: 440 } },
 
     { type: "create_sheet", sheetId: "sheet-s301", number: "S-301", name: "STRUCTURAL COLUMN & BEAM SCHEDULES", discipline: "structure", group: "Structural", sortOrder: 354 },
-    { type: "place_viewport", viewportId: "vp-sched-columns", sheetId: "sheet-s301", viewId: "view-sched-columns", center: { x: 220, y: 295 } },
-    { type: "place_viewport", viewportId: "vp-sched-beams", sheetId: "sheet-s301", viewId: "view-sched-beams", center: { x: 605, y: 295 } },
+    { type: "place_viewport", viewportId: "vp-sched-columns", sheetId: "sheet-s301", viewId: "view-sched-columns", center: { x: 205, y: 240 } },
+    { type: "place_viewport", viewportId: "vp-sched-beams", sheetId: "sheet-s301", viewId: "view-sched-beams", center: { x: 590, y: 295 } },
+    {
+      type: "create_text_note",
+      itemId: "note-s301-basis",
+      ownerId: "sheet-s301",
+      at: { x: 132, y: 415 },
+      width: 245,
+      textSize: 2.3,
+      paragraphs: [
+        { runs: [{ text: "STRUCTURAL DEFLECTION & LOAD PATH BASIS", bold: true }] },
+        { runs: [{ text: "1. STEEL FRAMING: ASTM A992 (E = 29,000 KSI), STRONG-AXIS CATALOG Ix, SIMPLY SUPPORTED CONSTANT-EI EULER-BERNOULLI BENDING (NO SHEAR DEFORMATION)." }] },
+        { runs: [{ text: "2. LIVE DEFL. / LIVE L/Δ: MODELED ONE-WAY DECK LIVE LOAD ONLY (50 PSF OFFICE FLOOR, 100 PSF BALCONY CORRIDOR, 20 PSF ORDINARY ROOF)." }] },
+        { runs: [{ text: "3. TOTAL DEFL. / TOTAL L/Δ: SERVICE-LEVEL DEAD (BEAM SELF-WEIGHT) + LIVE + EQUIPMENT POINT LOADS (RTU-1 ON 22' CLEAR-SPAN GIRDER G2-B4, EF-1 ON ROOF)." }] },
+        { runs: [{ text: "4. SPAN RATIOS ARE UNFACTORED INFORMATIONAL L/Δ VALUES; NO CODE SERVICEABILITY LIMIT IS EVALUATED." }] },
+      ],
+    },
 
     // ---- Mechanical Views & Sheets (M-101 + M-201) ----
     // Separate Rooftop Unit Schedule, Exhaust Fan Schedule (only relevant columns per equipment type!), and Type-Based Air Device Schedule!

@@ -14,7 +14,7 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.railing`](#buildingrailing): A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42" IBC commercial height); returns its id.
 - [`building.grid`](#buildinggrid): A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.
 - [`building.column`](#buildingcolumn): A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`, optional `baseOffset`, `rotationDeg`, AISC `section`, `grade`, and `mark`; returns its id.
-- [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+- [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.
 - [`building.footing`](#buildingfooting): A concrete pad footing (`struct.footing_pad`) centered at `at` below `level` with `width`, `depth`, `thickness`, and `mark`; returns its id.
 - [`building.curtainWall`](#buildingcurtainwall): A glazed architectural storefront / curtain wall from `from` to `to` with automatic 3D/plan mullions and optional `mullionMaterial`; returns its id.
 - [`building.moveWall`](#buildingmovewall): Move a wall by a plan delta, carrying joined walls and collinear slab/ceiling/roof edges unless `disjoin: true`.
@@ -257,13 +257,13 @@ export default defineScript({
 
 ## building.beam
 
-A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
+A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id.
 
 ```ts
-beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
+beam(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly section?: string; readonly grade?: string; readonly elasticModulus?: Measure; readonly camber?: Measure; readonly mark?: string; readonly baseOffset?: Measure; readonly typeId?: string; readonly classId?: string; readonly material?: string; readonly values?: Readonly<Record<string, number | string | boolean>>; readonly id?: string }): string
 ```
 
-Topics: beam, framing, steel, wide flange, structure
+Topics: beam, framing, steel, wide flange, structure, deflection, elastic modulus
 
 <details><summary>Example script</summary>
 
@@ -274,7 +274,7 @@ export default defineScript({
   reads: { levels: true },
   parameters: {},
   run(ctx) {
-    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", mark: "B1" });
+    building.beam(ctx, { level: "L2", from: { x: units.ft(0), y: units.ft(14) }, to: { x: units.ft(18), y: units.ft(14) }, section: "W16X26", grade: "A992", elasticModulus: units.of("stress", 29000, "ksi"), mark: "B1" });
   },
 });
 ```

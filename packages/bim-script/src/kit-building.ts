@@ -65,6 +65,13 @@ function mm(m: Measure, what: string): number {
   return Math.round(measureIn(m, "mm") * 1000) / 1000;
 }
 
+function ksi(m: Measure, what: string): number {
+  if (m.kind !== "stress") throw new Error(`${what} is a stress; the value given is a ${m.kind}.`);
+  const v = measureIn(m, "ksi");
+  if (!(Number.isFinite(v) && v > 0)) throw new Error(`${what} must be a finite number greater than zero.`);
+  return Math.round(v * 1000) / 1000;
+}
+
 function planMm(p: PlanPoint, what: string): { x: number; y: number } {
   return { x: mm(p.x, `${what} x`), y: mm(p.y, `${what} y`) };
 }
@@ -894,7 +901,7 @@ export const building = {
     ctx.edit(command);
     return command.elementId;
   },
-  /** A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`), with optional AISC `section`, `grade`, `camber`, and `mark`; returns its id. */
+  /** A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`), with optional AISC `section`, `grade`, `elasticModulus` (E), `camber`, and `mark`; returns its id. */
   beam(
     ctx: ScriptContext,
     spec: {
@@ -903,6 +910,7 @@ export const building = {
       readonly to: PlanPoint;
       readonly section?: string;
       readonly grade?: string;
+      readonly elasticModulus?: Measure;
       readonly camber?: Measure;
       readonly mark?: string;
       readonly baseOffset?: Measure;
@@ -914,12 +922,13 @@ export const building = {
     },
   ): string {
     const mergedValues =
-      spec.material || spec.values || spec.section || spec.grade || spec.camber || spec.mark
+      spec.material || spec.values || spec.section || spec.grade || spec.elasticModulus || spec.camber || spec.mark
         ? {
             ...(spec.values ?? {}),
             ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
             ...(spec.section ? { "struct.section": spec.section } : {}),
             ...(spec.grade ? { "struct.grade": spec.grade } : {}),
+            ...(spec.elasticModulus ? { "struct.elastic_modulus": ksi(spec.elasticModulus, "Elastic modulus (E)") } : {}),
             ...(spec.camber ? { "struct.camber": mm(spec.camber, "Beam camber") } : {}),
             ...(spec.mark ? { mark: spec.mark } : {}),
           }
