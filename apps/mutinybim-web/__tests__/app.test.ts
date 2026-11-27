@@ -101,6 +101,39 @@ test("wrong password, duplicate email and cross-site posts are refused in words"
   expect(cross.status).toBe(403);
 });
 
+test("a lost create reply reopens the original model from the signed-in form after restart at quota", async () => {
+  await start({ modelLimit: 1 });
+  const cookie = await signUp("creator@example.com");
+  const page = await (await fetch(`${base}/models`, { headers: { cookie } })).text();
+  const key = page.match(/name="creation_key" value="([^"]+)"/)?.[1];
+  if (!key || !app) throw new Error("Missing model creation form");
+  const form = { name: "East plant", start: "blank", creation_key: key };
+  const lost = new AbortController();
+  const finish = app.db.finishCreation.bind(app.db);
+  let id = "";
+  jest.spyOn(app.db, "finishCreation").mockImplementationOnce(async (...args) => {
+    const receipt = await finish(...args);
+    id = receipt.model_id;
+    lost.abort();
+    return receipt;
+  });
+  await expect(fetch(`${base}/models`, { method: "POST", body: new URLSearchParams(form),
+    headers: { cookie, origin: base }, signal: lost.signal, redirect: "manual" })).rejects.toMatchObject({ name: "AbortError" });
+  expect(id).toMatch(/^m-/);
+  await app.close();
+  app = null;
+  await start({ modelLimit: 1 });
+  const replay = await post("/models", form, cookie);
+  expect(replay.status).toBe(303);
+  expect(replay.headers.get("location")).toBe(`/m/${id}?view=plan`);
+  const summary = await fetch(`${base}/api/hosted/models/${id}/summary`, { headers: { cookie } });
+  expect(await summary.json()).toMatchObject({ byKind: { level: 1 } });
+  expect((await post("/models", { ...form, name: "Different" }, cookie)).status).toBe(409);
+  const full = await post("/models", { name: "East plant", start: "blank" }, cookie);
+  expect(full.status).toBe(409);
+  expect(await full.text()).toContain("up to 1 model.");
+});
+
 test("someone else's model is not found, in the list, the editor or its summary", async () => {
   await start();
   const owner = await signUp("owner@example.com");
@@ -241,6 +274,113 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   expect((await post(`/models/${id}/share/${guestId}/delete`, {}, owner)).status).toBe(200);
   expect((await fetch(`${base}/m/${id}`, { headers: { cookie: guest } })).status).toBe(404);
   expect(await (await fetch(`${base}/models`, { headers: { cookie: guest } })).text()).not.toContain("Shared warehouse");
+});
+
+test("removing the recipient's share explains how to recover an ended offer", async () => {
+  await start();
+  const alex = await signUp("alex@example.com", "Alex");
+  const bea = await signUp("bea@example.com", "Bea");
+  await signUp("cam@example.com", "Cam");
+  const id = await makeModel(alex, "East plant room");
+  const share = `/models/${id}/share`;
+  const beaId = (await app?.db.userByEmail("bea@example.com"))?.id;
+  if (!beaId) throw new Error("Missing recipient");
+  for (const email of ["bea@example.com", "cam@example.com"]) {
+    expect((await post(share, { email, role: "view" }, alex)).status).toBe(200);
+  }
+  expect((await post(`/models/${id}/transfer`, { recipient: beaId, retained: "view" }, alex)).status).toBe(303);
+  const offer = (await app?.db.transfers.inbox(beaId))?.[0];
+  if (!offer) throw new Error("Missing offer");
+  const page = await (await fetch(base + share, { headers: { cookie: alex } })).text();
+  expect(page).toMatch(/with Bea\? [^"]*ends their ownership offer/);
+  expect(page).not.toMatch(/with Cam\? [^"]*ends their ownership offer/);
+
+  expect((await post(`${share}/${beaId}/delete`, {}, alex)).status).toBe(200);
+  expect((await post(share, { email: "bea@example.com", role: "view" }, alex)).status).toBe(200);
+  const stale = await post(`/transfers/${offer.id}/accept`, {}, bea);
+  expect(stale.status).toBe(409);
+  const notice = await stale.text();
+  expect(notice).toContain("Ownership offer ended");
+  expect(notice).toContain("ask the model owner to send a new offer");
+  expect(notice).toMatch(/href="\/models"[^>]*>My models</);
+});
+
+test("a direct viewer accepts a handover and recovers the same receipt after restart and model deletion", async () => {
+  await start({ modelLimit: 1 });
+  const alex = await signUp("alex@example.com", "Alex");
+  const bea = await signUp("bea@example.com", "Bea");
+  const id = await makeModel(alex, "Plant room");
+  const full = await makeModel(bea, "Current job");
+  const beaId = (await app?.db.userByEmail("bea@example.com"))?.id;
+  if (!beaId) throw new Error("Missing recipient");
+  expect((await post(`/models/${id}/share`, { email: "bea@example.com", role: "view" }, alex)).status).toBe(200);
+  expect((await post(`/models/${id}/transfer`, { recipient: beaId, retained: "view" }, alex)).status).toBe(303);
+  const inbox = await (await fetch(base + "/models", { headers: { cookie: bea } })).text();
+  const action = inbox.match(/action="(\/transfers\/[a-f0-9-]+\/accept)"/)?.[1];
+  if (!action) throw new Error("Transfer offer missing from My models");
+  expect(inbox).toContain("Alex");
+  expect(inbox).toContain("Your model slots are full. Free one to accept this offer.");
+  expect(inbox).not.toContain("1 models");
+  expect((await post(action, {}, bea)).status).toBe(409);
+  expect((await post(`/models/${full}/delete`, {}, bea)).status).toBe(303);
+  const refreshed = await (await fetch(base + "/models", { headers: { cookie: bea } })).text();
+  expect(refreshed).toContain("Accepting uses one of your model slots.");
+  expect(refreshed).toContain(action);
+  const first = await post(action, {}, bea);
+  expect(first.status).toBe(303);
+  const receipt = first.headers.get("location");
+  expect(receipt).toMatch(/\/receipt$/);
+  const firstReceipt = await (await fetch(base + receipt, { headers: { cookie: bea } })).text();
+  expect(firstReceipt).toContain("Ownership transfer accepted");
+  expect(firstReceipt).toContain("Plant room");
+  expect((await fetch(`${base}/api/hosted/models/${id}/summary`, { headers: { cookie: alex } })).status).toBe(200);
+  expect((await post(`/models/${id}/rename`, { name: "Next job" }, bea)).status).toBe(303);
+  expect((await post(`/models/${id}/delete`, {}, bea)).status).toBe(303);
+  await app?.close();
+  app = null;
+  await start({ modelLimit: 1 });
+  expect((await post(action, {}, bea)).headers.get("location")).toBe(receipt);
+  expect(await (await fetch(base + receipt, { headers: { cookie: bea } })).text()).toBe(firstReceipt);
+  expect((await fetch(base + receipt, { headers: { cookie: alex } })).status).toBe(404);
+  expect((await fetch(`${base}/api/hosted/models/${id}/summary`, { headers: { cookie: bea } })).status).toBe(404);
+});
+
+test("both open model connections reconnect with their new rights after a handover", async () => {
+  await start();
+  const owner = await signUp("owner@example.test");
+  const viewer = await signUp("viewer@example.test");
+  const id = await makeModel(owner, "East plant");
+  const viewerId = (await app?.db.userByEmail("viewer@example.test"))?.id;
+  if (!viewerId) throw new Error("Missing test viewer");
+  await post(`/models/${id}/share`, { email: "viewer@example.test", role: "view" }, owner);
+  const senderKey = await makeAgentKey(owner);
+  const recipientKey = await makeAgentKey(viewer);
+  async function openEditor(key: string, person: string) {
+    let notify!: (reason: string) => void;
+    const closed = new Promise<string>((resolve) => { notify = resolve; });
+    const connect = builtinWebSocketFactory();
+    const session = await AgentSession.open({
+      modelId: id, token: "local", url: `${base.replace(/^http/, "ws")}/sync?key=${key}`, actor: agentActor(person, "run", person),
+      socketFactory: (url, handlers) => connect(url, { ...handlers, onClose(reason) { handlers.onClose(reason); notify(reason); } }),
+    });
+    return { session, closed };
+  }
+  const sender = await openEditor(senderKey, "sender");
+  const recipient = await openEditor(recipientKey, "recipient");
+  try {
+    expect((await post(`/models/${id}/transfer`, { recipient: viewerId, retained: "view" }, owner)).status).toBe(303);
+    const offer = (await app?.db.transfers.inbox(viewerId))?.[0];
+    if (!offer) throw new Error("Missing ownership offer");
+    expect((await post(`/transfers/${offer.id}/accept`, {}, viewer)).status).toBe(303);
+    expect(await Promise.all([sender.closed, recipient.closed])).toEqual([expect.stringContaining("access"), expect.stringContaining("access")]);
+    await expect(sender.session.edit({ type: "create_level", levelId: "stale", name: "Stale edit", elevationMm: 4000 },
+      { idempotencyKey: "stale" })).rejects.toMatchObject({ code: "closed" });
+    expect(await agentEdit(senderKey, id, "after-as-viewer")).toMatchObject({ status: "refused" });
+    expect(await agentEdit(recipientKey, id, "after-as-owner")).toMatchObject({ status: "saved" });
+  } finally {
+    sender.session.close();
+    recipient.session.close();
+  }
 });
 
 test("branches, their edits and saved versions are on disk and come back after a restart", async () => {

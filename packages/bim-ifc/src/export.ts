@@ -5,11 +5,11 @@ import {
   activeClassRegistry,
   activeServiceRegistry,
   classSolidsOf,
-  gridAxisFamily,
   fieldProviderRegistry,
   hostLineOf,
   hostVoidsOf,
   ifcRelationRowsFor,
+  kindRowOf,
   spaceBoundaryFacts,
   withPackParameters,
   buildClassIndex,
@@ -22,7 +22,9 @@ import {
   ifcOrganizationProperties,
   linkAdapterId,
   loadAnchorOf,
+  hostedPoints,
   localBounds,
+  mountPoint,
   mountedPositions,
   organizationOf,
   parameterOfParamDef,
@@ -30,9 +32,12 @@ import {
   partMesh,
   phaseStatusAt,
   placementOf,
+  portWidthAxis,
   rawRegistryWords,
   resolveConnectors,
   resolveGeometry,
+  riserWidthAxis,
+  segmentWidthAxis,
   siteMapConversion,
   siteOf,
   spaceAreaM2,
@@ -51,6 +56,7 @@ import {
   type PartTypeElement,
   type PortRef,
   type Registry,
+  type RunFitting,
   type RunSize,
   type ServiceLink,
   type ServiceRegistry,
@@ -62,10 +68,11 @@ import { activePackSet } from "@permitzip/bim-kernel/packs";
 import { elementTypeOf, elementTypeValue } from "@permitzip/bim-kernel/elements";
 import { LEGACY_QUANTITY_KEYS, QUANTITY_BINDINGS } from "@permitzip/bim-units";
 import { GeometryWriter, type Section, type Vec3 } from "./geometry";
+import { sortGridAxes } from "./grid-axes";
 import { derivedIfcGuid, isIfcGuid, isUuid, projectNamespace, relationshipIfcGuid, uuidToIfcGuid } from "./guid";
 import { PROXY, primaryClass, resolveIfcClass, type ResolvedIfcClass } from "./mapping";
 import { ParameterHomes, PropertyBag, baselineParameterHomes, registryParameterHomes, writeSets, type ParameterHome, type PropertyInput } from "./properties";
-import { ownAttributes, predefinedTypes } from "./schema-ifc4x3";
+import { ownAttributes, predefinedTypes, statedEnumMembers, type StatedEnumAttribute } from "./schema-ifc4x3";
 import { $, bool, en, int, list, opt, real, str, serializeStep, StepGraph, type StepRef, type StepValue } from "./step";
 import { UnitSet } from "./units";
 
@@ -173,6 +180,23 @@ const ZONE_PURPOSE_SPATIAL: Readonly<Record<string, string>> = {
 const PHASE_STATUS: Readonly<Record<string, string>> = { new: "NEW", existing: "EXISTING", demolished: "DEMOLISH", temporary: "TEMPORARY" };
 const PORT_DOMAIN: Readonly<Record<string, string>> = { duct: "DUCT", pipe: "PIPE", electrical: "CABLE", conduit: "CABLECARRIER" };
 const FLOW_DIRECTION: Readonly<Record<string, string>> = { in: "SINK", out: "SOURCE", bidirectional: "SOURCEANDSINK" };
+/** ObjectType of the port a trunk has where a branch fitting leaves it, and of that fitting's port into the trunk. */
+const TRUNK_BRANCH_PORT = "Branch";
+const FITTING_TRUNK_PORT = "Trunk";
+
+/** What a port's standard property set can say: its opening (mm) and what it is designed to carry. */
+interface PortFacts {
+  readonly width?: number;
+  readonly height?: number;
+  readonly diameter?: number;
+  /** CFM at a duct port, GPM at a pipe port. */
+  readonly flow?: number;
+  readonly voltage?: number;
+}
+
+function sizeFacts(s: RunSize): PortFacts {
+  return s.shape === "rect" || s.shape === "oval" ? { width: s.width, height: s.height } : { diameter: s.shape === "round" ? s.diameter : s.shape === "pipe" ? s.nominalMm : s.tradeSizeMm };
+}
 
 function push<V>(m: Map<string, V[]>, k: string, v: V): void {
   const items = m.get(k);
@@ -186,6 +210,23 @@ function byId<T extends { readonly id: string }>(a: T, b: T): number {
 
 function str255(s: string): StepValue {
   return s === "" ? $ : str(s.length > 255 ? s.slice(0, 255) : s);
+}
+
+/** Where the schema keeps a person's own words when the enumeration has no member for them. */
+const USER_DEFINED_ATTRIBUTE: Readonly<Record<StatedEnumAttribute, string>> = { OperationType: "UserDefinedOperationType", PartitioningType: "UserDefinedPartitioningType" };
+
+/**
+ * A stored door operation or window partitioning as the schema takes it: the
+ * enumeration's own member when it has one (in any casing), else USERDEFINED
+ * with the stored words beside it. Null when nothing is stated (blank, or not
+ * text). Nothing a model stores here can stop the export.
+ */
+function statedEnum(attribute: StatedEnumAttribute, raw: unknown): Readonly<Record<string, StepValue>> | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const stated = raw.trim();
+  const member = stated.toUpperCase();
+  if (statedEnumMembers(attribute).has(member)) return { [attribute]: en(member) };
+  return { [attribute]: en("USERDEFINED"), [USER_DEFINED_ATTRIBUTE[attribute]]: str255(stated) };
 }
 
 function stringField(el: BimElement, key: string): string | null {
@@ -209,6 +250,13 @@ function finite(v: unknown): number {
 function numberField(el: BimElement, key: string): number | null {
   const v: unknown = Reflect.get(el, key);
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** The element type a record names in its own `typeId`. Read from the record, not by kind: a ceiling names a type too, and it is not an element-core kind. */
+function namedElementType(els: ModelState["elements"], el: BimElement): Extract<BimElement, { kind: "element_type" }> | null {
+  const typeId = stringField(el, "typeId");
+  const type = typeId ? els[typeId] : undefined;
+  return type?.kind === "element_type" ? type : null;
 }
 
 /** The GlobalId an element was imported with (`provenance.ifcGlobalId`; levels: their storey's). */
@@ -466,7 +514,8 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   const typicalMembers = new Map<string, { readonly levelId: string | null; readonly items: StepRef[] }>();
   const groupMembers = new Map<string, StepRef[]>();
 
-  const writeType = (key: string, entity: string, predefined: string | null, name: string, elementType: string | null, bag: PropertyBag | null, extraEnums: Readonly<Record<string, string>> = {}): { ref: StepRef; guid: string; members: StepRef[] } => {
+  // `userDefined` says what a USERDEFINED type is when it has no `elementType` of its own: what its occurrences say in ObjectType.
+  const writeType = (key: string, entity: string, predefined: string | null, name: string, elementType: string | null, bag: PropertyBag | null, extra: Readonly<Record<string, StepValue>> = {}, userDefined: string | null = null): { ref: StepRef; guid: string; members: StepRef[] } => {
     const existing = typeObjects.get(key);
     if (existing) return existing;
     const guid = guids.derived(`type:${key}`);
@@ -476,25 +525,33 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       counts.quantitySets += bag.qtos.size;
     }
     const members = predefinedTypes(entity);
-    const tail = ownAttributes(entity).map((a): StepValue => {
-      if (a === "PredefinedType") return en(predefined && members.has(predefined) ? predefined : "NOTDEFINED");
-      if (a === "OperationType" || a === "PartitioningType") return en(extraEnums[a] ?? "NOTDEFINED");
-      return $;
+    const own = ownAttributes(entity);
+    const predefinedType = predefined && members.has(predefined) ? predefined : "NOTDEFINED";
+    const tail = own.map((a): StepValue => {
+      if (a === "PredefinedType") return en(predefinedType);
+      // Required on the type, so a type that states none says so.
+      if (a === "OperationType" || a === "PartitioningType") return extra[a] ?? en("NOTDEFINED");
+      // Required by the schema; the model doesn't say where a thing is put together.
+      if (a === "AssemblyPlace") return extra[a] ?? en("NOTDEFINED");
+      return extra[a] ?? $;
     });
-    const ref = g.add(entity.toUpperCase(), [str(guid), $, str255(name), $, $, sets.length > 0 ? list(sets.map((s) => s.ref)) : $, $, $, elementType ? str255(elementType) : $, ...tail]);
+    // The schema's rules: a type has a Name, and a USERDEFINED one says what it is in ElementType.
+    const typeName = name.trim() === "" ? "Unnamed type" : name;
+    const typeLabel = elementType?.trim() ? elementType : own.includes("PredefinedType") && predefinedType === "USERDEFINED" ? userDefined?.trim() || typeName : "";
+    const ref = g.add(entity.toUpperCase(), [str(guid), $, str255(typeName), $, $, sets.length > 0 ? list(sets.map((s) => s.ref)) : $, $, $, str255(typeLabel), ...tail]);
     const entry = { ref, guid, members: [] as StepRef[] };
     typeObjects.set(key, entry);
     counts.types++;
     return entry;
   };
 
-  const writeElement = (el: BimElement, cls: ResolvedIfcClass, name: string | null, tag: string | null, placement: StepRef | null, body: StepRef | null, extra: Readonly<Record<string, number | string>> = {}): Product => {
+  const writeElement = (el: BimElement, cls: ResolvedIfcClass, name: string | null, tag: string | null, placement: StepRef | null, body: StepRef | null, extra: Readonly<Record<string, number | StepValue>> = {}): Product => {
     const guid = guids.record(el);
     const tail = ownAttributes(cls.entity).map((a): StepValue => {
       if (a === "PredefinedType") return cls.predefinedType ? en(cls.predefinedType) : $;
       const v = extra[a];
-      if (typeof v === "string" && v.trim() !== "") return en(v);
-      return typeof v === "number" && v > 0 ? real(v) : $;
+      if (typeof v === "number") return v > 0 ? real(v) : $;
+      return v ?? $;
     });
     const ref = g.add(cls.entity.toUpperCase(), [str(guid), $, opt(name), $, opt(cls.objectType), placement ?? $, body ?? $, opt(tag), ...tail]);
     byEntity[cls.entity] = (byEntity[cls.entity] ?? 0) + 1;
@@ -589,7 +646,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
           const tb = new PropertyBag();
           partValues(tb, type.definition, type.definition.typeValues, "type");
           return tb;
-        })());
+        })(), {}, cls.objectType);
         t.members.push(product.ref);
         partValues(bag, type.definition, el.values, "instance");
       } else warn(`${el.id}: its part type ${el.typeId} is not in the model`);
@@ -598,7 +655,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const dy = el.end.y - el.start.y;
       const placement = geo.placement(frame, geo.turned({ x: el.start.x, y: el.start.y, z: wallBaseAtMm(el, 0) }, (Math.atan2(dy, dx) * 180) / Math.PI));
       product = writeElement(el, cls, el.wallType || null, null, placement, geo.strip(Math.hypot(dx, dy), el.thickness, el.height));
-      if (cls.typeEntity && el.wallType && !elementTypeOf(els, el)) writeType(`wall:${el.wallType}|${cls.entity}`, cls.typeEntity, cls.predefinedType, el.wallType, null, null).members.push(product.ref);
+      if (cls.typeEntity && el.wallType && !elementTypeOf(els, el)) writeType(`wall:${el.wallType}|${cls.entity}`, cls.typeEntity, cls.predefinedType, el.wallType, null, null, {}, cls.objectType).members.push(product.ref);
     } else if (el.kind === "slab") {
       const placement = geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 }));
       product = writeElement(el, cls, null, null, placement, geo.prism(el.outline, -el.thickness, el.thickness));
@@ -613,23 +670,18 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const depth = line?.widthMm ?? 0;
       const placement = geo.placement(frame, geo.turned({ x: el.position.x, y: el.position.y, z: hostBase + sill }, angle));
       const body = el.width > 0 && el.height > 0 && depth > 0 ? geo.box({ x: -el.width / 2, y: -depth / 2, z: 0 }, { x: el.width / 2, y: depth / 2, z: el.height }) : null;
-      const resolveIfcDoorOp = (): string => {
-        const op = elementTypeValue(els, el, "architecture.door_operation");
-        if (typeof op === "string" && op.trim()) return op.trim().toUpperCase();
+      const resolveIfcDoorOp = (): Readonly<Record<string, StepValue>> => {
+        const stated = statedEnum("OperationType", elementTypeValue(els, el, "architecture.door_operation"));
+        if (stated) return stated;
         const hand = elementTypeValue(els, el, "architecture.door_handing");
-        if (typeof hand === "string") {
-          const h = hand.trim().toUpperCase();
-          if (h === "RH" || h === "RHR") return "SINGLE_SWING_RIGHT";
-          if (h === "LH" || h === "LHR") return "SINGLE_SWING_LEFT";
-        }
-        return "SINGLE_SWING_LEFT";
+        const h = typeof hand === "string" ? hand.trim().toUpperCase() : "";
+        return { OperationType: en(h === "RH" || h === "RHR" ? "SINGLE_SWING_RIGHT" : "SINGLE_SWING_LEFT") };
       };
-      const rawWinPart = el.openingType === "window" ? elementTypeValue(els, el, "architecture.window_partitioning") : undefined;
-      const extraOpening: Record<string, number | string> = {
+      const extraOpening: Record<string, number | StepValue> = {
         OverallWidth: el.width,
         OverallHeight: el.height,
-        ...(el.openingType === "door" ? { OperationType: resolveIfcDoorOp() } : {}),
-        ...(typeof rawWinPart === "string" && rawWinPart.trim() ? { PartitioningType: rawWinPart.trim().toUpperCase() } : {}),
+        ...(el.openingType === "door" ? resolveIfcDoorOp() : {}),
+        ...(el.openingType === "window" ? statedEnum("PartitioningType", elementTypeValue(els, el, "architecture.window_partitioning")) : {}),
       };
       product = writeElement(el, cls, el.mark.trim() || null, el.mark.trim() || null, placement, body, extraOpening);
     } else if (el.kind === "run_segment") {
@@ -739,9 +791,24 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const p = typeof pos === "object" && pos !== null ? { x: finite(Reflect.get(pos, "x")), y: finite(Reflect.get(pos, "y")), z: finite(Reflect.get(pos, "z")) } : null;
       const rotation = numberField(el, "rotationDeg") ?? 0;
       const offsetZ = el.kind === "component" && el.placement?.kind === "point" ? el.placement.offsetMm : 0;
-      const placement = p ? geo.placement(frame, geo.turned({ x: p.x, y: p.y, z: p.z + offsetZ }, rotation)) : null;
+      // A kind whose row states a body (a roof, a stair): placed in its storey's frame, where that body is measured.
+      const solidFace = kindRowOf(el.kind)?.solid;
+      const placement = solidFace ? geo.placement(frame, geo.axis({ x: 0, y: 0, z: 0 })) : p ? geo.placement(frame, geo.turned({ x: p.x, y: p.y, z: p.z + offsetZ }, rotation)) : null;
       let body: StepRef | null = null;
-      if (el.kind === "component" && el.category === "footing" && el.size.x > 0 && el.size.y > 0) {
+      if (solidFace) {
+        // The same blocks the 3D view and sections draw, from above project zero to above its storey.
+        const storey = levelId ? els[levelId] : undefined;
+        const floorMm = storey?.kind === "level" ? storey.elevationMm : 0;
+        const down = (q: Vec3): Vec3 => ({ x: q.x, y: q.y, z: q.z - floorMm });
+        try {
+          const shape = solidFace(el, { elements: els, floorMm });
+          if (shape?.form === "run") body = geo.sweep(down(shape.a), down(shape.b), sectionOf(shape.size));
+          else if (shape) body = geo.blocks((shape.form === "prisms" ? shape.blocks : [shape]).map((b) => ({ ...b, z0: b.z0 - floorMm, z1: b.z1 - floorMm })));
+        } catch (err) {
+          console.error("[bim-ifc] a kind's body did not resolve; exported without a body", { elementId: el.id, kind: el.kind, err });
+        }
+        if (!body) warn(`${el.id}: the model has no shape for this ${(kindRowOf(el.kind)?.label ?? el.kind).toLowerCase()}, so it has no body in the file. Open it in a 3D view: if it is missing there too, fix it in the model and export again`);
+      } else if (el.kind === "component" && el.category === "footing" && el.size.x > 0 && el.size.y > 0) {
         const rawThick = elementTypeValue(els, el, "struct.footing_thickness_mm");
         const thickMm = typeof rawThick === "number" && Number.isFinite(rawThick) && rawThick > 0 ? rawThick : 18 * 25.4;
         body = geo.box({ x: -el.size.x / 2, y: -el.size.y / 2, z: -thickMm }, { x: el.size.x / 2, y: el.size.y / 2, z: 0 });
@@ -751,17 +818,16 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       product = writeElement(el, cls, name, mark, placement, body);
     }
 
-    const elementType = el.kind === "part" ? null : elementTypeOf(els, el);
+    const elementType = el.kind === "part" ? null : namedElementType(els, el);
     if (elementType) {
       const tb = new PropertyBag();
       parameterValues(tb, elementType.values ?? {}, "MutinyBIM_Type");
-      const rawOp = elementType.values?.["architecture.door_operation"];
-      const rawPart = elementType.values?.["architecture.window_partitioning"];
-      const extraEnums: Record<string, string> = {
-        ...(typeof rawOp === "string" && rawOp.trim() ? { OperationType: rawOp.trim().toUpperCase() } : {}),
-        ...(typeof rawPart === "string" && rawPart.trim() ? { PartitioningType: rawPart.trim().toUpperCase() } : {}),
+      // A door type has no partitioning attribute and a window type no operation, so the one that doesn't apply is never written.
+      const extraEnums: Record<string, StepValue> = {
+        ...statedEnum("OperationType", elementType.values?.["architecture.door_operation"]),
+        ...statedEnum("PartitioningType", elementType.values?.["architecture.window_partitioning"]),
       };
-      writeType(`etype:${elementType.id}|${cls.entity}`, cls.typeEntity ?? "IfcBuildingElementProxyType", cls.predefinedType, elementType.name, null, tb, extraEnums).members.push(product.ref);
+      writeType(`etype:${elementType.id}|${cls.entity}`, cls.typeEntity ?? "IfcBuildingElementProxyType", cls.predefinedType, elementType.name, null, tb, extraEnums, cls.objectType).members.push(product.ref);
     }
     organizationSets(bag, el);
     attachSets(product.ref, product.guid, el.id, bag);
@@ -851,14 +917,30 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   if (grids.length > 0) {
     const point = (p: { readonly x: number; readonly y: number }): StepRef => g.add("IFCCARTESIANPOINT", [list([real(p.x), real(p.y)])]);
     const axis = (gl: GridLine): StepRef => g.add("IFCGRIDAXIS", [str255(gl.label.trim() || gl.id), g.add("IFCPOLYLINE", [list([point(gl.start), point(gl.end)])]), bool(true)]);
-    const u = grids.filter((gl) => gridAxisFamily(gl.start, gl.end) === "U").map(axis);
-    const v = grids.filter((gl) => gridAxisFamily(gl.start, gl.end) === "V").map(axis);
+    const sorted = sortGridAxes(grids);
+    for (const gl of sorted.noLength) warn(`${gl.id}: this grid line starts and ends at the same point, so it is left out of the file`);
     const lowest = levels[0]?.id ?? null;
-    const guid = guids.derived("grid");
-    const ref = g.add("IFCGRID", [str(guid), $, str("Grid"), $, $, geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), $, list(u), list(v), $, en("RECTANGULAR")]);
-    byEntity.IfcGrid = (byEntity.IfcGrid ?? 0) + 1;
-    byEntity.IfcGridAxis = (byEntity.IfcGridAxis ?? 0) + u.length + v.length;
-    containIn(lowest, null, ref);
+    if (sorted.u.length > 0 && sorted.v.length > 0) {
+      const u = sorted.u.map(axis);
+      const v = sorted.v.map(axis);
+      const guid = guids.derived("grid");
+      const ref = g.add("IFCGRID", [str(guid), $, str("Grid"), $, $, geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), $, list(u), list(v), $, en(sorted.rectangular ? "RECTANGULAR" : "IRREGULAR")]);
+      byEntity.IfcGrid = (byEntity.IfcGrid ?? 0) + 1;
+      byEntity.IfcGridAxis = (byEntity.IfcGridAxis ?? 0) + u.length + v.length;
+      containIn(lowest, null, ref);
+    } else {
+      // IfcGrid.UAxes and VAxes are LIST [1:?]: lines that all run one way can't be an IfcGrid. Each is kept as a named line instead.
+      const oneWay = [...sorted.u, ...sorted.v];
+      for (const gl of oneWay) {
+        const curve = g.add("IFCPOLYLINE", [list([point(gl.start), point(gl.end)])]);
+        const shape = g.add("IFCPRODUCTDEFINITIONSHAPE", [$, $, list([g.add("IFCSHAPEREPRESENTATION", [context, str("Annotation"), str("Curve2D"), list([curve])])])]);
+        const ref = g.add("IFCANNOTATION", [str(guids.record(gl)), $, str255(`Grid ${gl.label.trim() || gl.id}`), $, str("Grid line"), geo.placement(frameOf(lowest), geo.axis({ x: 0, y: 0, z: 0 })), shape, en("USERDEFINED")]);
+        byEntity.IfcAnnotation = (byEntity.IfcAnnotation ?? 0) + 1;
+        containIn(lowest, null, ref);
+      }
+      if (oneWay.length === 1) warn(`${oneWay[0]?.id}: it is the only grid line, and an IFC grid needs lines in two directions, so it is written as a named reference line (IfcAnnotation). Add a grid line across it to export a grid`);
+      else if (oneWay.length > 1) warn(`The ${oneWay.length} grid lines all run the same way, and an IFC grid needs lines in two directions, so they are written as named reference lines (IfcAnnotation) with their labels. Add a grid line across them to export a grid`);
+    }
   }
 
   // ---------------------------------------------------------------- typicals as assemblies
@@ -900,9 +982,64 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
   }
 
   // ---------------------------------------------------------------- ports and connections
+  // Every port's ObjectPlacement is relative to its host's own placement. Location is where the port is; local z (Axis)
+  // points out of the host through the port, along the connection; local x (RefDirection) is square to it
+  // (GeometryWriter.facing). Two joined ports sit at one point and face opposite ways. A planned part has no placement,
+  // so its ports have none.
   const ports = new Map<string, { readonly ref: StepRef; readonly guid: string }>();
   const nests = new Map<string, { readonly host: Product; readonly items: StepRef[] }>();
-  const writePort = (hostId: string, portId: string, name: string, flow: string | undefined, domain: string | undefined, systemKind: string | undefined, placement: StepRef | null): StepRef | null => {
+  // Size and flow go in the IFC 4.3 standard port sets, by the port's kind. Ports with the same values share one set.
+  const portSets = new Map<string, { readonly ref: StepRef; readonly guid: string; readonly ports: StepRef[] }>();
+  const describePort = (port: StepRef, kind: string | undefined, facts: PortFacts) => {
+    const props: Array<PropertyInput & { readonly kind: "number" }> = [];
+    const length = (name: string, value: number | undefined, measure: "IFCPOSITIVELENGTHMEASURE" | "IFCNONNEGATIVELENGTHMEASURE") => {
+      if (value !== undefined && value > 0) props.push({ kind: "number", name, value: Math.round(value * 1e6) / 1e6, unit: "mm", measure });
+    };
+    // A design value the standard set defines as a bounded value: written as its set point.
+    const design = (name: string, value: number | undefined, unit: string) => {
+      if (value !== undefined && value > 0) props.push({ kind: "number", name, value, unit, bounded: true });
+    };
+    let setName: string;
+    if (kind === "DUCT") {
+      setName = "Pset_DistributionPortTypeDuct";
+      // NominalWidth is the width, or the diameter of a round opening; NominalHeight is for an opening with flat sides only.
+      length("NominalWidth", facts.width ?? facts.diameter, "IFCNONNEGATIVELENGTHMEASURE");
+      length("NominalHeight", facts.height, "IFCPOSITIVELENGTHMEASURE");
+      design("VolumetricFlowRate", facts.flow, "cfm");
+    } else if (kind === "PIPE") {
+      setName = "Pset_DistributionPortTypePipe";
+      length("NominalDiameter", facts.diameter, "IFCPOSITIVELENGTHMEASURE");
+      design("VolumetricFlowRate", facts.flow, "gpm");
+    } else if (kind === "CABLE") {
+      setName = "Pset_DistributionPortTypeCable";
+      design("Voltage", facts.voltage, "V");
+    } else return;
+    if (props.length === 0) return;
+    // To a millionth, so 3 in computed two ways (76.2 and 76.19999999999999) is one size.
+    const key = `${setName}|${props.map((p) => `${p.name}=${Math.round(p.value * 1e6) / 1e6}`).join("|")}`;
+    let shared = portSets.get(key);
+    if (!shared) {
+      const bag = new PropertyBag();
+      for (const p of props) bag.set(setName, p);
+      const guid = guids.derived(`port-set:${key}`);
+      const written = writeSets(g, units, bag, () => guid)[0];
+      if (!written) return;
+      portSets.set(key, (shared = { ref: written.ref, guid, ports: [] }));
+      counts.propertySets++;
+    }
+    shared.ports.push(port);
+  };
+  const writePort = (
+    hostId: string,
+    portId: string,
+    name: string,
+    flow: string | undefined,
+    domain: string | undefined,
+    systemKind: string | undefined,
+    placement: StepRef | null,
+    facts: PortFacts,
+    objectType?: string,
+  ): StepRef | null => {
     const host = products.get(hostId);
     if (!host) return null;
     const key = `${hostId}|${portId}`;
@@ -910,18 +1047,41 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     const guid = guids.derived(`port:${key}`);
     const sys = systemKind ? services.byId.get(systemKind)?.ifc : undefined;
     const sysType = sys && sys.system === "IfcDistributionSystem" && predefinedTypes("IfcDistributionSystem").has(sys.predefinedType) ? en(sys.predefinedType) : $;
-    const ref = g.add("IFCDISTRIBUTIONPORT", [str(guid), $, str255(name), $, $, placement ?? $, $, en(FLOW_DIRECTION[flow ?? ""] ?? "NOTDEFINED"), en(PORT_DOMAIN[domain ?? ""] ?? "NOTDEFINED"), sysType]);
+    const kind = PORT_DOMAIN[domain ?? ""];
+    const ref = g.add("IFCDISTRIBUTIONPORT", [str(guid), $, str255(name), $, objectType ? str(objectType) : $, placement ?? $, $, en(FLOW_DIRECTION[flow ?? ""] ?? "NOTDEFINED"), en(kind ?? "NOTDEFINED"), sysType]);
     ports.set(key, { ref, guid });
     const n = nests.get(hostId) ?? { host, items: [] };
     n.items.push(ref);
     nests.set(hostId, n);
     counts.ports++;
+    describePort(ref, kind, facts);
     return ref;
   };
   const systemKindOf = (systemId: string): string | undefined => {
     const s = els[systemId];
     return s?.kind === "mep_system" ? s.systemKind : undefined;
   };
+  // A branch fitting (tap, tee, wye) sits on a trunk that stays one piece. The trunk gets a port where the branch
+  // leaves it, facing the branch, and the fitting a port at its own point that faces into the trunk; the two are
+  // joined like any other pair. Found before the ports are written, so a trunk's branch ports follow its two ends.
+  const branchesOn = new Map<string, Array<{ readonly fitting: RunFitting; readonly at: Vec3; readonly outward: Vec3 }>>();
+  const trunkOf = new Map<string, { readonly trunkId: string; readonly at: Vec3; readonly outward: Vec3; readonly along: Vec3 }>();
+  // A port with flat sides that faces straight up or down: "level and to the left" says nothing there, so its local x is
+  // the width axis the kernel draws the run with (a riser takes it from the elbow that turns into it; a tap off the top
+  // or bottom of a trunk lies along the trunk). Round openings need none.
+  const needsWidthAxis = (size: RunSize | undefined, out: Vec3): boolean => (size?.shape === "rect" || size?.shape === "oval") && Math.abs(out.z) >= 0.999 * Math.hypot(out.x, out.y, out.z);
+  for (const el of elements) {
+    if (el.kind !== "run_fitting" || !el.host || el.ports.length === 0 || !products.has(el.id)) continue;
+    const trunk = els[el.host.segmentId];
+    if (trunk?.kind !== "run_segment" || !products.has(trunk.id)) {
+      warn(`${el.id}: the run it branches from is not in the file, so the file does not say where on that run it sits`);
+      continue;
+    }
+    const where = hostedPoints(trunk, el.host.s, el.host.side, el.host.dir, el.host.face, el.host.t);
+    push(branchesOn, trunk.id, { fitting: el, at: where.onAxis, outward: where.outward });
+    // In the fitting's own coordinates when it is on the trunk's level; otherwise at the fitting's point.
+    trunkOf.set(el.id, { trunkId: trunk.id, at: el.levelId === trunk.levelId ? where.onAxis : el.position, outward: where.outward, along: { x: trunk.end.x - trunk.start.x, y: trunk.end.y - trunk.start.y, z: trunk.end.z - trunk.start.z } });
+  }
   const connections: Array<readonly [string, string]> = [];
   for (const el of elements) {
     const host = products.get(el.id);
@@ -930,26 +1090,57 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
       const type = partTypeOf(el);
       if (!type) continue;
       for (const c of resolveConnectors(type.definition, el.values)) {
-        const placement = host.placement ? geo.placement(host.placement, geo.axis({ x: c.position[0], y: c.position[1], z: c.position[2] })) : null;
-        const flow = type.definition.connectors.find((d) => d.id === c.id)?.flowDirection;
-        writePort(el.id, c.id, c.label, flow, c.domain, c.systemKind, placement);
+        const def = type.definition.connectors.find((d) => d.id === c.id);
+        // In the part's own frame, as the part is mounted; the part's placement carries its position and plan rotation.
+        const [x, y, z] = mountPoint(el.mount, c.position);
+        const [dx, dy, dz] = mountPoint(el.mount, c.direction);
+        const across = def?.widthAxis ? mountPoint(el.mount, def.widthAxis) : null;
+        const placement = host.placement ? geo.placement(host.placement, geo.facing({ x, y, z }, { x: dx, y: dy, z: dz }, across ? { x: across[0], y: across[1], z: across[2] } : undefined)) : null;
+        const facts: PortFacts = c.shape === "rect" ? { width: c.width, height: c.height, flow: c.flow, voltage: c.voltage } : { diameter: c.diameter, flow: c.flow, voltage: c.voltage };
+        writePort(el.id, c.id, c.label, def?.flowDirection, c.domain, c.systemKind, placement, facts);
       }
       for (const [connector, link] of Object.entries(el.links ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) connections.push([`${el.id}|${connector}`, `${link.elementId}|${link.port}`]);
     } else if (el.kind === "run_segment") {
       const sk = systemKindOf(el.systemId);
-      const at = (p: Vec3) => (host.placement ? geo.placement(host.placement, geo.axis(p)) : null);
-      writePort(el.id, "start", "Start", undefined, el.domain, sk, at(el.start));
-      writePort(el.id, "end", "End", undefined, el.domain, sk, at(el.end));
+      // A segment's placement is its level's frame, so its ports are at the run's own coordinates. Each end faces away from the other.
+      const at = (p: Vec3, out: Vec3, across?: Vec3) => (host.placement ? geo.placement(host.placement, geo.facing(p, out, across)) : null);
+      const along = { x: el.end.x - el.start.x, y: el.end.y - el.start.y, z: el.end.z - el.start.z };
+      const across = needsWidthAxis(el.size, along) ? segmentWidthAxis(els, el) : undefined;
+      // What a duct carries is a volume of air. A pipe's number may be fixture units, which is no flow rate, so it is left out.
+      const facts: PortFacts = el.domain === "duct" ? { ...sizeFacts(el.size), flow: el.flow } : sizeFacts(el.size);
+      writePort(el.id, "start", "Start", undefined, el.domain, sk, at(el.start, { x: -along.x, y: -along.y, z: -along.z }, across), facts);
+      writePort(el.id, "end", "End", undefined, el.domain, sk, at(el.end, along, across), facts);
       const ends: Array<readonly ["start" | "end", PortRef | undefined]> = [
         ["start", el.links.start],
         ["end", el.links.end],
       ];
       for (const [end, link] of ends) if (link) connections.push([`${el.id}|${end}`, `${link.elementId}|${link.port}`]);
+      const branches = [...(branchesOn.get(el.id) ?? [])].sort((a, b) => (a.fitting.host?.s ?? 0) - (b.fitting.host?.s ?? 0) || byId(a.fitting, b.fitting));
+      for (const b of branches) {
+        const size = b.fitting.ports[0]?.size;
+        writePort(el.id, `branch|${b.fitting.id}`, "Branch", undefined, el.domain, sk, at(b.at, b.outward, needsWidthAxis(size, b.outward) ? along : undefined), size ? sizeFacts(size) : {}, TRUNK_BRANCH_PORT);
+      }
     } else if (el.kind === "run_fitting") {
       const sk = systemKindOf(el.systemId);
+      // A fitting's placement is at its own point, unturned, so a port's place is its offset from that point.
+      const local = (p: Vec3): Vec3 => ({ x: p.x - el.position.x, y: p.y - el.position.y, z: p.z - el.position.z });
+      const trunk = trunkOf.get(el.id);
+      // The width axis the fitting's body is drawn with at this port: the trunk's line for a branch fitting, else the riser it joins, else what its other side leaves it.
+      const widthAt = (port: RunFitting["ports"][number]): Vec3 | undefined => {
+        if (!needsWidthAxis(port.size, port.direction)) return undefined;
+        if (trunk) return trunk.along;
+        const joined = port.link ? els[port.link.elementId] : undefined;
+        return (joined?.kind === "run_segment" ? riserWidthAxis(els, joined, new Set([el.id])) : null) ?? portWidthAxis(els, { elementId: el.id, port: port.id }) ?? undefined;
+      };
       for (const port of [...el.ports].sort(byId)) {
-        writePort(el.id, port.id, port.id, undefined, el.domain, sk, host.placement ? geo.placement(frameOf(levelOf(el)), geo.axis(port.position)) : null);
+        writePort(el.id, port.id, port.id, undefined, el.domain, sk, host.placement ? geo.placement(host.placement, geo.facing(local(port.position), port.direction, widthAt(port))) : null, sizeFacts(port.size));
         if (port.link) connections.push([`${el.id}|${port.id}`, `${port.link.elementId}|${port.link.port}`]);
+      }
+      if (trunk) {
+        const size = el.ports[0]?.size;
+        const into = { x: -trunk.outward.x, y: -trunk.outward.y, z: -trunk.outward.z };
+        writePort(el.id, `trunk|${trunk.trunkId}`, "Trunk", undefined, el.domain, sk, host.placement ? geo.placement(host.placement, geo.facing(local(trunk.at), into, needsWidthAxis(size, into) ? trunk.along : undefined)) : null, size ? sizeFacts(size) : {}, FITTING_TRUNK_PORT);
+        connections.push([`${trunk.trunkId}|branch|${el.id}`, `${el.id}|trunk|${trunk.trunkId}`]);
       }
     }
   }
@@ -964,6 +1155,7 @@ export function exportIfc(opts: IfcExportOptions): IfcExportResult {
     if (!pa || !pb) continue;
     g.add("IFCRELCONNECTSPORTS", [str(guids.rel("IfcRelConnectsPorts", [pa.guid, pb.guid])), $, $, $, pa.ref, pb.ref, $]);
   }
+  for (const set of portSets.values()) g.add("IFCRELDEFINESBYPROPERTIES", [str(guids.rel("IfcRelDefinesByProperties", [set.guid])), $, $, $, list(set.ports), set.ref]);
 
   // Load points: a port for what is connected where no fixture is modelled.
   for (const lp of elements.filter((e): e is LoadPointElement => e.kind === "load_point")) {

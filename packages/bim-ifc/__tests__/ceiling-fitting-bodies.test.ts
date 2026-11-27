@@ -183,8 +183,8 @@ describe("exportIfc: a run fitting's body (#59)", () => {
     }
     expect(warnings.filter((w) => fittings.some((f) => w.includes(f.id)))).toEqual([]);
 
-    // A reader no longer calls them shapeless.
-    const line = importReport(ifc).classes.find((c) => c.label === "Duct fittings");
+    // A reader no longer calls them shapeless; they are counted under the class that takes them ("Fittings").
+    const line = importReport(ifc).classes.find((c) => c.classId === "mep.run_fitting");
     expect(line).toBeDefined();
     expect((line?.converted ?? 0) + (line?.linked ?? []).reduce((n, l) => n + l.count, 0)).toBe(fittings.length);
     expect((line?.linked ?? []).some((l) => NO_SHAPE.test(l.reason))).toBe(false);

@@ -16,6 +16,7 @@ import {
   toLinkedGrant,
   toLinkedModel,
   toModel,
+  toModelCreation,
   toUser,
   type AssistantCodeRow,
   type OAuthClientRow,
@@ -25,6 +26,7 @@ import {
   type WebStore,
 } from "./db";
 import type { Fetch } from "./oauth";
+import { transferResult, transferRow } from "./model-transfers";
 
 const REST_TIMEOUT_MS = 10_000;
 
@@ -122,6 +124,26 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
   const userById = async (id: string) => toUser(await selectOne("users", { select: "*", id: eq(id) }));
 
   return {
+    transfers: {
+      async forRecipient(id, person) {
+        const row = await selectOne("model_transfers", { select: "*", id: eq(id), recipient_id: eq(person) });
+        return row ? transferRow(row) : null;
+      },
+      async outgoing(modelId) {
+        const row = await selectOne("model_transfers", { select: "*", model_id: eq(modelId), state: eq("open"), expires_at: "gt.now" });
+        return row ? transferRow(row) : null;
+      },
+      async inbox(recipientId) {
+        return (await selectRows("model_transfers", { select: "*", recipient_id: eq(recipientId), state: eq("open"),
+          expires_at: "gt.now", order: "expires_at,id" })).map(transferRow);
+      },
+      async offer(id, modelId, sender, recipient, retained) {
+        return transferResult(await rpc("web_offer_model_transfer", { p_id: id, p_model: modelId, p_sender: sender, p_recipient: recipient, p_retained: retained }));
+      },
+      async respond(id, actor, action, limit) {
+        return transferResult(await rpc("web_respond_model_transfer", { p_id: id, p_actor: actor, p_action: action, p_limit: limit }));
+      },
+    },
     async close() {
       // Stateless HTTPS client; nothing to tear down.
     },
@@ -224,6 +246,21 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       if (!model) throw new Error("[mutinybim-web supabase-db] the new model was not saved");
       return model;
     },
+    async creationByKey(ownerId, key) {
+      const row = await selectOne("model_creations", { select: "*", owner_id: eq(ownerId), creation_key: eq(key) });
+      return row ? toModelCreation(row) : null;
+    },
+    async pendingCreations(ownerId) {
+      return (await selectRows("model_creations", { select: "*", owner_id: eq(ownerId), state: eq("reserved"), order: "model_id" })).map(toModelCreation);
+    },
+    async reserveCreation(input, limit) {
+      const result = await rpc("web_reserve_model_creation", { p_owner: input.owner_id, p_key: input.creation_key,
+        p_model: input.model_id, p_name: input.name, p_starter: input.starter, p_hash: input.starter_hash, p_limit: limit });
+      return result === "quota" || result === "conflict" || result === "id_used" ? result : toModelCreation(result);
+    },
+    async finishCreation(ownerId, key, state) {
+      return toModelCreation(await rpc("web_finish_model_creation", { p_owner: ownerId, p_key: key, p_state: state }));
+    },
     async modelsOf(userId) {
       return (await selectRows("models", { select: "*", owner_id: eq(userId), order: "updated_at.desc" })).flatMap((r) => toModel(r) ?? []);
     },
@@ -233,22 +270,30 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
     async countModelsOf(userId) {
       return countRows("models", { owner_id: eq(userId) });
     },
-    async renameModel(id, name) {
-      await request(`/rest/v1/models?${new URLSearchParams({ id: eq(id) })}`, { method: "PATCH", body: { name, updated_at: now() } });
+    async renameModel(id, name, ownerId) {
+      const { data } = await request(`/rest/v1/models?${new URLSearchParams({ id: eq(id), owner_id: eq(ownerId), select: "id" })}`,
+        { method: "PATCH", body: { name, updated_at: now() }, prefer: "return=representation" });
+      return Array.isArray(data) && data.length === 1;
     },
     async touchModel(id) {
       await request(`/rest/v1/models?${new URLSearchParams({ id: eq(id) })}`, { method: "PATCH", body: { updated_at: now() } });
     },
-    async deleteModel(id) {
-      await request(`/rest/v1/models?${new URLSearchParams({ id: eq(id) })}`, { method: "DELETE" });
+    async deleteModel(id, ownerId) {
+      const { data } = await request(`/rest/v1/models?${new URLSearchParams({ id: eq(id), owner_id: eq(ownerId), select: "id" })}`,
+        { method: "DELETE", prefer: "return=representation" });
+      return Array.isArray(data) && data.length === 1;
     },
 
     async accessTo(userId, modelId) {
-      const model = toModel(await selectOne("models", { select: "*", id: eq(modelId) }));
-      if (!model) return null;
+      // Acceptance changes the owner and consumes the recipient's share in one commit.
+      const row = await selectOne("models", {
+        select: "*,model_shares(role)", id: eq(modelId), "model_shares.user_id": eq(userId),
+      });
+      const model = toModel(row);
+      if (!model || !isRecord(row)) return null;
       if (model.owner_id === userId) return { model, access: "owner" };
-      const row = await selectOne("model_shares", { select: "role", model_id: eq(modelId), user_id: eq(userId) });
-      return isRecord(row) ? { model, access: shareRole(row.role) } : null;
+      const share = Array.isArray(row.model_shares) ? row.model_shares[0] : null;
+      return isRecord(share) ? { model, access: shareRole(share.role) } : null;
     },
     async sharedWith(userId) {
       const rows = await selectRows("model_shares", {
@@ -286,14 +331,10 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       return out;
     },
     async share(input) {
-      await request("/rest/v1/model_shares?on_conflict=model_id,user_id", {
-        method: "POST",
-        prefer: "resolution=merge-duplicates",
-        body: { model_id: input.modelId, user_id: input.userId, role: input.role, invited_by: input.invitedBy, created_at: now() },
-      });
+      return (await rpc("web_change_model_share", { p_model: input.modelId, p_owner: input.invitedBy, p_user: input.userId, p_role: input.role })) === true;
     },
-    async unshare(modelId, userId) {
-      await request(`/rest/v1/model_shares?${new URLSearchParams({ model_id: eq(modelId), user_id: eq(userId) })}`, { method: "DELETE" });
+    async unshare(modelId, userId, ownerId) {
+      return (await rpc("web_change_model_share", { p_model: modelId, p_owner: ownerId, p_user: userId, p_role: null })) === true;
     },
 
     async createAgentKey(input) {

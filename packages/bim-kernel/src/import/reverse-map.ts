@@ -13,6 +13,12 @@ import type { ImportProduct } from "./types";
  * deeper class. A class whose home names a different predefined type than
  * the product's is not a candidate. Only classes with a usable rule are
  * chosen; the rest are reported with the reason.
+ *
+ * A class may be homed on a general entity and written as a more specific
+ * one (one class covers a fitting on any run; the writer picks the entity for
+ * the run). The reader says which general entities a product also is
+ * (`generalEntities`), and such a class takes the product when no class with
+ * a rule names the product's own entity. A class that does name it wins.
  */
 
 export interface ImportChoice {
@@ -27,7 +33,8 @@ export type ImportChoiceResult = { readonly ok: true; readonly choice: ImportCho
 export interface ReverseClassMap {
   /** Classes whose IFC home the product matches, best first (with or without a rule). */
   candidates(product: Pick<ImportProduct, "entity" | "predefinedType" | "objectType">): readonly ObjectClass[];
-  choose(product: Pick<ImportProduct, "entity" | "predefinedType" | "objectType">): ImportChoiceResult;
+  /** The class and rule a product comes in through: a class of its own entity, else one of an entity it also is (`generalEntities`). */
+  choose(product: Pick<ImportProduct, "entity" | "predefinedType" | "objectType" | "generalEntities">): ImportChoiceResult;
 }
 
 const UNSET = new Set(["NOTDEFINED", ""]);
@@ -120,7 +127,8 @@ export function reverseClassMap(registry: Registry, rules: readonly ImportRuleDe
   return {
     candidates,
     choose(product) {
-      const found = candidates(product);
+      // Its own entity first; then, nearest first, the more general entities it also is.
+      const found = [...candidates(product), ...(product.generalEntities ?? []).flatMap((entity) => candidates({ ...product, entity }))];
       for (const cls of found) {
         const rule = ruleFor(cls);
         if (rule) return { ok: true, choice: { cls, rule, fields: recognitionFields(registry, cls), options: nearest(registry, cls, (c) => c.ifc?.import?.options) ?? {} } };

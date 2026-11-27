@@ -40,7 +40,7 @@ function DiffLines({ newer }: { readonly newer: NewerPartVersion }) {
     ['Other', d.other],
   ]
   const shown = groups.filter(([, lines]) => lines.length > 0)
-  if (shown.length === 0) return <ItemDescription>Only the stored layout changed; it draws the same.</ItemDescription>
+  if (shown.length === 0) return <ItemDescription>Other part properties changed.</ItemDescription>
   return (
     <div className="flex flex-col gap-1 text-sm">
       {shown.map(([title, lines]) => (
@@ -122,7 +122,7 @@ export function PartUpdateReview({ modelTypes, placedCopies, canEdit, editBlocke
       <Alert data-testid="part-update-available">
         <ArrowUpCircle />
         <AlertTitle>A newer version is in the library</AlertTitle>
-        <AlertDescription>{first && newer.length === 1 ? `${first.name}: placed from revision ${first.placedRevision}; the library has revision ${first.latestRevision}.` : `${newer.length} sizes have a newer library revision.`}</AlertDescription>
+        <AlertDescription>{first && newer.length === 1 ? `This copy of ${first.name} matches revision ${first.placedRevision}. The library has revision ${first.latestRevision}.` : `${newer.length} sizes have a newer library revision.`}</AlertDescription>
         <AlertAction>
           <Button size="sm" variant="outline" onClick={() => setOpen(true)} data-testid="part-update-review">
             Review update

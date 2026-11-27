@@ -17,6 +17,7 @@ import { mutinyToShadcnVars } from './theme'
 import { MODEL_PATH } from './paths'
 import { nativeSignIn, readNativeCallback } from './native-signin'
 import { nativeRevocation, NativeSignedOut } from './native-signout'
+import { createDemoFirmParts } from './local-firm-parts'
 
 const THEME: MutinyThemeOverrides = {
   brand: { logoUrl: '/assets/bim-ui/mutiny-logo.png', iconUrl: '/assets/bim-ui/mutiny-icon.svg' },
@@ -27,13 +28,13 @@ const userName = new URLSearchParams(location.search).get('name') ?? 'You'
 
 /** The dev server's in-process model, or a real model server it points at (docker compose up) with a local sign-in. */
 type DemoConfig =
-  | { readonly authority: 'in-process' }
+  | { readonly authority: 'in-process'; readonly firmPartsId?: string }
   | { readonly authority: 'native'; readonly authorityUrl: string }
   | { readonly authority: 'external'; readonly authorityUrl: string; readonly token: string; readonly userId: string; readonly displayName: string; readonly requireWriteGrant?: boolean }
 
 function isDemoConfig(value: unknown): value is DemoConfig {
   if (typeof value !== 'object' || value === null || !('authority' in value)) return false
-  if (value.authority === 'in-process') return true
+  if (value.authority === 'in-process') return !('firmPartsId' in value) || typeof value.firmPartsId === 'string'
   if (value.authority === 'native') return 'authorityUrl' in value && typeof value.authorityUrl === 'string'
   return value.authority === 'external' && 'authorityUrl' in value && typeof value.authorityUrl === 'string' && 'token' in value && typeof value.token === 'string' && 'userId' in value && typeof value.userId === 'string' && 'displayName' in value && typeof value.displayName === 'string'
 }
@@ -75,11 +76,14 @@ function render(config: Exclude<DemoConfig, { authority: 'native' }>, nativeMemb
   const external = config.authority === 'external' ? config : null
   const userId = external?.userId ?? `local-${userName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   const displayName = external?.displayName ?? userName
+  const firmParts = config.authority === 'in-process' && config.firmPartsId
+    ? createDemoFirmParts(config.firmPartsId, userName, () => window.localStorage) : undefined
   const host = createLocalEditorHost({
     nativeMembership,
     authorityUrl: external?.authorityUrl ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/sync`,
     userId,
     displayName,
+    firmParts,
     ...(external ? { token: external.token, requireWriteGrant: external.requireWriteGrant } : {}),
     connectHint: 'Connect your own AI to this model with the tool server (docs/CONNECT-AN-AGENT.md).',
   })
@@ -94,6 +98,7 @@ function render(config: Exclude<DemoConfig, { authority: 'native' }>, nativeMemb
       <BuildingModelSurface projectId={projectId} projectName={external?.requireWriteGrant ? projectId : 'Local demo'} projectNumber={external?.requireWriteGrant ? undefined : 'DEMO'} userId={userId} userName={displayName} initialView={initialView} onSignOut={signOut} />
     </EditorHostProvider>
   )
+  void firmParts?.recoverPending((ok, message) => ok ? host.notify.success(message) : host.notify.error(message))
 }
 
 function showStartupError(err: unknown, loadingConfig: boolean) {

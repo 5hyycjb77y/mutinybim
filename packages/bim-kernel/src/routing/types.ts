@@ -249,6 +249,8 @@ export interface RunFitting extends RunElementBase {
   readonly coefficientOverride?: CoefficientOverride;
   /** Authored, duct and pipe: set with the segments it joins (routing and insulation edits write both). */
   readonly insulation?: RunInsulation;
+  /** Set on a fitting that came in from a linked model (import/): the file's id for it and the linked model version, as on the runs it joins. */
+  readonly provenance?: { readonly ifcGlobalId?: string; readonly source?: string };
 }
 
 export interface CoefficientOverride {

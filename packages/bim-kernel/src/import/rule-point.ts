@@ -2,7 +2,7 @@ import { defineExtensionPoint } from "../packs/contract";
 import type { ObjectClass } from "../registry/types";
 import type { BimElement, ElementId, Level, ParamValue, Partition } from "../types";
 import { KERNEL_IMPORT_RULES } from "./rules";
-import type { ImportGroup, ImportProduct, ImportRuleResult } from "./types";
+import type { ImportGroup, ImportJoin, ImportPort, ImportProduct, ImportRuleResult } from "./types";
 
 /**
  * How a class's instances come in from a linked model (contract 1.7.0,
@@ -30,6 +30,13 @@ export interface ImportRuleContext {
   partition(level: Level): Partition;
   /** A record another product already became in this import (a door's host wall), or an element of the model. */
   converted(sourceId: string): BimElement | null;
+  /**
+   * What the file joins a connection point to: each far point with the product it is on (a fitting reads the runs
+   * its openings join). Empty when the file joins it to nothing; a far point on a product the reader left out is
+   * skipped. Whether that product converted is `converted(join.product.sourceId)`; when it became a part,
+   * `join.connector` is the id of the part's connector at that point.
+   */
+  joinedTo(port: ImportPort): readonly ImportJoin[];
   /** A group the file assigns products to (a distribution system). */
   group(sourceId: string): ImportGroup | null;
   /** A record several products share (their type, their system), made once per key. */

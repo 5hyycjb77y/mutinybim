@@ -55,6 +55,19 @@ function hintOf(registry: Registry, cls: ObjectClass): ObjectClassIfc | null {
 }
 
 const RUN_DOMAIN_FITTING: Readonly<Record<string, string>> = { duct: "IfcDuctFitting", pipe: "IfcPipeFitting", conduit: "IfcCableCarrierFitting" };
+const FITTING_ENTITIES: ReadonlySet<string> = new Set(Object.values(RUN_DOMAIN_FITTING).map((sub) => sub.toUpperCase()));
+const GENERAL_FITTING: readonly string[] = ["IfcFlowFitting"];
+const NOT_GENERAL: readonly string[] = [];
+/**
+ * The more general entities a product's entity also is, nearest first, for
+ * the importer's reverse class map (`ImportProduct.generalEntities`). The
+ * other way round from `refine` below: what one class writes as the fitting
+ * entity for a run's domain comes back to that class, unless a class homed on
+ * the specific entity takes it first.
+ */
+export function generalEntitiesOf(entity: string): readonly string[] {
+  return FITTING_ENTITIES.has(entity.toUpperCase()) ? GENERAL_FITTING : NOT_GENERAL;
+}
 const RUN_DOMAIN_SEGMENT: Readonly<Record<string, string>> = { duct: "IfcDuctSegment", pipe: "IfcPipeSegment", conduit: "IfcCableCarrierSegment" };
 /** A riser's `service` (NetworkService) as a run domain. */
 const NETWORK_SERVICE_DOMAIN: Readonly<Record<string, string>> = { air: "duct", water: "pipe", sprinkler: "pipe", power: "conduit" };

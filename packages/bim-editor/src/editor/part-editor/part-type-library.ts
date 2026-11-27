@@ -1,7 +1,7 @@
 import { partTypeDefinitionSchema } from '@permitzip/bim-kernel'
-import type { EditorDataAnswer, EditorDataHost } from '@permitzip/bim-editor-host'
+import type { EditorDataAnswer, EditorDataHost, EditorPartPublishRequest } from '@permitzip/bim-editor-host'
 import { unavailableWords } from '@permitzip/bim-editor/host/unavailable'
-import type { LibraryPartTypeEntry } from '../../contracts/bim/firm-part-versions'
+import { confirmedPartPublish, isPartPublishRefusal, type LibraryPartTypeEntry } from '../../contracts/bim/firm-part-versions'
 
 /**
  * The browser's side of the firm library's part types
@@ -56,12 +56,30 @@ export async function fetchLibraryPartTypesFrom(port: LibraryPort): Promise<{ re
   return { canPublish: body.canPublish === true, partTypes }
 }
 
-export async function publishPartTypeFrom(port: LibraryPort, definition: unknown): Promise<PublishAnswer> {
+export async function publishPartTypeFrom(port: LibraryPort, definition: unknown, baseRevision?: number, requestId?: string): Promise<PublishAnswer> {
   if (!port) return { ok: false, message: unavailableWords('Publishing to the firm library') }
-  const res = await port.publishPartType({ definition })
+  let request: EditorPartPublishRequest | undefined
+  let res: EditorDataAnswer
+  if (port.publishPartTypeAtRevision) {
+    if (baseRevision === undefined || !requestId) return { ok: false, message: 'Open Publish to confirm this edit.' }
+    request = { definition, baseRevision, requestId }
+    res = await port.publishPartTypeAtRevision(request)
+  } else {
+    res = await port.publishPartType({ definition })
+  }
   const body = await bodyOf(res, 'publish')
-  if (isRecord(body) && body.status === 'saved' && isRecord(body.summary) && typeof body.summary.revision === 'number') return { ok: true, revision: body.summary.revision, upToDate: false }
-  if (isRecord(body) && body.status === 'up_to_date' && typeof body.revision === 'number') return { ok: true, revision: body.revision, upToDate: true }
-  const message = isRecord(body) && typeof body.message === 'string' ? body.message : isRecord(body) && typeof body.error === 'string' ? body.error : `the firm library answered HTTP ${res.status}`
-  return { ok: false, message }
+  if (request) {
+    const confirmed = res.ok && confirmedPartPublish(request, body)
+    if (confirmed) return { ok: true, ...confirmed }
+    if (!isPartPublishRefusal(res.status)) throw new Error('No matching publish receipt was received.')
+  } else {
+    if (res.ok && isRecord(body) && body.status === 'saved' && isRecord(body.summary) && typeof body.summary.revision === 'number') return { ok: true, revision: body.summary.revision, upToDate: false }
+    if (res.ok && isRecord(body) && body.status === 'up_to_date' && typeof body.revision === 'number') return { ok: true, revision: body.revision, upToDate: true }
+  }
+  const detail = isRecord(body) && typeof body.message === 'string' ? body.message : isRecord(body) && typeof body.error === 'string' ? body.error : null
+  if (res.status === 409) {
+    const reason = isRecord(body) && typeof body.currentRevision === 'number' ? `The library is now at revision ${body.currentRevision}.` : detail ?? 'Another editor changed this part.'
+    return { ok: false, message: `${reason} Review the current revision before publishing again.` }
+  }
+  return { ok: false, message: detail ?? (res.ok ? 'The library did not confirm a revision. Reopen Publish to check.' : `The firm library answered HTTP ${res.status}.`) }
 }

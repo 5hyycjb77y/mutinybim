@@ -305,6 +305,16 @@ const OTHER_PREDEFINED: Readonly<Record<string, string>> = {
   IfcSpace: "BERTH EXTERNAL GFA INTERNAL PARKING SPACE USERDEFINED NOTDEFINED",
 };
 
+/** Members of the second enumeration a door and a window carry (IfcDoorTypeOperationEnum, IfcWindowTypePartitioningEnum), by the attribute that holds it. */
+const STATED_ENUMS = {
+  OperationType:
+    "DOUBLE_DOOR_DOUBLE_SWING DOUBLE_DOOR_FOLDING DOUBLE_DOOR_LIFTING_VERTICAL DOUBLE_DOOR_SINGLE_SWING DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_LEFT DOUBLE_DOOR_SINGLE_SWING_OPPOSITE_RIGHT DOUBLE_DOOR_SLIDING DOUBLE_SWING_LEFT DOUBLE_SWING_RIGHT FOLDING_TO_LEFT FOLDING_TO_RIGHT LIFTING_HORIZONTAL LIFTING_VERTICAL_LEFT LIFTING_VERTICAL_RIGHT REVOLVING REVOLVING_VERTICAL ROLLINGUP SINGLE_SWING_LEFT SINGLE_SWING_RIGHT SLIDING_TO_LEFT SLIDING_TO_RIGHT SWING_FIXED_LEFT SWING_FIXED_RIGHT USERDEFINED NOTDEFINED",
+  PartitioningType: "DOUBLE_PANEL_HORIZONTAL DOUBLE_PANEL_VERTICAL SINGLE_PANEL TRIPLE_PANEL_BOTTOM TRIPLE_PANEL_HORIZONTAL TRIPLE_PANEL_LEFT TRIPLE_PANEL_RIGHT TRIPLE_PANEL_TOP TRIPLE_PANEL_VERTICAL USERDEFINED NOTDEFINED",
+} as const;
+
+/** A door's `OperationType` or a window's `PartitioningType`: the attributes whose enumeration is not the entity's PredefinedType. */
+export type StatedEnumAttribute = keyof typeof STATED_ENUMS;
+
 const words = (s: string): ReadonlySet<string> => new Set(s.split(" ").filter(Boolean).map((w) => w.toUpperCase()));
 const NO_OWN = words(NO_OWN_ATTRIBUTES);
 const ONLY_PREDEFINED = words(PREDEFINED_ONLY);
@@ -341,4 +351,11 @@ export function ownAttributes(entity: string): readonly string[] {
 /** The PredefinedType members the entity accepts; empty when it has no PredefinedType. */
 export function predefinedTypes(entity: string): ReadonlySet<string> {
   return PREDEFINED_BY_UPPER.get(entity.toUpperCase()) ?? new Set();
+}
+
+const STATED_ENUM_MEMBERS: Readonly<Record<StatedEnumAttribute, ReadonlySet<string>>> = { OperationType: words(STATED_ENUMS.OperationType), PartitioningType: words(STATED_ENUMS.PartitioningType) };
+
+/** The members a door's `OperationType` or a window's `PartitioningType` accepts, on the occurrence and on its type alike. */
+export function statedEnumMembers(attribute: StatedEnumAttribute): ReadonlySet<string> {
+  return STATED_ENUM_MEMBERS[attribute];
 }

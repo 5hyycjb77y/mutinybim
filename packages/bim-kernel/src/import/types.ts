@@ -73,6 +73,35 @@ export interface ImportPort {
   readonly flow: string | null;
   /** Ports it is joined to in the file (their ids). */
   readonly connectedTo: readonly string[];
+  /** The way it faces, out of the product: a unit vector in the host frame. Absent or null: the file doesn't say. */
+  readonly direction?: ImportPoint | null;
+  /** For an opening with a width: a unit vector along that width, in the host frame. Absent or null: the file doesn't say. */
+  readonly across?: ImportPoint | null;
+  /** What it connects to: a connector id of the service registry, as the reader maps the file's word. Absent or null: the file doesn't say. */
+  readonly domain?: string | null;
+  /** What it carries, in the file's own words (an IFC distribution system type), matched to a service row's IFC home. Absent or null: the file doesn't say. */
+  readonly systemType?: string | null;
+  /** The size of its opening, mm. Absent or null: the file doesn't say, or it has none. */
+  readonly size?: ImportPortSize | null;
+  /**
+   * Numbers the file gives for a connector's own optional fields, by the connector field's name and in that field's
+   * unit (the reader converts). A rule keeps the ones the connector schema takes. Absent or null: the file gives none.
+   */
+  readonly rated?: Readonly<Record<string, number>> | null;
+}
+
+/** A port's opening: a rectangle (its width and height) or a circle (its diameter), mm. */
+export type ImportPortSize = { readonly shape: "rect"; readonly width: number; readonly height: number } | { readonly shape: "round"; readonly diameter: number };
+
+/** The far side of a join the file states: a connection point and the product it is on. */
+export interface ImportJoin {
+  readonly product: ImportProduct;
+  readonly port: ImportPort;
+  /**
+   * Set when that product has become a part: the id of the part's connector that sits at this point, or null when
+   * none does (the point wasn't brought in as a connector). Absent: the product isn't a part, or hasn't converted.
+   */
+  readonly connector?: string | null;
 }
 
 export interface ImportProduct {
@@ -80,6 +109,11 @@ export interface ImportProduct {
   readonly sourceId: string;
   /** The schema's entity name (`IfcWall`). */
   readonly entity: string;
+  /**
+   * The more general entities it also is, nearest first, as far as the reader knows them. A class whose home is one
+   * of them takes the product when no class names its own entity. Absent: none.
+   */
+  readonly generalEntities?: readonly string[];
   readonly predefinedType: string | null;
   readonly objectType: string | null;
   readonly name: string | null;
@@ -137,7 +171,7 @@ export interface ImportSource {
     readonly entity: string;
     readonly count: number;
     readonly reason: string;
-    readonly classHint?: Pick<ImportProduct, "predefinedType" | "objectType">;
+    readonly classHint?: Pick<ImportProduct, "predefinedType" | "objectType" | "generalEntities">;
   }[];
 }
 

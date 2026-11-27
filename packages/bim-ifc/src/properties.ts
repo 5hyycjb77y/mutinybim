@@ -67,7 +67,15 @@ export function baselineParameterHomes(): ParameterHome[] {
 
 /** One value on its way to a property or quantity set. */
 export type PropertyInput =
-  | { readonly kind: "number"; readonly name: string; readonly value: number; readonly unit?: string; readonly measure?: "IFCPOSITIVELENGTHMEASURE" }
+  | {
+      readonly kind: "number";
+      readonly name: string;
+      readonly value: number;
+      readonly unit?: string;
+      readonly measure?: "IFCPOSITIVELENGTHMEASURE" | "IFCNONNEGATIVELENGTHMEASURE";
+      /** Written as an IfcPropertyBoundedValue with this value as its set point and no bounds, where the standard set defines a bounded value. */
+      readonly bounded?: boolean;
+    }
   | { readonly kind: "text"; readonly name: string; readonly value: string }
   | { readonly kind: "bool"; readonly name: string; readonly value: boolean };
 
@@ -180,7 +188,7 @@ export interface WrittenSet {
 export function writeSets(g: StepGraph, units: UnitSet, bag: PropertyBag, guidOf: (setName: string) => string): WrittenSet[] {
   const out: WrittenSet[] = [];
   for (const [name, props] of [...bag.psets].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    const items = [...props.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((p) => g.add("IFCPROPERTYSINGLEVALUE", [str(p.name), $, nominal(units, p), $]));
+    const items = [...props.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map((p) => (p.kind === "number" && p.bounded ? g.add("IFCPROPERTYBOUNDEDVALUE", [str(p.name), $, $, $, $, nominal(units, p)]) : g.add("IFCPROPERTYSINGLEVALUE", [str(p.name), $, nominal(units, p), $])));
     out.push({ name, ref: g.add("IFCPROPERTYSET", [str(guidOf(name)), $, str(name), $, list(items)]) });
   }
   for (const [name, qs] of [...bag.qtos].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {

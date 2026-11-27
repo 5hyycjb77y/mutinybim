@@ -24,6 +24,7 @@ import {
 } from '@permitzip/bim-kernel'
 import type { TriangleMesh } from '@permitzip/bim-geometry'
 import { initPartGeometry } from '../../contracts/bim/part-geometry'
+import { draftBaseRevision, drawnPartItemId, type LibraryPartTypeEntry } from '../../contracts/bim/firm-part-versions'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../ui/alert-dialog'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
@@ -93,18 +94,22 @@ import {
 /** Whether the firm library (every project's shared parts) can take this part. */
 export interface FirmLibraryAccess {
   readonly canWrite: boolean
+  /** Revisions seen in the catalog when opening a draft on a versioned host. */
+  readonly itemsById?: ReadonlyMap<string, LibraryPartTypeEntry>
   /** Why not, in plain words, when it can't. */
   readonly reason?: string
-  /** Save to the firm library; resolves to the refusal in plain words, or null. */
+  /** Updates Place part after a confirmed publish; resolves to a refusal in words, or null. */
   readonly save: (definition: PartTypeDefinition) => Promise<string | null>
 }
 
 interface Props {
   /** The definition to edit, or null for a new part. */
   initial: PartTypeDefinition | null
+  /** Project row values at open; initial still identifies the library revision for publishing. */
+  projectDefinition?: PartTypeDefinition
   canEdit: boolean
   /** Save to the project library; returns the refusal in plain words, or null. */
-  onSave: (definition: PartTypeDefinition) => string | null
+  onSave: (definition: PartTypeDefinition, baseline: PartTypeDefinition | null) => string | null
   /** The firm library; absent where there is none (the standalone harness without it). */
   firmLibrary?: FirmLibraryAccess
   onClose: () => void
@@ -125,8 +130,14 @@ type EngineState = { status: 'loading' } | { status: 'ready' } | { status: 'fail
  * parameters and sizes, connectors, plan / front / side / 3D views, and a Test
  * tab that flexes every size. Save writes every size to the project library.
  */
-export default function PartEditorWindow({ initial, canEdit, onSave, firmLibrary, onClose, placesAt = null, newCategory }: Props) {
-  const [draft, setDraft] = useState<Draft>(() => (initial ? draftFromDefinition(initial) : blankDraft(undefined, newCategory)))
+export default function PartEditorWindow({ initial, projectDefinition, canEdit, onSave, firmLibrary, onClose, placesAt = null, newCategory }: Props) {
+  const [draft, setDraft] = useState<Draft>(() => (initial ? draftFromDefinition(projectDefinition ?? initial) : blankDraft(undefined, newCategory)))
+  const modelId = draft.definition.model?.id
+  const [baseRevision, setBaseRevision] = useState<number>()
+  // Pin the original definition's revision once, even if the catalog arrives after editing starts.
+  if (baseRevision === undefined && modelId && firmLibrary?.itemsById) {
+    setBaseRevision(draftBaseRevision(firmLibrary.itemsById.get(drawnPartItemId(modelId)), initial))
+  }
   const [past, setPast] = useState<Draft[]>([])
   const [future, setFuture] = useState<Draft[]>([])
   const [saved, setSaved] = useState<Draft | null>(initial ? draft : null)
@@ -262,7 +273,7 @@ export default function PartEditorWindow({ initial, canEdit, onSave, firmLibrary
       setSaveMessage({ ok: false, text: `Not saved: ${issue.message}` })
       return
     }
-    const refused = onSave(draftDefinition(draft))
+    const refused = onSave(draftDefinition(draft), saved ? draftDefinition(saved) : null)
     if (refused) setSaveMessage({ ok: false, text: refused })
     else {
       setSaved(draft)
@@ -383,10 +394,14 @@ export default function PartEditorWindow({ initial, canEdit, onSave, firmLibrary
             open
             onOpenChange={setPublishing}
             definition={draftDefinition(draft)}
+            baseRevision={baseRevision}
             partName={draft.groupName || 'this part'}
             sizesText={sizesText}
             alsoSaveForPlacePart={firmLibrary.save}
-            onDone={(m) => setSaveMessage({ ok: m.ok, text: `${m.text}${m.ok ? reportNote : ''}` })}
+            onDone={(m) => {
+              setBaseRevision(m.revision)
+              setSaveMessage({ ok: m.ok, text: `${m.text}${m.ok ? reportNote : ''}` })
+            }}
           />
         )}
 
