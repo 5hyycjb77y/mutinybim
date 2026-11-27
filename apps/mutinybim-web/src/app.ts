@@ -32,8 +32,9 @@ import { ModelStore, summarize, type StarterKind } from "./models";
 import { ModelCreator } from "./model-creation";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
 import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
-import { approvalPage, approvalsPage, assistantConsentPage, confirmEmailPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
-import { confirmMail, EMAIL_SHAPE, resetMail, smtpMailer, type Mailer } from "./mailer";
+import { approvalPage, approvalsPage, assistantConsentPage, confirmEmailPage, connectPage, forgotPage, invitationPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
+import { confirmMail, EMAIL_SHAPE, invitationMail, resetMail, smtpMailer, type Mailer } from "./mailer";
+import { INVITATION_DAYS, normalizeInviteEmail, type InvitationRole } from "./model-invitations";
 import { CONFIRM_LINK_HOURS, digest, hashPassword, issueEmailConfirmation, issuePasswordReset, pkcePair, randomToken, verifyPassword } from "./secrets";
 import { exchangePkceCode, googleAuthorizeUrl, requestPasswordReset, signInWithPassword, signUpWithPassword, SupabaseAuthError, updatePassword, verifyTokenHash, type SupabaseUser } from "./supabase-auth";
 
@@ -233,6 +234,9 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   const resetMailLimit = new Throttle(3, 60 * 60_000);
   // The same for confirmation emails, which a signed-in person asks for about their own address.
   const confirmMailLimit = new Throttle(3, 60 * 60_000);
+  // Invitations: a cap per owner on making them, and per invited address on emailing them.
+  const inviteLimit = new Throttle(30, 60 * 60_000);
+  const inviteMailLimit = new Throttle(3, 60 * 60_000);
   const afterReply = new Set<Promise<void>>();
   const ipOf = (req: IncomingMessage): string => clientIp(req, Boolean(config.trustProxy));
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
@@ -413,10 +417,12 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   }
 
   async function modelsView(user: UserRow, flash: Flash | null, status = 200, fresh = false): Promise<{ status: number; body: string }> {
-    const [own, shared, linked, pending, inbox] = await Promise.all([
+    const [own, shared, linked, pending, inbox, invitations] = await Promise.all([
       db.modelsOf(user.id), db.sharedWith(user.id), linkedModelsView(user, fresh), db.pendingCreations(user.id), db.transfers.inbox(user.id),
+      // Invitations wait for a confirmed address: until then the account may not be the inbox's owner.
+      user.email_confirmed_at ? db.invitations.inbox(user.email) : Promise.resolve([]),
     ]);
-    return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked, pending, inbox) };
+    return { status, body: modelsPage(config, user, own, shared, flash ?? undefined, linked, pending, inbox, invitations) };
   }
 
   /** Runs work after the reply has gone; `settled()` and `close()` wait for it. */
@@ -470,6 +476,27 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     }
     await db.finishEmailConfirmationMail(tokenHash, true);
     console.log("[mutinybim-web] confirmation email sent", { userId: person.id });
+  }
+
+  /** Emails an invitation link within the invited address's hourly limit. Never logs the link or the address. */
+  async function mailInvitation(invitationId: string, to: string, token: string, invite: { readonly inviter: string; readonly model: string; readonly role: InvitationRole }): Promise<void> {
+    if (!mailer) return;
+    if (!inviteMailLimit.allow(to)) {
+      console.log("[mutinybim-web] invitation email skipped: hourly limit for this address", { invitationId });
+      return;
+    }
+    try {
+      await mailer.send(invitationMail(config.origin, to, token, invite));
+      console.log("[mutinybim-web] invitation email sent", { invitationId });
+    } catch (err) {
+      console.error("[mutinybim-web] invitation email failed", { invitationId, code: errorCode(err) });
+    }
+  }
+
+  /** The owner's Share page: personal shares, open invitations and any ownership offer. */
+  async function shareView(user: UserRow, model: ModelRow, options: { email?: string; flash?: Flash; link?: { readonly email: string; readonly url: string } } = {}): Promise<string> {
+    const [shares, offer, invitations] = await Promise.all([db.sharesOf(model.id), db.transfers.outgoing(model.id), db.invitations.outgoing(model.id, user.id)]);
+    return sharePage(config, user, model, shares, { ...options, offer, invitations, mail: mailer !== null });
   }
 
   /** The Settings page, which knows whether this server sends email. */
@@ -578,7 +605,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     // password on the Supabase user and Google's own word for this address (the proof that attaches an
     // existing account), or a sign-up link opened in the browser that chose the password (PKCE).
     // A link opened anywhere else may confirm a Supabase user whose password someone else chose.
-    if (verified.user.emailConfirmed && ((flow === "google" && verified.user.googleVerifiedEmail) || (flow === "signup" && viaPkce))) {
+    // A local account that still holds a pre-migration password isn't confirmed this way either: whoever chose
+    // that password keeps signing in with it. Its owner confirms with a mailed link after a password log-in.
+    if (verified.user.emailConfirmed && !synced.user.password_hash
+      && ((flow === "google" && verified.user.googleVerifiedEmail) || (flow === "signup" && viaPkce))) {
       await db.confirmIdentityEmail("supabase", verified.user.id, synced.user.id, verified.user.email);
     }
     if (flow === "recovery") {
@@ -891,13 +921,13 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         const welcome = url.searchParams.get("welcome") === "1";
         await creator.recover(user.id);
         const deleted = url.searchParams.get("deleted");
-        const flash = welcome
-          ? { kind: "ok" as const, text: `Welcome, ${user.display_name}. Make your first model below.` }
-          : deleted
-            ? { kind: "ok" as const, text: `Deleted “${deleted}”.` }
-            : url.searchParams.get("reset") === "1"
-              ? { kind: "ok" as const, text: "Your new password is saved. You were signed out everywhere else." }
-              : null;
+        const joined = url.searchParams.get("joined");
+        const flash = welcome ? { kind: "ok" as const, text: `Welcome, ${user.display_name}. Make your first model below.` }
+          : deleted ? { kind: "ok" as const, text: `Deleted “${deleted}”.` }
+          : joined ? { kind: "ok" as const, text: `Accepted. “${joined.slice(0, 120)}” is under Shared with you.` }
+          : url.searchParams.get("invitation") === "declined" ? { kind: "ok" as const, text: "Invitation declined. Nothing was shared." }
+          : url.searchParams.get("reset") === "1" ? { kind: "ok" as const, text: "Your new password is saved. You were signed out everywhere else." }
+          : null;
         const linkedId = url.searchParams.get("linked_models");
         const linkedProvider = linkedId ? linkedHosts.provider(linkedId) : null;
         const linkedSignInId = url.searchParams.get("linked");
@@ -1038,23 +1068,53 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const shareRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/share$/);
     if (user && shareRoute?.[1]) {
       const model = await ownModel(user, shareRoute[1]);
-      const renderShare = async (options: { email?: string; flash?: Flash } = {}) =>
-        sharePage(config, user, model, await db.sharesOf(model.id), { ...options, offer: await db.transfers.outgoing(model.id) });
-      if (method === "GET") return html(res, 200, await renderShare());
+      if (method === "GET") return html(res, 200, await shareView(user, model));
       if (method === "POST") {
         const form = await readForm(req);
-        const email = (form.get("email") ?? "").trim().toLowerCase();
+        const email = normalizeInviteEmail(form.get("email") ?? "");
         const role: ShareRole = form.get("role") === "view" ? "view" : "edit";
-        const fail = async (status: number, text: string) => html(res, status, await renderShare({ email, flash: { kind: "error", text } }));
-        const person = email ? await db.userByEmail(email) : null;
-        if (!person) return fail(404, `No MutinyBIM account here uses ${email || "that email"}. Ask them to sign up first (this app sends no invitations), then share again.`);
-        if (person.id === user.id) return fail(400, "That's you; you already own this model.");
-        if (!(await db.share({ modelId: model.id, userId: person.id, role, invitedBy: user.id }))) throw new Refusal(404, NOT_YOURS);
-        await refreshMemberAccess(model.id, person.id);
-        console.log("[mutinybim-web] model shared", { modelId: model.id, ownerId: user.id, userId: person.id, role });
-        const words = `Saved ${person.display_name}’s personal share as ${role === "edit" ? "Can edit" : "View only"}.`;
-        return html(res, 200, await renderShare({ flash: { kind: "ok", text: words } }));
+        const fail = async (status: number, text: string) => html(res, status, await shareView(user, model, { email, flash: { kind: "error", text } }));
+        if (email.length > 254 || !EMAIL_SHAPE.test(email)) return fail(400, "Enter one email address, like colleague@example.com.");
+        if (email === normalizeInviteEmail(user.email)) return fail(400, "That's your own address; you already own this model.");
+        if (!inviteLimit.allow(user.id)) return fail(429, "You've sent a lot of invitations this hour. Wait a while, then try again.");
+        // Nothing here asks whether an account uses this address, so the reply is the same either way (#27).
+        const id = randomUUID();
+        const token = randomToken();
+        const saved = await db.invitations.create({ id, modelId: model.id, ownerId: user.id, email, role, tokenHash: digest(token),
+          expiresAt: new Date(Date.now() + INVITATION_DAYS * 86_400_000) });
+        if (!saved) throw new Refusal(404, NOT_YOURS);
+        console.log("[mutinybim-web] model invitation saved", { modelId: model.id, ownerId: user.id, invitationId: id, role });
+        if (mailer) {
+          html(res, 200, await shareView(user, model, { flash: { kind: "ok", text: `Invitation saved. We're emailing a link to ${email}. Nothing is shared until they accept.` } }));
+          return afterReplying(() => mailInvitation(id, email, token, { inviter: user.display_name, model: model.name, role }));
+        }
+        // With mail off the owner sends the link. It's shown this once; only its digest is kept.
+        return html(res, 200, await shareView(user, model, { flash: { kind: "ok", text: `Invitation saved for ${email}. Nothing is shared until they accept.` },
+          link: { email, url: `${config.origin}/invitations/${token}` } }));
       }
+    }
+    const roleRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/share\/([0-9a-f-]{36})\/role$/);
+    if (user && method === "POST" && roleRoute?.[1] && roleRoute[2]) {
+      const model = await ownModel(user, roleRoute[1]);
+      const person = (await db.sharesOf(model.id)).find((s) => s.user_id === roleRoute[2]);
+      if (!person) return html(res, 404, await shareView(user, model, { flash: { kind: "error", text: "That personal share was removed. Invite them again to give them access." } }));
+      const form = await readForm(req);
+      const role = form.get("role");
+      if (role !== "view" && role !== "edit") throw new Refusal(400, "Choose View only or Can edit.");
+      if (!(await db.changeShareRole(model.id, person.user_id, user.id, form.get("grant_id") ?? "", role))) {
+        return html(res, 409, await shareView(user, model, { flash: { kind: "error", text: "That share changed. Check the current access before editing it again." } }));
+      }
+      await refreshMemberAccess(model.id, person.user_id);
+      console.log("[mutinybim-web] model share changed", { modelId: model.id, ownerId: user.id, userId: person.user_id, role });
+      return html(res, 200, await shareView(user, model, { flash: { kind: "ok", text: `Saved ${person.display_name}’s personal share as ${role === "edit" ? "Can edit" : "View only"}.` } }));
+    }
+    const cancelInvite = pathname.match(/^\/models\/([a-z0-9-]+)\/invitations\/([0-9a-f-]{36})\/cancel$/);
+    if (user && method === "POST" && cancelInvite?.[1] && cancelInvite[2]) {
+      const model = await ownModel(user, cancelInvite[1]);
+      const cancelled = await db.invitations.cancel(cancelInvite[2], model.id, user.id);
+      if (cancelled) console.log("[mutinybim-web] model invitation cancelled", { modelId: model.id, ownerId: user.id, invitationId: cancelInvite[2] });
+      return html(res, 200, await shareView(user, model, { flash: { kind: "ok",
+        text: cancelled ? "Invitation cancelled. Its link no longer works." : "That invitation was already answered, replaced or cancelled." } }));
     }
     const unshareRoute = pathname.match(/^\/models\/([a-z0-9-]+)\/share\/([0-9a-f-]{36})\/delete$/);
     if (user && method === "POST" && unshareRoute?.[1] && unshareRoute[2]) {
@@ -1065,8 +1125,35 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       console.log("[mutinybim-web] model unshared", { modelId: model.id, ownerId: user.id, userId: unshareRoute[2] });
       const remaining = access === "edit" ? "They can still edit it." : access === "view" ? "They can still view it."
         : access === "owner" ? "They now own it." : "They no longer have access.";
-      return html(res, 200, sharePage(config, user, model, await db.sharesOf(model.id), { offer: await db.transfers.outgoing(model.id),
+      return html(res, 200, await shareView(user, model, {
         flash: { kind: "ok", text: removed ? `Removed ${removed.display_name}’s personal share. ${remaining}` : "There was no personal share to remove." } }));
+    }
+
+    const inviteLink = pathname.match(/^\/invitations\/([A-Za-z0-9_-]{20,80})$/);
+    if (inviteLink?.[1] && method === "GET") {
+      if (!user) return redirect(res, `/login?return_to=${encodeURIComponent(pathname)}`);
+      const card = await db.invitations.byToken(digest(inviteLink[1]));
+      // The link points at an invitation; it isn't the proof. Only the invited address, confirmed, can answer.
+      if (!card || card.email !== normalizeInviteEmail(user.email) || card.invited_by === user.id) {
+        return html(res, 404, invitationPage(user, { state: "unavailable" }), TOKEN_PAGE);
+      }
+      if (!user.email_confirmed_at) return html(res, 200, invitationPage(user, { state: "unconfirmed", mail: mailer !== null }), TOKEN_PAGE);
+      return html(res, 200, invitationPage(user, { state: "open", card }), TOKEN_PAGE);
+    }
+    const inviteAnswer = pathname.match(/^\/invitations\/([0-9a-f-]{36})\/(accept|decline)$/);
+    if (user && method === "POST" && inviteAnswer?.[1]) {
+      const action = inviteAnswer[2] === "accept" ? "accept" : "decline";
+      const card = user.email_confirmed_at ? (await db.invitations.inbox(user.email)).find((c) => c.id === inviteAnswer[1]) : undefined;
+      const answer = card ? await db.invitations.respond(card.id, user.id, action) : "unavailable";
+      if (!card || answer === "unavailable") {
+        return html(res, 410, messagePage(config, user, "Invitation unavailable",
+          "It may have been cancelled, replaced by a newer invitation, already answered or expired, or it's for a different address. Ask the model's owner to invite you again.",
+          { href: "/models", label: "My models" }));
+      }
+      console.log("[mutinybim-web] model invitation answered", { modelId: card.model_id, userId: user.id, invitationId: card.id, answer });
+      if (answer === "declined") return redirect(res, "/models?invitation=declined");
+      await refreshMemberAccess(card.model_id, user.id);
+      return redirect(res, `/models?joined=${encodeURIComponent(card.model_name)}`);
     }
 
     const confirmLink = pathname.match(/^\/confirm\/([A-Za-z0-9_-]{20,80})$/);

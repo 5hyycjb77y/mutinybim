@@ -29,6 +29,7 @@ import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { toolFamily } from "@permitzip/bim-mcp";
 import { starterScriptItems } from "@permitzip/bim-script";
 import { LocalScriptRunner } from "@permitzip/bim-script-runner/local";
+import { shareByInvitation } from "../__fixtures__/invitation";
 import { createApp, type App } from "../src/app";
 import { HOSTED_PROJECT_ID } from "../src/assistant-tools";
 import type { WebConfig } from "../src/config";
@@ -203,7 +204,7 @@ test("a layout script: preview changes nothing, apply waits for the person on th
   await client.close();
 
   const pat = await signUp("pat@example.com", "Pat Example");
-  await post(`/models/${modelId}/share`, { email: "pat@example.com", role: "view" }, sam);
+  await shareByInvitation(base, dataDir, { owner: sam, recipient: pat, modelId, email: "pat@example.com", role: "view" });
   const asked: string[] = [];
   const viewer = await connect(await signInAssistant(pat), (message) => (asked.push(message), "accept"));
   const theirs = { source: LEVEL_SCRIPT("level-3", "Level 3", 8000), reads: { levels: true } };
@@ -263,7 +264,7 @@ test("a previewed script lands by its id after a restart, in a new session, and 
     if (!String(err).includes("fetch failed")) throw err;
     return signUp("pat@example.com", "Pat Example");
   });
-  await post(`/models/${modelId}/share`, { email: "pat@example.com", role: "edit" }, sam);
+  await shareByInvitation(base, dataDir, { owner: sam, recipient: pat, modelId, email: "pat@example.com", role: "edit" });
   const theirs = await connect(await signInAssistant(pat), () => "accept");
   expect(await call(theirs, "bim_apply_output", args)).toMatchObject({ status: "refused", message: expect.stringContaining("That preview has expired"), nothing_changed: true });
   await theirs.close();

@@ -231,6 +231,11 @@ export async function migrateSqliteToSupabase(options: MigrateOptions): Promise<
       ...r, sender_id: remap(userIdMap, r.sender_id), recipient_id: remap(userIdMap, r.recipient_id),
     })));
 
+    // Invitations keep their link digests, so a link sent before the move still opens the same invitation.
+    counts.model_invitations = await upsertBatch("model_invitations", "id", readTable(sqlite, "model_invitations").map((r) => ({
+      ...r, invited_by: remap(userIdMap, r.invited_by), answered_by: r.answered_by === null ? null : remap(userIdMap, r.answered_by),
+    })));
+
     counts.teams = await upsertBatch("teams", "id", readTable(sqlite, "teams").map((r) => ({
       ...r, owner_id: remap(userIdMap, r.owner_id), created_by: remap(userIdMap, r.created_by),
     })));

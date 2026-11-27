@@ -12,6 +12,7 @@ import { approvalTitle, type PendingApproval } from "./assistant-approvals";
 import type { AgentKeyRow, AssistantGrantRow, LinkedModelRow, ModelCreation, ModelRow, SharedModelRow, ShareRow, UserRow } from "./db";
 import type { LinkedProvider, LinkedView } from "./linked-hosts";
 import type { ModelSummary } from "./models";
+import { INVITATION_DAYS, type Invitation, type InvitationCard } from "./model-invitations";
 import type { Transfer } from "./model-transfers";
 import { formatWhen, page, waitingApprovalsOf, type Flash, type FrameUser } from "./ui";
 
@@ -332,6 +333,65 @@ export function forgotPage(config: WebConfig, options: { email?: string; flash?:
   );
 }
 
+/** What an invitation link shows the signed-in account. Nothing about the invitation shows unless the address matches and is confirmed. */
+export function invitationPage(user: UserRow, view: { readonly state: "open"; readonly card: InvitationCard } | { readonly state: "unconfirmed"; readonly mail: boolean } | { readonly state: "unavailable" }): string {
+  const frame = { title: "Invitation", user: frameUser(user), quote: null, flash: null, narrow: true };
+  if (view.state === "unavailable") {
+    return page(
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">This invitation doesn't work here</CardTitle>
+          <CardDescription>
+            It may be for a different address, cancelled, replaced by a newer invitation, already answered or expired. You're logged in as {user.email}. If it was meant for you, ask the model's owner to invite this address again.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button asChild><a href="/models">My models</a></Button>
+        </CardFooter>
+      </Card>,
+      frame,
+    );
+  }
+  if (view.state === "unconfirmed") {
+    return page(
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">Confirm your email first</CardTitle>
+          <CardDescription>
+            {view.mail
+              ? `Invitations open for a confirmed address. In Settings, send a confirmation link to ${user.email}, open it, then open this invitation again.`
+              : `Invitations open for a confirmed address, and ${user.email} isn't confirmed yet. This server sends no email, so ask whoever runs this server to confirm it, or link a sign-in provider that vouches for it in Settings.`}
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button asChild><a href="/settings">Go to Settings</a></Button>
+        </CardFooter>
+      </Card>,
+      frame,
+    );
+  }
+  const { card } = view;
+  return page(
+    <Card data-testid="invitation">
+      <CardHeader>
+        <CardTitle className="text-2xl">Join “{card.model_name}”?</CardTitle>
+        <CardDescription>
+          {card.inviter_name} invited {card.email} to {card.role === "edit" ? "edit" : "view"} this model. The invitation expires {formatWhen(card.expires_at)}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex gap-2">
+        <form method="post" action={`/invitations/${card.id}/accept`}>
+          <Button type="submit" size="lg">Accept invitation</Button>
+        </form>
+        <form method="post" action={`/invitations/${card.id}/decline`}>
+          <Button type="submit" size="lg" variant="outline">Decline</Button>
+        </form>
+      </CardContent>
+    </Card>,
+    frame,
+  );
+}
+
 /** Confirms the signed-in account's address from a mailed link, with one button so nothing changes on a plain visit. */
 export function confirmEmailPage(user: UserRow, options: { token: string; refused?: boolean }): string {
   const email = user.email;
@@ -562,11 +622,29 @@ function LinkedSection({ view }: { view: LinkedView }) {
   );
 }
 
-export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash, linked: LinkedModelsView = { sections: [], keyMissing: [] }, pending: readonly ModelCreation[] = [], inbox: readonly Transfer[] = []): string {
+export function modelsPage(config: WebConfig, user: UserRow, models: readonly ModelRow[], shared: readonly SharedModelRow[], flash?: Flash, linked: LinkedModelsView = { sections: [], keyMissing: [] }, pending: readonly ModelCreation[] = [], inbox: readonly Transfer[] = [], invitations: readonly InvitationCard[] = []): string {
   const atLimit = models.length + pending.length >= config.modelLimit;
   return page(
     <>
       <PageTitle>My models</PageTitle>
+      {invitations.map((invite) => (
+        <Card key={invite.id} data-testid="invitation">
+          <CardHeader>
+            <CardTitle>Join “{invite.model_name}”?</CardTitle>
+            <CardDescription>
+              {invite.inviter_name} invited {invite.email} to {invite.role === "edit" ? "edit" : "view"} this model. Nothing is shared until you accept. The invitation expires {formatWhen(invite.expires_at)}.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <form method="post" action={`/invitations/${invite.id}/accept`}>
+              <Button type="submit">Accept invitation</Button>
+            </form>
+            <form method="post" action={`/invitations/${invite.id}/decline`}>
+              <Button type="submit" variant="outline">Decline</Button>
+            </form>
+          </CardContent>
+        </Card>
+      ))}
       {inbox.map((offer) => (
         <Card key={offer.id}>
           <CardHeader>
@@ -718,10 +796,39 @@ export function modelsPage(config: WebConfig, user: UserRow, models: readonly Mo
   );
 }
 
-export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, shares: readonly ShareRow[], options: { email?: string; flash?: Flash; offer?: Transfer | null } = {}): string {
+export interface ShareOptions {
+  readonly email?: string;
+  readonly flash?: Flash;
+  readonly offer?: Transfer | null;
+  readonly invitations?: readonly Invitation[];
+  /** Whether this server emails invitations. Without mail, the owner copies each link. */
+  readonly mail?: boolean;
+  /** A link to copy, shown once right after an invitation is saved with mail off. */
+  readonly link?: { readonly email: string; readonly url: string };
+}
+
+export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, shares: readonly ShareRow[], options: ShareOptions = {}): string {
+  const invitations = options.invitations ?? [];
+  const now = new Date().toISOString();
   return page(
     <>
-      <PageTitle lede="People you share with see it under “Shared with you” on their My models page. They need a MutinyBIM account on this server; this app sends no email, so tell them yourself.">Share “{model.name}”</PageTitle>
+      <PageTitle lede={`Invite people by email. They accept from their My models page, signed in with that address once it's confirmed, and then see the model under “Shared with you”. ${options.mail ? "This server emails each invitation." : "This server sends no email, so you send each invitation's link yourself."}`}>Share “{model.name}”</PageTitle>
+      {options.link ? (
+        <Card data-testid="invitation-link">
+          <CardHeader>
+            <CardTitle>Send this link to {options.link.email}</CardTitle>
+            <CardDescription>
+              It's shown only this once. It works for {INVITATION_DAYS} days, and only for an account whose confirmed address is {options.link.email}, so sending it to someone else shares nothing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Field>
+              <Label htmlFor="invitation-url">Invitation link</Label>
+              <Input id="invitation-url" readOnly value={options.link.url} className="font-mono text-sm" />
+            </Field>
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>Owner and personal shares</CardTitle>
@@ -739,8 +846,8 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
                 <span className="min-w-0 flex-1">
                   <strong>{s.display_name}</strong> <span className="text-(--mutiny-muted)">({s.email})</span>
                 </span>
-                <form method="post" action={`/models/${model.id}/share`} className="flex items-center gap-1.5">
-                  <input type="hidden" name="email" value={s.email} />
+                <form method="post" action={`/models/${model.id}/share/${s.user_id}/role`} className="flex items-center gap-1.5">
+                  <input type="hidden" name="grant_id" value={s.grant_id} />
                   <NativeSelect name="role" defaultValue={s.role} aria-label={`What ${s.display_name} can do`} className="h-8 w-auto">
                     <option value="view">View only</option>
                     <option value="edit">Can edit</option>
@@ -765,12 +872,39 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Add someone</CardTitle>
+          <CardTitle>Invitations</CardTitle>
+          <CardDescription>Waiting for an answer. A new invitation to the same address replaces the old one.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {invitations.length > 0 ? <ul className="flex flex-col gap-2" data-testid="invitations">
+            {invitations.map((invite) => {
+              const expired = invite.expires_at <= now;
+              return (
+                <li key={invite.id} className="flex flex-wrap items-center gap-3 rounded-(--mutiny-radius) border border-(--mutiny-border) bg-(--mutiny-field) px-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <strong>{invite.email}</strong>{" "}
+                    <span className="text-(--mutiny-muted)">{expired ? "expired" : `expires ${formatWhen(invite.expires_at)}`}</span>
+                  </span>
+                  <Badge variant={expired ? "outline" : "secondary"}>{expired ? "Expired" : invite.role === "edit" ? "Can edit" : "View only"}</Badge>
+                  <form method="post" action={`/models/${model.id}/invitations/${invite.id}/cancel`}>
+                    <Button type="submit" size="sm" variant="ghost" className="text-(--mutiny-danger)">
+                      {expired ? "Remove" : "Cancel"}
+                    </Button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul> : <p className="text-(--mutiny-muted)">No invitations waiting.</p>}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Invite someone</CardTitle>
           <CardDescription>“Can edit” lets them change the model, make branches and save versions. A personal “View only” share can coexist with edit access through a team.</CardDescription>
         </CardHeader>
         <form method="post" action={`/models/${model.id}/share`} className="flex flex-wrap items-end gap-2">
           <Field className="min-w-60 flex-1">
-            <Label htmlFor="share-email">Their account email</Label>
+            <Label htmlFor="share-email">Their email</Label>
             <Input id="share-email" name="email" type="email" required defaultValue={options.email ?? ""} placeholder="colleague@example.com" />
           </Field>
           <Field>
@@ -781,7 +915,7 @@ export function sharePage(config: WebConfig, user: UserRow, model: ModelRow, sha
             </NativeSelect>
           </Field>
           <Button type="submit" size="lg">
-            Share
+            Invite
           </Button>
         </form>
       </Card>
@@ -880,13 +1014,13 @@ export function settingsPage(config: WebConfig, user: UserRow, linked: readonly 
         </CardHeader>
         {user.email_confirmed_at ? null : options.mail ? (
           <form method="post" action="/settings/confirm-email" className="flex flex-wrap items-center gap-2">
-            <p className="text-sm">Confirm that you can receive email at this address.</p>
+            <p className="text-sm">Confirm that you can receive email at this address, so you can accept invitations sent to it.</p>
             <Button type="submit" variant="outline" size="sm">
               Send confirmation link
             </Button>
           </form>
         ) : (
-          <p className="text-sm text-(--mutiny-muted)">This server sends no email. A sign-in provider that vouches for your address confirms it.</p>
+          <p className="text-sm text-(--mutiny-muted)">This server sends no email. A sign-in provider that vouches for your address confirms it, or whoever runs this server can confirm it.</p>
         )}
         <form method="post" action="/settings/profile" className="flex flex-wrap items-end gap-2">
           <Field className="min-w-60 flex-1">

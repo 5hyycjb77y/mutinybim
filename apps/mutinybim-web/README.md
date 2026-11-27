@@ -233,12 +233,29 @@ services firm for quotes: `MUTINYBIM_WEB_QUOTE` takes a JSON object with
 
 ## Sharing
 
-The owner of a model shares it with another account on the same server by
-email: **Can edit** (edit, make branches, save versions) or **View only** (the
-model server refuses their edits). There are no invitations by email; the
-person needs an account first. When a personal share changes, the app
-rechecks that person's open editors and disconnects any whose role changed.
-Only the model owner shares, renames or deletes.
+The owner of a model invites people by email to **Can edit** (edit, make
+branches, save versions) or **View only** (the model server refuses their
+edits). Inviting never looks up whether an account uses the address, so the
+reply is the same either way. Nothing is shared until an account whose
+**confirmed** address matches accepts, from a card on **My models** or from
+the invitation's link. The invitation works for 7 days, only while its inviter
+still owns the model. Only its link's digest is stored.
+
+- **With mail on**, the invitation is emailed. Each address gets at most three
+  invitation emails an hour.
+- **With mail off**, the owner sees the link once, right after inviting, and
+  sends it themselves. The link only points at the invitation: sending it to
+  someone else shares nothing. Without a sign-in provider, the person's address
+  is confirmed by the operator (see Confirmed addresses).
+- The Share page lists open invitations by address. The owner can cancel one,
+  and inviting the same address again replaces it.
+- Shares made before invitations keep working. Changing a share's role needs
+  no invitation.
+
+When a personal share changes, the app rechecks that person's open editors and
+disconnects any whose role changed. Only the model owner shares, renames or
+deletes. Invitations apply to native hosted models only; a linked host's
+models keep that host's own sharing.
 
 The hosted stores resolve personal and team grants together. A person with
 personal view and team edit can edit. Shared models appear once in **My
@@ -282,8 +299,8 @@ keeps sending its own reset emails.
 ### Confirmed addresses
 
 Each account records when its email address was confirmed (`email_confirmed_at`).
-New invitations will need a confirmed address; shares that already exist keep
-working. An address is confirmed by:
+Accepting an invitation needs a confirmed address; shares that already exist
+keep working. An address is confirmed by:
 
 - a configured sign-in provider whose UserInfo returns `email_verified: true` for
   that address (see Sign-in providers);
@@ -293,7 +310,11 @@ working. An address is confirmed by:
 - with mail on, **Settings → Send confirmation link**. The link works once, for
   24 hours, and only while logged in to the account that asked for it. Only its
   digest is stored. For a Supabase account with an unconfirmed address, log in
-  with the account password before using the mailed link.
+  with the account password before using the mailed link;
+- the operator, on the server: `npm run web:confirm-email -- person@example.com`.
+  Run it once you know the person controls that inbox. It's the way to confirm
+  an address on a server with no email and no sign-in provider, so its
+  invitations can be accepted.
 
 A Supabase password sign-up confirms nothing by itself: with "Confirm email" off,
 Supabase marks every address confirmed. Changing an account's address clears
@@ -345,12 +366,13 @@ Operator commands run as the app's user:
   whole (Main with its history, branches, saved versions), so very long-lived
   models grow their file; a deployment that outgrows that points the editor at
   a model server with a Postgres commit store.
-- Sharing is by account email on the same server; there are no emailed
-  invitations or links for people without an account.
+- Sharing is by invitation to an email address on the same server. Someone
+  without an account signs up with that address and confirms it before they
+  can accept.
 - The editor screens that need hosted storage (firm part libraries, stored
   drawings, linked models (IFC or Revit), code studies, file storage) say in words that
   they are not available here; the rest of the editor works.
-- Local sign-up leaves the address unconfirmed. When SMTP is enabled, the account holder can request a confirmation link in Settings.
+- Local sign-up leaves the address unconfirmed. When SMTP is enabled, the account holder can request a confirmation link in Settings; otherwise the operator confirms it with `npm run web:confirm-email`.
 - A tool call that was waiting for the person when the server restarted
   ends; the request stays on the approvals page and lands if approved.
 - Files the tool families write (printed sheets, issued sets) are kept under
@@ -362,7 +384,7 @@ Operator commands run as the app's user:
 | --- | --- |
 | `src/server.ts` | Starts the app. |
 | `src/app.ts` | Routes, forms, sessions, sharing, the editor routes and the model server socket. |
-| `src/admin.ts` | Operator commands (`npm run web:reset-password`). |
+| `src/admin.ts` | Operator commands (`npm run web:reset-password`, `npm run web:confirm-email`). |
 | `src/mailer.ts` | The `Mailer` interface, the fixed plain-text email templates and the SMTP transport (Nodemailer). |
 | `src/config.ts` | The settings above. |
 | `src/db.ts` | Accounts, sessions, models, shares, reset links, agent keys and assistant sign-ins (SQLite). |

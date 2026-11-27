@@ -19,6 +19,7 @@ import { ModelStore, starterModel } from "../src/models";
 import { digest, randomToken } from "../src/secrets";
 import type { WebConfig } from "../src/config";
 import type { Fetch } from "../src/oauth";
+import { shareByInvitation } from "../__fixtures__/invitation";
 import { seedTeamShare } from "../__fixtures__/team-share";
 
 let dataDir = "";
@@ -307,11 +308,7 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   const guest = await signUp("guest@example.com", "Gus Guest");
   const guestKey = await makeAgentKey(guest);
 
-  const unknown = await post(`/models/${id}/share`, { email: "nobody@example.com", role: "view" }, owner);
-  expect(unknown.status).toBe(404);
-  expect(await unknown.text()).toContain("Ask them to sign up first");
-
-  expect((await post(`/models/${id}/share`, { email: "GUEST@example.com", role: "view" }, owner)).status).toBe(200);
+  await shareByInvitation(base, dataDir, { owner, recipient: guest, modelId: id, email: "GUEST@example.com", role: "view" });
   const list = await (await fetch(`${base}/models`, { headers: { cookie: guest } })).text();
   expect(list).toContain("Shared with you");
   expect(list).toContain("Shared warehouse");
@@ -322,11 +319,14 @@ test("sharing: view only can look but not edit, edit can edit, only the owner sh
   expect((await post(`/models/${id}/share`, { email: "guest@example.com", role: "edit" }, guest)).status).toBe(403);
   expect((await post(`/models/${id}/delete`, {}, guest)).status).toBe(403);
 
-  expect((await post(`/models/${id}/share`, { email: "guest@example.com", role: "edit" }, owner)).status).toBe(200);
+  const guestId = (await app?.db.userByEmail("guest@example.com"))?.id;
+  expect((await post(`/models/${id}/share/${guestId}/role`, { role: "edit" }, guest)).status).toBe(403);
+  const grantId = (await app?.db.sharesOf(id))?.find((share) => share.user_id === guestId)?.grant_id;
+  if (!grantId) throw new Error("missing guest share");
+  expect((await post(`/models/${id}/share/${guestId}/role`, { role: "edit", grant_id: grantId }, owner)).status).toBe(200);
   expect(await agentEdit(guestKey, id, "level-edit")).toMatchObject({ status: "saved" });
 
   const sharePage = await (await fetch(`${base}/models/${id}/share`, { headers: { cookie: owner } })).text();
-  const guestId = (await app?.db.userByEmail("guest@example.com"))?.id;
   expect(sharePage).toContain("Gus Guest");
   expect((await post(`/models/${id}/share/${guestId}/delete`, {}, owner)).status).toBe(200);
   expect((await fetch(`${base}/m/${id}`, { headers: { cookie: guest } })).status).toBe(404);
@@ -364,7 +364,7 @@ test("East plant team edit survives personal unsharing, while the original hando
   const session = await AgentSession.open({ url: `${base.replace(/^http/, "ws")}/sync?key=${key}`, token: "local",
     modelId: id, actor: agentActor("bea", "team-edit", "Bea"), socketFactory: builtinWebSocketFactory() });
   try {
-    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    await shareByInvitation(base, dataDir, { owner: alex, recipient: bea, modelId: id, email: "bea@example.test", role: "view" });
     expect((await post(offer, terms, alex)).status).toBe(303);
     const [first] = await app.db.transfers.inbox(beaId);
     if (!first) throw new Error("Missing direct-share offer");
@@ -372,7 +372,7 @@ test("East plant team edit survives personal unsharing, while the original hando
     expect(await removed.text()).toContain("They can still edit it.");
     expect(await session.edit({ type: "create_level", levelId: "mezz", name: "Mezzanine", elevationMm: 4000 },
       { idempotencyKey: "existing-team-editor" })).toMatchObject({ status: "saved" });
-    expect((await post(share, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+    await shareByInvitation(base, dataDir, { owner: alex, recipient: bea, modelId: id, email: "bea@example.test", role: "view" });
     expect((await post(`/transfers/${first.id}/accept`, {}, bea)).status).toBe(409);
   } finally { session.close(); }
   expect((await post(offer, terms, alex)).status).toBe(303);
@@ -390,13 +390,13 @@ test("removing the recipient's share explains how to recover an ended offer", as
   await start();
   const alex = await signUp("alex@example.com", "Alex");
   const bea = await signUp("bea@example.com", "Bea");
-  await signUp("cam@example.com", "Cam");
+  const cam = await signUp("cam@example.com", "Cam");
   const id = await makeModel(alex, "East plant room");
   const share = `/models/${id}/share`;
   const beaId = (await app?.db.userByEmail("bea@example.com"))?.id;
   if (!beaId) throw new Error("Missing recipient");
-  for (const email of ["bea@example.com", "cam@example.com"]) {
-    expect((await post(share, { email, role: "view" }, alex)).status).toBe(200);
+  for (const [recipient, email] of [[bea, "bea@example.com"], [cam, "cam@example.com"]] as const) {
+    await shareByInvitation(base, dataDir, { owner: alex, recipient, modelId: id, email, role: "view" });
   }
   expect((await post(`/models/${id}/transfer`, { recipient: beaId, retained: "view" }, alex)).status).toBe(303);
   const offer = (await app?.db.transfers.inbox(beaId))?.[0];
@@ -406,7 +406,7 @@ test("removing the recipient's share explains how to recover an ended offer", as
   expect(page).not.toMatch(/with Cam\? [^"]*ends their ownership offer/);
 
   expect((await post(`${share}/${beaId}/delete`, {}, alex)).status).toBe(200);
-  expect((await post(share, { email: "bea@example.com", role: "view" }, alex)).status).toBe(200);
+  await shareByInvitation(base, dataDir, { owner: alex, recipient: bea, modelId: id, email: "bea@example.com", role: "view" });
   const stale = await post(`/transfers/${offer.id}/accept`, {}, bea);
   expect(stale.status).toBe(409);
   const notice = await stale.text();
@@ -423,7 +423,7 @@ test("a direct viewer accepts a handover and recovers the same receipt after res
   const full = await makeModel(bea, "Current job");
   const beaId = (await app?.db.userByEmail("bea@example.com"))?.id;
   if (!beaId) throw new Error("Missing recipient");
-  expect((await post(`/models/${id}/share`, { email: "bea@example.com", role: "view" }, alex)).status).toBe(200);
+  await shareByInvitation(base, dataDir, { owner: alex, recipient: bea, modelId: id, email: "bea@example.com", role: "view" });
   expect((await post(`/models/${id}/transfer`, { recipient: beaId, retained: "view" }, alex)).status).toBe(303);
   const inbox = await (await fetch(base + "/models", { headers: { cookie: bea } })).text();
   const action = inbox.match(/action="(\/transfers\/[a-f0-9-]+\/accept)"/)?.[1];
@@ -462,7 +462,7 @@ test("both open model connections reconnect with their new rights after a handov
   const id = await makeModel(owner, "East plant");
   const viewerId = (await app?.db.userByEmail("viewer@example.test"))?.id;
   if (!viewerId) throw new Error("Missing test viewer");
-  await post(`/models/${id}/share`, { email: "viewer@example.test", role: "view" }, owner);
+  await shareByInvitation(base, dataDir, { owner, recipient: viewer, modelId: id, email: "viewer@example.test", role: "view" });
   const senderKey = await makeAgentKey(owner);
   const recipientKey = await makeAgentKey(viewer);
   async function openEditor(key: string, person: string) {

@@ -16,6 +16,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { occupiedSlots, sqliteTransfers, SQLITE_TRANSFER_SCHEMA, type Transfers } from "./model-transfers";
+import { sqliteInvitations, SQLITE_INVITATION_SCHEMA, type Invitations } from "./model-invitations";
 import { SQLITE_MODEL_ACCESS, SQLITE_SHARED_MODELS, SQLITE_TEAM_SCHEMA } from "./team-access";
 
 export interface UserRow {
@@ -65,6 +66,7 @@ export interface SharedModelRow extends ModelRow {
 }
 
 export interface ShareRow {
+  readonly grant_id: string;
   readonly user_id: string;
   readonly email: string;
   readonly display_name: string;
@@ -394,6 +396,7 @@ CREATE TABLE IF NOT EXISTS linked_offers (
 
 export interface WebStore {
   readonly transfers: Transfers;
+  readonly invitations: Invitations;
   close(): Promise<void>;
 
   createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): Promise<UserRow>;
@@ -407,6 +410,12 @@ export interface WebStore {
   userByIdentity(provider: string, subject: string): Promise<UserRow | null>;
   linkIdentity(provider: string, subject: string, userId: string): Promise<void>;
   confirmIdentityEmail(provider: string, subject: string, userId: string, email: string): Promise<void>;
+  /**
+   * An operator vouches for the account's address (`npm run web:confirm-email`).
+   * Keeps the first confirmation time. True when `email` is still the account's
+   * address and is now confirmed; false (changing nothing) when it isn't.
+   */
+  confirmEmail(userId: string, email: string): Promise<boolean>;
   identitySubject(userId: string, provider: string): Promise<string | null>;
   identitiesOf(userId: string): Promise<readonly string[]>;
 
@@ -459,6 +468,7 @@ export interface WebStore {
   sharedWith(userId: string): Promise<readonly SharedModelRow[]>;
   /** Personal grants only. A model handover offer binds to one of these grants. */
   sharesOf(modelId: string): Promise<readonly ShareRow[]>;
+  changeShareRole(modelId: string, userId: string, ownerId: string, grantId: string, role: ShareRole): Promise<boolean>;
   share(input: { modelId: string; userId: string; role: ShareRole; invitedBy: string }): Promise<boolean>;
   unshare(modelId: string, userId: string, ownerId: string): Promise<boolean>;
 
@@ -753,6 +763,8 @@ export function openDb(file: string): WebStore {
       db.exec(sql);
       db.exec(`PRAGMA user_version = ${index + 1}`);
     }
+    // Needs the models and users tables only, so it doesn't take an upgrade number.
+    db.exec(SQLITE_INVITATION_SCHEMA);
   });
 
   function creationByKey(ownerId: string, key: string): ModelCreation | null {
@@ -779,6 +791,7 @@ export function openDb(file: string): WebStore {
 
   return {
     transfers: sqliteTransfers(db, writeTransaction),
+    invitations: sqliteInvitations(db, writeTransaction),
     async close() {
       db.close();
     },
@@ -802,6 +815,9 @@ export function openDb(file: string): WebStore {
     },
     async userByEmail(email) {
       return toUser(db.prepare("SELECT * FROM users WHERE email = ?").get(email));
+    },
+    async confirmEmail(userId, email) {
+      return db.prepare("UPDATE users SET email_confirmed_at = COALESCE(email_confirmed_at, ?) WHERE id = ? AND email = ?").run(now(), userId, email).changes === 1;
     },
     async userById(id) {
       return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id));
@@ -991,9 +1007,14 @@ export function openDb(file: string): WebStore {
     },
     async sharesOf(modelId) {
       return db
-        .prepare("SELECT s.user_id, u.email, u.display_name, s.role, s.created_at FROM model_shares s JOIN users u ON u.id = s.user_id WHERE s.model_id = ? ORDER BY s.created_at")
+        .prepare("SELECT s.grant_id, s.user_id, u.email, u.display_name, s.role, s.created_at FROM model_shares s JOIN users u ON u.id = s.user_id WHERE s.model_id = ? ORDER BY s.created_at")
         .all(modelId)
-        .flatMap((r) => (isRecord(r) ? [{ user_id: str(r, "user_id"), email: str(r, "email"), display_name: str(r, "display_name"), role: shareRole(r.role), created_at: str(r, "created_at") }] : []));
+        .flatMap((r) => (isRecord(r) ? [{ grant_id: str(r, "grant_id"), user_id: str(r, "user_id"), email: str(r, "email"), display_name: str(r, "display_name"), role: shareRole(r.role), created_at: str(r, "created_at") }] : []));
+    },
+    async changeShareRole(modelId, userId, ownerId, grantId, role) {
+      return db.prepare(`UPDATE model_shares SET role = ? WHERE model_id = ? AND user_id = ? AND grant_id = ?
+        AND EXISTS (SELECT 1 FROM models WHERE id = model_shares.model_id AND owner_id = ? AND owner_id <> model_shares.user_id)`)
+        .run(role, modelId, userId, grantId, ownerId).changes === 1;
     },
     async share(input) {
       return db.prepare(`INSERT INTO model_shares (model_id, user_id, role, invited_by, created_at)

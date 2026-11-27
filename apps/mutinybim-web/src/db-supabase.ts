@@ -27,6 +27,7 @@ import {
   type WebStore,
 } from "./db";
 import type { Fetch } from "./oauth";
+import { invitationAnswer, invitationCard, invitationRow, normalizeInviteEmail } from "./model-invitations";
 import { transferResult, transferRow } from "./model-transfers";
 
 const REST_TIMEOUT_MS = 10_000;
@@ -145,6 +146,33 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
         return transferResult(await rpc("web_respond_model_transfer", { p_id: id, p_actor: actor, p_action: action, p_limit: limit }));
       },
     },
+    invitations: {
+      async create(input) {
+        return (await rpc("web_create_model_invitation", { p_id: input.id, p_model: input.modelId, p_owner: input.ownerId,
+          p_email: normalizeInviteEmail(input.email), p_role: input.role, p_token_hash: input.tokenHash, p_expires_at: input.expiresAt.toISOString() })) === true;
+      },
+      async outgoing(modelId, ownerId) {
+        return (await selectRows("model_invitations", { select: "id,model_id,email,role,invited_by,created_at,expires_at",
+          model_id: eq(modelId), invited_by: eq(ownerId), state: eq("open"), order: "created_at,id" })).map(invitationRow);
+      },
+      async cancel(id, modelId, ownerId) {
+        const { data } = await request(`/rest/v1/model_invitations?${new URLSearchParams({ id: eq(id), model_id: eq(modelId), invited_by: eq(ownerId), state: eq("open"), select: "id" })}`,
+          { method: "PATCH", prefer: "return=representation", body: { state: "cancelled", answered_at: now() } });
+        return Array.isArray(data) && data.length === 1;
+      },
+      async byToken(tokenHash) {
+        const rows = await rpc("web_open_model_invitations", { p_email: null, p_token_hash: tokenHash });
+        return Array.isArray(rows) && rows[0] ? invitationCard(rows[0]) : null;
+      },
+      async inbox(email) {
+        const rows = await rpc("web_open_model_invitations", { p_email: normalizeInviteEmail(email), p_token_hash: null });
+        if (!Array.isArray(rows)) throw new Error("[mutinybim-web supabase-db] expected an invitation list");
+        return rows.map(invitationCard);
+      },
+      async respond(id, userId, action) {
+        return invitationAnswer(await rpc("web_respond_model_invitation", { p_id: id, p_user: userId, p_action: action }));
+      },
+    },
     async close() {
       // Stateless HTTPS client; nothing to tear down.
     },
@@ -188,6 +216,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
     },
     async confirmIdentityEmail(provider, subject, userId, email) {
       await rpc("web_confirm_oidc_email", { p_provider: provider, p_subject: subject, p_user_id: userId, p_email: email });
+    },
+    async confirmEmail(userId, email) {
+      return (await rpc("web_confirm_email_by_operator", { p_user_id: userId, p_email: email })) === true;
     },
     async identitySubject(userId, provider) {
       const row = await selectOne("identities", { select: "subject", user_id: eq(userId), provider: eq(provider) });
@@ -314,7 +345,7 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
     },
     async sharesOf(modelId) {
       const rows = await selectRows("model_shares", {
-        select: "user_id,role,created_at,users!model_shares_user_id_fkey(email,display_name)",
+        select: "grant_id,user_id,role,created_at,users!model_shares_user_id_fkey(email,display_name)",
         model_id: eq(modelId),
         order: "created_at.asc",
       });
@@ -322,6 +353,7 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       for (const r of rows) {
         if (!isRecord(r) || !isRecord(r.users)) continue;
         out.push({
+          grant_id: str(r, "grant_id"),
           user_id: str(r, "user_id"),
           email: str(r.users, "email"),
           display_name: str(r.users, "display_name"),
@@ -330,6 +362,11 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
         });
       }
       return out;
+    },
+    async changeShareRole(modelId, userId, ownerId, grantId, role) {
+      return (await rpc("web_update_model_share_role", {
+        p_model: modelId, p_user: userId, p_owner: ownerId, p_grant: grantId, p_role: role,
+      })) === true;
     },
     async share(input) {
       return (await rpc("web_change_model_share", { p_model: input.modelId, p_owner: input.invitedBy, p_user: input.userId, p_role: input.role })) === true;

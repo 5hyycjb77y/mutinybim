@@ -23,6 +23,7 @@ import { HOSTED_PROJECT_ID } from "../src/assistant-tools";
 import type { WebConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { DatabaseSync } from "node:sqlite";
+import { shareByInvitation } from "../__fixtures__/invitation";
 import { seedTeamShare } from "../__fixtures__/team-share";
 
 let dataDir = "";
@@ -376,7 +377,7 @@ test("an assistant lists East plant once and reads its new role in the same sess
   if (!alexId || !beaId || !app) throw new Error("Missing fixture accounts");
   const sqlitePath = path.join(dataDir, "accounts.sqlite");
   seedTeamShare(sqlitePath, { id: "mech", name: "Mechanical", ownerId: alexId, memberId: beaId, modelId, role: "edit" });
-  expect((await post(`/models/${modelId}/share`, { email: "bea@example.test", role: "view" }, alex)).status).toBe(200);
+  await shareByInvitation(base, dataDir, { owner: alex, recipient: bea, modelId, email: "bea@example.test", role: "view" });
   await app.db.transfers.offer("open-offer", modelId, alexId, beaId, "none");
   const { access, consentHtml } = await signInAssistant(bea);
   expect(consentHtml).toContain("and the 1 shared with you");
@@ -399,7 +400,7 @@ test("a model shared view-only: the assistant reads it but can't change it, and 
   const sam = await signUp("sam@example.com", "Sam Example");
   const modelId = await makeModel(sam, "Sample Warehouse");
   const pat = await signUp("pat@example.com", "Pat Example");
-  expect((await post(`/models/${modelId}/share`, { email: "pat@example.com", role: "view" }, sam)).status).toBeLessThan(400);
+  await shareByInvitation(base, dataDir, { owner: sam, recipient: pat, modelId, email: "pat@example.com", role: "view" });
   const strangerModel = await makeModel(sam, "Not shared");
 
   const { access } = await signInAssistant(pat);

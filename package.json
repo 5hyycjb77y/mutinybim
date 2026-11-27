@@ -25,6 +25,7 @@
     "demo:mechanical": "node --import tsx packages/bim-devserver/src/server.ts",
     "web": "TSX_TSCONFIG_PATH=apps/mutinybim-web/tsconfig.runtime.json node --import tsx apps/mutinybim-web/src/server.ts",
     "web:reset-password": "TSX_TSCONFIG_PATH=apps/mutinybim-web/tsconfig.runtime.json node --import tsx apps/mutinybim-web/src/admin.ts reset-password",
+    "web:confirm-email": "TSX_TSCONFIG_PATH=apps/mutinybim-web/tsconfig.runtime.json node --import tsx apps/mutinybim-web/src/admin.ts confirm-email",
     "test": "jest",
     "typecheck": "node --max-old-space-size=6144 node_modules/typescript/bin/tsc -p packages/tsconfig.bim.json",
     "typecheck:authority": "cd services/bim-authority && tsc -p tsconfig.json",
