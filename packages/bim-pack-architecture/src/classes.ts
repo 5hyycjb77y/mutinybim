@@ -26,4 +26,5 @@ export const ARCHITECTURE_CLASSES: readonly PackClass[] = [
   },
   { id: "arch.roof", label: "Roofs", discipline: "architecture", ifc: { entity: "IfcRoof", predefinedType: "FLAT_ROOF", typeEntity: "IfcRoofType" }, recognize: { elementKinds: ["architecture.roof"] } },
   { id: "arch.stair", label: "Stairs", discipline: "architecture", ifc: { entity: "IfcStair", predefinedType: "STRAIGHT_RUN_STAIR", typeEntity: "IfcStairType" }, recognize: { elementKinds: ["architecture.stair"] } },
+  { id: "arch.railing", label: "Railings", discipline: "architecture", ifc: { entity: "IfcRailing", predefinedType: "GUARDRAIL", typeEntity: "IfcRailingType" }, recognize: { elementKinds: ["architecture.railing"] }, description: "Guardrails and handrails along balconies, mezzanines, stairwell openings, and ramps (glass, picket, cable, horizontal bar, or solid)." },
 ];

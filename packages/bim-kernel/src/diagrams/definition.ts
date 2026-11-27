@@ -78,6 +78,8 @@ export const diagramHintsSchema = z
     utility: z.boolean(),
     showWarnings: z.boolean(),
     showLoads: z.boolean(),
+    /** Print calculated demand load labels on distribution links (e.g. kVA on feeders). Absent: off. */
+    showFeederLoads: z.boolean(),
     labels: z.partialRecord(z.enum(DIAGRAM_LABEL_KINDS), z.array(z.string().max(160)).max(8)),
     title: text,
     notes: z.array(z.string().trim().min(1).max(200)).max(12),
@@ -105,6 +107,8 @@ export const diagramHintsSchema = z
 export const DIAGRAM_FAULT_CURRENT_FEATURE = "diagrams:fault_current";
 /** Peers that store and evaluate diagram load-rating and phase-scope filters (`minLoadRatingA`, `phaseScope`). */
 export const DIAGRAM_FILTERS_FEATURE = "diagrams:filters";
+/** Peers that store and evaluate distribution link demand-load labels (`showFeederLoads`). */
+export const DIAGRAM_FEEDER_LOADS_FEATURE = "diagrams:feeder_loads";
 
 export const diagramDefinitionSchema = z
   .object({ kind: z.string().max(80).regex(DIAGRAM_KIND_ID, "A diagram kind is lower case words with underscores (an add-on's own: <pack>.<name>)."), hints: diagramHintsSchema.optional() })

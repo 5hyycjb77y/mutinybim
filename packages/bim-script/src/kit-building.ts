@@ -765,6 +765,56 @@ export const building = {
     ctx.edit(command);
     return command.elementId;
   },
+  /** A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight segment (`from` → `to`) or continuous polyline (`points`); defaults to 42" IBC commercial height; returns its id. */
+  railing(
+    ctx: ScriptContext,
+    spec: {
+      readonly level: string;
+      readonly from?: PlanPoint;
+      readonly to?: PlanPoint;
+      readonly points?: readonly PlanPoint[];
+      readonly height?: Measure;
+      readonly style?: "glass" | "picket" | "cable" | "horizontal_bar" | "solid";
+      readonly postSpacing?: Measure;
+      readonly balusterSpacing?: Measure;
+      readonly handrail?: boolean;
+      readonly baseOffset?: Measure;
+      readonly material?: string;
+      readonly id?: string;
+    },
+  ): string {
+    const poly = spec.points && spec.points.length >= 2 ? spec.points.map((p, i) => planMm(p, `Railing point ${i + 1}`)) : null;
+    const start = poly ? poly[0]! : spec.from ? planMm(spec.from, "Railing start") : null;
+    const end = poly ? poly[poly.length - 1]! : spec.to ? planMm(spec.to, "Railing end") : null;
+    if (!start || !end) {
+      throw new Error("building.railing requires either { from, to } or { points } with at least 2 points");
+    }
+    const heightMm = spec.height !== undefined ? mm(spec.height, "Railing height") : undefined;
+    const postSpacingMm = spec.postSpacing !== undefined ? mm(spec.postSpacing, "Railing post spacing") : undefined;
+    const balusterSpacingMm = spec.balusterSpacing !== undefined ? mm(spec.balusterSpacing, "Railing baluster spacing") : undefined;
+    const baseOffsetMm = spec.baseOffset !== undefined ? mm(spec.baseOffset, "Railing base offset") : undefined;
+    const mergedValues = {
+      ...(spec.style ? { "architecture.railing_style": spec.style } : {}),
+      ...(heightMm !== undefined ? { "architecture.railing_height_mm": heightMm } : {}),
+      ...(postSpacingMm !== undefined ? { "architecture.post_spacing_mm": postSpacingMm } : {}),
+      ...(balusterSpacingMm !== undefined ? { "architecture.baluster_spacing_mm": balusterSpacingMm } : {}),
+      ...(spec.handrail !== undefined ? { "architecture.rail_handrail": spec.handrail } : {}),
+      ...(baseOffsetMm !== undefined ? { "architecture.base_offset_mm": baseOffsetMm } : {}),
+      ...(poly && poly.length > 2 ? { "architecture.railing_path": poly.map((p) => `${Math.round(p.x * 10) / 10},${Math.round(p.y * 10) / 10}`).join(";") } : {}),
+      ...(spec.material ? { [MATERIAL_ID_KEY]: spec.material } : {}),
+    };
+    const command: CreateElement = {
+      type: "create_element",
+      elementId: spec.id ?? ctx.id("railing"),
+      levelId: levelOf(ctx, spec.level),
+      kind: "architecture.railing",
+      placement: { kind: "line", start, end },
+      ...(heightMm !== undefined ? { size: { heightMm } } : {}),
+      ...(Object.keys(mergedValues).length > 0 ? { values: mergedValues } : {}),
+    };
+    ctx.edit(command);
+    return command.elementId;
+  },
   /** A structural column grid line (`grid`, e.g. `1`, `A`) shown as a vertical 3D datum across every plan, RCP, and building section; returns its id. */
   grid(
     ctx: ScriptContext,

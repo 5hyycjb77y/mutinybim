@@ -18,7 +18,7 @@ import { WallBaseField, WallTopField } from './WallTopField'
 import { OpeningSillField } from './OpeningSillField'
 
 const TYPED_KINDS: ReadonlySet<string> = new Set(['wall', 'opening', 'slab', 'ceiling', 'column'])
-const ARCH_ADDON_KINDS: ReadonlySet<string> = new Set(['architecture.roof', 'architecture.stair'])
+const ARCH_ADDON_KINDS: ReadonlySet<string> = new Set(['architecture.roof', 'architecture.stair', 'architecture.railing'])
 const NO_TYPE = '__none__'
 const NO_MATERIAL = '__default_material__'
 const NEW_TYPE = '__new__'
@@ -352,8 +352,101 @@ function MaterialField({ model, el, what, submit, editBlocked, notify }: { reado
   )
 }
 
-/** Readout, live material picker & guidance for architectural add-on kinds (`architecture.roof`, `architecture.stair`). */
+/** Readout, live material picker & guidance for architectural add-on kinds (`architecture.roof`, `architecture.stair`, `architecture.railing`). */
 function ArchAddonInspector({ model, el, submit, editBlocked, notify }: { readonly model: ModelState; readonly el: BimElement; readonly submit: SubmitCommand; readonly editBlocked: string | null; readonly notify: Props['notify'] }): ReactNode {
+  if (String(el.kind) === 'architecture.railing') {
+    const r = el as unknown as {
+      readonly start?: { x: number; y: number }
+      readonly end?: { x: number; y: number }
+      readonly points?: readonly { x: number; y: number }[]
+      readonly heightMm?: number
+      readonly style?: string
+      readonly handrail?: boolean
+      readonly values?: Readonly<Record<string, unknown>>
+    }
+    const rawPath = r.values?.['architecture.railing_path']
+    const parsedPath = typeof rawPath === 'string' && rawPath.includes(';')
+      ? rawPath.split(';').map((s) => { const [xs, ys] = s.split(','); return { x: Number(xs), y: Number(ys) } }).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+      : null
+    const pts = parsedPath && parsedPath.length >= 2 ? parsedPath : r.points && r.points.length >= 2 ? r.points : r.start && r.end ? [r.start, r.end] : []
+    let lenMm = 0
+    for (let i = 0; i < pts.length - 1; i++) lenMm += Math.hypot(pts[i + 1]!.x - pts[i]!.x, pts[i + 1]!.y - pts[i]!.y)
+    const currentStyle = String(r.values?.['architecture.railing_style'] ?? r.style ?? 'picket').toLowerCase()
+    const heightMm = typeof r.values?.['architecture.railing_height_mm'] === 'number' ? Number(r.values['architecture.railing_height_mm']) : typeof r.heightMm === 'number' ? r.heightMm : 1067
+    const heightPreset = heightMm >= 1040 ? '1067' : '914'
+    const hasHandrail = typeof r.values?.['architecture.rail_handrail'] === 'boolean' ? Boolean(r.values['architecture.rail_handrail']) : r.handrail === true
+    const blocked = editBlocked !== null
+    const ibcGuardOk = heightMm >= 1065
+    return (
+      <FieldGroup data-testid="architecture-railing-properties">
+        <Field>
+          <FieldLabel htmlFor="architecture-railing-style">Railing style</FieldLabel>
+          <Select
+            value={currentStyle}
+            disabled={blocked}
+            onValueChange={(v) => {
+              const err = submit({ type: 'set_element_values', elementIds: [el.id], values: { 'architecture.railing_style': v } }, 'Change railing style')
+              if (err) notify(err, 'error')
+            }}
+          >
+            <SelectTrigger id="architecture-railing-style" aria-label="Railing style">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="glass">Glass panel (tempered Low-E)</SelectItem>
+              <SelectItem value="picket">Metal picket (4&quot; sphere)</SelectItem>
+              <SelectItem value="cable">Horizontal stainless cable</SelectItem>
+              <SelectItem value="horizontal_bar">Horizontal bars</SelectItem>
+              <SelectItem value="solid">Solid knee-wall guard</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="architecture-railing-height">Guard height</FieldLabel>
+          <Select
+            value={heightPreset}
+            disabled={blocked}
+            onValueChange={(v) => {
+              const err = submit({ type: 'set_element_values', elementIds: [el.id], values: { 'architecture.railing_height_mm': Number(v) } }, 'Change railing height')
+              if (err) notify(err, 'error')
+            }}
+          >
+            <SelectTrigger id="architecture-railing-height" aria-label="Guard height">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1067">42&quot; — IBC commercial guard</SelectItem>
+              <SelectItem value="914">36&quot; — Residential / stair handrail</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field orientation="horizontal">
+          <FieldLabel htmlFor="architecture-railing-handrail">ADA secondary handrail (36&quot;)</FieldLabel>
+          <Switch
+            id="architecture-railing-handrail"
+            checked={hasHandrail}
+            disabled={blocked}
+            onCheckedChange={(checked) => {
+              const err = submit({ type: 'set_element_values', elementIds: [el.id], values: { 'architecture.rail_handrail': checked } }, 'Toggle secondary handrail')
+              if (err) notify(err, 'error')
+            }}
+          />
+        </Field>
+        <Field orientation="horizontal">
+          <FieldLabel>Total length</FieldLabel>
+          <Badge variant="outline">{(lenMm / 304.8).toFixed(1)} ft</Badge>
+        </Field>
+        <Field orientation="horizontal">
+          <FieldLabel>IBC 1015.3</FieldLabel>
+          <Badge variant={ibcGuardOk ? 'outline' : 'destructive'}>{ibcGuardOk ? '42" Commercial OK' : 'Below 42" commercial'}</Badge>
+        </Field>
+        <MaterialField key={`mat-${el.id}`} model={model} el={el} what="railing" submit={submit} editBlocked={editBlocked} notify={notify} />
+        <FieldDescription>
+          Railings render posts, cap rails, and infill in 2D plan, building sections, and 3D, and export as <code>IfcRailing</code>.
+        </FieldDescription>
+      </FieldGroup>
+    )
+  }
   if (String(el.kind) === 'architecture.roof') {
     const r = el as unknown as { readonly form?: string; readonly slopeRise?: number; readonly thicknessMm?: number; readonly baseOffsetMm?: number }
     const form = r.form ?? ((r.slopeRise ?? 0) > 0 ? 'shed' : 'flat')

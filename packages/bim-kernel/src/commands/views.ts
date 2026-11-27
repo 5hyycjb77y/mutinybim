@@ -10,7 +10,7 @@ import { peerReads } from "../elements/feature";
 import { parseLinkedElementKey } from "../reference-geometry/index-geometry";
 import { ANNOTATION_LINKED_ANCHORS_FEATURE } from "../reference-geometry/linked-anchors";
 import { TAGS_MASK_LEADER_FEATURE } from "../organization/model";
-import { DIAGRAM_FAULT_CURRENT_FEATURE, DIAGRAM_FILTERS_FEATURE } from "../diagrams/definition";
+import { DIAGRAM_FAULT_CURRENT_FEATURE, DIAGRAM_FEEDER_LOADS_FEATURE, DIAGRAM_FILTERS_FEATURE } from "../diagrams/definition";
 import { viewGraphicsHintsRefusal, viewGraphicsRowByKey, type ViewGraphicsHints } from "../layout/view-graphics-point";
 import {
   CUT_PATTERNS,
@@ -948,6 +948,7 @@ function checkProps(viewType: ViewElement["viewType"], props: ViewProps, viewId:
   if (viewType !== "section" && viewType !== "elevation" && props.section) fail("Only section and elevation views have a cut line.", [viewId]);
   const isPlan = viewType === "floor_plan" || viewType === "ceiling_plan";
   if (props.diagram?.hints?.faultCurrent !== undefined && !peerReads(DIAGRAM_FAULT_CURRENT_FEATURE)) fail("Show fault current can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
+  if (props.diagram?.hints?.showFeederLoads !== undefined && !peerReads(DIAGRAM_FEEDER_LOADS_FEATURE)) fail("Show feeder loads can't be saved yet: the model server this model is open on is an older version. Try again once the server is updated.", [viewId]);
   if (
     (props.diagram?.hints?.minLoadRatingA !== undefined ||
       props.diagram?.hints?.phaseScope !== undefined ||

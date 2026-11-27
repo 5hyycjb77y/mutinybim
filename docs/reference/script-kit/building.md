@@ -11,6 +11,7 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`building.floor`](#buildingfloor): A floor or structural deck slab with this outline (and optional stairwell/atrium `holes`, one-way `spanDirectionDeg`, live-load `occupancy`, `classId`, and `material`); returns its id.
 - [`building.roof`](#buildingroof): A flat, single-slope shed, two-slope gable, or four-slope hip roof (`architecture.roof`) with optional `form`, `slopeRise`, `slopeDirectionDeg`, `baseOffset`, and `material`; returns its id.
 - [`building.stair`](#buildingstair): A stair (`architecture.stair`) supporting straight runs, 90° L-shape, and 180° U-shape switchbacks with landings; returns its id.
+- [`building.railing`](#buildingrailing): A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42" IBC commercial height); returns its id.
 - [`building.grid`](#buildinggrid): A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.
 - [`building.column`](#buildingcolumn): A structural or architectural column at a plan point with fixed `height` or level-tied `topLevel`/`topOffset`, optional `baseOffset`, `rotationDeg`, AISC `section`, `grade`, and `mark`; returns its id.
 - [`building.beam`](#buildingbeam): A structural beam from `from` to `to` (top aligned to `level` + optional `baseOffset`) with AISC `section`, `grade`, `camber`, and `mark`; returns its id.
@@ -170,6 +171,32 @@ export default defineScript({
   parameters: {},
   run(ctx) {
     building.stair(ctx, { level: "L1", topLevel: "L2", form: "u_shape", turn: "right", from: { x: units.ft(4), y: units.ft(4) }, to: { x: units.ft(14), y: units.ft(4) }, width: units.in(44), landingDepth: units.ft(4) });
+  },
+});
+```
+
+</details>
+
+## building.railing
+
+A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42" IBC commercial height); returns its id.
+
+```ts
+railing(ctx: ScriptContext, spec: { readonly level: string; readonly from?: PlanPoint; readonly to?: PlanPoint; readonly points?: readonly PlanPoint[]; readonly height?: Measure; readonly style?: 'glass' | 'picket' | 'cable' | 'horizontal_bar' | 'solid'; readonly postSpacing?: Measure; readonly balusterSpacing?: Measure; readonly handrail?: boolean; readonly baseOffset?: Measure; readonly material?: string; readonly id?: string }): string
+```
+
+Topics: railing, guardrail, handrail, balcony, stairwell, architecture, safety
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    building.railing(ctx, { level: "L2", style: "glass", height: units.in(42), points: [{ x: units.ft(26.7), y: units.ft(27.4) }, { x: units.ft(26.7), y: units.ft(15.2) }, { x: units.ft(33.5), y: units.ft(15.2) }] });
   },
 });
 ```

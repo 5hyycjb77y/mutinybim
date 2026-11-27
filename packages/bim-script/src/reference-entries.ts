@@ -475,6 +475,13 @@ export const KIT_ENTRIES: readonly KitEntry[] = [
     topics: ["stair", "stairs", "circulation", "architecture"],
   },
   {
+    name: "building.railing",
+    summary: "A guardrail or handrail (`architecture.railing` → `IfcRailing`) along a straight run or multi-segment polyline (`glass`, `picket`, `cable`, `horizontal_bar`, or `solid`, default 42\" IBC commercial height); returns its id.",
+    signature: "railing(ctx: ScriptContext, spec: { readonly level: string; readonly from?: PlanPoint; readonly to?: PlanPoint; readonly points?: readonly PlanPoint[]; readonly height?: Measure; readonly style?: 'glass' | 'picket' | 'cable' | 'horizontal_bar' | 'solid'; readonly postSpacing?: Measure; readonly balusterSpacing?: Measure; readonly handrail?: boolean; readonly baseOffset?: Measure; readonly material?: string; readonly id?: string }): string",
+    example: layout(`    building.railing(ctx, { level: "L2", style: "glass", height: units.in(42), points: [{ x: units.ft(26.7), y: units.ft(27.4) }, { x: units.ft(26.7), y: units.ft(15.2) }, { x: units.ft(33.5), y: units.ft(15.2) }] });`),
+    topics: ["railing", "guardrail", "handrail", "balcony", "stairwell", "architecture", "safety"],
+  },
+  {
     name: "building.grid",
     summary: "A structural column grid line (`grid`, e.g. `1`, `A`) drawn with Revit circular bubbles across every plan, RCP, and building section; returns its id.",
     signature: "grid(ctx: ScriptContext, spec: { readonly level: string; readonly from: PlanPoint; readonly to: PlanPoint; readonly label?: string; readonly id?: string }): string",

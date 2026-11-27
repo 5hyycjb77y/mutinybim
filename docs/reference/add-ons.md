@@ -159,9 +159,9 @@ Grids, walls, doors, windows, openings, floors, ceilings, roofs, columns and sta
 | --- | --- |
 | Add-on library rows | 4 |
 | Assembly rating kinds | 2 |
-| Bodies by class | 2 |
-| Element classes | 9 |
-| Element kinds | 2 |
+| Bodies by class | 3 |
+| Element classes | 10 |
+| Element kinds | 3 |
 | Field providers | 1 |
 | IFC import rules | 2 |
 | IFC relationships | 3 |
@@ -169,7 +169,7 @@ Grids, walls, doors, windows, openings, floors, ceilings, roofs, columns and sta
 | Materials | 32 |
 | Parameter sets | 1 |
 | Plan graphics by class | 2 |
-| Starter element types | 4 |
+| Starter element types | 7 |
 | Surface faces | 1 |
 | Tag style presets | 2 |
 

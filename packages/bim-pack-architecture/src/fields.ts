@@ -1,6 +1,7 @@
 import { boundsRooms, OPENING_VOID_ROW, type BimElement, type FieldProvider, type FieldWriter, type Vec2 } from "@permitzip/bim-kernel";
 import { ARCHITECTURE_CLASSES } from "./classes";
 import { resolveDoorHanding, resolveDoorOperation, resolveDoorSide } from "./graphics";
+import { asRailing, railingCompliance, railingSpec } from "./railing";
 import { FIRE_RESISTANCE_RATING } from "./ratings";
 import { valueOf } from "./values";
 
@@ -107,5 +108,10 @@ export const ARCHITECTURE_FIELD_PROVIDER: FieldProvider = {
     { path: "number", label: "Room number", classes: ["arch.room"], valueType: "text", writer: locked("Rename the room in the model."), group: "Identity", read: (el) => (el.kind === "room" ? textOrNull(el.number) : null) },
     { path: "name", label: "Room name", classes: ["arch.room"], valueType: "text", writer: locked("Rename the room in the model."), group: "Identity", read: (el) => (el.kind === "room" ? textOrNull(el.name) : null) },
     { path: "area", label: "Area", classes: ["arch.room"], valueType: "quantity", kind: "area", unit: "m2", writer: locked("Edit the room's outline."), group: "Dimensions", read: (el) => (el.kind === "room" ? finite(el.areaSqM) : null) },
+    { ...mmLength("length", "Length", ["arch.railing"], () => null, locked("Edit the railing path in the model.")), deps: READS_TYPE, read: (el, ctx) => { const r = asRailing(el); return r ? railingSpec(r, ctx.elements).lengthMm : null; } },
+    { ...mmLength("height", "Height", ["arch.railing"], () => null, locked("Set guard height in Properties.")), deps: READS_TYPE, read: (el, ctx) => { const r = asRailing(el); return r ? railingSpec(r, ctx.elements).heightMm : null; } },
+    { path: "railing_style", label: "Railing style", classes: ["arch.railing"], valueType: "text", writer: locked("Pick a railing style in Properties."), group: "Identity", deps: READS_TYPE, read: (el, ctx) => { const r = asRailing(el); return r ? enumWords(railingSpec(r, ctx.elements).style) : null; } },
+    { path: "railing_posts", label: "Posts", classes: ["arch.railing"], valueType: "text", writer: locked("Computed from railing length and post spacing."), group: "Dimensions", deps: READS_TYPE, read: (el, ctx) => { const r = asRailing(el); return r ? String(railingSpec(r, ctx.elements).postCount) : null; } },
+    { path: "railing_compliant", label: "IBC guard compliant", classes: ["arch.railing"], valueType: "boolean", writer: locked("Computed against IBC 1015.3 (42\") and IBC 1015.4 (4\" sphere)."), group: "Ratings", deps: READS_TYPE, read: (el, ctx) => { const r = asRailing(el); return r ? railingCompliance(r, ctx.elements).compliant : null; } },
   ],
 };

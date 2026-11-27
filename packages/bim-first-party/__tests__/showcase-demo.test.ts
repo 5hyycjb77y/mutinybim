@@ -12,7 +12,8 @@
  * - Renders all 12 Arch D construction sheets cleanly via `buildSheetSceneFor`
  * - Leaves the legacy `createDemoModel("f-a-demo")` mechanical fixture untouched
  */
-import { buildSheetSceneFor, buildViewScene, ceilingGridCellCenter, columnVerticalSpan, documentIndex, elementValues, evaluateDiagram, planAutoPartMarks, resolveElementMaterial, resolveViewProps, sceneToSvg, scheduleV2Paper, tagLines, TILE_2FT_MM, TILE_4FT_MM, validateModel, visiblePlanParts } from "@permitzip/bim-kernel";
+import { buildSheetSceneFor, buildViewScene, ceilingGridCellCenter, checkDetailView, columnVerticalSpan, documentIndex, elementValues, evaluateDiagram, planAutoPartMarks, resolveElementMaterial, resolveViewProps, sceneToSvg, scheduleV2Paper, tagLines, TILE_2FT_MM, TILE_4FT_MM, validateModel, visiblePlanParts } from "@permitzip/bim-kernel";
+import { asRailing, asStair, railingCompliance, railingSpec, stairGeometry, stairLayout } from "@permitzip/bim-pack-architecture";
 import { circuitHomeRunsOnPaper, circuitJoinsOnPaper, evaluateEgressPhotometrics, evaluateNormalPhotometrics } from "@permitzip/bim-pack-electrical";
 import { createDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { plumbingDiagramGraph } from "@permitzip/bim-pack-plumbing";
@@ -100,20 +101,67 @@ describe("createShowcaseDemoModel", () => {
       }
     }
 
-    // All horizontal L1 plenum ducts sit cleanly above 9'-6" ceiling (2896 mm) and below 11'-4" deck underside (3454 mm)
+    // All horizontal L1 plenum ducts sit cleanly above 9'-6" ceiling (2896 mm), below 11'-4" deck underside (3454 mm),
+    // and completely outside the L1→L2 stairwell shaft (26.7'..33.5', 15.2'..27.4')
     const ducts = active.filter((el): el is Extract<typeof el, { kind: "run_segment" }> => el.kind === "run_segment" && el.domain === "duct");
+    const swMinX = Math.round(26.7 * 304.8);
+    const swMaxX = Math.round(33.5 * 304.8);
+    const swMinY = Math.round(15.2 * 304.8);
+    const swMaxY = Math.round(27.4 * 304.8);
     for (const d of ducts) {
       const isHoriz = Math.abs(d.start.z - d.end.z) < 20;
       if (isHoriz && d.start.z < 3658) {
         const halfH = d.size.shape === "rect" ? d.size.height / 2 : d.size.shape === "round" ? d.size.diameter / 2 : 0;
         expect(d.start.z - halfH).toBeGreaterThanOrEqual(2896);
         expect(d.start.z + halfH).toBeLessThanOrEqual(3454);
+        const segMinX = Math.min(d.start.x, d.end.x);
+        const segMaxX = Math.max(d.start.x, d.end.x);
+        const segMinY = Math.min(d.start.y, d.end.y);
+        const segMaxY = Math.max(d.start.y, d.end.y);
+        const overlapsShaft = segMaxX > swMinX && segMinX < swMaxX && segMaxY > swMinY && segMinY < swMaxY;
+        expect(overlapsShaft).toBe(false);
       }
     }
 
     // Real `connect_into` flex connectors for SD-1..SD-4 + RG-1..RG-2
     const flexSegments = ducts.filter((d) => d.id.includes("-flex"));
     expect(flexSegments.length).toBe(12);
+
+    // Zero 3D clashes between Supply Air and Return Air duct segments (including insulation wrap!)
+    const ductAabb = (d: (typeof ducts)[number]) => {
+      const ins = d.insulation?.thicknessMm ?? 0;
+      const halfW = (d.size.shape === "rect" ? d.size.width / 2 : d.size.shape === "round" ? d.size.diameter / 2 : 0) + ins;
+      const halfH = (d.size.shape === "rect" ? d.size.height / 2 : d.size.shape === "round" ? d.size.diameter / 2 : 0) + ins;
+      const dx = Math.abs(d.end.x - d.start.x);
+      const dy = Math.abs(d.end.y - d.start.y);
+      const dz = Math.abs(d.end.z - d.start.z);
+      const isVert = dz > 20 && dx < 20 && dy < 20;
+      const isEW = dx >= dy && !isVert;
+      const padX = isVert ? halfW : isEW ? 0 : halfW;
+      const padY = isVert ? halfH : isEW ? halfW : 0;
+      const padZ = isVert ? 0 : halfH;
+      return {
+        minX: Math.min(d.start.x, d.end.x) - padX,
+        maxX: Math.max(d.start.x, d.end.x) + padX,
+        minY: Math.min(d.start.y, d.end.y) - padY,
+        maxY: Math.max(d.start.y, d.end.y) + padY,
+        minZ: Math.min(d.start.z, d.end.z) - padZ,
+        maxZ: Math.max(d.start.z, d.end.z) + padZ,
+      };
+    };
+    const saDucts = ducts.filter((d) => d.systemId === "sys-sa");
+    const raDucts = ducts.filter((d) => d.systemId === "sys-ra");
+    const clashes: string[] = [];
+    for (const s of saDucts) {
+      const sb = ductAabb(s);
+      for (const r of raDucts) {
+        const rb = ductAabb(r);
+        if (sb.maxX > rb.minX && sb.minX < rb.maxX && sb.maxY > rb.minY && sb.minY < rb.maxY && sb.maxZ > rb.minZ && sb.minZ < rb.maxZ) {
+          clashes.push(`${s.id} x ${r.id}`);
+        }
+      }
+    }
+    expect(clashes).toEqual([]);
   });
 
   it("circuits RTU-1, WH-1, EF-1, and interior + exterior luminaires and populates all 6 live diagrams", () => {
@@ -180,7 +228,7 @@ describe("createShowcaseDemoModel", () => {
     }
   });
 
-  it("renders all 20 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
+  it("renders all 22 Arch D sheets cleanly with no unresolved callout references and verified passing normal + egress photometrics", () => {
     const sheets = active.filter((el): el is Extract<typeof el, { kind: "sheet" }> => el.kind === "sheet");
     expect(sheets.map((s) => s.number).sort()).toEqual([
       "A-101",
@@ -198,6 +246,7 @@ describe("createShowcaseDemoModel", () => {
       "E-203",
       "M-101",
       "M-201",
+      "M-501",
       "P-101",
       "P-102",
       "S-101",
@@ -229,6 +278,13 @@ describe("createShowcaseDemoModel", () => {
       expect(svg).not.toContain("?? DIMENSION REFERENCE MISSING");
       if (sh.number === "E-201") {
         expect(svg.replace(/\u00a0/g, " ")).toContain("AFC 42 KA");
+        expect(svg).toMatch(/\d+(?:\.\d+)?\s*kVA/i);
+      }
+      if (sh.number === "M-501") {
+        const plain = svg.replace(/\u00a0/g, " ");
+        expect(plain).toContain("CARRIER 50FC-A06");
+        expect(plain).toContain("INSULATED ROOF CURB");
+        expect(plain).toContain("HOODED WALL CAP");
       }
       if (sh.number === "E-202") {
         expect(svg).toContain("LIGHTING CONTROLS");
@@ -552,5 +608,68 @@ describe("createShowcaseDemoModel", () => {
       .filter((v) => !resolveViewProps(model.elements, v).props.discipline)
       .map((v) => v.id);
     expect(missingDisciplineViews).toEqual([]);
+
+    // Verify new-feature showcase coverage:
+    // 1. Live feeder kVA demand load tags enabled on both One-Line diagrams (#168)
+    const olFull = model.elements["view-oneline"];
+    const olDist = model.elements["view-oneline-dist"];
+    expect(olFull?.kind === "view" && olFull.props?.diagram?.hints?.showFeederLoads).toBe(true);
+    expect(olDist?.kind === "view" && olDist.props?.diagram?.hints?.showFeederLoads).toBe(true);
+
+    // 2. Structured electrical.disconnect pack parameters populated on RTU-1 and WH-1 (#165)
+    const rtu1 = model.elements["rtu-1"];
+    const wh1 = model.elements["wh-1"];
+    expect(rtu1?.kind === "part" && rtu1.values?.["electrical.disconnect_required"]).toBe(true);
+    expect(rtu1?.kind === "part" && rtu1.values?.["electrical.local_disconnect"]).toBe("required");
+    expect(wh1?.kind === "part" && wh1.values?.["electrical.disconnect_required"]).toBe(false);
+    expect(wh1?.kind === "part" && wh1.values?.["electrical.local_disconnect"]).toBe("not_required");
+
+    // 3. Drafted Mechanical Details on Sheet M-501 pass automated CAD overlap & crop QA cleanly
+    const rtuQa = checkDetailView(model, "view-detail-rtu-curb");
+    const fanQa = checkDetailView(model, "view-detail-ef-wall");
+    expect(rtuQa.textOverlaps).toEqual([]);
+    expect(rtuQa.lineCrossings).toEqual([]);
+    expect(rtuQa.clippedItems).toEqual([]);
+    expect(rtuQa.orphanedDimensions).toEqual([]);
+    expect(rtuQa.clean).toBe(true);
+    expect(fanQa.textOverlaps).toEqual([]);
+    expect(fanQa.lineCrossings).toEqual([]);
+    expect(fanQa.clippedItems).toEqual([]);
+    expect(fanQa.orphanedDimensions).toEqual([]);
+    expect(fanQa.clean).toBe(true);
+
+    // 4. U-stair connects L1 (0) -> L2 (3658 mm), skips non-story L1_CLG datum, meets IBC riser/tread specs, and lands flush at L2 stairwell edge
+    const stair = asStair(model.elements["stair-main"]!);
+    expect(stair).not.toBeNull();
+    const sg = stair ? stairGeometry(stair, model.elements) : null;
+    expect(sg).not.toBeNull();
+    expect(sg!.topLevelId).toBe("L2");
+    expect(sg!.heightMm).toBe(Math.round(12 * 304.8));
+    expect(sg!.riserMm).toBeLessThanOrEqual(178);
+    const sl = stairLayout(stair!, sg!, 0);
+    expect(sl.flights.length).toBe(2);
+    expect(sl.flights[0]!.treadMm).toBeGreaterThanOrEqual(280);
+    expect(sl.flights[1]!.treadMm).toBeGreaterThanOrEqual(280);
+    expect(sl.flights[0]!.riserMm).toBeLessThanOrEqual(178);
+    expect(sl.flights[1]!.riserMm).toBeLessThanOrEqual(178);
+    expect(sl.flights[1]!.z1).toBe(Math.round(12 * 304.8));
+    // Upper flight arrives heading South (-y) flush onto the south edge of the L2 stairwell hole (y = 15.2 ft = 4633 mm) opening directly into the L2 Loft
+    expect(sl.flights[1]!.u.y).toBeCloseTo(-1, 3);
+    expect(Math.abs(sl.flights[1]!.end.y - Math.round(15.2 * 304.8))).toBeLessThanOrEqual(5);
+
+    // 5. First-class `architecture.railing` (IfcRailing) 42" glass guardrails protect L2 balcony & stairwell opening
+    for (const rid of ["rail-l2-balcony", "rail-l2-stair-w", "rail-l2-stair-s"]) {
+      const r = asRailing(model.elements[rid]!);
+      expect(r).not.toBeNull();
+      const spec = railingSpec(r!, model.elements);
+      expect(spec.style).toBe("glass");
+      expect(spec.heightMm).toBeGreaterThanOrEqual(1067);
+      expect(railingCompliance(r!, model.elements).compliant).toBe(true);
+    }
+    expect(railingSpec(asRailing(model.elements["rail-l2-balcony"]!)!, model.elements).path).toHaveLength(4);
+
+    // 6. L2 Architectural Plan renders the L1→L2 stair (`DN` + treads) even with non-story L1_CLG datum between L1 and L2
+    const l2Svg = sceneToSvg(buildViewScene(model, "view-plan-l2").scene);
+    expect(l2Svg).toContain(">DN<");
   });
 });

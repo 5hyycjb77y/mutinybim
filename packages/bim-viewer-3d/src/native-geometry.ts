@@ -13,6 +13,7 @@ import {
   fittingMesh,
   flexRings,
   insulationEnvelope,
+  isBuildingStoryLevel,
   partGeometryReady,
   partMesh,
   mountedPositions,
@@ -804,14 +805,17 @@ function rawElementSolids(el: BimElement, rules: ElevationRules = DEFAULT_ELEVAT
   }
 }
 
-/** Find the elevation of the lowest level strictly above `zMm`, or null. */
+/** Find the elevation of the lowest building story strictly above `zMm` (skipping non-story datums like ceiling levels unless no story exists above), or null. */
 function nextLevelAboveMm(model: ModelState | undefined, zMm: number): number | null {
   if (!model) return null;
-  let best: number | null = null;
+  let bestStory: number | null = null;
+  let bestAny: number | null = null;
   for (const lvl of elementsOfKind(model.elements, "level")) {
-    if (lvl.elevationMm > zMm && (best === null || lvl.elevationMm < best)) best = lvl.elevationMm;
+    if (lvl.elevationMm <= zMm) continue;
+    if (bestAny === null || lvl.elevationMm < bestAny) bestAny = lvl.elevationMm;
+    if (isBuildingStoryLevel(lvl) && (bestStory === null || lvl.elevationMm < bestStory)) bestStory = lvl.elevationMm;
   }
-  return best;
+  return bestStory ?? bestAny;
 }
 
 /** Underside elevation of any overhead slab on `topLevelZ` covering `(x, y)` (so columns & soffits stop flush below finished floors). */
@@ -931,7 +935,7 @@ function stairHandrailSolid(el: BimElement, floor: number, model: ModelState): S
   const nT: Vec2 = { x: nL.x * turnSign, y: nL.y * turnSign };
   const add = (p: Vec2, v: Vec2, k = 1): Vec2 => ({ x: p.x + v.x * k, y: p.y + v.y * k });
 
-  const risers = typeof r.risers === "number" && r.risers >= 2 ? Math.round(r.risers) : Math.max(2, Math.ceil(rise / 180));
+  const risers = typeof r.risers === "number" && r.risers >= 2 ? Math.round(r.risers) : Math.max(2, Math.ceil(rise / 178));
   const flights: Array<{ start: Vec2; u: Vec2; n: Vec2; run: number; z0: number; z1: number }> = [];
   const railEdges: Array<{ a: Vec2; b: Vec2; z: number }> = [];
 
@@ -1010,12 +1014,13 @@ function stairHandrailSolid(el: BimElement, floor: number, model: ModelState): S
       blocks.push({ outline: [at(0, sOut), at(f.run, sOut), at(f.run, sIn), at(0, sIn)], z0: f.z0 + railH - 42, z1: f.z0 + railH, tilt0: tilt, tilt1: tilt });
       blocks.push({ outline: [at(0, sOut), at(f.run, sOut), at(f.run, sIn), at(0, sIn)], z0: f.z0 + railH * 0.52 - 16, z1: f.z0 + railH * 0.52 + 16, tilt0: tilt, tilt1: tilt });
       const posts = Math.max(3, Math.round(f.run / 1100) + 1);
+      const stepDrop = Math.min(200, fRise / Math.max(2, Math.round(f.run / 280) + 1));
       for (let i = 0; i < posts; i++) {
         const frac = i / (posts - 1);
         const d0 = Math.max(0, frac * f.run - barHalf);
         const d1 = Math.min(f.run, d0 + barHalf * 2);
         const baseZ = f.z0 + frac * fRise;
-        blocks.push({ outline: [at(d0, sOut), at(d1, sOut), at(d1, sIn), at(d0, sIn)], z0: Math.max(f.z0, baseZ - 20), z1: baseZ + railH - 36 });
+        blocks.push({ outline: [at(d0, sOut), at(d1, sOut), at(d1, sIn), at(d0, sIn)], z0: Math.max(f.z0, baseZ - stepDrop - 20), z1: baseZ + railH - 36 });
       }
     }
   }

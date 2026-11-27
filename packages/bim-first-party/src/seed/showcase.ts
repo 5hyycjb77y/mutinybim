@@ -40,6 +40,7 @@ import {
   SHOWCASE_WORKTABLE,
 } from "./showcase-parts";
 import { SHOWCASE_SHEET_MARKUPS } from "./showcase-markups";
+import { appendShowcaseDetails } from "./showcase-details";
 
 /**
  * MutinyBIM flagship default showcase model:
@@ -316,10 +317,10 @@ function buildShowcase(modelId: string): ModelState {
   ];
 
   const stairwellHole: Vec2[] = [
-    pt(20.5 * FT, 20.5 * FT),
-    pt(33.2 * FT, 20.5 * FT),
-    pt(33.2 * FT, 27.3 * FT),
-    pt(20.5 * FT, 27.3 * FT),
+    pt(26.7 * FT, 15.2 * FT),
+    pt(33.5 * FT, 15.2 * FT),
+    pt(33.5 * FT, 27.4 * FT),
+    pt(26.7 * FT, 27.4 * FT),
   ];
 
   let m: ModelState = { modelId, revision: 0 as Revision, elements: {}, connections: [], settings: DEFAULT_SETTINGS };
@@ -577,24 +578,25 @@ function buildShowcase(modelId: string): ModelState {
           outline: [pt(36.0 * FT, 2.0 * FT), pt(54.0 * FT, 2.0 * FT), pt(54.0 * FT, 20.0 * FT), pt(36.0 * FT, 20.0 * FT)],
           grid: { spacingXMm: TILE_4FT_MM, spacingYMm: TILE_2FT_MM, origin: pt(36.0 * FT, 2.0 * FT), rotationDeg: 0 },
         },
-        { ceilingId: "clg-l1-reception", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "soffit", outline: [pt(W_WEST + 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 13.5 * FT), pt(W_MAIN - 4 * IN, 19.8 * FT), pt(W_WEST + 4 * IN, 19.8 * FT)] },
+        { ceilingId: "clg-l1-reception", levelId: "L1", heightMm: Math.round(9.5 * FT), form: "soffit", outline: [pt(W_WEST + 4 * IN, 13.5 * FT), pt(26.5 * FT, 13.5 * FT), pt(26.5 * FT, 19.8 * FT), pt(W_WEST + 4 * IN, 19.8 * FT)] },
         { ceilingId: "clg-l1-restroom", levelId: "L1", heightMm: Math.round(9.0 * FT), form: "flat", outline: [pt(6 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, Y_WET + 4 * IN), pt(W_WEST - 4 * IN, D_ALL - 6 * IN), pt(6 * IN, D_ALL - 6 * IN)] },
       ],
     },
     { type: "set_element_values", elementIds: ["clg-l1-studio"], values: { "material.id": "architecture.act_ceiling" } },
     { type: "set_element_values", elementIds: ["clg-l1-reception", "clg-l1-restroom"], values: { "material.id": "architecture.gypsum_partition" } },
 
-    // Code-Compliant 180° U-Turn Oak Stair (L1 → L2, rises cleanly inside stairwell 20.5'..33.2' with zero wall penetration!)
+    // Code-Compliant 180° U-Turn Oak Stair (L1 0'-0" → L2 12'-0": 22 risers @ 6.55", 10+10 treads @ 11.02", 3'-0" width & mid-landing; climbs North along East wall, turns Left onto NE mid-landing, and arrives heading South onto the wide-open L2 Loft at y = 15.2' with 15' clear ahead & 8'-6" gallery to West!)
     {
       type: "create_element",
       kind: "architecture.stair",
       elementId: "stair-main",
       levelId: "L1",
-      placement: { kind: "line", start: pt(21.4 * FT, 25.7 * FT), end: pt(28.4 * FT, 25.7 * FT) },
-      size: { widthMm: Math.round(3.25 * FT) },
+      placement: { kind: "line", start: pt(31.8 * FT, 15.2 * FT), end: pt(31.8 * FT, 24.386 * FT) },
+      size: { widthMm: Math.round(3.0 * FT) },
       values: {
         "architecture.stair_form": "u_shape",
-        "architecture.stair_turn": "right",
+        "architecture.stair_turn": "left",
+        "architecture.risers": 22,
         "architecture.landing_depth_mm": Math.round(3.0 * FT),
         "architecture.well_gap_mm": Math.round(0.5 * FT),
         "material.id": "architecture.wood_oak",
@@ -637,10 +639,51 @@ function buildShowcase(modelId: string): ModelState {
     wall("w-l2-para-s", "L2", W_MAIN, 0, W_ALL, 0, EXT_T, PARAPET_H, "type-wall-concrete"),
     wall("w-l2-para-e", "L2", W_ALL, 0, W_ALL, D_ALL, EXT_T, PARAPET_H, "type-wall-concrete"),
     wall("w-l2-para-n", "L2", W_MAIN, D_ALL, W_ALL, D_ALL, EXT_T, PARAPET_H, "type-wall-concrete"),
-    // L2 South Balcony Architectural Glass Guardrail
-    wall("w-l2-rail-s", "L2", W_WEST, -4.8 * FT, W_MAIN, -4.8 * FT, 90, GUARD_H, "type-wall-curtain"),
-    wall("w-l2-rail-w", "L2", W_WEST, -4.8 * FT, W_WEST, 0, 90, GUARD_H, "type-wall-curtain"),
-    wall("w-l2-rail-e", "L2", W_MAIN, -4.8 * FT, W_MAIN, 0, 90, GUARD_H, "type-wall-curtain"),
+    // L2 South Balcony 42" Architectural Glass Guardrail (first-class `architecture.railing` → `IfcRailing`, continuous U-polyline)
+    {
+      type: "create_element",
+      elementId: "rail-l2-balcony",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(W_WEST, 0), end: pt(W_MAIN, 0) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(5 * FT),
+        "architecture.railing_path": [pt(W_WEST, 0), pt(W_WEST, -4.8 * FT), pt(W_MAIN, -4.8 * FT), pt(W_MAIN, 0)].map((p) => `${p.x},${p.y}`).join(";"),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
+    // L2 Stairwell Opening 42" Architectural Glass Guardrails (West edge + South edge over Flight 1; leaves Flight 2 arrival 26.7'..29.8' open)
+    {
+      type: "create_element",
+      elementId: "rail-l2-stair-w",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(26.7 * FT, 15.2 * FT), end: pt(26.7 * FT, 27.4 * FT) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(4.5 * FT),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
+    {
+      type: "create_element",
+      elementId: "rail-l2-stair-s",
+      levelId: "L2",
+      kind: "architecture.railing",
+      placement: { kind: "line", start: pt(29.8 * FT, 15.2 * FT), end: pt(33.5 * FT, 15.2 * FT) },
+      size: { heightMm: GUARD_H },
+      values: {
+        "architecture.railing_style": "glass",
+        "architecture.railing_height_mm": GUARD_H,
+        "architecture.post_spacing_mm": Math.round(4 * FT),
+        "material.id": "architecture.aluminum_frame",
+      },
+    },
 
     // Level 2 Doors & Windows
     ...opening("d-201", "L2", "w-l2-core", "door", 10 * FT, 3 * FT, 7 * FT, "D201", { "architecture.door_operation": "SINGLE_SWING_LEFT", "host.side": -1 }),
@@ -779,7 +822,7 @@ function buildShowcase(modelId: string): ModelState {
 
   m = runCmds(m, [
     // Packaged RTU-1 on East flat parapet roof (L2 = 12'-0", hosted on deck-roof-east; 511 lb operating weight from Carrier 50FC-A06 cut sheet) + IMC 306.5 compliant indoor inline EF-1 (Greenheck CSP-B150) discharging up through passive spun-aluminum roof gravity hood GV-1 seated flush on sloped roof!
-    { type: "place_part", partId: "rtu-1", typeId: SHOWCASE_RTU.id, levelId: "L2", position: pt(48.5 * FT, 16.0 * FT), offsetMm: 0, host: { kind: "slab", elementId: "deck-roof-east" }, mark: "RTU-1", values: { circuit: "HP-1-1,3,5", serves: "Studio & Reception", room: "East Roof" } },
+    { type: "place_part", partId: "rtu-1", typeId: SHOWCASE_RTU.id, levelId: "L2", position: pt(48.5 * FT, 16.0 * FT), offsetMm: 0, host: { kind: "slab", elementId: "deck-roof-east" }, mark: "RTU-1", values: { circuit: "HP-1-1,3,5", serves: "Studio & Reception", room: "East Roof", "electrical.disconnect_required": true, "electrical.local_disconnect": "required", "electrical.disconnect_note": "NEC 440.14 — served via wall-mounted SD-RTU-1 within sight on east parapet" } },
     { type: "place_part", partId: "ef-1", typeId: SHOWCASE_INLINE_FAN.id, levelId: "L2", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(12.2 * FT), host: { kind: "slab", elementId: "deck-roof-west" }, mark: "EF-1", values: { circuit: "LP-1-7", serves: "Restrooms 102 & 202", room: "Restroom 202 Ceiling Plenum (Indoor)" } },
     { type: "place_part", partId: "gv-1", typeId: SHOWCASE_GRAVITY_HOOD.id, levelId: "ROOF", position: pt(13.0 * FT, 23.5 * FT), offsetMm: Math.round(4.4 * FT), mark: "GV-1", values: { serves: "EF-1 Exhaust Discharge", room: "Upper Roof" } },
 
@@ -789,9 +832,9 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "sd-3", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(23.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 400, room: "Reception & Break 103" } },
     { type: "place_part", partId: "sd-4", typeId: SHOWCASE_DIFFUSER.id, levelId: "L1", position: pt(29.5 * FT, 6.5 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 400, room: "Reception & Break 103" } },
 
-    // 2 Return Grilles (Type Mark RG-1; dead-center in Studio ACT 2'×2' half-tile at (39', 13'), clear of trunks!)
-    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(39.0 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 1000 } },
-    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(28.5 * FT, 13.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 700 } },
+    // 2 Return Grilles (Type Mark RG-1; dead-center in Studio ACT 2'×2' half-tile at (45', 25') & Reception at (23.2', 19.2'), 100% clear of supply ducts & stairwell!)
+    { type: "place_part", partId: "rg-1", typeId: rg.id, levelId: "L1", position: pt(45.0 * FT, 25.0 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 1000 } },
+    { type: "place_part", partId: "rg-2", typeId: rg.id, levelId: "L1", position: pt(23.2 * FT, 19.2 * FT), offsetMm: CEILING_Z, mark: "", values: { airflow: 700 } },
 
     // Stacked Restroom Exhaust Grilles (Type Mark EG-1; L1 9'-0" & L2 8'-6" over open restroom aisle north of vanity)
     { type: "place_part", partId: "eg-2", typeId: eg.id, levelId: "L1", position: pt(11.6 * FT, 25.2 * FT), offsetMm: Math.round(9.0 * FT), mark: "", values: { airflow: 150 } },
@@ -811,7 +854,8 @@ function buildShowcase(modelId: string): ModelState {
       points: [pt(47.12 * FT, 10.5 * FT), pt(22.0 * FT, 10.5 * FT)],
     },
 
-    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → 16"×12" trunk at Y = 19.35' with 2" external duct wrap!
+    // Return Air: vertical drop from RTU-1 curb return connector (47.12', 16.85') → turns NORTH to Y = 19.35' (zero overlap with South-going SA drop!),
+    // runs West in East Studio north of SD-2, jogs South at X = 35.5' (clear East of stairwell), and continues West at Y = 12.7' (2'-6" south of stairwell & 2'-2" north of SA)!
     {
       type: "route_run",
       idPrefix: "ra-main",
@@ -822,7 +866,7 @@ function buildShowcase(modelId: string): ModelState {
       insulation: { kind: "wrap", thicknessMm: Math.round(2 * IN) },
       system: RA_SYS,
       from: { kind: "part", partId: "rtu-1", connectorId: "return" },
-      points: [pt(47.12 * FT, 19.35 * FT), pt(27.0 * FT, 19.35 * FT)],
+      points: [pt(47.12 * FT, 19.35 * FT), pt(35.5 * FT, 19.35 * FT), pt(35.5 * FT, 12.7 * FT), pt(20.5 * FT, 12.7 * FT)],
     },
 
     // Exhaust Air: indoor inline EF-1 in Restroom 202 ceiling plenum (100% clear of walls & D203) → straight L2 plenum header to EG-1 + branch drop to L1 EG-2 + vertical roof discharge to GV-1!
@@ -869,6 +913,9 @@ function buildShowcase(modelId: string): ModelState {
   if ("refused" in airPlan) {
     throw new Error(`showcase flex connect refused: ${airPlan.refused}`);
   }
+  if (airPlan.joinable < 6) {
+    throw new Error(`showcase flex connect incomplete (${airPlan.joinable}/6): ${airPlan.lines.filter((l) => !l.ok).map((l) => `${l.elementId}: ${l.text}`).join(" | ")}`);
+  }
   m = runCmds(m, airPlan.plan.commands);
 
   // =========================================================================
@@ -889,7 +936,7 @@ function buildShowcase(modelId: string): ModelState {
     // Exterior Site Utilities + MEP Room Water Service Entry (buried below 8" slab at -350 mm, ZERO water/sewer clash!)
     { type: "place_part", partId: "mtr-1", typeId: waterMeter.id, levelId: "L1", position: pt(-6.0 * FT, Y_WATER), offsetMm: -350, mark: "MTR-1", values: { room: "Site West" } },
     { type: "place_part", partId: "rpz-1", typeId: rpz.id, levelId: "L1", position: pt(1.6 * FT, Y_WATER), offsetMm: Math.round(3.0 * FT), mark: "RPZ-1", values: { room: "MEP / Electrical 101" } },
-    { type: "place_part", partId: "wh-1", typeId: SHOWCASE_WATER_HEATER.id, levelId: "L1", position: pt(13.5 * FT, 18.0 * FT), offsetMm: 0, mark: "WH-1", values: { room: "MEP / Electrical 101", circuit: "HP-1-2,4,6" } },
+    { type: "place_part", partId: "wh-1", typeId: SHOWCASE_WATER_HEATER.id, levelId: "L1", position: pt(13.5 * FT, 18.0 * FT), offsetMm: 0, mark: "WH-1", values: { room: "MEP / Electrical 101", circuit: "HP-1-2,4,6", "electrical.disconnect_required": false, "electrical.local_disconnect": "not_required", "electrical.disconnect_note": "NEC 422.31(B) — lockable breaker in HP-1 within MEP Room 101" } },
     { type: "place_part", partId: "et-1", typeId: expTank.id, levelId: "L1", position: pt(15.6 * FT, 18.8 * FT), offsetMm: Math.round(4.5 * FT), mark: "ET-1", values: { room: "MEP / Electrical 101" } },
     { type: "place_part", partId: "mh-1", typeId: manhole.id, levelId: "L1", position: pt(-10.0 * FT, Y_SAN), offsetMm: -545, rotationDeg: 180, mark: "MH-1", values: { room: "Public Sewer" } },
     // Exterior Floor Cleanout at grade (z = 0) with parametric 21" riser neck extending straight down into the sloped 4" sanitary lateral!
@@ -1517,7 +1564,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-17", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(32.0 * FT, 10.5 * FT), offsetMm: CEILING_Z, mark: "F1-5", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-13", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(20.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-6", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-14", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(26.0 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-7", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "switched", type_mark: "F1E" } },
-    { type: "place_part", partId: "lt-15", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(31.5 * FT, 17.5 * FT), offsetMm: CEILING_Z, mark: "F1-8", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
+    { type: "place_part", partId: "lt-15", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(23.5 * FT, 22.5 * FT), offsetMm: CEILING_Z, mark: "F1-8", values: { switch_leg: "a", control_type: "0-10v", type_mark: "F1" } },
     { type: "place_part", partId: "lt-18", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(20.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-9", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     { type: "place_part", partId: "lt-19", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(26.5 * FT, 24.5 * FT), offsetMm: CEILING_Z, mark: "F1-10", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
     { type: "place_part", partId: "lt-20", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L1", position: pt(34.5 * FT, 23.5 * FT), offsetMm: Math.round(10.8 * FT), mark: "F1-11", values: { switch_leg: "a", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
@@ -1563,7 +1610,7 @@ function buildShowcase(modelId: string): ModelState {
     { type: "place_part", partId: "lt-213", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(22.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-17", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F2E" } },
     { type: "place_part", partId: "lt-214", typeId: SHOWCASE_TROFFER_2X4.id, levelId: "L2", position: pt(30.0 * FT, 23.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F2-18", values: { switch_leg: "e", control_type: "0-10v", type_mark: "F2" } },
     // Dedicated L2 stairwell emergency downlight centered inside the stairwell shaft above the U-stair mid-landing & upper flight (NFPA 101 3D tread compliance!)
-    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(32.5 * FT, 23.5 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
+    { type: "place_part", partId: "lt-215", typeId: SHOWCASE_DOWNLIGHT_6.id, levelId: "L2", position: pt(30.0 * FT, 22.0 * FT), offsetMm: Math.round(9.5 * FT), mark: "F1-20", values: { switch_leg: "e", control_type: "0-10v", emergency: true, emergency_mode: "unswitched", type_mark: "F1E" } },
 
     // Emergency Exit / Combo Units above Studio corridor door D104 & L2 Stair Head
     { type: "place_part", partId: "exit-1", typeId: exit.id, levelId: "L1", position: pt(34.5 * FT, 10.5 * FT), offsetMm: Math.round(8.5 * FT), mark: "EX-1", values: { emergency: true, emergency_mode: "unswitched", type_mark: "EX" } },
@@ -1682,8 +1729,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-power",
-      name: "Elec — Power Plan (Chamfered)",
-      description: "Electrical power plan locking chamfered orthogonal circuit graphics and clean device marks.",
+      name: "Elec — Power Plan",
+      description: "Electrical power plan locking orthogonal circuit graphics and clean device marks.",
       viewTypes: ["floor_plan"],
       locks: ["discipline", "annotations", "pack_props"],
       props: {
@@ -1695,8 +1742,8 @@ function buildShowcase(modelId: string): ModelState {
     {
       type: "create_view_template",
       viewTemplateId: "vt-elec-lighting",
-      name: "Elec — Lighting Plan (Chamfered)",
-      description: "Electrical lighting RCP locking chamfered orthogonal wiring and lighting visibility filters.",
+      name: "Elec — Lighting Plan",
+      description: "Electrical lighting RCP locking orthogonal wiring and lighting visibility filters.",
       viewTypes: ["ceiling_plan"],
       locks: ["discipline", "category_overrides", "pack_props"],
       props: {
@@ -2139,7 +2186,7 @@ function buildShowcase(modelId: string): ModelState {
         },
       },
     },
-    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
+    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showFeederLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
     {
       type: "create_view",
       viewId: "view-oneline-dist",
@@ -2152,6 +2199,7 @@ function buildShowcase(modelId: string): ModelState {
           hints: {
             title: "DISTRIBUTION ONE-LINE DIAGRAM (≥ 60A FEEDERS)",
             showLoads: true,
+            showFeederLoads: true,
             showWarnings: true,
             faultCurrent: true,
             minLoadRatingA: 60,
@@ -2439,6 +2487,9 @@ function buildShowcase(modelId: string): ModelState {
     // Seeded human review markups (non-printing on permit PDFs; vivid colour on screen & agent renders)
     ...SHOWCASE_SHEET_MARKUPS,
   ]);
+
+  // Append CAD-standard Mechanical Drafting Details sheet (M-501: RTU-1 curb & restroom exhaust wall cap)
+  m = appendShowcaseDetails(m);
 
   const hero = m.elements["view-3d-hero"] as ViewElement | undefined;
   if (!hero) throw new Error("showcase: missing view-3d-hero");

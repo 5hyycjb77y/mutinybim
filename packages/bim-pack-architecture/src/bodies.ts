@@ -1,5 +1,6 @@
 import { hostLineOf, hostVoidRow, wallBaseAtMm, type BimElement, type ClassSolidPart, type ClassSolidsRow, type KindSolidContext, type Vec2 } from "@permitzip/bim-kernel";
 import { resolveDoorOperation, resolveDoorSide, WINDOW_PARTITIONING_KEY } from "./graphics";
+import { railingClassParts } from "./railing";
 import { valueOf } from "./values";
 
 /**
@@ -232,4 +233,12 @@ export const WINDOW_BODY: ClassSolidsRow = {
   },
 };
 
-export const ARCHITECTURE_BODIES: readonly ClassSolidsRow[] = [DOOR_BODY, WINDOW_BODY];
+export const RAILING_BODY: ClassSolidsRow = {
+  classId: "arch.railing",
+  label: "Railing posts, rails and infill",
+  solids(el, ctx) {
+    return railingClassParts(el, ctx);
+  },
+};
+
+export const ARCHITECTURE_BODIES: readonly ClassSolidsRow[] = [DOOR_BODY, WINDOW_BODY, RAILING_BODY];

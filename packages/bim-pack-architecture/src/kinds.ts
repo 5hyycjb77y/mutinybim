@@ -1,4 +1,5 @@
-import { elementsOfKind, hostVoidsOf, type BimElement, type ElementKindItem, type FacePair, type KindSolidShape, type PlanGraphic, type SectionGraphic, type SurfaceFaceRow, type Vec2 } from "@permitzip/bim-kernel";
+import { elementsOfKind, hostVoidsOf, isBuildingStoryLevel, type BimElement, type ElementKindItem, type FacePair, type KindSolidShape, type PlanGraphic, type SectionGraphic, type SurfaceFaceRow, type Vec2 } from "@permitzip/bim-kernel";
+import { RAILING_KIND_ROW } from "./railing";
 
 /**
  * The Architecture add-on's own kinds: roofs and stairs.
@@ -162,9 +163,14 @@ function elevationOf(elements: Elements, levelId: string): number | null {
 function levelAbove(elements: Elements, levelId: string): string | null {
   const z = elevationOf(elements, levelId);
   if (z === null) return null;
-  let best: { id: string; z: number } | null = null;
-  for (const l of elementsOfKind(elements, "level")) if (l.elevationMm > z && (!best || l.elevationMm < best.z)) best = { id: l.id, z: l.elevationMm };
-  return best?.id ?? null;
+  let bestStory: { id: string; z: number } | null = null;
+  let bestAny: { id: string; z: number } | null = null;
+  for (const l of elementsOfKind(elements, "level")) {
+    if (l.elevationMm <= z) continue;
+    if (!bestAny || l.elevationMm < bestAny.z) bestAny = { id: l.id, z: l.elevationMm };
+    if (isBuildingStoryLevel(l) && (!bestStory || l.elevationMm < bestStory.z)) bestStory = { id: l.id, z: l.elevationMm };
+  }
+  return (bestStory ?? bestAny)?.id ?? null;
 }
 
 /** How a stair climbs: from its level to the one above. Null when it has nowhere to rise to. */
@@ -910,6 +916,13 @@ export const STAIR_KIND_ROW: ElementKindItem = {
           z1: stepTop,
         });
       }
+      // Close the top riser solidly up to f.z1 (flush with the landing / upper floor slab)
+      const capMm = Math.min(60, f.treadMm * 0.25);
+      blocks.push({
+        outline: [at(f.runMm - capMm, 1), at(f.runMm, 1), at(f.runMm, -1), at(f.runMm - capMm, -1)],
+        z0: Math.max(f.z0, f.z1 - waistMm),
+        z1: f.z1,
+      });
     }
     for (const land of layout.landings) {
       blocks.push({ outline: land.outline, z0: land.zBot, z1: land.zTop });
@@ -997,4 +1010,4 @@ export const STAIR_KIND_ROW: ElementKindItem = {
   },
 };
 
-export const ARCHITECTURE_KIND_ROWS: readonly ElementKindItem[] = [ROOF_KIND_ROW, STAIR_KIND_ROW];
+export const ARCHITECTURE_KIND_ROWS: readonly ElementKindItem[] = [ROOF_KIND_ROW, STAIR_KIND_ROW, RAILING_KIND_ROW];
