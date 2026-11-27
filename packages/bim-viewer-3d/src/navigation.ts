@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import CameraControls from "camera-controls";
-import { panButtonOf } from "./pan-buttons";
+import { panButtonOf, BUTTONS_RIGHT } from "./pan-buttons";
 import { wheelZoomLog, type WheelDelta } from "./wheel-zoom";
 
 CameraControls.install({ THREE });
@@ -13,6 +13,8 @@ const ORTHO_MIN_DEPTH = 1;
 /** Two middle-button presses within this long, and this close, are a double-click (zoom extents), ms / px. */
 export const MIDDLE_DOUBLE_CLICK_MS = 400;
 export const MIDDLE_DOUBLE_CLICK_PX = 6;
+/** A mouse or touch drag turning the view. */
+const TURNING = CameraControls.ACTION.ROTATE | CameraControls.ACTION.TOUCH_ROTATE;
 
 /**
  * Distance scale for one wheel event: below 1 zooms in, above 1 zooms out.
@@ -60,6 +62,9 @@ interface OrbitFrame {
  *
  * Within `zoomFloor` of the point, zooming in carries on forward along the
  * pointer's ray instead of slowing to a crawl.
+ *
+ * While walking (`walking`), a drag turns the view where the eye stands
+ * instead of swinging it round the orbit point; see `walkBy`.
  */
 export class PointZoomControls extends CameraControls {
   /** Metres: closer than this, zooming in moves forward along the pointer's ray instead of approaching the point. */
@@ -72,6 +77,8 @@ export class PointZoomControls extends CameraControls {
   onPassThrough: (() => void) | null = null;
   /** A middle-button double-click: zoom extents, as in every flat view. */
   onZoomExtents: (() => void) | null = null;
+  /** While walking, a wheel notch with the right button held turned the pace: 1 is faster, −1 slower (it does not zoom). */
+  onWalkSpeed: ((direction: 1 | -1) => void) | null = null;
   private lastMiddle: { time: number; x: number; y: number } | null = null;
   private beforePassThrough: PassThroughFrame | null = null;
   /** The last surface point a wheel zoom went toward (scene metres). */
@@ -79,6 +86,20 @@ export class PointZoomControls extends CameraControls {
   private readonly wheelElement: HTMLElement;
   private freeButtons: FreeButtons | null = null;
   private pendingPivot: THREE.Vector3 | null = null;
+  private walkingMode = false;
+  /** True while a turn by the person is settling: a drag (and its easing once the buttons come up), the orientation ball, a preset view. */
+  private turning = false;
+  /** Scratch vectors/matrices for zero-allocation turn-in-place compensation while walking. */
+  private readonly prevEyeScratch = new THREE.Vector3();
+  private readonly scratchSpherical = new THREE.Spherical();
+  private readonly scratchBasis = new THREE.Matrix4();
+  private readonly scratchAxisX = new THREE.Vector3();
+  private readonly scratchAxisY = new THREE.Vector3();
+  private readonly scratchAxisZ = new THREE.Vector3();
+  private readonly drift = new THREE.Vector3();
+  private frameHeld = false;
+  private deferringEvents = false;
+  private readonly deferredEvents: Array<Parameters<CameraControls["dispatchEvent"]>[0]> = [];
   private readonly pointerRay = new THREE.Raycaster();
 
   constructor(camera: ViewCamera, element: HTMLElement) {
@@ -133,6 +154,57 @@ export class PointZoomControls extends CameraControls {
     return this.chordLeft !== null;
   }
 
+  /**
+   * Walking (`ModelViewer3D.setWalk`). A drag, the orientation ball or a
+   * preset view then turns the camera where the eye stands, instead of
+   * swinging it round the orbit point: the eye moves only when the person
+   * walks (`walkBy`), pans or zooms. The orbit point keeps its distance ahead
+   * of the eye, so the orbit is as it was once the walk ends.
+   */
+  get walking(): boolean {
+    return this.walkingMode;
+  }
+
+  set walking(walking: boolean) {
+    if (walking === this.walkingMode) return;
+    this.walkingMode = walking;
+    this.turning = false;
+    this.frameHeld = false;
+  }
+
+  /**
+   * Carry the eye and the orbit point together by `by` (scene metres), from
+   * the next update: a walk step. Nothing eases here; the step already has.
+   */
+  walkBy(by: THREE.Vector3): void {
+    if (by.lengthSq() === 0) return;
+    this._target.add(by);
+    this._targetEnd.add(by);
+    this._needsUpdate = true;
+  }
+
+  // The orientation ball and the preset views turn the camera (`ModelViewer3D.orbitBy`, `orientTo`): the eye stays.
+  override rotate(azimuthAngle: number, polarAngle: number, enableTransition?: boolean): Promise<void> {
+    this.turning = true;
+    return super.rotate(azimuthAngle, polarAngle, enableTransition);
+  }
+
+  override rotateTo(azimuthAngle: number, polarAngle: number, enableTransition?: boolean): Promise<void> {
+    this.turning = true;
+    return super.rotateTo(azimuthAngle, polarAngle, enableTransition);
+  }
+
+  // The eye is told where to go (Home, a saved view), or only the orbit point moves: neither is a turn.
+  override setLookAt(positionX: number, positionY: number, positionZ: number, targetX: number, targetY: number, targetZ: number, enableTransition?: boolean): Promise<void> {
+    this.turning = false;
+    return super.setLookAt(positionX, positionY, positionZ, targetX, targetY, targetZ, enableTransition);
+  }
+
+  override setOrbitPoint(targetX: number, targetY: number, targetZ: number): void {
+    this.turning = false;
+    super.setOrbitPoint(targetX, targetY, targetZ);
+  }
+
   private readonly onMiddleDown = (event: PointerEvent) => {
     if (event.button !== 1) return;
     const last = this.lastMiddle;
@@ -148,6 +220,11 @@ export class PointZoomControls extends CameraControls {
   private readonly onWheel = (event: WheelEvent) => {
     if (!this.enabled) return;
     event.preventDefault();
+    // Walking like a game: scroll with the right button held sets the pace. The wheel alone still zooms toward the pointer.
+    if (this.walkingMode && this.onWalkSpeed && (event.buttons & BUTTONS_RIGHT) !== 0) {
+      this.onWalkSpeed(event.deltaY < 0 ? 1 : -1);
+      return;
+    }
     this.zoomAtPointer(event.clientX, event.clientY, wheelScale({ deltaY: event.deltaY, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey }));
   };
 
@@ -419,10 +496,67 @@ export class PointZoomControls extends CameraControls {
     return this.pendingPivot !== null;
   }
 
+  override dispatchEvent(event: Parameters<CameraControls["dispatchEvent"]>[0]): void {
+    if (this.deferringEvents) {
+      this.deferredEvents.push(event);
+      return;
+    }
+    super.dispatchEvent(event);
+  }
+
   override update(delta: number): boolean {
-    const changed = super.update(delta);
+    if (!this.walking) {
+      const changed = super.update(delta);
+      this.applyPendingPivot();
+      return changed;
+    }
+    const { theta, phi } = this._spherical;
+    if (this.currentAction & TURNING) this.turning = true;
+    this.deferringEvents = true;
+    this.deferredEvents.length = 0;
+    let changed: boolean;
+    try {
+      changed = super.update(delta);
+      if (this.frameHeld && this.turning && (this._spherical.theta !== theta || this._spherical.phi !== phi)) {
+        this.holdTheEye(theta, phi);
+      }
+      this.frameHeld = true;
+      if (this._spherical.theta === this._sphericalEnd.theta && this._spherical.phi === this._sphericalEnd.phi) this.turning = false;
+    } finally {
+      this.deferringEvents = false;
+    }
+    if (this.deferredEvents.length > 0) {
+      const events = this.deferredEvents.splice(0);
+      for (const event of events) super.dispatchEvent(event);
+    }
     this.applyPendingPivot();
     return changed;
+  }
+
+  /**
+   * The view turned since the last update. Cancel only the eye movement caused
+   * by the angular change `(prevTheta, prevPhi) -> (_spherical.theta, _spherical.phi)`
+   * so walk steps, pans and radial wheel zooms keep their exact eye motion, while
+   * the rotation drift moves into the orbit point and keeps it ahead of the eye.
+   */
+  private holdTheEye(prevTheta: number, prevPhi: number): void {
+    this.scratchSpherical.set(this._spherical.radius, prevPhi, prevTheta);
+    this.scratchSpherical.makeSafe();
+    this.prevEyeScratch.setFromSpherical(this.scratchSpherical).applyQuaternion(this._yAxisUpSpaceInverse).add(this._target);
+    const f = this._focalOffset;
+    if (f.x !== 0 || f.y !== 0 || f.z !== 0) {
+      this.scratchBasis.lookAt(this.prevEyeScratch, this._target, this._camera.up);
+      this.scratchAxisX.setFromMatrixColumn(this.scratchBasis, 0);
+      this.scratchAxisY.setFromMatrixColumn(this.scratchBasis, 1);
+      this.scratchAxisZ.setFromMatrixColumn(this.scratchBasis, 2);
+      this.prevEyeScratch.addScaledVector(this.scratchAxisX, f.x).addScaledVector(this.scratchAxisY, -f.y).addScaledVector(this.scratchAxisZ, f.z);
+    }
+    this.drift.copy(this._camera.position).sub(this.prevEyeScratch);
+    if (this.drift.lengthSq() === 0) return;
+    this._target.sub(this.drift);
+    this._targetEnd.sub(this.drift);
+    this._camera.position.sub(this.drift);
+    this._camera.updateMatrixWorld();
   }
 
   private applyPendingPivot() {

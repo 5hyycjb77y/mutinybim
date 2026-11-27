@@ -11,6 +11,8 @@ export * from "./live-view";
 export * from "./live-display";
 export * from "./projection";
 export * from "./navigation";
+export * from "./walk";
+export * from "./walk-keys";
 export * from "./crop-box";
 export * from "./level-planes";
 export * from "./reference-tone";
