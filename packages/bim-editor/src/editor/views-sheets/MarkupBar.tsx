@@ -73,13 +73,15 @@ export function MarkupBar({ brush, onChange, onDone, openCount }: Props) {
           return (
             <Tooltip key={swatch.color}>
               <TooltipTrigger asChild>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
                   aria-label={swatch.label}
                   aria-pressed={active}
                   data-testid={`markup-color-${swatch.color.slice(1)}`}
                   onClick={() => onChange({ ...brush, color: swatch.color, eraser: false })}
-                  className={`flex size-5 items-center justify-center rounded-full border transition-transform ${active ? 'scale-110 ring-2 ring-foreground ring-offset-1 ring-offset-background' : 'border-black/20 hover:scale-105'}`}
+                  className={`size-5 rounded-full border p-0 transition-transform hover:bg-transparent ${active ? 'scale-110 ring-2 ring-foreground ring-offset-1 ring-offset-background' : 'border-black/20 hover:scale-105'}`}
                   style={{ backgroundColor: swatch.color }}
                 />
               </TooltipTrigger>

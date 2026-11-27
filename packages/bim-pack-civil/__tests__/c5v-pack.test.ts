@@ -59,7 +59,7 @@ describe("civil pack contract", () => {
     // The always-installed Electrical, Architecture (round 13) and Structural (round 14) add-ons contribute their classes beside the civil pack's own.
     expect(set.contributors(CLASS_POINT)).toEqual([
       { packId: "electrical", packName: "Electrical", version: "1.0.0", count: 2 },
-      { packId: "architecture", packName: "Architecture", version: "1.0.0", count: 9 },
+      { packId: "architecture", packName: "Architecture", version: "1.0.0", count: 10 },
       { packId: "struct", packName: "Structural", version: "0.1.0", count: 9 },
       { packId: "civil", packName: "Civil", version: "0.1.0", count: 7 },
     ]);

@@ -2186,7 +2186,7 @@ function buildShowcase(modelId: string): ModelState {
         },
       },
     },
-    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showFeederLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
+    { type: "create_view", viewId: "view-oneline", name: "Electrical One-Line Diagram", viewType: "detail", props: { discipline: "electrical", diagram: { kind: "one_line", hints: { title: "ELECTRICAL ONE-LINE DIAGRAM", showLoads: true, showLinkLoads: true, showWarnings: true, faultCurrent: true, lengthMode: "shortest" } } } },
     {
       type: "create_view",
       viewId: "view-oneline-dist",
@@ -2199,7 +2199,7 @@ function buildShowcase(modelId: string): ModelState {
           hints: {
             title: "DISTRIBUTION ONE-LINE DIAGRAM (≥ 60A FEEDERS)",
             showLoads: true,
-            showFeederLoads: true,
+            showLinkLoads: true,
             showWarnings: true,
             faultCurrent: true,
             minLoadRatingA: 60,

@@ -916,13 +916,6 @@ export const STAIR_KIND_ROW: ElementKindItem = {
           z1: stepTop,
         });
       }
-      // Close the top riser solidly up to f.z1 (flush with the landing / upper floor slab)
-      const capMm = Math.min(60, f.treadMm * 0.25);
-      blocks.push({
-        outline: [at(f.runMm - capMm, 1), at(f.runMm, 1), at(f.runMm, -1), at(f.runMm - capMm, -1)],
-        z0: Math.max(f.z0, f.z1 - waistMm),
-        z1: f.z1,
-      });
     }
     for (const land of layout.landings) {
       blocks.push({ outline: land.outline, z0: land.zBot, z1: land.zTop });

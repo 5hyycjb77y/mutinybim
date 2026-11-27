@@ -414,8 +414,7 @@ function levelElements(model: ModelState, view: ViewElement): BimElement[] {
       if (spanning.length > 0 && viewLvl) {
         const allLevels = modelLevels(model).sort((a, b) => a.elevationMm - b.elevationMm);
         const idx = allLevels.findIndex((l) => l.id === viewLvl.id);
-        // Prefer the nearest building story below (skipping non-story datums like L1_CLG),
-        // matching `architecture.stair`'s own `levelAbove()` story resolution.
+        // Prefer the nearest building story below (skipping non-story ceiling datums).
         let below: (typeof allLevels)[number] | undefined;
         for (let i = idx - 1; i >= 0; i--) {
           if (isBuildingStoryLevel(allLevels[i]!)) {

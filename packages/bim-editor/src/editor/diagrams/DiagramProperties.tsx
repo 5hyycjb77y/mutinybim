@@ -141,11 +141,11 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
           ...(isOneLine ? ([['utility', 'Utility source above each service', hints.utility !== false]] as const) : []),
           ['showWarnings', 'Warnings on the drawing', hints.showWarnings !== false],
           ...(def.kind !== 'plumbing_riser' ? ([['showLoads', 'Equipment loads (motors, units)', hints.showLoads === true]] as const) : []),
-          ...(isOneLine ? ([['showFeederLoads', 'Feeder demand loads', hints.showFeederLoads === true]] as const) : []),
-        ] as ReadonlyArray<readonly ['utility' | 'showWarnings' | 'showLoads' | 'showFeederLoads', string, boolean]>
+          ...(isOneLine ? ([['showLinkLoads', 'Feeder demand loads', hints.showLinkLoads === true]] as const) : []),
+        ] as ReadonlyArray<readonly ['utility' | 'showWarnings' | 'showLoads' | 'showLinkLoads', string, boolean]>
       ).map(([key, label, on]) => (
         <Field key={key} orientation="horizontal">
-          <Switch id={`diagram-${key}`} checked={on} disabled={!canEdit} onCheckedChange={(next) => set({ [key]: key === 'showLoads' || key === 'showFeederLoads' ? (next ? true : undefined) : next ? undefined : false }, `${next ? 'show' : 'hide'} ${label.toLowerCase()}`)} data-testid={`diagram-${key}`} />
+          <Switch id={`diagram-${key}`} checked={on} disabled={!canEdit} onCheckedChange={(next) => set({ [key]: key === 'showLoads' || key === 'showLinkLoads' ? (next ? true : undefined) : next ? undefined : false }, `${next ? 'show' : 'hide'} ${label.toLowerCase()}`)} data-testid={`diagram-${key}`} />
           <FieldLabel htmlFor={`diagram-${key}`}>{label}</FieldLabel>
         </Field>
       ))}

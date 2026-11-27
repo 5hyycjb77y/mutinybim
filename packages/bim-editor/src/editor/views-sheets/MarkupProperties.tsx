@@ -48,8 +48,8 @@ export function MarkupProperties({ item, canEdit, blockedReason, onUpdate, onDel
       )}
 
       {spec.addressedNote && (
-        <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs text-foreground">
-          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-yellow-700 dark:text-yellow-400">
+        <div className="rounded-md border border-warning-300 bg-warning-50 p-2 text-xs text-foreground">
+          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-warning-700">
             <CheckCircle2 className="size-3" />
             Addressed note
           </div>
@@ -72,7 +72,7 @@ export function MarkupProperties({ item, canEdit, blockedReason, onUpdate, onDel
               data-testid={`markup-status-${opt.value}`}
               onClick={() => onUpdate({ status: opt.value })}
             >
-              {opt.value === 'open' && <CircleDot className="mr-1 size-3 text-red-600" />}
+              {opt.value === 'open' && <CircleDot className="mr-1 size-3 text-danger-600" />}
               {opt.label}
             </Button>
           ))}
@@ -87,13 +87,15 @@ export function MarkupProperties({ item, canEdit, blockedReason, onUpdate, onDel
           {MARKUP_COLOR_SWATCHES.map((swatch) => {
             const active = color.toLowerCase() === swatch.color.toLowerCase()
             return (
-              <button
+              <Button
                 key={swatch.color}
                 type="button"
+                variant="ghost"
+                size="icon"
                 disabled={!canEdit}
                 title={!canEdit ? blockedReason : swatch.label}
                 onClick={() => onUpdate({ color: swatch.color })}
-                className={`size-5 rounded-full border ${active ? 'ring-2 ring-foreground ring-offset-1 ring-offset-background' : 'border-black/20'}`}
+                className={`size-5 rounded-full border p-0 hover:bg-transparent ${active ? 'ring-2 ring-foreground ring-offset-1 ring-offset-background' : 'border-black/20'}`}
                 style={{ backgroundColor: swatch.color }}
               />
             )

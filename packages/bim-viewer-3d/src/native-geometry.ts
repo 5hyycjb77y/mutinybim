@@ -1008,6 +1008,16 @@ function stairHandrailSolid(el: BimElement, floor: number, model: ModelState): S
       x: f.start.x + f.u.x * d + f.n.x * halfW * side,
       y: f.start.y + f.u.y * d + f.n.y * halfW * side,
     });
+    // Close the top riser solidly up to f.z1 in 3D (flush with the landing / upper floor slab)
+    // without adding an extra block to the kernel/IFC body so IFC round-trip preserves exact step counts.
+    const capMm = Math.min(60, f.run * 0.05);
+    if (capMm > 1) {
+      blocks.push({
+        outline: [at(f.run - capMm, 1), at(f.run, 1), at(f.run, -1), at(f.run - capMm, -1)],
+        z0: Math.max(f.z0, f.z1 - 215),
+        z1: f.z1,
+      });
+    }
     for (const side of [-1, 1] as const) {
       const sOut = side;
       const sIn = side * (1 - railW * 2);

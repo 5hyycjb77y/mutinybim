@@ -176,7 +176,7 @@ export function afcLine(elements: Elements, partId: string, lengthMode?: FeederL
 export function electricalDiagramGraph(elements: Elements, hints: ElectricalDiagramHints = {}): DiagramGraph {
   const detail = hints.detail ?? "full";
   const schematic = detail === "schematic";
-  const showFeederLoads = hints.showFeederLoads === true;
+  const showFeederLoads = hints.showLinkLoads === true || hints.showFeederLoads === true;
   const minLoadRatingA = hints.minLoadRatingA ?? 0;
   const phaseScope = hints.phaseScope ?? "all";
   const org = organizationOf({ elements, connections: [] });

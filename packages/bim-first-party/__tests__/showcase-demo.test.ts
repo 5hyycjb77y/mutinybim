@@ -613,8 +613,8 @@ describe("createShowcaseDemoModel", () => {
     // 1. Live feeder kVA demand load tags enabled on both One-Line diagrams (#168)
     const olFull = model.elements["view-oneline"];
     const olDist = model.elements["view-oneline-dist"];
-    expect(olFull?.kind === "view" && olFull.props?.diagram?.hints?.showFeederLoads).toBe(true);
-    expect(olDist?.kind === "view" && olDist.props?.diagram?.hints?.showFeederLoads).toBe(true);
+    expect(olFull?.kind === "view" && olFull.props?.diagram?.hints?.showLinkLoads).toBe(true);
+    expect(olDist?.kind === "view" && olDist.props?.diagram?.hints?.showLinkLoads).toBe(true);
 
     // 2. Structured electrical.disconnect pack parameters populated on RTU-1 and WH-1 (#165)
     const rtu1 = model.elements["rtu-1"];

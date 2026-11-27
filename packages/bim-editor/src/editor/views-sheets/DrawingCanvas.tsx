@@ -2024,7 +2024,7 @@ export function DrawingCanvas({ target, model, sheetTitle, canEdit, blockedReaso
                         {SHEET_MARKUP_SHORTCUT}
                       </kbd>
                       {openMarkupCount > 0 && (
-                        <span className="rounded-full bg-red-600/15 px-1.5 text-[10px] font-semibold text-red-700 dark:text-red-400">
+                        <span className="rounded-full bg-danger-100 px-1.5 text-[10px] font-semibold text-danger-700">
                           {openMarkupCount}
                         </span>
                       )}
