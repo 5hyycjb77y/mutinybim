@@ -36,6 +36,19 @@ export async function verifyPassword(password: string, stored: string): Promise<
 /** How long a password reset link works. */
 export const RESET_LINK_HOURS = 1;
 
+/** How long an email confirmation link works. */
+export const CONFIRM_LINK_HOURS = 24;
+
+/**
+ * Makes a one-time link that confirms an account's current address and returns
+ * its token. Only its digest and the intended address are stored.
+ */
+export async function issueEmailConfirmation(db: Pick<WebStore, "createEmailConfirmation">, userId: string, email: string): Promise<string> {
+  const token = randomToken();
+  await db.createEmailConfirmation(digest(token), userId, email, new Date(Date.now() + CONFIRM_LINK_HOURS * 3_600_000));
+  return token;
+}
+
 /**
  * Makes a one-time password reset link for an account and returns its token.
  * Only the token's digest is stored. The caller chooses when earlier links

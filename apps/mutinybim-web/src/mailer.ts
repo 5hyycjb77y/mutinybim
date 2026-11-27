@@ -12,11 +12,11 @@
  */
 import { createTransport } from "nodemailer";
 import type { MailConfig } from "./config";
-import { RESET_LINK_HOURS } from "./secrets";
+import { CONFIRM_LINK_HOURS, RESET_LINK_HOURS } from "./secrets";
 
 export interface Mail {
   readonly to: string;
-  readonly purpose: "reset";
+  readonly purpose: "reset" | "confirm";
   readonly subject: string;
   readonly text: string;
 }
@@ -44,6 +44,24 @@ export function resetMail(origin: string, to: string, token: string): Mail {
       "The link works once. Saving a new password signs you out everywhere else.",
       "",
       "If you didn't ask for this, ignore this email. Your password stays the same.",
+    ].join("\n"),
+  };
+}
+
+/** The message that asks the account's owner to confirm its address. */
+export function confirmMail(origin: string, to: string, token: string): Mail {
+  if (!EMAIL_SHAPE.test(to)) throw new Error("[mutinybim-web mail] a message needs one plain recipient address");
+  return {
+    to,
+    purpose: "confirm",
+    subject: "Confirm your email for MutinyBIM",
+    text: [
+      `Someone asked to confirm ${to} for a MutinyBIM account.`,
+      "",
+      `To confirm it, open this link within ${CONFIRM_LINK_HOURS} hours while logged in to that account:`,
+      `${origin}/confirm/${token}`,
+      "",
+      "If you didn't ask for this, ignore this email.",
     ].join("\n"),
   };
 }

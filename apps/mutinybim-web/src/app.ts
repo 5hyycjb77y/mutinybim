@@ -32,9 +32,9 @@ import { ModelStore, summarize, type StarterKind } from "./models";
 import { ModelCreator } from "./model-creation";
 import { finishSignIn, SignInError, startSignIn, type Fetch } from "./oauth";
 import { createLinkedHosts, LINK_STATE_PREFIX, readLinkKeys, type LinkedProvider, type LinkKeys } from "./linked-hosts";
-import { approvalPage, approvalsPage, assistantConsentPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
-import { EMAIL_SHAPE, resetMail, smtpMailer, type Mailer } from "./mailer";
-import { digest, hashPassword, issuePasswordReset, pkcePair, randomToken, verifyPassword } from "./secrets";
+import { approvalPage, approvalsPage, assistantConsentPage, confirmEmailPage, connectPage, forgotPage, landingPage, linkedOfferPage, loginPage, messagePage, modelsPage, privacyPage, quotePage, resetPage, settingsPage, sharePage, signupPage, supabaseResetPage, termsPage, type LinkedModelsView, type LinkedSwitch } from "./pages";
+import { confirmMail, EMAIL_SHAPE, resetMail, smtpMailer, type Mailer } from "./mailer";
+import { CONFIRM_LINK_HOURS, digest, hashPassword, issueEmailConfirmation, issuePasswordReset, pkcePair, randomToken, verifyPassword } from "./secrets";
 import { exchangePkceCode, googleAuthorizeUrl, requestPasswordReset, signInWithPassword, signUpWithPassword, SupabaseAuthError, updatePassword, verifyTokenHash, type SupabaseUser } from "./supabase-auth";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -231,6 +231,8 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
   const mailer = options.mailer !== undefined ? options.mailer : config.mail ? smtpMailer(config.mail) : null;
   // A few reset emails per address per hour, so nobody can flood an inbox or keep replacing its link.
   const resetMailLimit = new Throttle(3, 60 * 60_000);
+  // The same for confirmation emails, which a signed-in person asks for about their own address.
+  const confirmMailLimit = new Throttle(3, 60 * 60_000);
   const afterReply = new Set<Promise<void>>();
   const ipOf = (req: IncomingMessage): string => clientIp(req, Boolean(config.trustProxy));
   const syncUrl = `${config.origin.replace(/^http/, "ws")}/sync`;
@@ -450,6 +452,29 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     console.log("[mutinybim-web] reset email sent", { userId: person.id });
   }
 
+  /** Emails a link that confirms the account's current address, within its hourly limit. Never logs the link. */
+  async function mailConfirmation(person: UserRow): Promise<void> {
+    if (!mailer) return;
+    if (!confirmMailLimit.allow(person.email)) {
+      console.log("[mutinybim-web] confirmation email skipped: hourly limit for this address", { userId: person.id });
+      return;
+    }
+    const token = await issueEmailConfirmation(db, person.id, person.email);
+    const tokenHash = digest(token);
+    try {
+      await mailer.send(confirmMail(config.origin, person.email, token));
+    } catch (err) {
+      await db.finishEmailConfirmationMail(tokenHash, false);
+      console.error("[mutinybim-web] confirmation email failed", { userId: person.id, code: errorCode(err) });
+      return;
+    }
+    await db.finishEmailConfirmationMail(tokenHash, true);
+    console.log("[mutinybim-web] confirmation email sent", { userId: person.id });
+  }
+
+  /** The Settings page, which knows whether this server sends email. */
+  const settings = (person: UserRow, linked: readonly string[], opts: Parameters<typeof settingsPage>[3] = {}): string => settingsPage(config, person, linked, { ...opts, mail: mailer !== null });
+
   async function handleAuthCallback(req: IncomingMessage, res: ServerResponse, url: URL, provider: OAuthProviderConfig): Promise<void> {
     const error = url.searchParams.get("error");
     if (error) {
@@ -474,7 +499,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (linking) {
       const current = await sessionUser(req);
       if (!current) return redirect(res, "/login?return_to=%2Fsettings");
-      if (known && known.id !== current.id) return html(res, 409, settingsPage(config, current, await db.identitiesOf(current.id), { flash: { kind: "error", text: `That ${provider.label.replace(/^Log in with /i, "")} account is already linked to another MutinyBIM account.` } }));
+      if (known && known.id !== current.id) return html(res, 409, settings(current, await db.identitiesOf(current.id), { flash: { kind: "error", text: `That ${provider.label.replace(/^Log in with /i, "")} account is already linked to another MutinyBIM account.` } }));
       await db.linkIdentity(provider.id, person.subject, current.id);
       await confirmProviderEmail(current);
       console.log("[mutinybim-web] linked a sign-in", { provider: provider.id, userId: current.id });
@@ -517,6 +542,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const state = pkceStateKey ? await db.takeOAuthState(pkceStateKey) : null;
     let verified: { readonly user: SupabaseUser; readonly accessToken: string };
     let flow: "google" | "signup" | "recovery" | "email" = "email";
+    let viaPkce = false;
     let returnTo = "/models";
     try {
       if (code) {
@@ -524,6 +550,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
           return html(res, 400, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "That sign-in link expired or was opened in a different browser. Start again." } }), { "set-cookie": clearPkce });
         }
         verified = await exchangePkceCode(sb, { code, codeVerifier: state.code_verifier }, options.fetchImpl);
+        viaPkce = true;
         returnTo = safeReturn(state.return_to);
         if (state.provider === "supabase-google") flow = "google";
         else if (state.provider === "supabase-recovery") flow = "recovery";
@@ -546,6 +573,13 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     }
     if (!synced) {
       return html(res, 403, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "New accounts can't be made on this server right now." } }), { "set-cookie": clearPkce });
+    }
+    // Record a confirmed address only when the proof belongs to this browser's own sign-in: Google with no
+    // password on the Supabase user and Google's own word for this address (the proof that attaches an
+    // existing account), or a sign-up link opened in the browser that chose the password (PKCE).
+    // A link opened anywhere else may confirm a Supabase user whose password someone else chose.
+    if (verified.user.emailConfirmed && ((flow === "google" && verified.user.googleVerifiedEmail) || (flow === "signup" && viaPkce))) {
+      await db.confirmIdentityEmail("supabase", verified.user.id, synced.user.id, verified.user.email);
     }
     if (flow === "recovery") {
       const cookiesOut = [
@@ -1035,31 +1069,64 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         flash: { kind: "ok", text: removed ? `Removed ${removed.display_name}’s personal share. ${remaining}` : "There was no personal share to remove." } }));
     }
 
+    const confirmLink = pathname.match(/^\/confirm\/([A-Za-z0-9_-]{20,80})$/);
+    const requestConfirmation = pathname === "/settings/confirm-email" && method === "POST";
+    if (user && !user.email_confirmed_at && config.supabase && (confirmLink || requestConfirmation) && await db.identitySubject(user.id, "supabase")) {
+      // An inbox-only session doesn't establish who chose the account password.
+      const token = sessionToken(req);
+      const session = token && await db.session(digest(token));
+      if (!session || session.via !== "password") {
+        return html(res, 403, loginPage(config, { email: user.email, returnTo: confirmLink ? pathname : "/settings",
+          flash: { kind: "error", text: "Log in with your account password to confirm your email address. If you need a new password, log out and use Forgot your password." } }), TOKEN_PAGE);
+      }
+    }
+    if (confirmLink?.[1]) {
+      // The link confirms an address only for the account it was made for, opened while logged in to it.
+      // Otherwise whoever reads the inbox could confirm an account someone else made with that address.
+      if (!user) return redirect(res, `/login?return_to=${encodeURIComponent(pathname)}`, TOKEN_PAGE);
+      if (method === "GET") return html(res, 200, confirmEmailPage(user, { token: confirmLink[1] }), TOKEN_PAGE);
+      if (method === "POST") {
+        if (await db.redeemEmailConfirmation(digest(confirmLink[1]), user.id)) {
+          console.log("[mutinybim-web] email confirmed with a mailed link", { userId: user.id });
+          return redirect(res, "/settings?confirmed=1");
+        }
+        return html(res, 410, confirmEmailPage(user, { token: confirmLink[1], refused: true }), TOKEN_PAGE);
+      }
+    }
+    if (user && requestConfirmation) {
+      const linked = await db.identitiesOf(user.id);
+      const options = { passwordFree: await recentProviderSignIn(req), linkedModels: await linkedSwitches(user) };
+      if (!mailer) return html(res, 404, settings(user, linked, { ...options, flash: { kind: "error", text: "This server sends no email." } }));
+      if (user.email_confirmed_at) return html(res, 200, settings(user, linked, { ...options, flash: { kind: "ok", text: "Your email is already confirmed." } }));
+      html(res, 200, settings(user, linked, { ...options, flash: { kind: "ok", text: `Check ${user.email} for your confirmation link. Open the latest link within ${CONFIRM_LINK_HOURS} hours while logged in to this account.` } }));
+      return afterReplying(() => mailConfirmation(user));
+    }
+
     if (user && pathname === "/settings" && method === "GET") {
       const linked = url.searchParams.get("linked");
       const provider = linked ? config.providers.find((p) => p.id === linked) : undefined;
       const linkedProvider = url.searchParams.get("linked_models") ? linkedHosts.provider(url.searchParams.get("linked_models") ?? "") : null;
-      const flash: Flash | null = provider ? { kind: "ok", text: `Linked. You can now log in with ${provider.label.replace(/^Log in with /i, "")}.` } : linkedProvider ? { kind: "ok", text: `On. Your ${linkedProvider.models.label} show on My models.` } : null;
-      return html(res, 200, settingsPage(config, user, await db.identitiesOf(user.id), { passwordFree: await recentProviderSignIn(req), flash, linkedModels: await linkedSwitches(user) }));
+      const flash: Flash | null = provider ? { kind: "ok", text: `Linked. You can now log in with ${provider.label.replace(/^Log in with /i, "")}.` } : linkedProvider ? { kind: "ok", text: `On. Your ${linkedProvider.models.label} show on My models.` } : url.searchParams.get("confirmed") === "1" && user.email_confirmed_at ? { kind: "ok", text: "Your email is confirmed." } : null;
+      return html(res, 200, settings(user, await db.identitiesOf(user.id), { passwordFree: await recentProviderSignIn(req), flash, linkedModels: await linkedSwitches(user) }));
     }
     const linkedOff = pathname.match(/^\/settings\/linked\/([a-z0-9-]+)\/off$/);
     if (user && method === "POST" && linkedOff?.[1]) {
       const provider = linkedProviderOf(linkedOff[1]);
       await linkedHosts.unlink(user, provider);
-      return html(res, 200, settingsPage(config, user, await db.identitiesOf(user.id), { flash: { kind: "ok", text: `Off. ${provider.models.label} no longer show here, and your assistants can't reach them through this app.` }, linkedModels: await linkedSwitches(user) }));
+      return html(res, 200, settings(user, await db.identitiesOf(user.id), { flash: { kind: "ok", text: `Off. ${provider.models.label} no longer show here, and your assistants can't reach them through this app.` }, linkedModels: await linkedSwitches(user) }));
     }
     if (user && pathname === "/settings/profile" && method === "POST") {
       const name = ((await readForm(req)).get("name") ?? "").trim().slice(0, 80);
-      if (!name) return html(res, 400, settingsPage(config, user, await db.identitiesOf(user.id), { flash: { kind: "error", text: "Your name can't be empty." } }));
+      if (!name) return html(res, 400, settings(user, await db.identitiesOf(user.id), { flash: { kind: "error", text: "Your name can't be empty." } }));
       await db.renameUser(user.id, name);
       const fresh = (await db.userById(user.id)) ?? user;
-      return html(res, 200, settingsPage(config, fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Saved." }, linkedModels: await linkedSwitches(fresh) }));
+      return html(res, 200, settings(fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Saved." }, linkedModels: await linkedSwitches(fresh) }));
     }
     if (user && pathname === "/settings/password" && method === "POST") {
       const form = await readForm(req);
       const password = form.get("password") ?? "";
       const passwordFree = await recentProviderSignIn(req);
-      const fail = async (status: number, text: string) => html(res, status, settingsPage(config, user, await db.identitiesOf(user.id), { passwordFree, flash: { kind: "error", text }, linkedModels: await linkedSwitches(user) }));
+      const fail = async (status: number, text: string) => html(res, status, settings(user, await db.identitiesOf(user.id), { passwordFree, flash: { kind: "error", text }, linkedModels: await linkedSwitches(user) }));
       if (!throttle.allow(`password:${user.id}`)) return fail(429, "Too many tries. Wait ten minutes, then try again.");
       if (password.length < 8) return fail(400, "Use a new password of at least 8 characters.");
       if (config.supabase) {
@@ -1077,7 +1144,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         await db.deleteSessionsOf(user.id, token ? digest(token) : null);
         console.log("[mutinybim-web] password updated in supabase", { userId: user.id });
         const fresh = (await db.userById(user.id)) ?? user;
-        return html(res, 200, settingsPage(config, fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Password saved. You were signed out on every other device." }, linkedModels: await linkedSwitches(fresh) }));
+        return html(res, 200, settings(fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Password saved. You were signed out on every other device." }, linkedModels: await linkedSwitches(fresh) }));
       }
       if (user.password_hash && !passwordFree && !(await verifyPassword(form.get("current") ?? "", user.password_hash))) return fail(401, "Your current password isn't right. Forgot it? Log out, then use “Forgot your password?” on the log-in page.");
       await db.setPassword(user.id, await hashPassword(password));
@@ -1085,7 +1152,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       await db.deleteSessionsOf(user.id, token ? digest(token) : null);
       console.log("[mutinybim-web] password set", { userId: user.id, recovery: passwordFree });
       const fresh = (await db.userById(user.id)) ?? user;
-      return html(res, 200, settingsPage(config, fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Password saved. You were signed out on every other device." }, linkedModels: await linkedSwitches(fresh) }));
+      return html(res, 200, settings(fresh, await db.identitiesOf(user.id), { flash: { kind: "ok", text: "Password saved. You were signed out on every other device." }, linkedModels: await linkedSwitches(fresh) }));
     }
     if (user && pathname === "/settings/scheme" && method === "POST") {
       const json = (req.headers["content-type"] ?? "").startsWith("application/json");
@@ -1243,7 +1310,8 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         if ((req.url ?? "").startsWith("/api/")) return json(res, err.status, { error: err.words });
         return html(res, err.status, messagePage(config, user, err.status === 404 ? "Not found" : "That didn't work", err.words, { href: user ? "/models" : "/", label: user ? "Back to my models" : "Home" }));
       }
-      console.error("[mutinybim-web] request failed", { url: req.url, err });
+      // Paths and return URLs may contain a live confirmation or reset token.
+      console.error("[mutinybim-web] request failed", { method: req.method, route: req.url?.split(/[/?]/, 2)[1], code: errorCode(err) });
       if (res.headersSent) return res.end();
       const words = "The server hit an error it didn't expect. Try again; if it keeps happening, the server log has the details.";
       try {

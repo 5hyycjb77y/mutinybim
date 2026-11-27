@@ -332,6 +332,55 @@ export function forgotPage(config: WebConfig, options: { email?: string; flash?:
   );
 }
 
+/** Confirms the signed-in account's address from a mailed link, with one button so nothing changes on a plain visit. */
+export function confirmEmailPage(user: UserRow, options: { token: string; refused?: boolean }): string {
+  const email = user.email;
+  const confirmed = Boolean(user.email_confirmed_at);
+  if (options.refused) {
+    return page(
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">That confirmation link doesn't work here</CardTitle>
+          <CardDescription>
+            It may be for a different account, already used, more than a day old, or sent to an earlier address. You're logged in as {email}. Send a new link from Settings.
+          </CardDescription>
+        </CardHeader>
+        <CardFooter>
+          <Button asChild>
+            <a href="/settings">Go to Settings</a>
+          </Button>
+        </CardFooter>
+      </Card>,
+      { title: "Confirm your email", user: frameUser(user), quote: null, flash: null, narrow: true },
+    );
+  }
+  return page(
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-2xl">Confirm your email</CardTitle>
+        <CardDescription>
+          {confirmed ? `${email} is already confirmed.` : `Confirm ${email} for the account you're logged in to.`}
+        </CardDescription>
+      </CardHeader>
+      {confirmed ? null : (
+        <CardContent>
+          <form method="post" action={`/confirm/${encodeURIComponent(options.token)}`} className="flex flex-col gap-3">
+            <Button type="submit" size="lg">
+              Confirm {email}
+            </Button>
+          </form>
+        </CardContent>
+      )}
+      <CardFooter>
+        <Button asChild variant="ghost">
+          <a href="/settings">Back to Settings</a>
+        </Button>
+      </CardFooter>
+    </Card>,
+    { title: "Confirm your email", user: frameUser(user), quote: null, flash: null, narrow: true },
+  );
+}
+
 export function supabaseResetPage(options: { email: string; flash?: Flash }): string {
   return page(
     <Card>
@@ -817,15 +866,28 @@ function LinkedModelsSwitch({ provider, state }: { provider: LinkedProvider; sta
   );
 }
 
-export function settingsPage(config: WebConfig, user: UserRow, linked: readonly string[], options: { flash?: Flash; passwordFree?: boolean; linkedModels?: readonly { readonly provider: LinkedProvider; readonly state: LinkedSwitch }[] } = {}): string {
+export function settingsPage(config: WebConfig, user: UserRow, linked: readonly string[], options: { flash?: Flash; passwordFree?: boolean; mail?: boolean; linkedModels?: readonly { readonly provider: LinkedProvider; readonly state: LinkedSwitch }[] } = {}): string {
   return page(
     <>
       <PageTitle>Settings</PageTitle>
       <Card>
         <CardHeader>
           <CardTitle>Your account</CardTitle>
-          <CardDescription>Email: {user.email}</CardDescription>
+          <CardDescription className="flex flex-wrap items-center gap-2">
+            <span>Email: {user.email}</span>
+            {user.email_confirmed_at ? <Badge data-testid="email-confirmed">Confirmed</Badge> : <Badge variant="secondary" data-testid="email-unconfirmed">Not confirmed</Badge>}
+          </CardDescription>
         </CardHeader>
+        {user.email_confirmed_at ? null : options.mail ? (
+          <form method="post" action="/settings/confirm-email" className="flex flex-wrap items-center gap-2">
+            <p className="text-sm">Confirm that you can receive email at this address.</p>
+            <Button type="submit" variant="outline" size="sm">
+              Send confirmation link
+            </Button>
+          </form>
+        ) : (
+          <p className="text-sm text-(--mutiny-muted)">This server sends no email. A sign-in provider that vouches for your address confirms it.</p>
+        )}
         <form method="post" action="/settings/profile" className="flex flex-wrap items-end gap-2">
           <Field className="min-w-60 flex-1">
             <Label htmlFor="profile-name">Name</Label>
