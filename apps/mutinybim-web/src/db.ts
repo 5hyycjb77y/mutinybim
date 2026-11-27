@@ -406,7 +406,12 @@ export interface WebStore {
 
   createPasswordReset(tokenHash: string, userId: string, expiresAt: Date): Promise<void>;
   userByPasswordReset(tokenHash: string): Promise<UserRow | null>;
-  usePasswordReset(tokenHash: string): Promise<void>;
+  /**
+   * In one database operation: uses up an unexpired reset link, saves the new
+   * password and ends every session of its account. Returns that account, or
+   * null when the link is unknown, expired or already used (nothing changes then).
+   */
+  redeemPasswordReset(tokenHash: string, passwordHash: string): Promise<UserRow | null>;
 
   createModel(input: { id: string; ownerId: string; name: string }): Promise<ModelRow>;
   creationByKey(ownerId: string, key: string): Promise<ModelCreation | null>;
@@ -771,8 +776,14 @@ export function openDb(file: string): WebStore {
     async userByPasswordReset(tokenHash) {
       return toUser(db.prepare("SELECT u.* FROM password_resets r JOIN users u ON u.id = r.user_id WHERE r.token_hash = ? AND r.expires_at > ?").get(tokenHash, now()));
     },
-    async usePasswordReset(tokenHash) {
-      db.prepare("DELETE FROM password_resets WHERE token_hash = ?").run(tokenHash);
+    async redeemPasswordReset(tokenHash, passwordHash) {
+      return writeTransaction(() => {
+        const link = db.prepare("DELETE FROM password_resets WHERE token_hash = ? AND expires_at > ? RETURNING user_id").get(tokenHash, now());
+        if (!isRecord(link) || typeof link.user_id !== "string") return null;
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, link.user_id);
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(link.user_id);
+        return toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(link.user_id));
+      });
     },
 
     async createModel(input) {

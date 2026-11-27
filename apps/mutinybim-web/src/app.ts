@@ -611,11 +611,11 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         if (!person) return html(res, 410, resetPage({ token: reset[1], email: null }));
         const password = (await readForm(req)).get("password") ?? "";
         if (password.length < 8) return html(res, 400, resetPage({ token: reset[1], email: person.email, flash: { kind: "error", text: "Use a password of at least 8 characters." } }));
-        await db.setPassword(person.id, await hashPassword(password));
-        await db.usePasswordReset(tokenHash);
-        await db.deleteSessionsOf(person.id);
-        console.log("[mutinybim-web] password reset with a reset link", { userId: person.id });
-        return redirect(res, "/models?reset=1", { "set-cookie": await startSession(person.id, "reset") });
+        // The link is checked again where it is used up: of two uses at once, only one saves a password.
+        const redeemed = await db.redeemPasswordReset(tokenHash, await hashPassword(password));
+        if (!redeemed) return html(res, 410, resetPage({ token: reset[1], email: null }));
+        console.log("[mutinybim-web] password reset with a reset link", { userId: redeemed.id });
+        return redirect(res, "/models?reset=1", { "set-cookie": await startSession(redeemed.id, "reset") });
       }
     }
 

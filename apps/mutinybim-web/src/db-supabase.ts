@@ -1,6 +1,6 @@
 /**
  * Supabase / Postgres metadata store implementing `WebStore` over PostgREST
- * and the atomic RPCs defined in `db/migrations/20261124000000_mutinybim_web_initial.sql`.
+ * and the atomic RPCs defined in `db/migrations/`.
  *
  * Uses built-in fetch with zero extra dependencies, keeping the open-source
  * app self-contained while letting hosted deployments store accounts, sessions,
@@ -231,8 +231,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       if (!isRecord(row) || typeof row.user_id !== "string") return null;
       return userById(row.user_id);
     },
-    async usePasswordReset(tokenHash) {
-      await request(`/rest/v1/password_resets?${new URLSearchParams({ token_hash: eq(tokenHash) })}`, { method: "DELETE" });
+    async redeemPasswordReset(tokenHash, passwordHash) {
+      const userId = await rpc("web_redeem_password_reset", { p_token_hash: tokenHash, p_password_hash: passwordHash });
+      return typeof userId === "string" ? userById(userId) : null;
     },
 
     async createModel(input) {
