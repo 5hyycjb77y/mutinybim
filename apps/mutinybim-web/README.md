@@ -154,10 +154,13 @@ All optional; read once at start.
 
 Set `MUTINYBIM_WEB_SUPABASE_URL` and `MUTINYBIM_WEB_SUPABASE_PUBLISHABLE_KEY` to delegate email/password sign-up, password-reset emails, and **Continue with Google** (OAuth 2.0 PKCE) to a Supabase project:
 
-1. Apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` to the Supabase Postgres database in filename order. The handover migration adds the shared quota check, creation reservations and ownership offers.
+1. If Postgres stores the app's accounts, apply each unapplied SQL file in `apps/mutinybim-web/db/migrations/` in filename order before updating the app. The sign-in code uses the account lookup and creation functions in `20261126040000_supabase_user_identity.sql`. SQLite handles the update automatically.
 2. In Supabase Auth → URL Configuration, add `<MUTINYBIM_WEB_ORIGIN>/auth/supabase/callback` to **Redirect URLs**.
-3. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
-4. Optionally set `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` (as a secret on your deployment host) to store all app metadata tables in Supabase Postgres instead of local SQLite. If migrating an existing deployment off SQLite, copy existing rows first with `node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts` (supports `--dry-run`).
+3. Keep **Confirm email** on (Supabase Auth → Sign In / Providers → Email). With it off, Supabase treats every address as confirmed at sign-up.
+4. In Supabase Auth → Providers → Google, enable Google and add your Google OAuth Client ID and Client Secret (with Google's authorized redirect URI set to `https://<project-ref>.supabase.co/auth/v1/callback`).
+5. Optionally set `MUTINYBIM_WEB_SUPABASE_SECRET_KEY` (as a secret on your deployment host) to store all app metadata tables in Supabase Postgres instead of local SQLite. If migrating an existing deployment off SQLite, copy existing rows first with `node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts` (supports `--dry-run`).
+
+A first Google sign-in can link an existing MutinyBIM account when Supabase confirms the address, Google verifies that same address, and Google is the only linked provider. If those details are missing, use the existing account's password. Later sign-ins use the saved account link.
 
 ### Sign-in providers
 

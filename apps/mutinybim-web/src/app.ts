@@ -275,8 +275,18 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     return sessionCookie(token, SESSION_DAYS * 86_400);
   };
 
-  /** Ensures a verified Supabase Auth user has a matching local user + identity row. */
-  async function syncSupabaseUser(sbUser: SupabaseUser, options?: { readonly allowCreate?: boolean }): Promise<{ readonly user: UserRow; readonly created: boolean } | null> {
+  /**
+   * Ensures a Supabase Auth user has a matching local user + identity row.
+   * An existing account is attached by email only when this sign-in came
+   * through Google and Google reported the address verified. Supabase marks
+   * every address confirmed when its "Confirm email" setting is off, so a
+   * password sign-up proves nothing. An emailed link isn't enough either: the
+   * Supabase user behind it may carry a password someone else chose. For the
+   * same reason the Supabase user must sign in only through Google: Supabase
+   * merges a Google sign-in into an existing Supabase user with that address,
+   * which may already hold someone else's password.
+   */
+  async function syncSupabaseUser(sbUser: SupabaseUser, options?: { readonly allowCreate?: boolean; readonly provenBy?: "google" }): Promise<{ readonly user: UserRow; readonly created: boolean } | "email_in_use" | null> {
     const isGoogle = sbUser.providers.includes("google");
     const byIdentity = await db.userByIdentity("supabase", sbUser.id);
     if (byIdentity) {
@@ -284,17 +294,24 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       return { user: byIdentity, created: false };
     }
     const byEmail = await db.userByEmail(sbUser.email);
+    let created = false;
     if (byEmail) {
+      if (options?.provenBy !== "google" || !sbUser.emailConfirmed || !sbUser.googleVerifiedEmail) {
+        console.warn("[mutinybim-web] a supabase sign-in used an existing account's email; not attached", { userId: byEmail.id });
+        return "email_in_use";
+      }
       await db.linkIdentity("supabase", sbUser.id, byEmail.id);
-      if (isGoogle) await db.linkIdentity("google", sbUser.id, byEmail.id);
-      return { user: byEmail, created: false };
+    } else {
+      if (options?.allowCreate === false || !config.signupOpen) return null;
+      created = await db.createSupabaseUser({ id: sbUser.id, email: sbUser.email, displayName: sbUser.displayName });
     }
-    if (options?.allowCreate === false || !config.signupOpen) return null;
-    const created = await db.createUser({ id: sbUser.id, email: sbUser.email, displayName: sbUser.displayName, passwordHash: null });
-    await db.linkIdentity("supabase", sbUser.id, created.id);
-    if (isGoogle) await db.linkIdentity("google", sbUser.id, created.id);
-    console.log("[mutinybim-web] account synced from supabase", { userId: created.id, google: isGoogle });
-    return { user: created, created: true };
+    // A duplicate insert can lose to a different binding. Only the stored
+    // subject owner can receive this session or its Google sign-in marker.
+    const linked = await db.userByIdentity("supabase", sbUser.id);
+    if (!linked || linked.id !== (byEmail?.id ?? sbUser.id)) return "email_in_use";
+    if (isGoogle) await db.linkIdentity("google", sbUser.id, linked.id);
+    if (created) console.log("[mutinybim-web] account synced from supabase", { userId: linked.id, google: isGoogle });
+    return { user: linked, created };
   }
 
   /** A form post must come from this app's own pages (SameSite cookies plus an Origin check). */
@@ -459,7 +476,10 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
       console.error("[mutinybim-web] supabase callback verification failed", { code: err.code, status: err.status });
       return html(res, err.status, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: err.words } }), { "set-cookie": clearPkce });
     }
-    const synced = await syncSupabaseUser(verified.user);
+    const synced = await syncSupabaseUser(verified.user, flow === "google" ? { provenBy: "google" } : {});
+    if (synced === "email_in_use") {
+      return html(res, 409, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "That email belongs to an existing MutinyBIM account. Log in with that account's password, or reset it." } }), { "set-cookie": clearPkce });
+    }
     if (!synced) {
       return html(res, 403, loginPage(config, { returnTo: "/models", flash: { kind: "error", text: "New accounts can't be made on this server right now." } }), { "set-cookie": clearPkce });
     }
@@ -530,19 +550,27 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
         const returnTo = safeReturn(form.get("return_to"));
         if (!throttle.allow(`login:${ipOf(req)}`)) return html(res, 429, loginPage(config, { email, returnTo, flash: { kind: "error", text: "Too many tries from here. Wait ten minutes, then try again." } }));
         if (config.supabase) {
+          // Pre-migration local accounts still hold an scrypt hash; the right password opens them without linking anything.
+          const localAccount = async (): Promise<UserRow | null> => {
+            const legacy = email ? await db.userByEmail(email) : null;
+            return legacy?.password_hash && (await verifyPassword(password, legacy.password_hash)) ? legacy : null;
+          };
           try {
             const signedIn = await signInWithPassword(config.supabase, { email, password }, options.fetchImpl);
             const synced = await syncSupabaseUser(signedIn.user);
+            if (synced === "email_in_use") {
+              // The Supabase user stays unattached, but whoever knows this account's own password is its owner.
+              const legacy = await localAccount();
+              if (legacy) return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
+              return html(res, 409, loginPage(config, { email, returnTo, flash: { kind: "error", text: "That email belongs to an existing MutinyBIM account. Log in with that account's password, or reset it." } }));
+            }
             if (!synced) return html(res, 403, loginPage(config, { email, returnTo, flash: { kind: "error", text: "New accounts can't be made on this server right now." } }));
             return redirect(res, returnTo, { "set-cookie": await startSession(synced.user.id, "password") });
           } catch (err) {
             if (!(err instanceof SupabaseAuthError)) throw err;
             if (err.code === "invalid_credentials") {
-              // Seamless fallback for pre-migration local accounts that still hold an scrypt hash.
-              const legacy = email ? await db.userByEmail(email) : null;
-              if (legacy?.password_hash && (await verifyPassword(password, legacy.password_hash))) {
-                return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
-              }
+              const legacy = await localAccount();
+              if (legacy) return redirect(res, returnTo, { "set-cookie": await startSession(legacy.id, "password") });
             }
             return html(res, err.status, loginPage(config, { email, returnTo, flash: { kind: "error", text: err.words } }));
           }
@@ -653,6 +681,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
               });
             }
             const synced = await syncSupabaseUser({ ...signedUp.user, displayName: name });
+            if (synced === "email_in_use") return fail("An account with that email already exists. Log in instead.", 409);
             if (!synced) return fail("New accounts can't be made on this server right now.", 403);
             console.log("[mutinybim-web] account made", { userId: synced.user.id, auth: "supabase" });
             return redirect(res, "/models?welcome=1", { "set-cookie": await startSession(synced.user.id, "password") });

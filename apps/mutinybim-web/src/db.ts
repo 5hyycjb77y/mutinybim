@@ -387,6 +387,8 @@ export interface WebStore {
   close(): Promise<void>;
 
   createUser(input: { id: string; email: string; displayName: string; passwordHash: string | null }): Promise<UserRow>;
+  /** Create a local account and its Supabase subject together. A conflict leaves both records as they were. */
+  createSupabaseUser(input: { id: string; email: string; displayName: string }): Promise<boolean>;
   userByEmail(email: string): Promise<UserRow | null>;
   userById(id: string): Promise<UserRow | null>;
   renameUser(id: string, displayName: string): Promise<void>;
@@ -714,6 +716,17 @@ export function openDb(file: string): WebStore {
       const user = toUser(db.prepare("SELECT * FROM users WHERE id = ?").get(input.id));
       if (!user) throw new Error("[mutinybim-web db] the new account was not saved");
       return user;
+    },
+    async createSupabaseUser({ id, email, displayName }) {
+      return writeTransaction(() => {
+        if (db.prepare("SELECT 1 FROM identities WHERE provider = 'supabase' AND subject = ?").get(id)) return false;
+        const at = now();
+        const inserted = db.prepare("INSERT INTO users (id, email, display_name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
+          .run(id, email, displayName, at);
+        if (!inserted.changes) return false;
+        db.prepare("INSERT INTO identities (provider, subject, user_id, created_at) VALUES ('supabase', ?, ?, ?)").run(id, id, at);
+        return true;
+      });
     },
     async userByEmail(email) {
       return toUser(db.prepare("SELECT * FROM users WHERE email = ?").get(email));

@@ -158,8 +158,12 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
       if (!user) throw new Error("[mutinybim-web supabase-db] the new account was not saved");
       return user;
     },
+    async createSupabaseUser({ id, email, displayName }) {
+      return (await rpc("web_create_supabase_user", { p_id: id, p_email: email, p_display_name: displayName })) === true;
+    },
     async userByEmail(email) {
-      return toUser(await selectOne("users", { select: "*", email: `ilike.${email.trim().toLowerCase()}` }));
+      const rows = await rpc("web_user_by_email", { p_email: email.trim() });
+      return toUser(Array.isArray(rows) ? rows[0] : null);
     },
     userById,
     async renameUser(id, displayName) {
