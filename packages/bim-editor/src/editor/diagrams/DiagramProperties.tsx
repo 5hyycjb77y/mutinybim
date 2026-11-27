@@ -141,7 +141,7 @@ export function DiagramProperties({ model, view, selectedIds, canEdit, blockedRe
           ...(isOneLine ? ([['utility', 'Utility source above each service', hints.utility !== false]] as const) : []),
           ['showWarnings', 'Warnings on the drawing', hints.showWarnings !== false],
           ...(def.kind !== 'plumbing_riser' ? ([['showLoads', 'Equipment loads (motors, units)', hints.showLoads === true]] as const) : []),
-          ...(isOneLine ? ([['showLinkLoads', 'Feeder demand loads', hints.showLinkLoads === true]] as const) : []),
+          ...(isOneLine ? ([['showLinkLoads', 'Link demand loads', hints.showLinkLoads === true]] as const) : []),
         ] as ReadonlyArray<readonly ['utility' | 'showWarnings' | 'showLoads' | 'showLinkLoads', string, boolean]>
       ).map(([key, label, on]) => (
         <Field key={key} orientation="horizontal">
