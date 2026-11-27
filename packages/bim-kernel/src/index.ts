@@ -245,3 +245,6 @@ export { lineEndCommandSchemas, isLineEndCommand, type LineEndCommand } from "./
 export { joinedEndFollowers, carryJoinedEndsOfReshape } from "./joins/carry";
 // Shared material definitions (`kernel.material` v1): 2D plan/section poché and 3D appearance.
 export * from "./materials";
+// Sheet review markups: non-printing felt-tip marker & highlighter ink on sheets (`documents:sheet_markups`).
+export * from "./annotation/markups";
+export * from "./annotation/markup-commands";

@@ -2,7 +2,7 @@
 
 # Edit commands (ctx.edit)
 
-Every single edit a script may send with `ctx.edit`, read from the kernel's own schemas and those of the add-ons in force: 209 commands. The kit functions build these for you; reach for a command directly only when no kit function fits.
+Every single edit a script may send with `ctx.edit`, read from the kernel's own schemas and those of the add-ons in force: 212 commands. The kit functions build these for you; reach for a command directly only when no kit function fits.
 
 | Command | From |
 | --- | --- |
@@ -14,6 +14,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 | [`add_link_members`](#add_link_members) | kernel |
 | [`add_local_rule`](#add_local_rule) | kernel |
 | [`add_question`](#add_question) | kernel |
+| [`add_sheet_markup`](#add_sheet_markup) | kernel |
 | [`add_submittal`](#add_submittal) | kernel |
 | [`answer_question`](#answer_question) | kernel |
 | [`assign_elements_to_group`](#assign_elements_to_group) | kernel |
@@ -23,6 +24,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 | [`change_elevation`](#change_elevation) | kernel |
 | [`clear_classification`](#clear_classification) | kernel |
 | [`clear_group_typical`](#clear_group_typical) | kernel |
+| [`clear_sheet_markups`](#clear_sheet_markups) | kernel |
 | [`connect_into`](#connect_into) | kernel |
 | [`connect_runs`](#connect_runs) | kernel |
 | [`copy_drawing_items`](#copy_drawing_items) | kernel |
@@ -212,6 +214,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 | [`update_level`](#update_level) | kernel |
 | [`update_phase`](#update_phase) | kernel |
 | [`update_phase_filter`](#update_phase_filter) | kernel |
+| [`update_sheet_markup`](#update_sheet_markup) | kernel |
 | [`update_tag_style`](#update_tag_style) | kernel |
 | [`update_text_style`](#update_text_style) | kernel |
 | [`update_view_template`](#update_view_template) | kernel |
@@ -246,7 +249,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 
 - itemId: string
 - ownerId: string
-- shape: "text"|"line"|"rect"|"cloud"|"dimension"|"tag"|"arc"|"circle"|"polyline"|"spline"|"region"|"component"|"repeat"|"batt"|"callout"|"figure"|"field_block"
+- shape: "text"|"line"|"rect"|"cloud"|"dimension"|"tag"|"arc"|"circle"|"polyline"|"spline"|"region"|"component"|"repeat"|"batt"|"callout"|"figure"|"field_block"|"markup"
 - points: { x: number; y: number }[]
 - text?: string
 - textSize?: number
@@ -284,6 +287,13 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 ## add_question
 
 - questions: { questionId: string; type?: "question"|"assumption"|"field_verify"; number?: string; text: string; askOf: string; anchor: { elementIds?: string[]; point?: {…} }; blocksIssue?: boolean; closeBy?: string; answeredBy?: { elementId: string; field: string }; externalRefs?: { provider: string; ref: string }[]; askOfAuthor?: { provider: string; subject: string; displayName?: string }; askedBefore?: string }[]
+
+## add_sheet_markup
+
+- itemId: string
+- sheetId: string
+- points: { x: number; y: number }[]
+- markup?: { tool?: "marker"|"highlighter"; color?: string; widthMm?: number; opacity?: number; status?: "open"|"addressed"|"resolved"; smartShape?: "line"|"rect"|"circle"; author?: string; createdAt?: string; addressedNote?: string; addressedColor?: string; note?: string }
 
 ## add_submittal
 
@@ -346,6 +356,11 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 ## clear_group_typical
 
 - groupId: string
+
+## clear_sheet_markups
+
+- sheetId: string
+- statuses?: "open"|"addressed"|"resolved"[]
 
 ## connect_into
 
@@ -1191,7 +1206,7 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 
 ## restore_document_elements
 
-- items: { elementId: string; before: { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "view"; name: string; viewType: "floor_plan"|"ceiling_plan"|"section"|"elevation"|"three_d"|"schedule"|"detail"; cropMin: {…}; cropMax: {…}; props?: {…} } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "view_template"; name: string; description?: string; viewTypes?: "floor_plan"|"ceiling_plan"|"section"|"elevation"|"three_d"|"detail"|"schedule"[]; locks: "view_range"|"category_overrides"|"detail_level"|"visual_style"|"discipline"|"annotations"|"pack_props"[]; props: {…}; sourceLibraryId?: string } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "sheet"; number: string; title: string; viewIds: string[]; props?: {…} } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "viewport"; sheetId: string; viewId: string; center: {…}; size: {…}; scale: number; northArrow?: boolean; northArrowOffsetMm?: {…}; titleOffsetMm?: {…}; titleRuleMm?: number } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "drawing_item"; ownerId: string; shape: "text"|"line"|"rect"|"cloud"|"dimension"|"tag"|"arc"|"circle"|"polyline"|"spline"|"region"|"component"|"repeat"|"batt"|"callout"|"figure"|"field_block"; points: {…}[]; text?: string; textSize?: number; note?: {…}; dim?: {…}; tag?: {…}; callout?: {…}; lineStyle?: {…}; closed?: boolean; ccw?: boolean; fill?: {…}; component?: {…}; batt?: {…}; category?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"; detailGroup?: string; pinned?: boolean; figure?: {…} | {…}; block?: {…} } | null; expectedVersion: number }[]
+- items: { elementId: string; before: { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "view"; name: string; viewType: "floor_plan"|"ceiling_plan"|"section"|"elevation"|"three_d"|"schedule"|"detail"; cropMin: {…}; cropMax: {…}; props?: {…} } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "view_template"; name: string; description?: string; viewTypes?: "floor_plan"|"ceiling_plan"|"section"|"elevation"|"three_d"|"detail"|"schedule"[]; locks: "view_range"|"category_overrides"|"detail_level"|"visual_style"|"discipline"|"annotations"|"pack_props"[]; props: {…}; sourceLibraryId?: string } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "sheet"; number: string; title: string; viewIds: string[]; props?: {…} } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "viewport"; sheetId: string; viewId: string; center: {…}; size: {…}; scale: number; northArrow?: boolean; northArrowOffsetMm?: {…}; titleOffsetMm?: {…}; titleRuleMm?: number } | { id: string; version: number; authoredRev: object; partition?: {…}; deleted?: boolean; kind: "drawing_item"; ownerId: string; shape: "text"|"line"|"rect"|"cloud"|"dimension"|"tag"|"arc"|"circle"|"polyline"|"spline"|"region"|"component"|"repeat"|"batt"|"callout"|"figure"|"field_block"|"markup"; points: {…}[]; text?: string; textSize?: number; note?: {…}; dim?: {…}; tag?: {…}; callout?: {…}; lineStyle?: {…}; closed?: boolean; ccw?: boolean; fill?: {…}; component?: {…}; batt?: {…}; category?: "detail_lines"|"hatching"|"masking"|"components"|"insulation"|"text"|"dimensions"|"tags"|"clouds"; detailGroup?: string; pinned?: boolean; figure?: {…} | {…}; block?: {…}; markup?: {…} } | null; expectedVersion: number }[]
 
 ## review_submittal
 
@@ -1701,6 +1716,20 @@ Every single edit a script may send with `ctx.edit`, read from the kernel's own 
 - filterId: string
 - name?: string
 - statuses?: { new?: "show"|"halftone"|"dashed"|"hide"; existing?: "show"|"halftone"|"dashed"|"hide"; demolished?: "show"|"halftone"|"dashed"|"hide"; temporary?: "show"|"halftone"|"dashed"|"hide" }
+
+## update_sheet_markup
+
+- itemId: string
+- points?: { x: number; y: number }[]
+- tool?: "marker"|"highlighter"
+- color?: string
+- widthMm?: number
+- opacity?: number | null
+- status?: "open"|"addressed"|"resolved"
+- smartShape?: "line"|"rect"|"circle" | null
+- addressedNote?: string | null
+- addressedColor?: string | null
+- note?: string | null
 
 ## update_tag_style
 

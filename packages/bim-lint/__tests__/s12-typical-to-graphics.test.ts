@@ -70,7 +70,7 @@ describe("s12-typical-to-graphics", () => {
     expect(drawTypicalTo(ctx, { show: true })).toBe(2);
     const texts = prims.filter((p) => p.kind === "text");
     expect(texts.map((t) => (t.kind === "text" ? t.text : ""))).toEqual(["TYPICAL TO UNIT 001", "TYPICAL TO UNIT 001"]);
-    expect(prims.every((p) => p.kind === "rect" || p.tone === "halftone")).toBe(true);
+    expect(prims.every((p) => p.kind === "rect" || p.kind === "stroke" || p.tone === "halftone")).toBe(true);
     expect(prims.filter((p) => p.kind === "line" && p.dash === undefined).length).toBeGreaterThan(4);
     expect(typicalToShown({ show: "yes" })).toBe(false);
     expect(TYPICAL_TO_VIEW_GRAPHICS.hintsKey).toBe(TYPICAL_TO_HINTS_KEY);

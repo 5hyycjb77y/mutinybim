@@ -167,6 +167,8 @@ export function registerBimRenderTools(server: McpServer, caller: ResolveBimCall
         ...target,
         sheet: z.string().min(1).max(200).describe("Sheet id or number, e.g. M-101."),
         region_in: box.optional().describe("Part of the sheet to show, paper inches from its top-left."),
+        include_markups: z.boolean().optional().describe("Overlay human review markups on the sheet in vivid colour (default true)."),
+        monochrome: z.boolean().optional().describe("Draw underlying sheet linework monochrome B&W so colour review markups stand out clearly (default false)."),
         ...imageInput,
       },
     },
@@ -182,10 +184,10 @@ export function registerBimRenderTools(server: McpServer, caller: ResolveBimCall
           const views = sheetViewports(model, sheet).map((v) => v.view);
           const linked = await linkedBackgrounds(extra, args.project_id, model, views);
           const graphics = await drawingCategoriesFor(extra, views, stores.firmClasses);
-          const scene: SheetScene = withCategoryRegistry(graphics.categories, () => buildSheetSceneFor(model, sheetId, { projectName: titleBlock.projectName, projectNumber: titleBlock.projectNumber, firmName: titleBlock.firmName, backgrounds: linked.backgrounds }));
+          const scene: SheetScene = withCategoryRegistry(graphics.categories, () => buildSheetSceneFor(model, sheetId, { projectName: titleBlock.projectName, projectNumber: titleBlock.projectNumber, firmName: titleBlock.firmName, backgrounds: linked.backgrounds, includeMarkups: args.include_markups ?? true }));
           const highlight = highlightOnSheet(model, sheetId, args.highlight_ids ?? []);
           const region = args.region_in ? { min: { x: args.region_in.min.x * IN, y: args.region_in.min.y * IN }, max: { x: args.region_in.max.x * IN, y: args.region_in.max.y * IN } } : null;
-          const image = renderSceneImage(scene, { dpi: args.dpi ?? RENDER_DEFAULT_DPI, maxPx: args.max_px ?? RENDER_DEFAULT_MAX_PX, region, highlights: highlight.boxes, fontDir: NOTE_FONTS_DIR });
+          const image = renderSceneImage(scene, { dpi: args.dpi ?? RENDER_DEFAULT_DPI, maxPx: args.max_px ?? RENDER_DEFAULT_MAX_PX, region, highlights: highlight.boxes, fontDir: NOTE_FONTS_DIR, monochrome: args.monochrome });
           return { number: sheet.number, title: sheet.title, scene, image, highlight, linkedMissing: linked.missing, printedTitle: titleBlockValues(sheet, titleBlock), graphicsNote: graphics.note };
         });
         if (typeof drawn === "string") return failure(drawn);

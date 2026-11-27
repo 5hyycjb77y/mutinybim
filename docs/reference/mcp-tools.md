@@ -146,7 +146,7 @@ Input: `project_id`, `model_id`, `view`, `region_ft`?, `region_in`?, `focus_ids`
 
 Draw one sheet from the last saved revision as a PNG you can look at, exactly as it prints: border, viewports at scale with titles, notes, schedules, title block. Use it to check a sheet's layout before printing or issuing. Optional: a region in paper inches from the sheet's top-left (to read small text), elements or drawn items to outline in red, resolution. A whole 36 x 24 sheet at the default size is an overview; zoom with region_in to read notes.
 
-Input: `project_id`, `model_id`, `sheet`, `region_in`?, `dpi`?, `max_px`?, `highlight_ids`?, `keep_copy`?
+Input: `project_id`, `model_id`, `sheet`, `region_in`?, `include_markups`?, `monochrome`?, `dpi`?, `max_px`?, `highlight_ids`?, `keep_copy`?
 
 ### bim_print_sheet_pdf
 

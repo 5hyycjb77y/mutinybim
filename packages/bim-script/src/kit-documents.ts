@@ -62,6 +62,7 @@ import {
 import { openSchedule, scheduleV1ToV2, ScheduleDefinitionError, type ColumnValues, type RowSet } from "@permitzip/bim-kernel/schedules";
 import { measureIn, type Measure } from "@permitzip/bim-units";
 import { ScriptRunError, type ScriptContext } from "./context";
+import type { ScriptRenderRequest } from "./output";
 import {
   formatStandardNoteSet,
   listStandardNoteSets,
@@ -1838,5 +1839,89 @@ export const documents = {
       paragraphs,
     });
     return itemId;
+  },
+  /** Queues a sheet PNG image to be rasterized by the host and attached to `bim_run_script`'s answer (with review markups included by default). */
+  renderSheet(
+    ctx: ScriptContext,
+    sheetRef: string,
+    opts: {
+      readonly label?: string;
+      readonly regionMm?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+      readonly includeMarkups?: boolean;
+      readonly includeResolvedMarkups?: boolean;
+      readonly monochromeSheet?: boolean;
+      readonly highlightIds?: readonly string[];
+      readonly dpi?: number;
+      readonly maxPx?: number;
+    } = {},
+  ): ScriptRenderRequest {
+    const req = onWorking(ctx, "documents.renderSheet", (model): ScriptRenderRequest => {
+      const trimmed = sheetRef.trim();
+      const direct = model.elements[trimmed];
+      let sheet = direct && direct.kind === "sheet" && !direct.deleted ? direct : undefined;
+      if (!sheet) {
+        const lower = trimmed.toLowerCase();
+        for (const el of Object.values(model.elements)) {
+          if (el.kind === "sheet" && !el.deleted && (el.number.toLowerCase() === lower || el.title.toLowerCase() === lower)) {
+            sheet = el;
+            break;
+          }
+        }
+      }
+      if (!sheet) throw new ScriptRunError(`Sheet "${sheetRef}" was not found.`);
+      return {
+        kind: "sheet",
+        targetId: sheet.id,
+        label: opts.label ?? `Sheet ${sheet.number} (${sheet.title})`,
+        ...(opts.regionMm ? { regionMm: opts.regionMm } : {}),
+        includeMarkups: opts.includeMarkups ?? true,
+        ...(opts.includeResolvedMarkups ? { includeResolvedMarkups: true } : {}),
+        ...(opts.monochromeSheet !== undefined ? { monochromeSheet: opts.monochromeSheet } : {}),
+        ...(opts.highlightIds && opts.highlightIds.length > 0 ? { highlightIds: [...opts.highlightIds] } : {}),
+        ...(opts.dpi !== undefined ? { dpi: opts.dpi } : {}),
+        ...(opts.maxPx !== undefined ? { maxPx: opts.maxPx } : {}),
+      };
+    });
+    ctx.render(req);
+    return req;
+  },
+  /** Queues a view PNG image to be rasterized by the host and attached to `bim_run_script`'s answer. */
+  renderView(
+    ctx: ScriptContext,
+    viewRef: string,
+    opts: {
+      readonly label?: string;
+      readonly regionMm?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+      readonly highlightIds?: readonly string[];
+      readonly dpi?: number;
+      readonly maxPx?: number;
+    } = {},
+  ): ScriptRenderRequest {
+    const req = onWorking(ctx, "documents.renderView", (model): ScriptRenderRequest => {
+      const trimmed = viewRef.trim();
+      const direct = model.elements[trimmed];
+      let view = direct && direct.kind === "view" && !direct.deleted ? direct : undefined;
+      if (!view) {
+        const lower = trimmed.toLowerCase();
+        for (const el of Object.values(model.elements)) {
+          if (el.kind === "view" && !el.deleted && el.name.toLowerCase() === lower) {
+            view = el;
+            break;
+          }
+        }
+      }
+      if (!view) throw new ScriptRunError(`View "${viewRef}" was not found.`);
+      return {
+        kind: "view",
+        targetId: view.id,
+        label: opts.label ?? `View ${view.name}`,
+        ...(opts.regionMm ? { regionMm: opts.regionMm } : {}),
+        ...(opts.highlightIds && opts.highlightIds.length > 0 ? { highlightIds: [...opts.highlightIds] } : {}),
+        ...(opts.dpi !== undefined ? { dpi: opts.dpi } : {}),
+        ...(opts.maxPx !== undefined ? { maxPx: opts.maxPx } : {}),
+      };
+    });
+    ctx.render(req);
+    return req;
   },
 };

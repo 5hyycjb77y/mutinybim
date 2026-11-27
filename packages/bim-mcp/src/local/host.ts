@@ -5,6 +5,7 @@ import { autoApproval, elicitationApproval, type ApprovalGate } from "../approva
 import type { BimToolHost, ScriptRunnerAvailability, ScriptRunnerHost } from "../host";
 import { MemoryScriptLibrary } from "./library";
 import { MemoryScriptPreviewStore } from "../scripts/previews";
+import { renderScriptRequests } from "../scripts/render-images";
 import type { LocalModelServer } from "./model-server";
 import { localCaller, localModelAccess, type LocalModelAccessOptions } from "./models";
 import type { ResolveBimCaller } from "../caller";
@@ -82,5 +83,6 @@ export function createLocalHost(options: LocalHostOptions): LocalHost {
     },
     approvals,
     previews: () => kept,
+    renderImages: (_extra, _args, model, requests) => renderScriptRequests(model, requests),
   };
 }

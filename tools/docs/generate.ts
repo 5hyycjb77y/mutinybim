@@ -41,6 +41,7 @@ const KIT_PAGES: readonly { readonly ns: string; readonly file: string; readonly
   { ns: "parts", file: "parts", title: "parts", about: "Making part types: a part's bodies, connectors and parameters." },
   { ns: "PartBuilder", file: "part-builder", title: "PartBuilder", about: "The builder `parts.part()` returns: boxes, extrusions, sweeps, connectors and parameters on one part type." },
   { ns: "documents", file: "documents", title: "documents", about: "Views, sheets, schedules, tags, notes, dimensions and the rest of a drawing set." },
+  { ns: "markups", file: "markups", title: "markups", about: "Sheet review markups: list marked sheets, render full sheets or tight markup crops with vivid redlines over monochrome linework, add strokes, and yellow-line (mark addressed), resolve or clear review markups." },
   { ns: "drafting", file: "drafting", title: "drafting", about: "Full CAD drafting-view authoring: detail views, linework, curves, hatched/halftone/screened/masking regions, 2D components, repeating details, batt insulation, masked notes with filled NCS leaders, margin-aligned callout stacks, dimensions, modify operations, auto-crop, and layout QA." },
   { ns: "checks", file: "checks", title: "checks", about: "Checks a script runs on its own output before a person sees it." },
   { ns: "electrical", file: "electrical", title: "electrical", about: "IES LM-63 photometrics, normal illuminance, NFPA 101 / IBC emergency egress checks, and 2D plan overlays." },

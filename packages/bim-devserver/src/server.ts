@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { WebSocketServer } from "ws";
-import { asRevision, branchModelId, buildSheetScene, buildSheetSceneFor, definitionTypes, demoSheetDefinition, elementValues, exampleRooftopUnit, executeCommand, isBranchId, parseBranchModelId, type Command, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
+import { asRevision, branchModelId, buildSheetScene, buildSheetSceneFor, definitionTypes, demoSheetDefinition, documentIndex, elementValues, exampleRooftopUnit, executeCommand, isBranchId, parseBranchModelId, type Command, type DrawingItem, type ModelState, type RunSegment } from "@permitzip/bim-kernel";
 import { createDemoModel, createPlacedDemoModel } from "@permitzip/bim-pack-mechanical/seed";
 import { captureSnapshot, issueFromSnapshot, renderSheetPdf } from "@permitzip/bim-sheets";
 import { InMemoryBranchHost, type SyncHub } from "@permitzip/bim-sync";
@@ -359,6 +359,91 @@ async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () =>
     if (!served) return send(res, 404, "application/json", JSON.stringify({ error: "No such model or branch here." }));
     const head = await served.sequencer.head();
     return send(res, 200, "application/json", JSON.stringify({ modelId: head.modelId, revision: head.revision, elements: Object.keys(head.elements).length, connections: served.hub.connectionCount() }));
+  }
+  if (req.method === "GET" && url.pathname === "/debug/markups") {
+    const served = await models.open(url.searchParams.get("model") ?? mainModelId);
+    if (!served) return send(res, 404, "application/json", JSON.stringify({ error: "No such model or branch here." }));
+    const head = await served.sequencer.head();
+    const idx = documentIndex(head);
+    const all: Array<{
+      itemId: string;
+      sheetId: string;
+      sheetNumber: string;
+      points: DrawingItem["points"];
+      markup: NonNullable<DrawingItem["markup"]>;
+    }> = [];
+    for (const sheet of idx.sheets) {
+      for (const item of idx.markupsBySheet.get(sheet.id) ?? []) {
+        if (item.deleted || !item.markup) continue;
+        all.push({
+          itemId: item.id,
+          sheetId: sheet.id,
+          sheetNumber: sheet.number,
+          points: item.points,
+          markup: item.markup,
+        });
+      }
+    }
+    return send(res, 200, "application/json", JSON.stringify({ modelId: head.modelId, revision: head.revision, count: all.length, markups: all }, null, 2));
+  }
+  if (req.method === "POST" && url.pathname === "/debug/save-showcase-markups") {
+    const allowSave = process.env.MUTINYBIM_ALLOW_SAVE_SHOWCASE_MARKUPS === "1" || process.argv.includes("--allow-save-showcase-markups");
+    if (!allowSave) {
+      return send(
+        res,
+        403,
+        "application/json",
+        JSON.stringify({
+          error: "Showcase markup saving is disabled by default. Restart devserver with MUTINYBIM_ALLOW_SAVE_SHOWCASE_MARKUPS=1 (or --allow-save-showcase-markups) and send header 'X-Mutiny-Dev-Save: 1'.",
+        }),
+      );
+    }
+    const remote = req.socket.remoteAddress ?? "";
+    const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+    const origin = req.headers.origin;
+    const originOk =
+      !origin ||
+      origin === `http://127.0.0.1:${url.port || "80"}` ||
+      origin === `http://localhost:${url.port || "80"}`;
+    const saveHeader = req.headers["x-mutiny-dev-save"];
+    if (!isLoopback || !originOk || saveHeader !== "1") {
+      return send(
+        res,
+        403,
+        "application/json",
+        JSON.stringify({ error: "Forbidden: requires loopback client, same-origin (or no Origin), and 'X-Mutiny-Dev-Save: 1' header." }),
+      );
+    }
+    const served = await models.open(url.searchParams.get("model") ?? mainModelId);
+    if (!served) return send(res, 404, "application/json", JSON.stringify({ error: "No such model or branch here." }));
+    const head = await served.sequencer.head();
+    const idx = documentIndex(head);
+    const commands: Array<Extract<Command, { type: "add_sheet_markup" }>> = [];
+    for (const sheet of idx.sheets) {
+      for (const item of idx.markupsBySheet.get(sheet.id) ?? []) {
+        if (item.deleted || !item.markup) continue;
+        commands.push({
+          type: "add_sheet_markup",
+          itemId: item.id,
+          sheetId: sheet.id,
+          points: item.points.map((p) => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 })),
+          markup: item.markup,
+        });
+      }
+    }
+    const targetPath = path.join(root, "packages/bim-first-party/src/seed/showcase-markups.ts");
+    const tsSource =
+      `import type { Command } from "@permitzip/bim-kernel";\n\n` +
+      `export type ShowcaseMarkupCommand = Extract<Command, { type: "add_sheet_markup" }>;\n\n` +
+      `/**\n` +
+      ` * Seeded sheet review markups for the MutinyBIM showcase model (\`createShowcaseDemoModel\`).\n` +
+      ` * Saved from live showcase rev ${head.revision} (${commands.length} stroke${commands.length === 1 ? "" : "s"}).\n` +
+      ` */\n` +
+      `export const SHOWCASE_SHEET_MARKUPS: readonly ShowcaseMarkupCommand[] = ${JSON.stringify(commands, null, 2)};\n`;
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(targetPath, tsSource, "utf8");
+    console.log("[bim-devserver] saved showcase markups", { count: commands.length, revision: head.revision, targetPath });
+    return send(res, 200, "application/json", JSON.stringify({ ok: true, saved: commands.length, revision: head.revision, file: "packages/bim-first-party/src/seed/showcase-markups.ts" }));
   }
   if (editor && (await editor.handle(req, res, url))) return;
   send(res, 404, "text/plain", "Not found");

@@ -13,6 +13,7 @@ export { BASE_REVISION, TRADE_BASE_REVISION, TRADE_TARGET, PROJECT_SCHEMAS, PROJ
 export { interestOf, withAreaSessionVia, type SessionOpener } from "./area";
 export { resolveAreaLevel, resolveLevelRef } from "./level-ref";
 export { registerBimScriptTools, approvalIo, SEALED_MACHINE_WORDS, type ScriptToolHelpers, type ScriptToolOptions } from "./scripts/tools";
+export { renderScriptRequests } from "./scripts/render-images";
 export {
   SCRIPT_APPLY_TOOL,
   SCRIPT_SAVE_PART_TYPE_TOOL,

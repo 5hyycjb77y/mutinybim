@@ -353,3 +353,15 @@ Author permit-ready 2D CAD mechanical/architectural details with proper lineweig
 5. Call drafting.fitCrop to set a tight crop box, run drafting.check to verify zero text overlaps, zero unmasked line crossings, and zero out-of-crop items, then place the detail view on a sheet with documents.place.
 
 Uses: `drafting.view`, `drafting.region`, `drafting.rect`, `drafting.line`, `drafting.component`, `drafting.breakLine`, `drafting.dimension`, `drafting.calloutStack`, `drafting.detailTitle`, `drafting.fitCrop`, `drafting.check`, `documents.place`
+
+## Sheet review markups
+
+Task: sheet markups
+
+Find every sheet with human felt-tip marker redlines, render the sheet PNG images (full sheet + zoomed crop) directly in bim_run_script, read exact model coordinates for every overlapped viewport, and yellow-line markups as addressed once modeled.
+
+1. Read sheets, viewports, views, and drawing_items (reads: { levels: true, kinds: ["sheet", "viewport", "view", "drawing_item"] }).
+2. Call markups.renderAllMarkedSheets(ctx) to queue full-sheet and zoomed-crop PNG renders with vivid markups over crisp monochrome linework, and call markups.list(ctx, sheetId) for exact viewport model coordinates (ft).
+3. Inspect the returned PNG images directly, model the requested revisions (routes, equipment, tags), and yellow-line the handled strokes with markups.markAddressed(ctx, ids, { note }).
+
+Uses: `markups.sheetsWithMarkups`, `markups.list`, `markups.renderSheet`, `markups.renderAllMarkedSheets`, `markups.markAddressed`

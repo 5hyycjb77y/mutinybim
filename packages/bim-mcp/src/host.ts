@@ -1,6 +1,6 @@
 import type { AuthorRef, Command, ModelState, Registry } from "@permitzip/bim-kernel";
 import type { PartTypeItem, ScriptItem } from "@permitzip/bim-library";
-import type { ScriptRunRequest, ScriptRunResult } from "@permitzip/bim-script";
+import type { ScriptRenderRequest, ScriptRunRequest, ScriptRunResult } from "@permitzip/bim-script";
 import type { AgentSession } from "@permitzip/bim-sync";
 import type { ApprovalGate } from "./approvals";
 import type { ScriptPreviewStore } from "./scripts/previews";
@@ -27,11 +27,37 @@ import type { ScriptPreviewStore } from "./scripts/previews";
  * cards and sealed script machines through the same interface.
  */
 
+export type ToolContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
 export interface ToolResult {
   [key: string]: unknown;
-  content: { type: "text"; text: string }[];
+  content: ToolContentBlock[];
   isError?: boolean;
 }
+
+/** One rasterized sheet or view PNG produced for a script's `ctx.render` / `markups.renderSheet` request. */
+export interface ScriptRenderedImage {
+  readonly label: string;
+  readonly kind: "sheet" | "view";
+  readonly targetId: string;
+  readonly targetName: string;
+  readonly revision: number;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly dpi: number;
+  readonly regionMm: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+  readonly png: Buffer;
+}
+
+/** Host hook that rasterizes `ctx.render` requests from `bim_run_script` into PNG image blocks. */
+export type ScriptImageRenderer = (
+  extra: unknown,
+  args: { project_id: string; model_id?: string },
+  model: ModelState,
+  requests: readonly ScriptRenderRequest[],
+) => Promise<readonly ScriptRenderedImage[]>;
 
 /** A command built against the model the edit will land on, or the refusal in words. */
 export type BuiltCommand =
@@ -151,6 +177,8 @@ export interface ScriptToolHost {
   previews?(extra: unknown): ScriptPreviewStore;
   /** Loads the part geometry engine for part pictures (default: the open engine). */
   drawingEngine?(): Promise<void>;
+  /** Optional host-side rasterizer for `ctx.render` / `markups.renderSheet` requests (attaches PNG image blocks to `bim_run_script` responses). */
+  readonly renderImages?: ScriptImageRenderer;
   now?(): Date;
 }
 

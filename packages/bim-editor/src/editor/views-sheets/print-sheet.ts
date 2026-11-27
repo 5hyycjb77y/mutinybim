@@ -21,20 +21,36 @@ export async function scenePdfBytes(scene: SheetScene, title: string, snapshotSh
  * classes) lets Visibility/Graphics on a firm class print; absent, the
  * built-in categories, which every other sheet prints identically under.
  */
-export async function printSheetPdf(model: ModelState, sheetId: string, title: SheetTitle, backgrounds: ViewBackgrounds = {}, images: SheetImageSource | null = null, categories?: CategoryRegistry): Promise<{ fileName: string; revision: number; sha256: string }> {
+export async function printSheetPdf(
+  model: ModelState,
+  sheetId: string,
+  title: SheetTitle,
+  backgrounds: ViewBackgrounds = {},
+  images: SheetImageSource | null = null,
+  categories?: CategoryRegistry,
+  opts?: { readonly includeMarkups?: boolean; readonly includeResolvedMarkups?: boolean },
+): Promise<{ fileName: string; revision: number; sha256: string }> {
   const kernel = await import('@permitzip/bim-kernel')
   const { ensureBimChartKinds } = await import('../../contracts/bim/chart-kinds')
   ensureBimChartKinds()
   const sheet = model.elements[sheetId]
   if (!sheet || sheet.kind !== 'sheet') throw new Error('That sheet no longer exists.')
-  const build = () => kernel.buildSheetSceneFor(model, sheetId, { ...title, backgrounds })
+  const includeMarkups = opts?.includeMarkups === true
+  const build = () =>
+    kernel.buildSheetSceneFor(model, sheetId, {
+      ...title,
+      backgrounds,
+      includeMarkups,
+      includeResolvedMarkups: opts?.includeResolvedMarkups === true,
+    })
   const scene = categories ? kernel.withCategoryRegistry(categories, build) : build()
-  const snapshot = await sha256Hex(new TextEncoder().encode(kernel.canonicalJson({ modelId: model.modelId, revision: model.revision, sheetId })))
-  // The project's black-only choice prints here exactly as an issued set does.
+  const snapshot = await sha256Hex(new TextEncoder().encode(kernel.canonicalJson({ modelId: model.modelId, revision: model.revision, sheetId, includeMarkups })))
+  // Permit prints hide markups by default; check sets opt in and keep colour ink vivid over monochrome sheets.
   const { modelPrintOptions } = await import('@permitzip/bim-sheets/pdf-core')
   const bytes = await scenePdfBytes(scene, `${sheet.number} ${sheet.title}`, snapshot, images, modelPrintOptions(model))
   const sha256 = await sha256Hex(bytes)
-  const fileName = `${sheet.number.replace(/[^\w.-]/g, '_')}-rev${model.revision}.pdf`
+  const suffix = includeMarkups ? `-markups-rev${model.revision}` : `-rev${model.revision}`
+  const fileName = `${sheet.number.replace(/[^\w.-]/g, '_')}${suffix}.pdf`
   const blob = new Blob([bytes.slice().buffer], { type: 'application/pdf' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

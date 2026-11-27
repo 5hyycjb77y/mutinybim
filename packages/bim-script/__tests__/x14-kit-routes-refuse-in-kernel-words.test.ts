@@ -29,6 +29,7 @@ function recorder(m: ModelState): { ctx: ScriptContext; sent: Command[] } {
     edit: (c) => void sent.push(c as Command),
     label: () => undefined,
     report: () => undefined,
+    render: () => undefined,
     reads: () => [],
     read: () => { throw new Error("not in this recorder"); },
     proposers: () => [],

@@ -93,7 +93,7 @@ export function unionBoxes(boxes: readonly PaperBox[]): PaperBox | null {
  */
 export function renderSceneImage(
   scene: SheetScene,
-  opts: { readonly dpi: number; readonly maxPx: number; readonly region?: PaperBox | null; readonly highlights?: readonly PaperBox[]; readonly fontDir: string },
+  opts: { readonly dpi: number; readonly maxPx: number; readonly region?: PaperBox | null; readonly highlights?: readonly PaperBox[]; readonly fontDir: string; readonly monochrome?: boolean },
 ): RenderedImage {
   const region = clampBox(opts.region ?? { min: { x: 0, y: 0 }, max: scene.paper }, scene.paper);
   const w = region.max.x - region.min.x;
@@ -103,7 +103,7 @@ export function renderSceneImage(
   const dpi = wantedPx > opts.maxPx ? (opts.maxPx * MM_PER_IN) / Math.max(w, h) : opts.dpi;
   const widthPx = Math.max(1, Math.round((w / MM_PER_IN) * dpi));
 
-  const svg = sceneToSvg(scene);
+  const svg = sceneToSvg(scene, { monochrome: opts.monochrome });
   const open = svg.indexOf(">");
   if (!svg.startsWith("<svg") || open < 0) throw new Error("The drawing didn't produce an SVG");
   const head = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${region.min.x} ${region.min.y} ${w} ${h}" width="${widthPx}" height="${Math.round((h / MM_PER_IN) * dpi)}" font-family="Helvetica, Arial, sans-serif">`;

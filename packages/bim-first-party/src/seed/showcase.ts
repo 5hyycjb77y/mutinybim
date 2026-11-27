@@ -39,6 +39,7 @@ import {
   SHOWCASE_WC_COMMERCIAL,
   SHOWCASE_WORKTABLE,
 } from "./showcase-parts";
+import { SHOWCASE_SHEET_MARKUPS } from "./showcase-markups";
 
 /**
  * MutinyBIM flagship default showcase model:
@@ -2435,6 +2436,8 @@ function buildShowcase(modelId: string): ModelState {
       ids: ["mdp"],
       locked: true,
     },
+    // Seeded human review markups (non-printing on permit PDFs; vivid colour on screen & agent renders)
+    ...SHOWCASE_SHEET_MARKUPS,
   ]);
 
   const hero = m.elements["view-3d-hero"] as ViewElement | undefined;

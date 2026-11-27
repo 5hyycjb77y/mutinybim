@@ -47,6 +47,8 @@ Every example below is a complete script that passes the kit's checks; the kit's
 - [`documents.keynote`](#documentskeynote): Gives elements a keynote by its key ("P1", "M3"); a keynote tag on a view prints the key and the sheet's keynote list (Sheets › Live table › Keynote list) gives its words from the keynote tables in force.
 - [`documents.listStandardNoteSets`](#documentsliststandardnotesets): Lists reusable discipline general-notes and specification sets (electrical-general, electrical-demolition, mechanical-general, plumbing-general, fire-protection-general, architectural-general, structural-steel-concrete) so scripts pull standard notes instead of regenerating boilerplate.
 - [`documents.placeStandardNotes`](#documentsplacestandardnotes): Places a formatted, numbered standard general-notes block from the reusable library onto a sheet or view, with optional custom title, extra project-specific notes, or excluded starter note numbers.
+- [`documents.renderSheet`](#documentsrendersheet): Queues a PNG image of one sheet (by id or sheet number) to be rasterized by the host and returned directly in bim_run_script's answer.
+- [`documents.renderView`](#documentsrenderview): Queues a PNG image of one view (by id or exact name) to be rasterized by the host and returned directly in bim_run_script's answer.
 - [`documents.scheduleRows`](#documentsschedulerows): A schedule's rows as numbers and words, on the model as the script has it so far: cells by column id (quantities in SI), grand totals, the row count.
 - [`documents.scheduleFields`](#documentsschedulefields): What a schedule can list and show: every class (no argument), or each named class's fields (path, label, type, unit, how it totals) and relationships for aggregate columns.
 - [`documents.autoTag`](#documentsautotag): Tag every untagged element of `categories` (`duct`, `pipe`, `air_terminal`, `equipment`, `fixture`, `part`, `room`, `space`, `opening`) in a view as movable `DrawingItem` tags placed clear of linework and other tags.
@@ -73,7 +75,7 @@ Topics: sheet, drawing, title block, sheets, sheet group, sheet discipline, sort
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -99,7 +101,7 @@ Topics: sheet, rename, title block fields, sheet group, sort order
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -126,7 +128,7 @@ Topics: view, plan, floor plan, view range, level above, browser group, sort ord
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -152,7 +154,7 @@ Topics: view, view range, level above, browser group, sort order, detail level, 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -179,7 +181,7 @@ Topics: view template, template, view range, level above, category overrides, st
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -206,7 +208,7 @@ Topics: view template, apply template, detach template, view
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -234,7 +236,7 @@ Topics: view template, list templates, audit view
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -261,7 +263,7 @@ Topics: view settings, view template, view range, audit view, rcp, ceiling plan,
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -289,7 +291,7 @@ Topics: view, ceiling, rcp
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -315,7 +317,7 @@ Topics: view, section, section cut, building section, section marker, split gap,
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -344,7 +346,7 @@ Topics: view, elevation, interior elevation, exterior elevation, elevation marke
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -373,7 +375,7 @@ Topics: view, 3d view, camera, perspective, orthographic, field of view, fov, is
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -402,7 +404,7 @@ Topics: view, 3d view, camera, field of view, fov, lens, perspective, orthograph
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -430,7 +432,7 @@ Topics: view, enlarged plan, callout, callout bubble, plan callout, detail callo
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -472,7 +474,7 @@ Topics: callout, callout bubble, view reference, enlarged plan, detail reference
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -501,7 +503,7 @@ Topics: callout, enlarged plan, crop, crop polygon, p-line, l-shape, boundary
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -539,7 +541,7 @@ Topics: crop, crop box, crop polygon, p-line, l-shape, view crop, enlarged plan,
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -567,7 +569,7 @@ Topics: view, copy, duplicate
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -594,7 +596,7 @@ Topics: viewport, place, sheet, layout, view title, north arrow
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -622,7 +624,7 @@ Topics: viewport, view title, title line, sheet, layout
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -651,7 +653,7 @@ Topics: viewport, north arrow, sheet, layout
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -680,7 +682,7 @@ Topics: schedule, columns, rename column, sort, filter, group, totals
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { ids: ["sched-equipment"] },
@@ -706,7 +708,7 @@ Topics: schedule, make a schedule, room schedule, space schedule, equipment sche
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -740,7 +742,7 @@ Topics: tag, tags, label, mark, annotate
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -768,7 +770,7 @@ Topics: move tag, tag, label, overlap, legibility
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -797,7 +799,7 @@ Topics: plan labels, overlaps, legibility, tags, inspect, qa
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -826,7 +828,7 @@ Topics: dimension, dimensions, measure, annotate
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -854,7 +856,7 @@ Topics: tag style, slope arrow, downhill arrow, drain slope tag, tag, arrow
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: {},
@@ -880,7 +882,7 @@ Topics: tag style, slope arrow, edit tag style
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: {},
@@ -907,7 +909,7 @@ Topics: text type, text style, font, opaque background, text mask, wipeout, typo
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: {},
@@ -934,7 +936,7 @@ Topics: text type, text style, edit text style, font, opaque background
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: {},
@@ -961,7 +963,7 @@ Topics: text type, text style, delete text style
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: {},
@@ -988,7 +990,7 @@ Topics: wire arc, flip wire, circuit graphics, arc side
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1016,7 +1018,7 @@ Topics: circuit graphics, wire style, hash marks, tick marks, switch legs, home 
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1044,7 +1046,7 @@ Topics: switch leg label, move switch letter, control designation
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1072,7 +1074,7 @@ Topics: mwbc, multi-wire branch circuit, shared neutral, combined home run, doub
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1100,7 +1102,7 @@ Topics: spline wire, wire vertices, wire path, bend circuit, arc wire
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1128,7 +1130,7 @@ Topics: home run, move home run, home run arrow, circuit label, home run curve
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1156,7 +1158,7 @@ Topics: keynote, key note, general note, legend, note number
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { ids: ["duct-1", "duct-2"] },
@@ -1182,7 +1184,7 @@ Topics: general notes, standard notes, spec library, boilerplate, sheet notes
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { ids: [] },
@@ -1209,7 +1211,7 @@ Topics: general notes, standard notes, spec library, sheet notes, place notes
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { ids: [] },
@@ -1217,6 +1219,60 @@ export default defineScript({
   run(ctx) {
     const sh = documents.sheet(ctx, { number: "E-001", name: "Electrical Notes" });
     documents.placeStandardNotes(ctx, sh, "electrical-general", { x: units.mm(650), y: units.mm(500) }, { extraNotes: ["COORDINATE FLOOR BOXES WITH FURNITURE LAYOUT."] });
+  },
+});
+```
+
+</details>
+
+## documents.renderSheet
+
+Queues a PNG image of one sheet (by id or sheet number) to be rasterized by the host and returned directly in bim_run_script's answer.
+
+```ts
+renderSheet(ctx: ScriptContext, sheetRef: string, opts?: { label?: string; regionMm?: { min: { x: number; y: number }; max: { x: number; y: number } }; includeMarkups?: boolean; includeResolvedMarkups?: boolean; monochromeSheet?: boolean; highlightIds?: readonly string[]; dpi?: number; maxPx?: number }): ScriptRenderRequest
+```
+
+Topics: render sheet, sheet image, png, visual check, markup
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { ids: [] },
+  parameters: {},
+  run(ctx) {
+    const sh = documents.sheet(ctx, { number: "A-101", name: "Floor Plan" });
+    documents.renderSheet(ctx, sh, { includeMarkups: true, monochromeSheet: true });
+  },
+});
+```
+
+</details>
+
+## documents.renderView
+
+Queues a PNG image of one view (by id or exact name) to be rasterized by the host and returned directly in bim_run_script's answer.
+
+```ts
+renderView(ctx: ScriptContext, viewRef: string, opts?: { label?: string; regionMm?: { min: { x: number; y: number }; max: { x: number; y: number } }; highlightIds?: readonly string[]; dpi?: number; maxPx?: number }): ScriptRenderRequest
+```
+
+Topics: render view, view image, png, visual check
+
+<details><summary>Example script</summary>
+
+```ts
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
+export default defineScript({
+  kind: "layout",
+  reads: { levels: true },
+  parameters: {},
+  run(ctx) {
+    const plan = documents.planView(ctx, { level: "L1", name: "Level 1 - Plan", scale: 48 });
+    documents.renderView(ctx, plan, { dpi: 150 });
   },
 });
 ```
@@ -1236,7 +1292,7 @@ Topics: schedule rows, read a schedule, totals, room areas, schedule values
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1269,7 +1325,7 @@ Topics: schedule fields, schedule classes, what can a schedule show, columns
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1297,7 +1353,7 @@ Topics: auto tag, tag all, tag every duct, tags, annotate
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "route",
   reads: { levels: true },
@@ -1327,7 +1383,7 @@ Topics: auto dimension, dimension walls, dimension string, chain dimension, dime
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1355,7 +1411,7 @@ Topics: sheet layout, arrange sheet, pack views, sheet packing, fit views
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1386,7 +1442,7 @@ Topics: diagram kinds, controls diagram, one-line, riser diagram, live diagram
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1413,7 +1469,7 @@ Topics: diagram, live diagram, controls diagram, lighting controls diagram, one-
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1441,7 +1497,7 @@ Topics: one-line, single line, riser diagram, electrical diagram, distribution d
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1469,7 +1525,7 @@ Topics: detail components, detail library, hatch patterns, line styles, symbols
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1497,7 +1553,7 @@ Topics: form schedule, panel schedule, switchboard schedule, feeder schedule, li
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },
@@ -1524,7 +1580,7 @@ Topics: panel schedule, form schedule, switchboard schedule, lighting controls s
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true, kinds: ["part"] },
@@ -1558,7 +1614,7 @@ Topics: detail view, drafting view, mechanical detail, 2d detail, section detail
 <details><summary>Example script</summary>
 
 ```ts
-import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script";
+import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script";
 export default defineScript({
   kind: "layout",
   reads: { levels: true },

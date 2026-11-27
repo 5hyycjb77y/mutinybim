@@ -31,6 +31,7 @@ import { levelOf } from "../fields/providers/level-room";
 import { anchorOf } from "../model";
 import { noteDrawing, type TextBlock } from "../annotation/text-note";
 import { figureFrame, figurePrimitives, type SheetImage } from "../annotation/figures";
+import { markupBounds, markupToPrimitives } from "../annotation/markups";
 import { forEachPartitionMember, partitionMembers } from "../partition";
 import { displayContextOf, displayResolver, resolveTextStyle, type DisplayResolver } from "../organization/model";
 import { clipSegment } from "../reference";
@@ -113,6 +114,10 @@ export interface SheetDrawOptions {
   readonly projectState?: string;
   readonly consultants?: Readonly<Record<string, string>>;
   readonly sealStatement?: string;
+  /** Draw sheet review markups on top of the sheet (default false so issued permit prints stay clean; true for check sets & agent review images). */
+  readonly includeMarkups?: boolean;
+  /** Include resolved/cleared review markups when `includeMarkups` is true (default false). */
+  readonly includeResolvedMarkups?: boolean;
 }
 
 /** Where a view sits on paper: the frame centre and size, the scale, and the model point at the centre. */
@@ -2684,6 +2689,7 @@ export function sheetDependsOn(model: ModelState, sheetId: string): (elementId: 
     // A block reads the distribution it summarises (its subtree only, never the model).
     if (item.shape === "field_block" && item.block) for (const id of renderFieldBlock(model, item.block).dependsOn) owned.add(id);
   }
+  for (const m of index.markupsBySheet.get(sheet.id) ?? []) owned.add(m.id);
   return (elementId, el) => {
     if (owned.has(elementId)) return true;
     if (!el) return false;
@@ -2741,14 +2747,78 @@ export function buildSheetSceneFor(model: ModelState, sheetId: string, opts: She
   }
 
   const images: SheetImage[] = [];
-  drawSheetItems(prims, documentIndex(model).itemsByOwner.get(sheet.id) ?? [], blocks, model, images, opts.frozenBlocks);
+  const docIndex = documentIndex(model);
+  drawSheetItems(prims, docIndex.itemsByOwner.get(sheet.id) ?? [], blocks, model, images, opts.frozenBlocks);
+  const drawMarkups = () => {
+    if (!opts.includeMarkups) return;
+    for (const item of docIndex.markupsBySheet.get(sheet.id) ?? []) {
+      prims.push(...markupToPrimitives(item, { includeResolved: opts.includeResolvedMarkups }));
+    }
+  };
   if (row) {
     const drawn = drawTitleBlock(model, sheet, row.definition, opts);
     prims.push(...drawn.primitives);
+    drawMarkups();
     return { paper, revision: model.revision, primitives: prims, tags, dimensions: [], details: [], schedule: [], textBlocks: blocks, ...(images.length > 0 ? { images } : {}), fonts: drawn.fonts, ...(drawn.codeSlot ? { codeSlot: drawn.codeSlot } : {}) };
   }
   drawTitleBlockFor(prims, sheet, paper, opts);
+  drawMarkups();
   return { paper, revision: model.revision, primitives: prims, tags, dimensions: [], details: [], schedule: [], textBlocks: blocks, ...(images.length > 0 ? { images } : {}) };
+}
+
+/** One viewport that a sheet markup overlaps, with the markup's paper points mapped into that view's model coordinates (mm). */
+export interface MarkupViewportHit {
+  readonly viewportId: string;
+  readonly viewId: string;
+  readonly viewName: string;
+  readonly viewType: ViewElement["viewType"];
+  readonly scale: number;
+  readonly level?: string;
+  readonly modelBoundsMm: { readonly min: Vec2; readonly max: Vec2 };
+  readonly modelPointsMm: readonly Vec2[];
+}
+
+/**
+ * Resolve which placed viewports on `sheetId` a markup stroke sits over and map
+ * its paper-mm points into each viewport's model coordinates (mm), so agents
+ * get both the rendered sheet picture and exact model coordinates in feet/mm.
+ */
+export function markupViewportContext(model: ModelState, sheetId: string, item: Pick<DrawingItem, "points" | "markup">): MarkupViewportHit[] {
+  const sheet = model.elements[sheetId];
+  if (!sheet || sheet.kind !== "sheet" || sheet.deleted) return [];
+  const bounds = markupBounds(item);
+  if (!bounds) return [];
+  const hits: MarkupViewportHit[] = [];
+  for (const { viewport, view } of sheetViewports(model, sheet)) {
+    const vpMinX = viewport.center.x - viewport.size.x / 2;
+    const vpMaxX = viewport.center.x + viewport.size.x / 2;
+    const vpMinY = viewport.center.y - viewport.size.y / 2;
+    const vpMaxY = viewport.center.y + viewport.size.y / 2;
+    if (bounds.max.x < vpMinX || bounds.min.x > vpMaxX || bounds.max.y < vpMinY || bounds.min.y > vpMaxY) continue;
+    const frame = frameForViewport(model, viewport, view);
+    const modelPointsMm = item.points.map((p) => paperToModel(frame, p));
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const q of modelPointsMm) {
+      if (q.x < minX) minX = q.x;
+      if (q.y < minY) minY = q.y;
+      if (q.x > maxX) maxX = q.x;
+      if (q.y > maxY) maxY = q.y;
+    }
+    hits.push({
+      viewportId: viewport.id,
+      viewId: view.id,
+      viewName: view.name,
+      viewType: view.viewType,
+      scale: viewport.scale,
+      ...(view.props?.level ? { level: view.props.level } : {}),
+      modelBoundsMm: { min: { x: Math.round(minX), y: Math.round(minY) }, max: { x: Math.round(maxX), y: Math.round(maxY) } },
+      modelPointsMm: modelPointsMm.map((q) => ({ x: Math.round(q.x), y: Math.round(q.y) })),
+    });
+  }
+  return hits;
 }
 
 /** One view on its own, framed with a small margin (the detail editor and view previews). */

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DEFAULT_SETTINGS, canonicalJson, elementCount, elementValues, gatedRecordFeatures, type ModelState } from "@permitzip/bim-kernel";
+import { DEFAULT_SETTINGS, canonicalJson, elementCount, elementValues, executeCommand, gatedRecordFeatures, withUpgradePolicy, type ModelState } from "@permitzip/bim-kernel";
 import { contentHashOf, makeItem, scriptItemSchema, scriptReadsSchema, type ScriptItem, type ScriptReads } from "@permitzip/bim-library";
 import {
   CLASH_DETAIL_LEVELS,
@@ -39,7 +39,7 @@ import { PROTOCOL_FEATURES } from "@permitzip/bim-sync";
 import { CHANGING_TOOL, READ_ONLY_TOOL } from "../annotations";
 import type { ApprovalIo, ApprovalProposal } from "../approvals";
 import { libraryPartTypesFor } from "./library-parts";
-import type { LibrarySaveResult, ModelArgs, ScriptLibrary, ScriptToolHost, ToolResult } from "../host";
+import type { LibrarySaveResult, ModelArgs, ScriptLibrary, ScriptRenderedImage, ScriptToolHost, ToolResult } from "../host";
 import { PROJECT_SCHEMAS, type CoreSchemas } from "../schemas";
 import { editsChange, outputHash, partTypesChange, type ScriptChangeReport } from "./change-summary";
 import { KEPT_SCRIPT_KEEP_MS, SCRIPT_EXPIRED_WORDS, applyReplacements, keepScript, notePreview, previewOf, readKeptScript, type KeptPreview, type KeptScript, type ScriptPreviewStore } from "./previews";
@@ -632,7 +632,7 @@ const referenceIndex = (keepsScripts: boolean) => ({
     : {}),
   read_more: 'search: a topic (the two best matches whole, the rest by name). topic: one function or recipe by its exact name, whole with its example. command: one ctx.edit command\'s fields. example: one whole script.',
   prefer: "One script for a multi-step layout (connect N parts to a run, place and route equipment, a sheet per level) instead of many single tool calls: one preview, one Approve, one Undo.",
-  module: 'import { defineScript, units, routes, parts, building, equipment, documents, drafting, checks, electrical } from "@permitzip/bim-script"; export default defineScript({ kind: "part" | "layout" | "route", reads, parameters, run(ctx, values) { ... } }). Import nothing else; no fetch, files, timers, Date or Math.random.',
+  module: 'import { defineScript, units, routes, parts, building, equipment, documents, markups, drafting, checks, electrical } from "@permitzip/bim-script"; export default defineScript({ kind: "part" | "layout" | "route", reads, parameters, run(ctx, values) { ... } }). Import nothing else; no fetch, files, timers, Date or Math.random.',
   kit: kitByNamespace(),
   /** The jobs an engineer names, each with a worked example: read one with topic (topic: "Schedules") for its steps and script. */
   tasks: Object.fromEntries(KIT_RECIPES.map((r) => [r.task, r.name])),
@@ -909,8 +909,72 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
           return json({ status: "has_issues", message: `The script declares reads ${canonicalJson(manifest.reads)} but was run with ${canonicalJson(resolved.script.reads)}. ${how}`, ...(declared ? { script_id: declared.id } : {}), nothing_changed: true });
         }
         const report = got.output.report ? { report: got.output.report } : {};
+        const renderRequests = got.output.renders ?? [];
+        let renderedImages: readonly ScriptRenderedImage[] = [];
+        let renderNote: string | undefined;
+        if (renderRequests.length > 0 && args.model_id) {
+          if (helpers.renderImages) {
+            try {
+              // Replay from `run.head` (the exact validated snapshot) under `run.slice.features`
+              // so rendered previews match reports/checks and honor feature-gated commands (e.g. markups).
+              const featureSet = new Set(run.slice.features);
+              const targetModel = withUpgradePolicy((f) => featureSet.has(f), () => {
+                let m = run.head;
+                if (got.output.kind === "edits" && got.output.steps > 0) {
+                  const at = new Date().toISOString();
+                  for (const batch of got.output.batches) {
+                    const res = executeCommand(m, batch, { actorId: "script-preview", at });
+                    if (!res.ok) {
+                      throw new Error(`Preview replay refused: ${res.error.message}`);
+                    }
+                    m = res.model;
+                  }
+                }
+                return m;
+              });
+              renderedImages = await helpers.renderImages(extra, { project_id: args.project_id, model_id: args.model_id }, targetModel, renderRequests);
+            } catch (err) {
+              renderNote = `Sheet/view image rendering failed: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          } else {
+            renderNote = "This host has no image renderer configured for ctx.render requests.";
+          }
+        }
+        const withImages = (payload: Record<string, unknown>): ToolResult => {
+          const extraMeta: Record<string, unknown> = {
+            ...(renderedImages.length > 0
+              ? {
+                  rendered_images: renderedImages.map((im, i) => ({
+                    index: i + 1,
+                    label: im.label,
+                    kind: im.kind,
+                    target_id: im.targetId,
+                    target_name: im.targetName,
+                    revision: im.revision,
+                    width_px: im.widthPx,
+                    height_px: im.heightPx,
+                    dpi: im.dpi,
+                    region_mm: im.regionMm,
+                  })),
+                }
+              : {}),
+            ...(renderNote ? { render_note: renderNote } : {}),
+          };
+          const full = { ...payload, ...extraMeta };
+          if (renderedImages.length === 0) return json(full);
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(full, null, 2) },
+              ...renderedImages.map((im) => ({ type: "image" as const, data: im.png.toString("base64"), mimeType: "image/png" })),
+            ],
+          };
+        };
         if (got.output.kind === "edits" && got.output.steps === 0) {
-          return json({ status: "reported", kind: "edits", ...report, message: "The script made no edits, so there is nothing to apply. Its reports are in report.", ...idPart(sid, false), nothing_changed: true, ms: run.result.ok ? run.result.ms : 0 });
+          const msg =
+            renderedImages.length > 0
+              ? `Rendered ${renderedImages.length} image${renderedImages.length === 1 ? "" : "s"} (attached below). The script made no edits, so there is nothing to apply.`
+              : "The script made no edits, so there is nothing to apply. Its reports are in report.";
+          return withImages({ status: "reported", kind: "edits", ...report, message: msg, ...idPart(sid, false), nothing_changed: true, ms: run.result.ok ? run.result.ms : 0 });
         }
         const tier = got.change.tier;
         const approval = tier.tier;
@@ -933,11 +997,11 @@ export function registerBimScriptTools(server: McpServer, helpers: ScriptToolHel
             ...idPart(sid, status !== "previewed"),
             ms: run.result.ok ? run.result.ms : 0,
           };
-          if (body.status !== "previewed" || !args.model_id) return json(body);
+          if (body.status !== "previewed" || !args.model_id) return withImages(body);
           // Kept by id: the approved call names the id, and runs with what this preview ran with. Otherwise it carries the script itself.
           const byId = await notePreviewQuietly(store, kept, ran);
           const script = byId && kept ? { script: { id: kept.id } } : { script: scriptEcho(resolved.script), values, ...(args.selection ? { selection: args.selection } : {}) };
-          return json({
+          return withImages({
             ...body,
             apply_with: { tool: SCRIPT_APPLY_TOOL, args: { project_id: args.project_id, model_id: args.model_id, ...(args.level ? { level: args.level } : {}), ...(args.zone ? { zone: args.zone } : {}), base_revision: run.slice.revision, ...script, output_hash: got.hash, label: got.output.label, steps: got.output.steps, changes: body.changes, approval } },
             next: "Show the person what it does. To land it call bim_apply_output with apply_with.args unchanged; nothing changes until they click Approve, and one Undo removes it.",

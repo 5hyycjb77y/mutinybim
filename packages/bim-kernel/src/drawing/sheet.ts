@@ -63,6 +63,20 @@ export type Primitive =
   | ({ readonly kind: "circle"; readonly at: Vec2; readonly r: number; readonly pen: Pen; readonly dash?: readonly number[]; readonly tone?: Tone } & PrimitiveStyle & PrimitiveOwner)
   /** A filled polygon with no outline (section poche, shaded surfaces). `grey`: 0 black, 1 white; a tone lightens it. `color` replaces the grey in colour; a monochrome print uses the grey. */
   | ({ readonly kind: "fill"; readonly points: readonly Vec2[]; readonly grey: number; readonly tone?: Tone } & Pick<PrimitiveStyle, "color"> & PrimitiveOwner)
+  /** A freehand marker or highlighter stroke in paper mm with smooth rounded caps/joins and optional translucency. */
+  | ({
+      readonly kind: "stroke";
+      readonly points: readonly Vec2[];
+      readonly widthMm: number;
+      readonly opacity?: number;
+      readonly closed?: boolean;
+      /** Draw straight polyline corners instead of quadratic smoothing (used for smart-snapped rectangles/lines). */
+      readonly sharp?: boolean;
+      /** Keep vivid ink colour even when printing a monochrome/black-only sheet (used for review markups). */
+      readonly preserveColor?: boolean;
+      readonly markupId?: string;
+    } & Pick<PrimitiveStyle, "color"> &
+      PrimitiveOwner)
   | ({
       readonly kind: "text";
       readonly at: Vec2;

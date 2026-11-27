@@ -17,13 +17,27 @@ export interface DrawnScene {
  * `categories` (the firm library's classes) lets Visibility/Graphics on a
  * firm class draw; absent, the built-in categories.
  */
-export function useDrawnScene(model: ModelState, target: DrawingTarget, title: SheetTitle, backgrounds: ViewBackgrounds | undefined, categories?: CategoryRegistry): DrawnScene {
+export function useDrawnScene(
+  model: ModelState,
+  target: DrawingTarget,
+  title: SheetTitle,
+  backgrounds: ViewBackgrounds | undefined,
+  categories?: CategoryRegistry,
+  opts?: { readonly includeMarkups?: boolean; readonly includeResolvedMarkups?: boolean },
+): DrawnScene {
   const kind = target.kind
   const id = target.kind === 'sheet' ? target.sheetId : target.viewId
+  const includeMarkups = opts?.includeMarkups ?? true
+  const includeResolvedMarkups = opts?.includeResolvedMarkups ?? false
   return useMemo(() => {
     const draw = (): DrawnScene => {
       if (kind === 'sheet') {
-        const scene = buildSheetSceneFor(model, id, { ...title, ...(backgrounds ? { backgrounds } : {}) })
+        const scene = buildSheetSceneFor(model, id, {
+          ...title,
+          ...(backgrounds ? { backgrounds } : {}),
+          includeMarkups,
+          includeResolvedMarkups,
+        })
         return { scene, frame: null, error: null }
       }
       const { scene, frame } = buildViewScene(model, id, backgrounds?.[id] ?? [])
@@ -35,5 +49,5 @@ export function useDrawnScene(model: ModelState, target: DrawingTarget, title: S
       console.error('[DrawingCanvas] drawing failed', { kind, id, err })
       return { scene: null, frame: null, error: kind === 'sheet' ? 'This sheet no longer exists.' : 'This view no longer exists.' }
     }
-  }, [model, kind, id, title, backgrounds, categories])
+  }, [model, kind, id, title, backgrounds, categories, includeMarkups, includeResolvedMarkups])
 }

@@ -561,6 +561,60 @@ export interface DetailAudit {
   readonly orphanedDimensions: readonly string[];
   readonly issues: readonly string[];
 }
+export type MarkupTool = "marker" | "highlighter";
+export type MarkupStatus = "open" | "addressed" | "resolved";
+export type MarkupSmartShape = "line" | "rect" | "circle";
+export type PaperPointInput = { readonly x: number; readonly y: number } | { readonly x: Measure; readonly y: Measure };
+export interface ScriptRenderRequest {
+  readonly kind: "sheet" | "view";
+  readonly targetId: string;
+  readonly label: string;
+  readonly regionMm?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+  readonly includeMarkups?: boolean;
+  readonly includeResolvedMarkups?: boolean;
+  readonly monochromeSheet?: boolean;
+  readonly highlightIds?: readonly string[];
+  readonly dpi?: number;
+  readonly maxPx?: number;
+}
+export interface SheetMarkupSummary {
+  readonly id: string; readonly sheetId: string; readonly sheetNumber: string; readonly sheetTitle: string;
+  readonly tool: MarkupTool; readonly color: string; readonly widthMm: number; readonly status: MarkupStatus;
+  readonly smartShape?: MarkupSmartShape; readonly author?: string; readonly createdAt?: string; readonly addressedNote?: string; readonly addressedColor?: string; readonly note?: string;
+  readonly pointCount: number;
+  readonly boundsMm: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } } | null;
+  readonly boundsIn: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } } | null;
+  readonly viewports: readonly {
+    readonly viewportId: string; readonly viewId: string; readonly viewName: string; readonly viewType: string; readonly scale: number; readonly level?: string;
+    readonly modelBoundsFt: { readonly min: { readonly xFt: number; readonly yFt: number }; readonly max: { readonly xFt: number; readonly yFt: number } };
+    readonly modelPointsFt: readonly { readonly xFt: number; readonly yFt: number }[];
+  }[];
+}
+export interface MarkedSheetSummary {
+  readonly sheetId: string; readonly number: string; readonly title: string; readonly paperSize: string;
+  readonly openCount: number; readonly addressedCount: number; readonly resolvedCount: number; readonly totalCount: number;
+  readonly markupIds: readonly string[];
+  readonly boundsMm: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } } | null;
+  readonly viewports: readonly { readonly viewportId: string; readonly viewId: string; readonly viewName: string; readonly scale: number }[];
+}
+export interface RenderSheetMarkupOptions {
+  readonly label?: string; readonly focusMarkupIds?: readonly string[]; readonly focusStatus?: MarkupStatus | "all";
+  readonly padMm?: number;
+  readonly regionMm?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+  readonly regionIn?: { readonly min: { readonly x: number; readonly y: number }; readonly max: { readonly x: number; readonly y: number } };
+  readonly includeMarkups?: boolean; readonly includeResolvedMarkups?: boolean; readonly monochromeSheet?: boolean;
+  readonly highlightIds?: readonly string[]; readonly dpi?: number; readonly maxPx?: number;
+}
+export interface RenderAllMarkedSheetsOptions {
+  readonly status?: MarkupStatus | "all"; readonly mode?: "full" | "crop" | "both"; readonly maxImages?: number;
+  readonly padMm?: number; readonly monochromeSheet?: boolean; readonly dpi?: number; readonly maxPx?: number;
+}
+export interface AddSheetMarkupSpec {
+  readonly id?: string; readonly points: readonly PaperPointInput[];
+  readonly tool?: MarkupTool; readonly color?: string; readonly widthMm?: number;
+  readonly closed?: boolean; readonly smartShape?: MarkupSmartShape;
+  readonly status?: MarkupStatus; readonly author?: string; readonly note?: string;
+}
 `;
 
 function member(e: KitEntry): string {

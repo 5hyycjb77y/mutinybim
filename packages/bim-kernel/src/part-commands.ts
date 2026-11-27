@@ -579,8 +579,10 @@ function planDelete(reader: TrackedReader, requested: readonly ElementId[], poli
     // A sheet's viewports and notes, and a view's viewport and notes, point at it. (A load point outlives its pipe: it is flagged, not deleted.)
     if (el?.kind === "sheet" || el?.kind === "view") {
       const docs = documentIndex(model);
-      if (el.kind === "sheet") for (const vp of docs.viewportsBySheet.get(id) ?? []) out.push(vp.id);
-      else {
+      if (el.kind === "sheet") {
+        for (const vp of docs.viewportsBySheet.get(id) ?? []) out.push(vp.id);
+        for (const item of docs.markupsBySheet.get(id) ?? []) out.push(item.id);
+      } else {
         const vp = docs.viewportByView.get(id);
         if (vp) out.push(vp.id);
       }
