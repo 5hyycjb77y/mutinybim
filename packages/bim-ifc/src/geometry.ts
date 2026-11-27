@@ -75,6 +75,11 @@ export class GeometryWriter {
   /** One IfcDirection per distinct unit vector (to 1e-9), for the many frames that face the same few ways. */
   private readonly unitDirections = new Map<string, StepRef>();
 
+  /** Drop cached direction handles created after a rolled-back `StepGraph.dropFrom(size)`. */
+  dropFrom(size: number): void {
+    for (const [key, ref] of this.unitDirections) if (ref.ref > size) this.unitDirections.delete(key);
+  }
+
   private unitDirection(v: Vec3): StepRef {
     const r = (n: number) => Math.round(n * 1e9) / 1e9 + 0;
     const d = { x: r(v.x), y: r(v.y), z: r(v.z) };
