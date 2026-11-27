@@ -162,6 +162,9 @@ Set `MUTINYBIM_WEB_SUPABASE_URL` and `MUTINYBIM_WEB_SUPABASE_PUBLISHABLE_KEY` to
 
 A first Google sign-in can link an existing MutinyBIM account when Supabase confirms the address, Google verifies that same address, and Google is the only linked provider. If those details are missing, use the existing account's password. Later sign-ins use the saved account link.
 
+Finish every copy pass before enabling writes on Postgres. Replaying an older
+SQLite snapshot can restore a share that someone removed on Postgres.
+
 ### Sign-in providers
 
 `MUTINYBIM_WEB_PROVIDERS` is a JSON array of OIDC providers. Each entry takes `id`, `label`, and `issuer`, plus optional `clientId`, `scope`, `clientName`, `domains` (e.g. `["example.com"]` to show a one-time dismissible *"Link your Example account?"* prompt on My models when someone signs in with a matching email domain), and `models` (for linked hosts).
@@ -181,6 +184,11 @@ one, as above.
 
 The provider's access token is used once, to ask UserInfo who signed in, and
 then dropped; it is never stored or logged.
+
+When a configured provider returns the JSON boolean `email_verified: true` in
+UserInfo, the app records confirmation for the matching account email at sign-in
+or when the person links that provider in Settings. Changing the account email
+clears its confirmation. Older accounts can gain confirmation on their next verified sign-in.
 
 ### Linked hosts
 

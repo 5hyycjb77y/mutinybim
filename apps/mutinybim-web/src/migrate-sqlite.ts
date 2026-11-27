@@ -5,10 +5,12 @@
  *   node --import tsx apps/mutinybim-web/src/migrate-sqlite.ts [--dry-run] [--sqlite=/path/to/accounts.sqlite]
  *
  * Reads `MUTINYBIM_WEB_DATA` (default `./mutinybim-web-data`), `MUTINYBIM_WEB_SUPABASE_URL`,
- * and `MUTINYBIM_WEB_SUPABASE_SECRET_KEY`. Existing Postgres rows are never overwritten;
- * if a user email already exists in Postgres under a different UUID (e.g. from an earlier
+ * and `MUTINYBIM_WEB_SUPABASE_SECRET_KEY`. Finish all copy passes before enabling writes
+ * on Postgres. A later pass can restore a share deleted on the destination.
+ * If a user email already exists in Postgres under a different UUID (e.g. from an earlier
  * OAuth sign-in), foreign keys on copied models, identities, shares, keys, scripts and
- * grants are remapped to the existing Postgres user id.
+ * grants are remapped to the existing Postgres user id. Email confirmation follows the
+ * original user id and address, and an existing destination confirmation is preserved.
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -114,13 +116,14 @@ export async function migrateSqliteToSupabase(options: MigrateOptions): Promise<
 
     // 1. Users — merge by lowercase email when a user already exists in Postgres.
     const existingUsersRaw = await request("/rest/v1/users?select=id,email,password_hash");
-    const existingByEmail = new Map<string, { id: string; passwordHash: string | null }>();
+    const existingByEmail = new Map<string, { id: string; email: string; passwordHash: string | null }>();
     if (Array.isArray(existingUsersRaw)) {
       for (const row of existingUsersRaw) {
         if (row && typeof row === "object" && typeof (row as Row).email === "string" && typeof (row as Row).id === "string") {
           const r = row as Row;
           existingByEmail.set(String(r.email).toLowerCase(), {
             id: String(r.id),
+            email: String(r.email),
             passwordHash: typeof r.password_hash === "string" ? r.password_hash : null,
           });
         }
@@ -131,9 +134,19 @@ export async function migrateSqliteToSupabase(options: MigrateOptions): Promise<
     for (const u of readTable(sqlite, "users")) {
       const id = String(u.id);
       const email = String(u.email).trim().toLowerCase();
+      const confirmedAt = asIsoOrNull(u.email_confirmed_at);
       const existing = existingByEmail.get(email);
       if (existing) {
         if (existing.id !== id) userIdMap.set(id, existing.id);
+        // An email-only remap must not confirm a different destination account.
+        if (existing.id === id && confirmedAt && !dryRun) {
+          const query = new URLSearchParams({ id: `eq.${id}`, email: `eq.${existing.email}`, email_confirmed_at: "is.null" });
+          await request(`/rest/v1/users?${query}`, {
+            method: "PATCH",
+            body: { email_confirmed_at: confirmedAt },
+            prefer: "return=minimal",
+          });
+        }
         if (!existing.passwordHash && typeof u.password_hash === "string" && u.password_hash && !dryRun) {
           await request(`/rest/v1/users?id=eq.${encodeURIComponent(existing.id)}`, {
             method: "PATCH",
@@ -145,6 +158,7 @@ export async function migrateSqliteToSupabase(options: MigrateOptions): Promise<
         usersToInsert.push({
           id,
           email,
+          email_confirmed_at: confirmedAt,
           display_name: String(u.display_name ?? email.split("@")[0] ?? "User"),
           password_hash: typeof u.password_hash === "string" ? u.password_hash : null,
           color_scheme: u.color_scheme === "light" || u.color_scheme === "dark" ? u.color_scheme : "system",

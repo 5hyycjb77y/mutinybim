@@ -410,15 +410,22 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     const linking = state.return_to.startsWith("link:");
     const returnTo = safeReturn(linking ? state.return_to.slice(5) : state.return_to);
     const known = await db.userByIdentity(provider.id, person.subject);
+    async function confirmProviderEmail(user: UserRow): Promise<void> {
+      if (person.emailVerified && person.email && !user.email_confirmed_at) {
+        await db.confirmIdentityEmail(provider.id, person.subject, user.id, person.email);
+      }
+    }
     if (linking) {
       const current = await sessionUser(req);
       if (!current) return redirect(res, "/login?return_to=%2Fsettings");
       if (known && known.id !== current.id) return html(res, 409, settingsPage(config, current, await db.identitiesOf(current.id), { flash: { kind: "error", text: `That ${provider.label.replace(/^Log in with /i, "")} account is already linked to another MutinyBIM account.` } }));
       await db.linkIdentity(provider.id, person.subject, current.id);
+      await confirmProviderEmail(current);
       console.log("[mutinybim-web] linked a sign-in", { provider: provider.id, userId: current.id });
       return redirect(res, await afterSignIn(current.id, provider, `${returnTo}${returnTo.includes("?") ? "&" : "?"}linked=${provider.id}`));
     }
     if (known) {
+      await confirmProviderEmail(known);
       console.log("[mutinybim-web] signed in", { provider: provider.id, userId: known.id });
       return redirect(res, await afterSignIn(known.id, provider, returnTo), { "set-cookie": await startSession(known.id, provider.id) });
     }
@@ -431,6 +438,7 @@ export function createApp(config: WebConfig, options: AppOptions = {}): App {
     if (!config.signupOpen) return html(res, 403, loginPage(config, { returnTo, flash: { kind: "error", text: "New accounts can't be made on this server right now." } }));
     const user = await db.createUser({ id: randomUUID(), email: person.email, displayName: person.name ?? person.email.split("@")[0] ?? "You", passwordHash: null });
     await db.linkIdentity(provider.id, person.subject, user.id);
+    await confirmProviderEmail(user);
     console.log("[mutinybim-web] account made through a sign-in provider", { provider: provider.id, userId: user.id });
     return redirect(res, await afterSignIn(user.id, provider, returnTo), { "set-cookie": await startSession(user.id, provider.id) });
   }

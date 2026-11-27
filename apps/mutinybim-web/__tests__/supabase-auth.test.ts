@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { createApp, type App } from "../src/app";
 import type { WebConfig } from "../src/config";
 import { openSupabaseStore } from "../src/db-supabase";
@@ -271,6 +272,23 @@ test("Supabase Auth: email signup confirmation, duplicate detection, login, lega
   expect((await fetch(`${base}/models`, { headers: { cookie: `mutinybim_session=${firstSession}` }, redirect: "manual" })).status).toBe(303);
 });
 
+test("the Supabase store confirms the specified OIDC identity and address in one authenticated call", async () => {
+  const fetchImpl = jest.fn<ReturnType<Fetch>, Parameters<Fetch>>(async (input, init) => {
+    expect(String(input)).toBe(`${SUPABASE_URL}/rest/v1/rpc/web_confirm_oidc_email`);
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("apikey")).toBe(SECRET_KEY);
+    expect(headers.get("authorization")).toBe(`Bearer ${SECRET_KEY}`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      p_provider: "org", p_subject: "sub-1", p_user_id: "u-1", p_email: "sam@example.com",
+    });
+    return new Response(null, { status: 204 });
+  });
+  const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
+  await store.confirmIdentityEmail("org", "sub-1", "u-1", "sam@example.com");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
 test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", async () => {
   const seen: { method: string; path: string; body: unknown }[] = [];
   const fetchImpl: Fetch = async (input, init) => {
@@ -301,6 +319,7 @@ test("openSupabaseStore sends authenticated PostgREST and atomic RPC calls", asy
   const store = openSupabaseStore({ url: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl });
   const created = await store.createUser({ id: "u-1", email: "SAM@example.com", displayName: "Sam", passwordHash: null });
   expect(created.email).toBe("sam@example.com");
+  expect(created.email_confirmed_at).toBeNull();
   const state = await store.takeOAuthState("st-1");
   expect(state).toMatchObject({ state: "st-1", provider: "supabase-google", code_verifier: "ver-1" });
   const rotated = await store.rotateAssistantRefresh("old-hash", "client-1", {
@@ -369,6 +388,40 @@ test("configured provider domains show a dismissible opt-in link prompt on My mo
   expect(dismiss.status).toBe(303);
   const afterDismiss = await (await fetch(`${base}/models`, { headers: { cookie: adaCookie } })).text();
   expect(afterDismiss).not.toContain('data-testid="link-prompt-acme"');
+});
+
+test("a populated SQLite upgrade preserves confirmation across a restart and clears it on an address change", async () => {
+  const file = path.join(dataDir, "legacy.sqlite");
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name TEXT NOT NULL, password_hash TEXT, created_at TEXT NOT NULL);
+    INSERT INTO users VALUES ('old', 'pat@example.com', 'Pat', NULL, '2026-01-01');`);
+  old.close();
+
+  const db = openDb(file);
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.linkIdentity("org", "pat", "old");
+  await db.confirmIdentityEmail("another", "pat", "old", "pat@example.com");
+  await db.confirmIdentityEmail("org", "different", "old", "pat@example.com");
+  expect((await db.userById("old"))?.email_confirmed_at).toBeNull();
+  await db.confirmIdentityEmail("org", "pat", "old", "PAT@example.com");
+  const confirmedAt = (await db.userById("old"))?.email_confirmed_at;
+  expect(confirmedAt).toEqual(expect.any(String));
+  await db.close();
+
+  const reopened = openDb(file);
+  const writer = new DatabaseSync(file);
+  try {
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("PAT@EXAMPLE.COM");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBe(confirmedAt);
+    writer.prepare("UPDATE users SET email = ? WHERE id = 'old'").run("new@example.com");
+    await reopened.confirmIdentityEmail("org", "pat", "old", "pat@example.com");
+    expect((await reopened.userById("old"))?.email_confirmed_at).toBeNull();
+  } finally {
+    writer.close();
+    await reopened.close();
+  }
 });
 
 test("migrateSqliteToSupabase copies records and remaps foreign keys when an email already exists in Postgres", async () => {
@@ -458,6 +511,43 @@ test("migrateSqliteToSupabase copies records and remaps foreign keys when an ema
   expect(identityPost?.body).toEqual([expect.objectContaining({ provider: "org", subject: "sub-1", user_id: existingPgId })]);
   const passwordPatch = posted.find((p) => p.path === "/rest/v1/users" && p.method === "PATCH");
   expect(passwordPatch?.body).toEqual({ password_hash: "scrypt$hash" });
+});
+
+test("the copier carries confirmation only for the original account and address", async () => {
+  const sqlitePath = path.join(dataDir, "copy.sqlite");
+  const sqlite = new DatabaseSync(sqlitePath);
+  sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL);
+    INSERT INTO users VALUES ('new', 'new@example.com'), ('same', 'same@example.com'), ('old-id', 'remap@example.com');`);
+  const stamp = "2026-11-01T12:00:00.000Z";
+  const patches: { filters: Record<string, string>; body: unknown }[] = [];
+  const inserts: unknown[] = [];
+  const fetchImpl: Fetch = async (input, init) => {
+    const url = new URL(input);
+    expect(url.pathname).toBe("/rest/v1/users");
+    if (init?.method === "GET") return Response.json([
+      { id: "same", email: "SAME@example.com" }, { id: "different-id", email: "remap@example.com" },
+    ]);
+    const body: unknown = JSON.parse(String(init?.body));
+    if (init?.method === "PATCH") patches.push({ filters: Object.fromEntries(url.searchParams), body });
+    else inserts.push(body);
+    return new Response(null, { status: 204 });
+  };
+  const copy = (dryRun = false) => migrateSqliteToSupabase({ sqlitePath, supabaseUrl: SUPABASE_URL, secretKey: SECRET_KEY, fetchImpl, dryRun });
+  try {
+    await copy();
+    expect(inserts[0]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: null })]);
+    expect(patches).toHaveLength(0);
+    sqlite.exec("ALTER TABLE users ADD COLUMN email_confirmed_at TEXT");
+    sqlite.prepare("UPDATE users SET email_confirmed_at = ?").run(stamp);
+    await copy(true);
+    expect(patches).toHaveLength(0);
+    expect(inserts).toHaveLength(1);
+    await copy();
+    expect(inserts[1]).toEqual([expect.objectContaining({ id: "new", email_confirmed_at: stamp })]);
+    expect(patches).toEqual([{ filters: { id: "eq.same", email: "eq.SAME@example.com", email_confirmed_at: "is.null" }, body: { email_confirmed_at: stamp } }]);
+  } finally {
+    sqlite.close();
+  }
 });
 
 

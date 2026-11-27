@@ -185,6 +185,9 @@ export function openSupabaseStore(options: SupabaseStoreOptions): WebStore {
         body: { provider, subject, user_id: userId, created_at: now() },
       });
     },
+    async confirmIdentityEmail(provider, subject, userId, email) {
+      await rpc("web_confirm_oidc_email", { p_provider: provider, p_subject: subject, p_user_id: userId, p_email: email });
+    },
     async identitySubject(userId, provider) {
       const row = await selectOne("identities", { select: "subject", user_id: eq(userId), provider: eq(provider) });
       return isRecord(row) && typeof row.subject === "string" ? row.subject : null;
