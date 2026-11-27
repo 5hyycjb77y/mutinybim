@@ -401,8 +401,17 @@ export interface EditorCopiesPort {
   remove(input: { readonly projectId: string; readonly grantId: string }): Promise<EditorDataAnswer>
 }
 
+export type EditorMemberRole = 'viewer' | 'editor' | 'manager'
+
+export interface EditorModelMembersPort {
+  /** Omit the person ID to read the base model's roster. An exact person ID can also identify a new member. */
+  read(modelId: string, personId?: string, signal?: AbortSignal): Promise<EditorDataAnswer>
+  change(modelId: string, input: { personId: string; expectedRole: EditorMemberRole | null; role: EditorMemberRole | null }): Promise<EditorDataAnswer>
+}
+
 /** Everything the editor asks of a host's server. Every port is optional. */
 export interface EditorDataHost {
+  readonly modelMembers?: EditorModelMembersPort
   readonly blocks?: EditorBlocksPort
   readonly threadBranch?: EditorThreadBranchPort
   readonly codeStudy?: EditorCodeStudyPort

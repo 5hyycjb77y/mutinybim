@@ -1,6 +1,6 @@
 import type { LineageMemberStore } from "@permitzip/bim-sync";
 import type { LineageGrantRecord } from "@permitzip/bim-sync/lineages";
-import type { Sql } from "../pg-store";
+import type { QuerySql } from "../pg-store";
 
 /**
  * Standalone per-copy members (round 11 W11): who is named on which copy when
@@ -11,7 +11,7 @@ import type { Sql } from "../pg-store";
 export class PgLineageMemberStore implements LineageMemberStore {
   private hasTable: Promise<boolean> | null = null;
 
-  constructor(private readonly sql: Sql) {}
+  constructor(private readonly sql: QuerySql) {}
 
   private stored(): Promise<boolean> {
     const known = this.hasTable;

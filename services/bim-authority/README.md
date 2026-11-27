@@ -23,7 +23,7 @@ example host (one person, every right).
 | A stale owner can't write | Every durable write (`guardedWrite`, `guardedReject`, the locked fallback) checks owner, generation and `lease_expires_at > clock_timestamp()` **in the same SQL statement**. A process stopped past its lease is refused even when nobody has taken over. |
 | Renewal failure stops commits | `LeaseKeeper`: a refused renewal, or no successful renewal for TTL − one renewal interval, halts the hub (commands answer "not saved yet"), tells clients plainly, closes their sockets and releases the lease. |
 | Clients reach the owner | The socket address carries `?model=`. On upgrade the server looks the holder up in the database and answers `fly-replay: instance=<machine>`. A client header (`fly-force-instance-id`) only picks which machine asks; it is never trusted. |
-| Access can be removed mid-session | Every live connection's capabilities are re-checked every `BIM_AUTHORITY_REAUTH_MS` (10 s). No read → `denied` with a plain message, socket closed `4003`. Edit removed → the connection becomes view-only. Token about to expire → "reconnecting with a fresh sign-in". |
+| Access can be removed mid-session | The authority rechecks live connections every `BIM_AUTHORITY_REAUTH_MS` (10 s by default). Losing read access closes the socket. Losing edit access makes the connection read-only. Hosted JWTs refresh shortly before expiry. A native session closes when a check observes expiry or sign-out. |
 | Agents are separate identities | `agent:<userId>:<runId>`, bound to the signed-in person (`packages/bim-sync/src/agent-principal.ts`); each run is its own editing session. |
 | Same person, two tabs | Each client has its own `clientSessionId`; the kernel only skips conflict checks for earlier edits from the **same** session (`packages/bim-kernel/src/changeset.ts`). |
 
@@ -34,6 +34,8 @@ Validated at start (`src/config.ts`); anything wrong stops the process with a li
 | Name | Kind | Meaning |
 | --- | --- | --- |
 | `MUTINYBIM_DB_URL` | secret | The authority's own Postgres, direct connection. A host plug-in's production database is refused (`forbiddenDbRefDigests`), as is any ref in `MUTINYBIM_FORBIDDEN_DB_REFS`. |
+| `MUTINYBIM_AUTH_MODE` | config | Defaults to `hosted`. Set `native` for WebSocket sessions issued by a standalone installation. Startup checks the database's installation mode. |
+| `BIM_AUTHORITY_BIND_HOST` | config | Optional listen address. Use `127.0.0.1` for a loopback-only walkthrough. |
 | `MUTINYBIM_DISPOSABLE_PROJECT_REF` | config | The Supabase project the database URL must belong to. |
 | `MUTINYBIM_AUTHORIZER_MODULE` | config | The host plug-in: a path from the working directory, or a package name. It reads its own settings from the same environment. A module that doesn't keep the contract stops the process at start. |
 | `MUTINYBIM_FORBIDDEN_DB_REFS` | config | More database project refs the authority must never use (comma-separated). |
@@ -110,6 +112,142 @@ recorded `baselined` without running. Files after that never get a probe
 `20261019150000`, so their first self-migrating deploy baselines eight files
 and applies `20261022000000_bim_models_settings_object.sql` and
 `20261029130000_bim_changeset_patches_checkpoints.sql`.
+
+### Native PostgreSQL installation
+
+`--native` installs storage in an **empty PostgreSQL 17 database**. Use the
+database-owning installation role through a direct or session-pooled
+connection. The command needs only `MUTINYBIM_DB_URL`; it does not require a
+Supabase project, a sign-in provider or a list of served models. It checks for
+PostgreSQL 17 or newer; the installer rehearsal uses PostgreSQL 17. Port 6543
+is refused because the migrator holds a session advisory lock. Other
+transaction poolers are also unsuitable, regardless of their port.
+
+From a repository checkout with the authority dependencies installed:
+
+```bash
+cd services/bim-authority
+export MUTINYBIM_DB_URL='postgresql://installer@127.0.0.1:5432/native'
+node --import tsx src/migrate.ts --native --dry-run
+node --import tsx src/migrate.ts --native
+# After a database or process restart, use the same command:
+node --import tsx src/migrate.ts --native
+```
+
+The role must own the database and the objects it installs. It needs neither
+superuser privileges nor permission to create cluster roles. Native
+installation creates no `auth` or `realtime` schema, no `public.projects`
+table, no hosted roles and no extension. Both project-ID columns remain in
+`bim.models` for the existing copy writers, with a native-only constraint
+that keeps them null. Do not apply the local or disposable hosted
+compatibility scripts to this database.
+
+The native baseline is
+`db/native/20261125000000_native_baseline.sql`. It supplies the model, commit,
+lease, branch, lineage, checkpoint and retention storage represented by the
+sixteen hosted files through `20261103100200`, without replaying those
+files. Later files in `db/migrations/` are shared by both installer modes.
+Native installation records the native baseline,
+`20261125010000_native_model_storage.sql`, and
+`20261125020000_native_signin_sessions.sql`. The default hosted path
+validates the full runtime configuration and runs its sixteen historical
+files followed by the two shared migrations. Hosted databases record the
+session migration in their ledger. It creates tables only in native mode.
+
+Both modes use the existing migration lock, transaction-per-file behavior,
+SHA-256 ledger and rerun/checksum guards. `bim.installation` records the
+chosen mode. `--native` refuses existing hosted history or application
+objects; the default command refuses a marked native database. Neither
+command converts one installation mode into the other. Native dry-run sets
+the PostgreSQL session to read-only and performs no schema, data or ledger
+writes, including on an empty database. It uses only transient session
+settings and the advisory lock. The existing forbidden-database list and
+explicit local-mode restrictions remain active.
+
+Wait for the installer to finish successfully before allowing model writes.
+A failure rolls back the current file together with its ledger row; earlier
+files remain recorded. A rerun resumes that recorded history. A native
+baseline interrupted before the shared file may be resumed while its model
+tables remain empty; model rows in that incomplete installation require
+review instead of being assigned an inferred permission source. Keep the
+native baseline immutable once deployed, and make future shared migrations
+work on both storage histories. `stage.sh` and the Dockerfile include the
+native SQL directory in the authority image.
+
+The shared addition supplies people, issuer-and-subject identities, explicit
+legacy identity mappings, model authority and memberships.
+`bim.create_native_model(model_id, owner_person_id, settings)` creates a
+standalone root and its manager membership in one transaction. The operator
+must name an existing person as the first owner and supply valid model
+settings. Equal subjects from different issuers stay separate until an
+explicit mapping is recorded; historical actor strings are preserved.
+
+To create a standalone model after installation, set `MUTINYBIM_DB_URL`
+for the native database operator and `PERSON_ID` to the existing native
+person's UUID. From `services/bim-authority`, run
+
+```sh
+node --import tsx src/create-native-model.ts east-plant --owner "$PERSON_ID"
+```
+
+The new base model uses the kernel's default settings. Repeating the command
+with the same owner confirms the stored grant, including after the model has
+been edited. A different owner for the same ID produces a conflict.
+
+The session store persists single-use sign-in transactions and maps each
+verified issuer and subject to a stable person ID. Use that ID with the
+operator command above. Sessions expire and can be revoked independently
+of model membership. See the [handler contract](NATIVE-SESSIONS.md).
+
+On a native authority, send a membership change to the base model's address.
+Use the caller's native session in the Authorization header and the coworker's
+person ID from sign-in in the JSON body. This example grants viewer access.
+
+```http
+POST /models/east-plant/members
+Authorization: Bearer <native session>
+Content-Type: application/json
+
+{"personId":"12345678-0000-0000-0000-000000000036","expectedRole":null,"role":"viewer"}
+```
+
+Both role fields are required and accept `viewer`, `editor`, `manager` or
+`null`. In `expectedRole`, null means the person has no membership. In `role`,
+it removes their membership. The designated owner can manage other members.
+A manager can add, change and remove ordinary viewers and editors. The
+designated owner's role and the caller's own role are protected.
+
+HTTP 200 returns `{"result":"changed","role":"viewer"}` after commit, or
+`unchanged` when the expected and requested roles already match the stored role.
+HTTP 409 returns `conflict` and the role observed in that transaction. Review
+that role before submitting another change. Only a committed change advances
+the model's authorization revision. Each open connection picks up its new
+rights on recheck. Removing model membership leaves the person's sign-in valid.
+
+To serve an installed model locally, keep `MUTINYBIM_DB_URL` set to its database
+and start the authority from this directory.
+
+```sh
+MUTINYBIM_AUTH_MODE=native BIM_AUTHORITY_SERVED_MODELS=east-plant BIM_AUTHORITY_BIND_HOST=127.0.0.1 npm start
+```
+
+The editor sends the person's ID and opaque session in its WebSocket `hello`.
+The authority checks the session, base membership and requested copy together
+at admission and on each live recheck. Sign-out or expiry closes that session
+when the authority observes it. The [browser walkthrough](NATIVE-SESSIONS.md#browser-sign-in-and-the-east-plant-walkthrough)
+exercises the membership endpoint from the editor's origin.
+
+From the authority directory, run
+`python3 drills/native-install.py --pg-bin /path/to/postgres/bin` with
+Node 22 and PostgreSQL 17 to rehearse the operator command. The drill uses
+synthetic identities and restarts its own database. The owner and viewer
+then open `east-plant` through the sync hub. The owner saves an East roof
+level and the viewer sees a read-only model. The drill also checks the
+viewer's rights on their own open and closed proposal. It then starts the
+model server and connects two editor sync clients over loopback WebSockets.
+The owner adds **Service deck**, the viewer sees it, and the viewer's own edit
+is refused. A fresh database connection checks the saved model. The drill
+also checks live session revocation and expiry before stopping both services.
 
 ### Repairing a recorded checksum
 

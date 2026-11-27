@@ -32,4 +32,5 @@ mkdir -p "${BUILD}/services/bim-authority"
 for f in package.json package-lock.json tsconfig.json; do cp "${ROOT}/services/bim-authority/${f}" "${BUILD}/services/bim-authority/"; done
 copy services/bim-authority/src
 copy services/bim-authority/db/migrations
+copy services/bim-authority/db/native
 cp "${ROOT}/services/bim-authority/Dockerfile" "${BUILD}/Dockerfile"

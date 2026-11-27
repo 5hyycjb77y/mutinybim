@@ -71,7 +71,7 @@ export interface PipelinedCommitStore extends CommitStore {
 }
 
 export function isPipelinedStore(store: CommitStore): store is PipelinedCommitStore {
-  return "decideLocal" in store && "flush" in store && "durableRevision" in store;
+  return store.allowsGroupCommit !== false && "decideLocal" in store && "flush" in store && "durableRevision" in store;
 }
 
 /** Recently answered keys kept in memory per term (beyond this, the durable store answers). */

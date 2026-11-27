@@ -1,0 +1,98 @@
+# Standalone model server with browser sign-in. See the README for first-owner setup.
+name: mutinybim-native
+
+x-authority-image: &authority-image
+  image: mutinybim-native-authority:local
+  build:
+    context: .
+    dockerfile: services/bim-authority/Dockerfile
+
+x-authority-env: &authority-env
+  MUTINYBIM_LOCAL_STACK: "1"
+  MUTINYBIM_AUTH_MODE: native
+  MUTINYBIM_DB_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+  MUTINYBIM_EDITOR_ORIGIN: http://127.0.0.1:3095
+  MUTINYBIM_OIDC_ISSUER: ${MUTINYBIM_OIDC_ISSUER:-http://127.0.0.1:9999}
+  MUTINYBIM_OIDC_CLIENT_ID: ${MUTINYBIM_OIDC_CLIENT_ID:-east-plant-editor}
+  MUTINYBIM_OIDC_CLIENT_SECRET: ${MUTINYBIM_OIDC_CLIENT_SECRET:-}
+  BIM_AUTHORITY_SERVED_MODELS: east-plant
+
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - native-db:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:3095:3095"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9999:9999"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  signin:
+    <<: *authority-image
+    network_mode: service:db
+    depends_on:
+      db:
+        condition: service_healthy
+    # Mount the development-only issuer in this service. The authority image excludes drills.
+    volumes:
+      - ./services/bim-authority/drills/native-browser-provider.ts:/app/services/bim-authority/dev-provider.ts:ro
+    command: ["node", "--import", "tsx", "dev-provider.ts"]
+    environment:
+      MUTINYBIM_DEMO_CONTAINER: "1"
+      MUTINYBIM_DEMO_SIGNIN_PORT: "9999"
+      MUTINYBIM_EDITOR_ORIGIN: http://127.0.0.1:3095
+      MUTINYBIM_DEMO_PASSWORD: ${MUTINYBIM_DEMO_PASSWORD:-east-plant-local-demo}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9999/.well-known/openid-configuration').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  authority-setup:
+    <<: *authority-image
+    network_mode: service:db
+    depends_on:
+      db:
+        condition: service_healthy
+    environment: *authority-env
+    command: ["node", "--import", "tsx", "src/migrate.ts", "--native"]
+    restart: "no"
+
+  authority:
+    <<: *authority-image
+    network_mode: service:db
+    depends_on:
+      authority-setup:
+        condition: service_completed_successfully
+      signin:
+        condition: service_healthy
+    environment: *authority-env
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  editor:
+    build:
+      context: .
+      dockerfile: tools/local-stack/editor.Dockerfile
+    network_mode: service:db
+    depends_on:
+      authority:
+        condition: service_healthy
+    environment:
+      BIM_DEV_PORT: "3095"
+      BIM_DEV_BIND_HOST: "0.0.0.0"
+      BIM_DEV_NATIVE_SIGNIN: "1"
+      BIM_DEV_AUTHORITY_URL: ws://127.0.0.1:8080/sync?model=east-plant
+
+volumes:
+  native-db:

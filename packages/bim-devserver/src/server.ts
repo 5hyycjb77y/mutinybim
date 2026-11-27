@@ -144,11 +144,21 @@ if (!["eager", "lazy", "off"].includes(editorMode)) {
   process.exit(1);
 }
 
+const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
+const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
+const nativeSignIn = process.env.BIM_DEV_NATIVE_SIGNIN === "1";
+if (nativeSignIn && (!externalAuthority || signInUrl)) throw new Error("Native sign-in needs BIM_DEV_AUTHORITY_URL and its own OIDC provider");
+if (externalAuthority && !signInUrl && !nativeSignIn) {
+  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
+  process.exit(1);
+}
+const landingModel = nativeSignIn && externalAuthority ? new URL(externalAuthority).searchParams.get("model") ?? mainModelId : mainModelId;
+
 const editor: EditorDemo | null =
   editorMode === "off"
     ? null
     : createEditorDemo({
-        mainModelId: async () => mainModelId,
+        mainModelId: async () => landingModel,
         authority: async (branch) => {
           const url = `ws://127.0.0.1:${port}/sync`;
           if (branch === null) return { url, modelId: mainModelId };
@@ -217,15 +227,9 @@ async function exportPdf(res: ServerResponse) {
   });
 }
 
-const externalAuthority = process.env.BIM_DEV_AUTHORITY_URL ?? null;
-const signInUrl = process.env.BIM_DEV_SIGNIN_URL ?? null;
-if (externalAuthority && !signInUrl) {
-  console.error("[bim-devserver] BIM_DEV_AUTHORITY_URL needs BIM_DEV_SIGNIN_URL: the model server only opens to someone signed in");
-  process.exit(1);
-}
-
 /** Which model server the editor page opens, and the sign-in it presents there. */
 async function demoConfig(res: ServerResponse, url: URL, firmParts: LocalFirmParts | null): Promise<void> {
+  if (nativeSignIn) return send(res, 200, "application/json", JSON.stringify({ authority: "native", authorityUrl: externalAuthority }));
   if (!externalAuthority || !signInUrl) return send(res, 200, "application/json", JSON.stringify({ authority: "in-process", firmPartsId: firmParts?.id }));
   const name = (url.searchParams.get("name") ?? "You").slice(0, 60);
   const answer = await fetch(`${signInUrl}/token?name=${encodeURIComponent(name)}`);
@@ -273,6 +277,27 @@ async function serveFirmParts(req: IncomingMessage, res: ServerResponse, url: UR
 
 async function handle(req: IncomingMessage, res: ServerResponse, clientJs: () => Promise<string>, css: string, firmParts: LocalFirmParts | null) {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  if (nativeSignIn && req.method === "GET" && url.pathname === "/auth/native/callback" && editor) {
+    res.setHeader("referrer-policy", "no-referrer");
+    res.setHeader("cache-control", "no-store");
+    await editor.handle(req, res, new URL("/m/sign-in", url));
+    return;
+  }
+  if (nativeSignIn && externalAuthority && req.method === "POST" && ["/auth/native/start", "/auth/native/finish", "/auth/native/sign-out"].includes(url.pathname)) {
+    const target = new URL(url.pathname, externalAuthority);
+    target.protocol = target.protocol === "wss:" ? "https:" : "http:";
+    const transport = target.protocol === "https:" ? await import("node:https") : await import("node:http");
+    const forward = transport.request(target, { method: "POST", headers: { "content-type": req.headers["content-type"] ?? "",
+      origin: req.headers.origin ?? "", cookie: req.headers.cookie ?? "",
+      ...(url.pathname === "/auth/native/sign-out" && req.headers.authorization ? { authorization: req.headers.authorization } : {}),
+    } }, (answer) => {
+      res.writeHead(answer.statusCode ?? 502, answer.headers);
+      answer.pipe(res);
+    });
+    forward.on("error", () => { if (!res.headersSent) send(res, 502, "text/plain", "The local model server is unavailable."); else res.end(); });
+    req.pipe(forward);
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/demo-config.json") return demoConfig(res, url, firmParts);
   if (firmParts && url.pathname === "/api/bim/library/part-types") return serveFirmParts(req, res, url, firmParts);
   if (req.method === "GET" && url.pathname === "/feasibility") return send(res, 200, "text/html; charset=utf-8", INDEX_HTML);
@@ -359,7 +384,7 @@ async function main() {
   const firmParts = catalogPath && !externalAuthority ? new (await import("./firm-parts")).LocalFirmParts(catalogPath) : null;
   const server = createServer((req, res) => {
     handle(req, res, clientJs, css, firmParts).catch((err) => {
-      console.error("[bim-devserver] request failed", { url: req.url, err });
+      console.error("[bim-devserver] request failed", { path: req.url?.split("?")[0], err });
       send(res, 500, "text/plain", "Server error: see devserver log");
     });
   });
@@ -414,11 +439,14 @@ async function main() {
   wss.on("error", (err) => console.error("[bim-devserver] websocket server error", err.message));
 
   server.on("close", () => firmParts?.close());
-  server.listen({ port, host: firmParts ? "127.0.0.1" : undefined }, () => {
+  // Docker forwards the host's loopback port to the editor's container interface.
+  const listenHost = process.env.BIM_DEV_BIND_HOST ?? (nativeSignIn || firmParts ? "127.0.0.1" : undefined);
+  server.listen({ port, host: listenHost }, () => {
     const address = server.address();
     const listenPort = typeof address === "object" && address ? address.port : port;
     if (editor) {
-      console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${listenPort}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
+      if (nativeSignIn) console.log("[bim-devserver] Native sign-in ready. Open a served model at the configured editor origin.");
+      else console.log(`[bim-devserver] MutinyBIM editor at http://127.0.0.1:${listenPort}/m/${encodeURIComponent(mainModelId)}?view=plan  (open twice with &name=Priya and &name=Avery to edit together)`);
       console.log(`[bim-devserver] editor build ${editorMode === "eager" ? "starting now" : "starts on the first editor page"} (cached in ${editor.outDir})`);
     } else {
       console.log("[bim-devserver] editor off (BIM_DEV_EDITOR=off)");

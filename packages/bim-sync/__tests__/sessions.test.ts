@@ -16,6 +16,7 @@ import {
   SyncClient,
   SyncHub,
   agentActor,
+  commandDigest,
   percentiles,
   syncUrlForModel,
   type CommitOutcome,
@@ -214,6 +215,29 @@ describe("host controls on a live hub", () => {
     const outcome = tab.outcomes[0];
     expect(outcome?.status).toBe("rejected");
     if (outcome?.status === "rejected") expect(outcome.error.message).toMatch(/view this model but not edit it/);
+  });
+
+  it("orders a native viewer's refusal through the sequencer and lets the tab read a previous receipt", async () => {
+    const previous: CommitOutcome = { status: "rejected", error: { code: "forbidden", message: "Earlier save refused", elementIds: [] } };
+    const readSaveReceipt = jest.fn(async () => previous);
+    const { hub, sequencer } = await startHub({ readSaveReceipt });
+    const submit = jest.spyOn(sequencer, "submit");
+    const tab = attach(hub, avery, "tab-a");
+    await settle();
+    const base = tab.client.confirmedModel();
+    if (!base) throw new Error("not connected");
+    const command = slideCommand(base, 10 * FT);
+    hub.setPrincipal("tab-a", { actorId: avery.id, canWrite: false });
+    tab.client.submit(command);
+    await waitFor("ordered refusal", () => tab.outcomes.length === 1);
+    const refusal = expect.stringMatching(/view this model but not edit it/);
+    expect(submit).toHaveBeenCalledWith(expect.anything(), { readOnlyReason: refusal });
+    expect(tab.outcomes[0]).toMatchObject({ status: "rejected", error: { code: "forbidden", message: refusal } });
+    expect((await sequencer.head()).revision).toBe(base.revision);
+    const key = "tab-a-earlier-save", digest = commandDigest(command);
+    await hub.handle(tab.conn, JSON.stringify({ type: "read_save_receipt", idempotencyKey: key, commandDigest: digest }));
+    expect(readSaveReceipt).toHaveBeenCalledWith("tab-a", key, digest);
+    expect(tab.received.map(raw => JSON.parse(raw))).toContainEqual({ type: "save_receipt", idempotencyKey: key, outcome: previous });
   });
 
   it("a halted hub answers 'not saved yet' and commits nothing", async () => {

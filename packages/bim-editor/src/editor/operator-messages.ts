@@ -84,6 +84,8 @@ export function editsPausedMessage(queued: number, deviceOffline: boolean): stri
 }
 
 export type BadgeTone = 'ok' | 'busy' | 'warn' | 'muted'
+export const MODEL_VIEW_ONLY = 'View only on this copy'
+export const AWAITING_WRITE_ACCESS = 'Waiting for the model server to confirm editing access'
 
 function offlineLabel(pending: number): string {
   return pending > 0 ? `Offline: ${edits(pending)} kept on this computer` : 'Offline: changes kept on this computer'
@@ -106,6 +108,7 @@ export function statusBadge(
   // Had the model and lost the line (offline), or got the line back and is replaying (catching_up).
   const lostLine = status === 'offline' || (status === 'catching_up' && problem !== null)
   if (lostLine) {
+    if (save.unconfirmed && save.message) return { label: save.message, tone: 'warn' }
     const pastGrace = problem?.kind === 'unreachable' || problem?.kind === 'device_offline'
     if (pastGrace) return { label: offlineLabel(save.pending), tone: 'warn' }
     return { label: save.pending > 0 ? `Reconnecting… ${edits(save.pending)} kept on this computer` : 'Reconnecting…', tone: 'busy' }
@@ -114,6 +117,9 @@ export function statusBadge(
   if (problem?.kind === 'quiet') return { label: 'Checking the connection…', tone: 'busy' }
   if (problem && status !== 'live') return { label: 'Not connected', tone: 'warn' }
   if (problem) return { label: problem.title, tone: 'warn' }
+  if (editPaused === MODEL_VIEW_ONLY) return { label: save.pending ? 'View only · checking earlier changes' : MODEL_VIEW_ONLY, tone: 'muted' }
+  if (save.unconfirmed && save.message) return { label: save.message, tone: 'busy' }
+  if (editPaused === AWAITING_WRITE_ACCESS) return { label: AWAITING_WRITE_ACCESS, tone: 'busy' }
   if (editPaused) return { label: 'Reconnecting…', tone: 'busy' }
   if (status === 'degraded') return { label: save.message ?? 'Not saved yet — retrying', tone: 'warn' }
   if (save.retrying > 0) return { label: `Not saved yet (${save.retrying}) — retrying`, tone: 'warn' }
